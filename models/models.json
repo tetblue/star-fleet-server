@@ -1,0 +1,150 @@
+{
+  "說明": "鍵名固定：e0～e4／a0～a4＝帝國／聯盟的 航母、戰列、巡洋、驅逐、護衛；ew0～ew5／aw0～aw5＝武器（三聯裝、雙聯裝、舷砲或垂直飛彈、防空、魚雷、衝角或貫穿主砲）；ef／af＝艦載機。file＝相對於這個資料夾的路徑；forward＝模型的船頭（砲口）朝向，+z、-z、+x、-x 其中之一；kind＝hull／weapon／fighter。換模型：把新的 GLB 放進來、改 file，重開伺服器就會重算遠景細節。",
+  "version": 1,
+  "models": {
+    "e0": {
+      "file": "帝國/船體/01_航空母艦.glb",
+      "kind": "hull",
+      "forward": "+z",
+      "name": "帝國 航空母艦"
+    },
+    "e1": {
+      "file": "帝國/船體/02_戰列艦.glb",
+      "kind": "hull",
+      "forward": "+z",
+      "name": "帝國 戰列艦"
+    },
+    "e2": {
+      "file": "帝國/船體/03_巡洋艦.glb",
+      "kind": "hull",
+      "forward": "+z",
+      "name": "帝國 巡洋艦"
+    },
+    "e3": {
+      "file": "帝國/船體/04_驅逐艦.glb",
+      "kind": "hull",
+      "forward": "+z",
+      "name": "帝國 驅逐艦"
+    },
+    "e4": {
+      "file": "帝國/船體/05_護衛艦.glb",
+      "kind": "hull",
+      "forward": "+z",
+      "name": "帝國 護衛艦"
+    },
+    "a0": {
+      "file": "聯盟/船體/01_航空母艦.glb",
+      "kind": "hull",
+      "forward": "+x",
+      "name": "聯盟 航空母艦"
+    },
+    "a1": {
+      "file": "聯盟/船體/02_戰列艦.glb",
+      "kind": "hull",
+      "forward": "+z",
+      "name": "聯盟 戰列艦"
+    },
+    "a2": {
+      "file": "聯盟/船體/03_巡洋艦.glb",
+      "kind": "hull",
+      "forward": "+x",
+      "name": "聯盟 巡洋艦"
+    },
+    "a3": {
+      "file": "聯盟/船體/04_驅逐艦.glb",
+      "kind": "hull",
+      "forward": "+x",
+      "name": "聯盟 驅逐艦"
+    },
+    "a4": {
+      "file": "聯盟/船體/05_護衛艦.glb",
+      "kind": "hull",
+      "forward": "+z",
+      "name": "聯盟 護衛艦"
+    },
+    "ew0": {
+      "file": "帝國/武器/01_三聯裝巨砲塔.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "帝國 三聯裝巨砲塔"
+    },
+    "ew1": {
+      "file": "帝國/武器/02_雙聯裝砲塔.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "帝國 雙聯裝砲塔"
+    },
+    "ew2": {
+      "file": "帝國/武器/03_舷砲砲座模組.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "帝國 舷砲砲座模組"
+    },
+    "ew3": {
+      "file": "帝國/武器/04_防空砲塔.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "帝國 防空砲塔"
+    },
+    "ew4": {
+      "file": "帝國/武器/05_魚雷發射管組.glb",
+      "kind": "weapon",
+      "forward": "-x",
+      "name": "帝國 魚雷發射管組"
+    },
+    "ew5": {
+      "file": "帝國/武器/06_金色衝角砲.glb",
+      "kind": "weapon",
+      "forward": "-x",
+      "name": "帝國 金色衝角砲"
+    },
+    "aw0": {
+      "file": "聯盟/武器/01_三聯裝主砲塔.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "聯盟 三聯裝主砲塔"
+    },
+    "aw1": {
+      "file": "聯盟/武器/02_雙聯裝副砲塔.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "聯盟 雙聯裝副砲塔"
+    },
+    "aw2": {
+      "file": "聯盟/武器/03_垂直飛彈發射模組.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "聯盟 垂直飛彈發射模組"
+    },
+    "aw3": {
+      "file": "聯盟/武器/04_防空砲塔.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "聯盟 防空砲塔"
+    },
+    "aw4": {
+      "file": "聯盟/武器/05_魚雷發射管組.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "聯盟 魚雷發射管組"
+    },
+    "aw5": {
+      "file": "聯盟/武器/06_貫穿式主砲.glb",
+      "kind": "weapon",
+      "forward": "-x",
+      "name": "聯盟 貫穿式主砲"
+    },
+    "ef": {
+      "file": "帝國/艦載機/01_能量炮.glb",
+      "kind": "fighter",
+      "forward": "+z",
+      "name": "帝國 艦載機"
+    },
+    "af": {
+      "file": "聯盟/艦載機/01_能量炮.glb",
+      "kind": "fighter",
+      "forward": "+z",
+      "name": "聯盟 艦載機"
+    }
+  }
+}

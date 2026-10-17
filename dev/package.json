@@ -1,0 +1,15 @@
+{
+  "name": "star-fleet-web",
+  "private": true,
+  "version": "1.0.0",
+  "description": "星海艦隊戰 網頁端的開發與建置（輸出到 ../web）",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "three": "0.160.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.2"
+  }
+}

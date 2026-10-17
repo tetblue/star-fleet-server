@@ -1,0 +1,15 @@
+{
+  "port": 8080,
+  "host": "0.0.0.0",
+  "openBrowser": true,
+  "modelsDir": "models",
+  "dataDir": "data",
+  "webDir": "web",
+  "allowRegister": true,
+  "backup": {
+    "minIntervalMinutes": 10,
+    "keepRecent": 50,
+    "keepDays": 60
+  },
+  "maxRecordsPerPlayer": 500
+}
