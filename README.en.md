@@ -62,7 +62,27 @@ node dev/server/server.js --base .
 
 ### Running and configuration
 
-Double-click `StarFleetServer.exe`. The window lists the local and LAN URLs (default port 8080). On first launch, allow it through Windows Firewall on private networks. See [說明.txt](說明.txt) (Chinese) for the `config.json` fields and how to swap models.
+Double-click `StarFleetServer.exe`. The window lists the local and LAN URLs (default port 8080). On first launch, allow it through Windows Firewall on private networks. See [說明.txt](說明.txt) (Chinese) for the other `config.json` fields and how to swap models.
+
+### Changing the server port
+
+The port is set only in **`config.json`**. It is in the same folder as `StarFleetServer.exe`, or in the `--base` folder when running from source. There is no command-line option for it.
+
+```json
+{
+  "port": 8080,
+  "host": "0.0.0.0"
+}
+```
+
+1. Close the server window.
+2. Change `port` to the number you want (for example `8090`) and save.
+3. Restart the server. The URLs it prints will use the new port; players connect with the new URL.
+
+- `host`: `0.0.0.0` allows connections from the whole LAN; `127.0.0.1` allows only this computer.
+- If startup reports that the port is already in use, the server may already be running or another program is using that port; pick a different number.
+- If `config.json` doesn't exist, the server creates one on first launch from its built-in defaults (`DEFAULT_CONFIG` in `dev/server/server.js`, port 8080). Edit that file afterwards.
+- Keep the file valid JSON (commas, quotes). If it isn't, the server reports a `config.json` format error and won't start.
 
 ## Game modes
 
