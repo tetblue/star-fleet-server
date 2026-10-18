@@ -429,6 +429,7 @@ scene.add(bgMesh);
 // 每個陣型＝艦隊座標（u 往右、v 往前）裡的一塊區域，依「切片鍵」切給各分艦隊
 const SHIP_AREA = 13;
 const CONE_VOL = SHIP_AREA * 24, CONE_RB = 0.55;   // 圓錐陣：每艘船佔的體積、底面半徑／長度
+const HCONE_K = 0.7, HCONE_RMIN = 66;   // 空心錐陣：錐底半徑／長度、錐底半徑的下限
 // 陣型的戰鬥特性：fire 火力倍率、aa 飛彈攔截、speed 速度倍率、frontTaken 正面受到的傷害倍率、
 //   flankBonus 打敵人側面／背後時的傷害倍率、noFlank＝沒有側背弱點、breach＝前端衝進敵方分艦隊時讓它陣形混亂幾秒
 const FORMATIONS = {
@@ -440,6 +441,8 @@ const FORMATIONS = {
   column:   { name: '縱陣',   fire: 0.6,  aa: 0.25, speed: 1.6, note: '機動最快；正面火力最弱，被橫切損失慘重。' },
   wedge:    { name: '圓錐陣', fire: 0.9, fireNear: 1.0, aa: 0.25, speed: 1.25, frontTaken: 0.85, flankBonus: 1.25, breach: 4,
     note: '快速突擊：速度 ×1.25、正面受傷 −15%，打敵人側面／背後時傷害再 +25%；衝進敵陣讓它混亂 4 秒。適合繞側切入。' },
+  hcone:    { name: '空心錐陣', fire: 0.9, fireNear: 1.0, aa: 0.25, speed: 1.25, frontTaken: 0.85, flankBonus: 1.25, breach: 4,
+    note: '圓錐陣的變形：艦艇排在空心的錐面上、各分艦隊分瓣錯開，往正前方開火時不會被自己的分艦隊擋住（擬真難度）。其餘特性同圓錐陣。' },
 };
 const DISORDER = { fire: 0.5, taken: 1.3 };   // 陣形混亂：開火速度 ×0.5、受到傷害 ×1.3
 // 命中倍率：受擊方位 × 雙方陣型 × 混亂
@@ -507,6 +510,7 @@ function formationRegion(kind, total, opt) {
 
 // 產生各分艦隊的落點（艦隊座標），order[k] = 第 k 個切片給哪個分艦隊
 function genFormation(kind, counts, order, R, opt) {
+  if (kind === 'hcone') return hollowConeLayout(counts, order, R);
   const total = counts.reduce((a, b) => a + b, 0);
   const reg = formationRegion(kind, total, opt);
   const [u0, u1, v0, v1] = reg.bbox;
@@ -605,6 +609,7 @@ function coneLattice(total, s) {
 }
 function genOrderly(kind, counts, order, layers = 1, opt) {
   const total = counts.reduce((a, b) => a + b, 0), s = ORDER_SPACING[layers];
+  if (kind === 'hcone') return hollowConeLayout(counts, order, null, s);   // 空心錐本身就是立體的，不另外疊層
   let p3;
   if (kind === 'wedge') p3 = coneLattice(total, s);   // 圓錐本身就是立體的，不另外疊層
   else {
@@ -628,9 +633,49 @@ function genOrderly(kind, counts, order, layers = 1, opt) {
   return out;
 }
 
+// ───── 空心錐陣：尖端朝前的空心尖錐 ─────
+// 艦艇排在有厚度的錐面上，依繞軸的角度切給各分艦隊（第一瓣以正上方為中心）：各瓣的中心高度、左右位置都不同，
+// 往正前方開火的射線從別的分艦隊的上下或旁邊穿過，擬真難度下不會被自己的分艦隊擋住。錐底半徑至少 HCONE_RMIN（不夠就把艦距拉開），
+// 讓各瓣的高度差大於誤射的高度容許（FF_RULE.vTol）。只有一支分艦隊時排成實心尖錐（同隊不會擋射界）。
+// R＝亂數：散布落點（每艘船佔 CONE_VOL）；沒給＝整齊排列，艦距 s。回傳的 cw＝分艦隊中心的高度
+function hollowConeLayout(counts, order, R, s) {
+  const N = counts.reduce((a, b) => a + b, 0), n = order.length, hollow = n > 1, K = HCONE_K, TK = 2.2;   // 殼厚＝TK × 艦距（厚一點，前後才短）
+  // 錐長：空心＝錐面積 πK·L² × 殼厚 ≈ 艘數 × 每艘體積；實心＝圓錐體積
+  const lenOf = (c, f) => hollow ? Math.sqrt(N * f * c * c / (Math.PI * K * TK)) : Math.cbrt(3 * N * f * c * c * c / (Math.PI * K * K));
+  const c0 = R ? Math.cbrt(CONE_VOL) : s, cell = hollow ? c0 * Math.max(1, HCONE_RMIN / K / lenOf(c0, 1)) : c0, T = TK * cell;
+  // 三瓣以上：瓣與瓣的接縫留空（半寬＝分艦隊外框多出的 9＋半個艦距），同高度的相鄰兩瓣才不會互相擋；尖端因此空出一小段。
+  // 接縫的角度依各瓣艘數的比例
+  const TAU = 2 * Math.PI, ang = (p) => ((Math.atan2(p[0], p[2]) + Math.PI / n) % TAU + TAU) % TAU;
+  const seams = []; if (n > 2) { let cum = 0; for (let i = 0; i < n; i++) { seams.push(cum / N * TAU); cum += counts[order[i]]; } }
+  const gap = 9 + cell * 0.5, inGap = (a, r) => seams.some((b) => { const d = Math.abs(((a - b) % TAU + TAU + Math.PI) % TAU - Math.PI); return d < Math.PI / 2 && r * Math.sin(d) < gap; });
+  let pts = [], L = 0;
+  for (let f = 1; f < 8; f *= 1.04) {   // 接縫與邊緣會少掉一些點：放大到夠用為止
+    L = lenOf(cell, f); pts = [];
+    const rb = K * L, j = R ? cell * 0.8 : 0, g0 = (x) => Math.ceil(x / cell) * cell;
+    for (let v = g0(-L); v <= 0; v += cell) for (let y = g0(-rb); y <= rb; y += cell) for (let u = g0(-rb); u <= rb; u += cell) {
+      const uu = j ? u + (R() - 0.5) * j : u, yy = j ? y + (R() - 0.5) * j : y, vv = j ? v + (R() - 0.5) * j : v;
+      if (vv > 0 || vv < -L) continue;
+      const p = [uu, vv, yy], r = Math.hypot(uu, yy), ro = -K * vv;
+      if (r <= ro && (!hollow || r >= ro - T) && !inGap(ang(p), r)) pts.push(p);
+    }
+    if (pts.length >= N) break;
+  }
+  pts.sort((a, b) => b[1] - a[1]); pts.length = Math.min(pts.length, N);   // 多的從最後面拿掉
+  if (hollow) pts.sort((a, b) => ang(a) - ang(b));
+  const mv = pts.reduce((t, p) => t + p[1], 0) / pts.length;   // 前後重心放在原點
+  const out = new Array(counts.length), k = R ? 0.9 : 1;   // 散布：往分艦隊中心收一點，讓分艦隊之間留出縫
+  let at = 0;
+  for (let slice = 0; slice < n; slice++) {
+    const sqi = order[slice], c = counts[sqi], chunk = pts.slice(at, at += c);
+    let cu = 0, cv = 0, cw = 0; for (const p of chunk) { cu += p[0]; cv += p[1]; cw += p[2]; } cu /= c; cv /= c; cw /= c;
+    out[sqi] = { cu, cv: cv - mv, cw, local: chunk.map((p) => [(p[0] - cu) * k, (p[2] - cw) * k, (p[1] - cv) * k]) };
+  }
+  return out;
+}
+
 // 分艦隊要依什麼順序對到切片（盡量少交叉）
 function squadronOrder(kind, sqs) {
-  const key = (kind === 'spindle' || kind === 'column' || kind === 'wedge') ? (s) => -s.cv + Math.abs(s.cu) * 0.5 : (s) => s.cu;
+  const key = (kind === 'spindle' || kind === 'column' || kind === 'wedge' || kind === 'hcone') ? (s) => -s.cv + Math.abs(s.cu) * 0.5 : (s) => s.cu;
   return sqs.map((s, i) => ({ i, k: key(s) })).sort((a, b) => a.k - b.k).map((o) => o.i);
 }
 
@@ -790,7 +835,7 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
       side: p.side, bg: !!p.bg || !!(p.fleetObj && p.fleetObj.reserve), hidden: !!(p.fleetObj && p.fleetObj.reserve), fleet: p.fleetObj || null,
       name: p.name, list: [], alive: 0, flagship: -1, typeAlive: new Array(NT).fill(0),
       group: p.fleet || null, mStart: 0, mDur: 0, oFrom: p.fleet && p.fleet.orderly ? 1 : 0, oTo: p.fleet && p.fleet.orderly ? 1 : 0, relayUntil: 0, hitW: [0, 0, 0],
-      off0: p.lay ? [p.lay.cu, p.lay.cv] : null, off1: p.lay ? [p.lay.cu, p.lay.cv] : null,
+      off0: p.lay ? [p.lay.cu, p.lay.cv, p.lay.cw || 0] : null, off1: p.lay ? [p.lay.cu, p.lay.cv, p.lay.cw || 0] : null,
       x: p.x || 0, y: (p.fleet && p.fleet.ay) || 0, p: 0, z: p.z || 0, h: p.h != null ? p.h : p.fleet.to,
       tFrom: p.h != null ? p.h : p.fleet.to, tTo: p.h != null ? p.h : p.fleet.to, tStart: 0, tDur: 0,
     };
@@ -829,7 +874,7 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
       // 開戰時的冷卻錯開（用固定雜湊，不動到佈陣的亂數）
       ships.mcd[si] = st.missile ? st.missile.cd * (0.25 + 0.75 * hash01(si * 3.1 + 1)) : 0; ships.fcd[si] = st.fighters ? 2 + 6 * hash01(si * 5.7 + 2) : 0; ships.rcd[si] = 3 * hash01(si * 2.3 + 3);
       sq.typeAlive[t]++;
-      ships.lx0[si] = ships.lx1[si] = l[0]; ships.ly0[si] = ships.ly1[si] = p.fleet && p.fleet.orderly ? l[1] : isFlag ? 4 : l[1] * (t <= 1 ? 0.6 : 1); ships.lz0[si] = ships.lz1[si] = l[2];
+      ships.lx0[si] = ships.lx1[si] = l[0]; ships.ly0[si] = ships.ly1[si] = p.fleet && (p.fleet.orderly || p.fleet.formation === 'hcone') ? l[1] : isFlag ? 4 : l[1] * (t <= 1 ? 0.6 : 1); ships.lz0[si] = ships.lz1[si] = l[2];
       ships.lag[si] = R() * 1.6 + R() * 0.6;
       aLocal.set([ships.lx0[si], ships.ly0[si], ships.lz0[si]], si * 3); aLocal2.set([ships.lx0[si], ships.ly0[si], ships.lz0[si]], si * 3);
       aInfo.set([sqi, st.look != null ? st.look + 0.5 : t, SIDE_FAC[p.side], R()], si * 4);   // 貼圖列；借用外觀的艦種 +0.5（著色器換色區分）
@@ -928,7 +973,7 @@ function changeFormation(g, kind, orderly, opt) {
     let newL = lay[k].local;
     if (fi >= 0) {
       let best = 0, bd = 1e9; newL.forEach((l, j) => { const d = Math.hypot(l[0], l[2] + 8); if (d < bd) { bd = d; best = j; } });
-      const flagSlot = newL[best]; if (!orderly) flagSlot[1] = 4;
+      const flagSlot = newL[best]; if (!orderly && kind !== 'hcone') flagSlot[1] = 4;
       const restNew = newL.filter((_, j) => j !== best), restOld = oldL.filter((_, j) => j !== fi);
       const m = matchSlots(restOld, restNew);
       newL = []; let r = 0;
@@ -943,16 +988,16 @@ function changeFormation(g, kind, orderly, opt) {
     list.forEach((i, j) => {
       ships.lx0[i] = oldL[j][0]; ships.ly0[i] = oldL[j][1]; ships.lz0[i] = oldL[j][2];
       const big = ships.type[i] <= 1 && i !== sq.flagship;
-      ships.lx1[i] = newL[j][0]; ships.ly1[i] = orderly ? newL[j][1] : (i === sq.flagship ? 4 : newL[j][1] * (big ? 0.6 : 1)); ships.lz1[i] = newL[j][2];
+      ships.lx1[i] = newL[j][0]; ships.ly1[i] = orderly || kind === 'hcone' ? newL[j][1] : (i === sq.flagship ? 4 : newL[j][1] * (big ? 0.6 : 1)); ships.lz1[i] = newL[j][2];
       aL.array.set([ships.lx0[i], ships.ly0[i], ships.lz0[i]], i * 3);
       aL2.array.set([ships.lx1[i], ships.ly1[i], ships.lz1[i]], i * 3);
     });
     sq.off0 = [cur[k].cu, cur[k].cv, cur[k].cw];
-    sq.off1 = [lay[k].cu, lay[k].cv, 0];   // 換陣＝整個部隊回到同一個陣型平面
+    sq.off1 = [lay[k].cu, lay[k].cv, lay[k].cw || 0];   // 換陣＝整個部隊回到同一個陣型平面（空心錐陣的分艦隊各有自己的高度）
     sq.W0 = lerpNum(sq.W0, sq.W1, eNow); sq.D0 = lerpNum(sq.D0, sq.D1, eNow);
     measureSquadron(sq);
     // 換陣的移動距離很遠（例如把分散的艦隊編在一起）：依距離拉長時間，不准瞬間滑過去
-    const far = Math.hypot(sq.off1[0] - sq.off0[0], sq.off1[1] - sq.off0[1], sq.off0[2] || 0);
+    const far = Math.hypot(sq.off1[0] - sq.off0[0], sq.off1[1] - sq.off0[1], sq.off1[2] - (sq.off0[2] || 0));
     sq.mStart = t; sq.mDur = Math.max(MORPH_DUR * morphMul, far / (vMorph * 5));   // 換陣最快是巡航速度的 5 倍
     sq.oFrom = omNow; sq.oTo = orderly ? 1 : 0;
   });
@@ -4011,7 +4056,7 @@ function cancelDrag() { ms = null; ts = null; hidePreview(); hideHint(); boxEl.s
 
 // ── 指令輪盤：選取後按住左鍵不動 → 出現輪盤；滑向某一格放開＝下令；停在中間放開＝取消 ──
 // 輪盤有兩頁，出現時按 Q／E 左右切換：「陣型」與「攻擊」
-const RADIAL_ORDER = ['line', 'spindle', 'wedge', 'crescent', 'ring', 'column'];   // 從正上方順時針
+const RADIAL_ORDER = ['line', 'spindle', 'wedge', 'hcone', 'crescent', 'ring', 'column'];   // 從正上方順時針
 const RADIAL_HOLD = 350, RADIAL_R = 100, RADIAL_DEAD = 28;
 const RADIAL_PAGES = [
   { name: '陣型', col: '#8fe3a5', items: RADIAL_ORDER.map((k) => ({ id: k, label: FORMATIONS[k].name, act: 'form_' + k })) },
@@ -4267,7 +4312,7 @@ canvas.addEventListener('pointercancel', (e) => { touches.delete(e.pointerId); c
 // [動作, 名稱, 分組, 預設鍵]。分組 radial 的鍵只在輪盤開著時有效，所以可以和鏡頭共用 Q／E
 const KEY_ACTIONS = [
   ['form_line', '橫陣', '陣型', 'Digit1'], ['form_spindle', '紡錘陣', '陣型', 'Digit2'], ['form_crescent', '凹形陣', '陣型', 'Digit3'],
-  ['form_ring', '圓陣', '陣型', 'Digit4'], ['form_column', '縱陣', '陣型', 'Digit5'], ['form_wedge', '圓錐陣', '陣型', 'KeyW'], ['orderly', '整齊排列切換', '陣型', 'KeyF'],
+  ['form_ring', '圓陣', '陣型', 'Digit4'], ['form_column', '縱陣', '陣型', 'Digit5'], ['form_wedge', '圓錐陣', '陣型', 'KeyW'], ['form_hcone', '空心錐陣', '陣型', 'KeyH'], ['orderly', '整齊排列切換', '陣型', 'KeyF'],
   ['attack', '指定攻擊（再點敵軍）', '攻擊', 'KeyA'], ['volley', '全艦齊射', '攻擊', 'KeyZ'], ['missile', '飛彈齊射', '攻擊', 'KeyX'],
   ['area', '區域攻擊（再點地圖）', '攻擊', 'KeyD'], ['scan', '區域掃描：航母派偵察機（再點地圖）', '攻擊', 'KeyC'],
   ['skill_focus', '集中火力', '技能', 'Digit6'], ['skill_wall', '鐵壁', '技能', 'Digit7'], ['skill_charge', '突進', '技能', 'Digit8'],
