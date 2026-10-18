@@ -8201,11 +8201,10 @@ function buildTac() {
   el.innerHTML = `<div class="tac-top"><b>戰術面板</b><span class="g-dim" id="tac-time"></span>
       <span class="tac-help g-dim" id="tac-help"></span><span class="g-sp"></span>
       <span class="tac-legend"><i style="--c:#5ad1ff">移動</i><i style="--c:#8fe3a5">陣型</i><i style="--c:#ff7ad9">技能</i><i style="--c:#ff6a4a">攻擊</i></span>
-      <button class="g-btn sm" id="tac-pause"></button><button class="g-btn sm" id="tac-speed"></button><button class="g-btn sm" id="tac-close">關閉（Tab）</button></div>
+      <button class="g-btn sm" id="tac-fit" title="地圖自動對準部隊（滾輪縮放、拖曳平移後會改成手動）">⤢ 自動對焦</button><button class="g-btn sm" id="tac-pause"></button><button class="g-btn sm" id="tac-speed"></button><button class="g-btn sm" id="tac-close">關閉（Tab）</button></div>
     <div class="tac-body"><div class="tac-mapwrap"><div class="tac-mapbox"><canvas id="tac-map"></canvas>
-        <div class="tac-svbar tac-mapbar"><button class="g-btn sm" id="tac-fit" title="自動對準部隊（滾輪縮放、拖曳平移後會改成手動）">⤢ 自動對焦</button></div>
         <div class="tac-pop" id="tac-pop" hidden></div></div>
-      <div class="tac-svbox"><canvas id="tac-sv"></canvas><div class="tac-svbar"><span id="tac-svt"></span><button class="g-btn sm" id="tac-svfit" title="恢復自動縮放">⤢ 重設</button><button class="g-btn sm" id="tac-svaxis" title="切換側視的方向"></button></div></div></div><div class="tac-side" id="tac-side"></div></div>`;
+      <div class="tac-svbox"><div class="tac-svbar"><span id="tac-svt"></span><button class="g-btn sm" id="tac-svfit" title="恢復自動縮放">⤢ 重設</button><button class="g-btn sm" id="tac-svaxis" title="切換側視的方向"></button></div><div class="tac-svcv"><canvas id="tac-sv"></canvas></div></div></div><div class="tac-side" id="tac-side"></div></div>`;
   document.body.appendChild(el);
   TAC.el = el; TAC.cv = el.querySelector('#tac-map'); TAC.ctx = TAC.cv.getContext('2d'); TAC.side = el.querySelector('#tac-side'); TAC.pop = el.querySelector('#tac-pop');
   el.querySelector('#tac-close').onclick = closeTac;
@@ -8284,7 +8283,7 @@ function openTac() {
   const ap = BR.on ? SETTINGS.bridgePause : SETTINGS.tacPause;
   TAC.autoPaused = ap && !paused; if (ap) { paused = true; updateTimeUI(); }   // 單人：打開就暫停（可在設定關掉）
   gEl('tac-close').textContent = BR.on ? `抬頭（${keyLabel(keyOf('tactical'))}）` : `關閉（${keyLabel(keyOf('tactical'))}）`;
-  gEl('tac-help').textContent = `左鍵：選艦隊／拖曳＝平移／按住＝指令輪盤　Shift＋左鍵拖曳：框選　滾輪：縮放　右鍵：移動（拖曳＝朝向）　${SETTINGS.queueMod}＋右鍵：加節點　節點：點＝陣型／刪除、拖曳＝改位置　${keyLabel(keyOf('attack'))}＋左鍵：指定攻擊`;
+  const help = gEl('tac-help'); help.textContent = help.title = `左鍵：選艦隊／拖曳＝平移／按住＝指令輪盤　Shift＋左鍵拖曳：框選　滾輪：縮放　右鍵：移動（拖曳＝朝向）　${SETTINGS.queueMod}＋右鍵：加節點　節點：點＝陣型／刪除、拖曳＝改位置　${keyLabel(keyOf('attack'))}＋左鍵：指定攻擊`;
   buildTacSide(); tacResize(); drawTac();
 }
 function closeTac() {
@@ -8775,7 +8774,7 @@ function drawSideView() {
     const B = tacBounds(), pad = 24;
     if (SV.axis === 'x') { SV.k = (W - pad * 2) / (B.x1 - B.x0); SV.o = pad - B.x0 * SV.k; } else { SV.k = (W - pad * 2) / (B.z1 - B.z0); SV.o = pad + B.z1 * SV.k; }
   }
-  gEl('tac-svt').textContent = `${SV.axis === 'x' ? '側視・左右（從我方看過去）' : '側視・前後（從右側看：我方在左）'}　拖曳節點＝高度・拖曳把手＝仰角・滾輪＝縮放`;
+  const svt = gEl('tac-svt'); svt.textContent = svt.title = `${SV.axis === 'x' ? '側視・左右（從我方看過去）' : '側視・前後（從右側看：我方在左）'}　拖曳節點＝高度・拖曳把手＝仰角・滾輪＝縮放`;
   gEl('tac-svaxis').textContent = SV.axis === 'x' ? '改看前後' : '改看左右';
   gEl('tac-svfit').classList.toggle('on', !SV.user);
   // 高度格線

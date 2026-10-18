@@ -284,17 +284,18 @@
   #tac[hidden] { display: none; }
   .tac-top { display: flex; align-items: center; gap: calc(10px * var(--sp)); padding: calc(8px * var(--sp)) calc(16px * var(--sp)); border-bottom: 1px solid var(--line); flex-wrap: wrap; font-size: calc(14px * var(--ui)); }
   .tac-top b { letter-spacing: .14em; font-size: calc(15px * var(--ui)); }
-  .tac-help { font-size: calc(13px * var(--ui)); flex: 1 1 320px; min-width: 0; line-height: 1.5; }
+  .tac-help { font-size: calc(13px * var(--ui)); flex: 1 1 320px; min-width: 0; line-height: 1.5; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }   /* 最多兩行（滑鼠停著看全文），不把下方的地圖擠小 */
   #tac .g-btn.sm { padding: calc(5px * var(--sp)) calc(12px * var(--sp)); font-size: calc(13.5px * var(--ui)); }
   .tac-body { flex: 1; display: flex; min-height: 0; }
   .tac-mapwrap { flex: 1 1 58%; min-width: 0; position: relative; border-right: 1px solid var(--line); display: flex; flex-direction: column; }
   .tac-mapbox { flex: 1 1 66%; position: relative; min-height: 0; }
-  .tac-svbox { flex: 0 0 40%; position: relative; min-height: calc(120px * var(--ui)); border-top: 1px solid var(--line); }
+  .tac-svbox { flex: 0 0 40%; display: flex; flex-direction: column; min-height: calc(150px * var(--ui)); border-top: 1px solid var(--line); }
+  .tac-svcv { flex: 1; position: relative; min-height: 0; }
   #tac-map, #tac-sv { position: absolute; inset: 0; cursor: crosshair; touch-action: none; }
-  .tac-svbar { position: absolute; right: 8px; top: 6px; display: flex; gap: calc(10px * var(--sp)); align-items: center; font-size: calc(12.5px * var(--ui)); color: var(--dim); pointer-events: none; }
-  .tac-svbar .g-btn { pointer-events: auto; }
-  .tac-svbar .g-btn.on { border-color: rgba(90,209,255,.7); color: #5ad1ff; }
-  .tac-mapbar { top: auto; bottom: 8px; }
+  /* 側視圖的說明與按鈕放在自己的一列，不蓋住圖上的節點 */
+  .tac-svbar { flex: none; display: flex; gap: calc(10px * var(--sp)); align-items: center; padding: calc(4px * var(--sp)) calc(8px * var(--sp)); border-bottom: 1px solid var(--line); font-size: calc(12.5px * var(--ui)); color: var(--dim); }
+  #tac-svt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tac-svbar .g-btn.on, #tac-fit.on { border-color: rgba(90,209,255,.7); color: #5ad1ff; }
   .tac-pop { position: absolute; z-index: 2; width: calc(310px * var(--ui)); padding: calc(10px * var(--sp)) calc(14px * var(--sp)); background: rgba(6,10,20,.96); border: 1px solid rgba(90,209,255,.55); border-radius: 5px; font-size: calc(13.5px * var(--ui)); box-shadow: 0 6px 20px rgba(0,0,0,.55); }
   .tac-pop[hidden] { display: none; }
   .tac-pop .g-dim { font-size: calc(12.5px * var(--ui)); margin: calc(6px * var(--sp)) 0; line-height: 1.6; }
@@ -781,7 +782,7 @@
 
 <div id="boot"><div class="boot-card"><h1>星海艦隊戰</h1><div class="sub">FLEET TACTICS · 內網伺服器</div><div id="boot-body"><p class="boot-st">連線中…</p></div></div></div>
 <div id="save-badge" hidden>⚠ 存檔還沒同步到伺服器，重試中…</div>
-<script>window.__BUILD = "20261018221905"; window.__ASSETS = { ships: "assets/ships.webp", fx: "assets/fx.webp", fighters: "assets/fighters.webp" };</script>
+<script>window.__BUILD = "20261018232637"; window.__ASSETS = { ships: "assets/ships.webp", fx: "assets/fx.webp", fighters: "assets/fighters.webp" };</script>
 <script>// ═══ 啟動前：登入伺服器、取得存檔、提供 STORE（取代 localStorage，寫入會自動同步到伺服器）═══
 (() => {
   'use strict';
