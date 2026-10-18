@@ -22,6 +22,15 @@ dev/
 data/                    Player accounts, saves, backups (created at runtime; not in git)
 ```
 
+## Update and run in one step
+
+Double-click **`update-and-run.bat`** (requires Git and Node.js):
+
+1. `git pull` to fetch the latest code. `web/` and `dev/src/_entry.js` are build outputs, so they are restored first so they don't block the pull.
+2. Run `npm ci` on first use or when `package.json` / `package-lock.json` changed, then `npm run build` to build the web app.
+3. Start the server: `StarFleetServer.exe` if it exists, otherwise `node dev/server/server.js --base .`.
+   If the server is already running, the new web build is already live (players just reload), and the script asks whether to restart it.
+
 ## Building
 
 ### 1. Build the web app (all you need for normal code changes)

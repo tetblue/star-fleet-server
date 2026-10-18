@@ -22,6 +22,15 @@ dev/
 data/                    プレイヤーのアカウント、セーブ、バックアップ（実行時に自動生成。git には含めない）
 ```
 
+## ワンクリックで更新して起動
+
+**`update-and-run.bat`** をダブルクリックします（Git と Node.js が必要です）。
+
+1. `git pull` で最新のコードを取得します。`web/` と `dev/src/_entry.js` はビルド成果物なので、pull の妨げにならないよう先に元に戻します。
+2. 初回、または `package.json`／`package-lock.json` が変わったときは `npm ci` を実行し、続けて `npm run build` で Web 版をビルドします。
+3. サーバーを起動します。`StarFleetServer.exe` があれば exe を使い、なければ `node dev/server/server.js --base .` で起動します。
+   サーバーがすでに起動している場合、新しい Web 版はすでに反映されており（プレイヤーは再読み込みするだけ）、再起動するかどうか確認されます。
+
 ## ビルド
 
 ### 1. Web 版のビルド（普段のコード変更はこれだけでよい）

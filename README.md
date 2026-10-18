@@ -20,6 +20,15 @@ dev/
 data/                    玩家帳號、存檔、備份（執行時自動產生；不在 git 裡）
 ```
 
+## 一鍵更新並啟動
+
+雙擊 **`update-and-run.bat`**（需要已安裝 Git 與 Node.js）：
+
+1. `git pull` 拉取最新程式（`web/` 與 `dev/src/_entry.js` 是建置產物，會先還原再拉）。
+2. 第一次或 `package.json`／`package-lock.json` 有變動時執行 `npm ci`，接著 `npm run build` 建置網頁。
+3. 啟動伺服器：有 `StarFleetServer.exe` 就用 exe，沒有就用 `node dev/server/server.js --base .`。
+   伺服器已經在執行時，新網頁已經生效（玩家重新整理即可），會詢問是否要重新啟動。
+
 ## 打包
 
 ### 1. 建置網頁（平常改程式只需要這步）
