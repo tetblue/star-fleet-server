@@ -26,6 +26,7 @@ function rosterLoad() {
 }
 function rosterSave() { try { STORE.setItem(ROSTER_STORE, JSON.stringify(ROSTER)); } catch (e) { /* 只在本次有效 */ } }
 let ROSTER = rosterLoad();
+const COMMANDERS_BASE = COMMANDERS.filter((c) => c.base);   // 初始指揮官（多人戰鬥只能派這幾位）
 // 把招募來的指揮官放進 COMMANDERS、拿掉解雇的初始指揮官
 function rosterApply() {
   for (let k = COMMANDERS.length - 1; k >= 0; k--) if (!COMMANDERS[k].base || ROSTER.fired.includes(COMMANDERS[k].id)) COMMANDERS.splice(k, 1);

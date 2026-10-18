@@ -16,7 +16,7 @@
   let started = false;
   async function logout() { try { await flush(); await call('POST', 'api/logout', {}); } catch (e) { /* 照樣登出 */ } frozen = true; try { localStorage.removeItem(SK); } catch (e) { /* 無法清除 */ } location.href = location.pathname; }
   function relogin() { if (frozen) return; frozen = true; try { localStorage.removeItem(SK); } catch (e) { /* 無法清除 */ } alertBox('登入已失效（可能伺服器重設過），請重新登入。', () => location.reload()); }
-  window.API = { get: (u) => call('GET', u), post: (u, b) => call('POST', u, b || {}), put: (u, b) => call('PUT', u, b), del: (u) => call('DELETE', u), name: () => me, logout };
+  window.API = { get: (u) => call('GET', u), post: (u, b) => call('POST', u, b || {}), put: (u, b) => call('PUT', u, b), del: (u) => call('DELETE', u), name: () => me, logout, headers: hdr };
 
   // ── 存檔同步 ──
   const S = { rev: 0, dirty: false, busy: false, timer: 0, state: 'ok' };

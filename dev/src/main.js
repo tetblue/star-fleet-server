@@ -954,7 +954,7 @@ function seenSq(viewer, q) {
   return jammed(viewer) && jamSeen[viewer] ? jamSeen[viewer].get(q) || null : q;
 }
 // 玩家畫面要不要遮敵情（作戰中被干擾；觀摩時看得到全部）。戰爭迷霧另外由 fowView 處理
-function playerFogged() { return typeof GAME !== 'undefined' && (GAME.phase === 'battle' || GAME.phase === 'replay') && !GAME.watch && jammed(GAME.playerSide) && !fowOn(); }
+function playerFogged() { return typeof GAME !== 'undefined' && (GAME.phase === 'battle' || GAME.phase === 'replay') && !GAME.watch && !NET.spec && jammed(GAME.playerSide) && !fowOn(); }
 
 // ───── 戰爭迷霧（擬真難度＋opts.fow；規則記進回放）─────
 // 每支艦隊各有一份「知道哪些敵方分艦隊的位置」（f.fowK，每 FOW_RULE.tick 重算）：
@@ -1071,7 +1071,7 @@ function fowSeen(f, q, maxAge = Infinity) {
 }
 // ── 玩家畫面 ──
 // 要不要用玩家這一方的情報畫敵軍（戰爭迷霧；回放、觀摩看得到全部）
-function fowView() { return fowOn() && typeof GAME !== 'undefined' && GAME.phase === 'battle' && !GAME.watch && !GAME.replaying; }
+function fowView() { return fowOn() && typeof GAME !== 'undefined' && GAME.phase === 'battle' && !GAME.watch && !GAME.replaying && !NET.spec; }   // 觀戰：看得到全部
 function pFiltered() { return fowView() || playerFogged(); }
 // 玩家看到的敵方分艦隊（同 seenSq：即時／快照／null）；maxAge＝最後已知位置保留幾秒
 function pSeen(q, maxAge = FOW_RULE.last) {
@@ -3005,7 +3005,11 @@ const INPUT_DELAY = 0;            // 單機＝0（立即生效）；連線時設
 const cmdQueue = [], cmdLog = [];
 const SIM_RULES = ['fire', 'advance', 'flankSide', 'flankRear', 'beamNear', 'beamFar', 'altitude', 'rangeMul', 'autoFace', 'flat', 'ff', 'fow'];
 let battleRules = null;
+// 多人戰鬥（內容在 multi.js）：on＝這場戰鬥由伺服器的回合推進；spec＝觀戰；bound＝收到的回合允許跑到哪個 tick（不含）
+const NET = { on: false, spec: false, seat: -1, K: 4, speed: 1, bound: 0, start: null, room: null, lobby: [], out: [], want: false, conn: null, screen: null, chat: [] };
 function issue(type, args = {}) {
+  if (type === 'qedit' && args.uturn == null) args = { ...args, uturn: opts.uturn };   // 迴轉方式記進命令（不同玩家的設定不同）
+  if (NET.on && GAME.phase === 'battle') { if (!NET.spec && type !== 'rule' && !GAME.result) netCmd({ type, ...args }); return null; }   // 多人：送到伺服器，由回合帶回來才執行
   if (GAME.replaying && type !== 'rule') return null;   // 回放中不接受新命令
   if (GAME.watch && type !== 'rule') { if (GAME.phase === 'battle' && performance.now() - (GAME.watchWarn || 0) > 4000) { GAME.watchWarn = performance.now(); toast('AI 對戰觀摩：雙方都由 AI 指揮，不能下令（可以點選艦隊查看、移動鏡頭、調速度）', 'hint'); } return null; }
   if (BR.on && type !== 'rule' && bridgeConsoleK() < 0.9) { bridgeNoCmd(); return null; }   // 艦橋：只有看著戰術台時才能下令（戰場畫面的右鍵移動等一律無效）
@@ -3135,7 +3139,7 @@ function editQueueNode(g, c) {
   switch (c.op) {
     case 'pos':   // 平面位置
       if (it) Q[idx] = { ...it, x: c.x, z: c.z };
-      else if (g.goal) { moveGroup(g, c.x, c.z, g.goal.H, { uturn: opts.uturn }); g.cur = g.plan ? { type: 'move', x: c.x, z: c.z } : null; }
+      else if (g.goal) { moveGroup(g, c.x, c.z, g.goal.H, { uturn: c.uturn != null ? c.uturn : opts.uturn }); g.cur = g.plan ? { type: 'move', x: c.x, z: c.z } : null; }
       break;
     case 'alt':   // 高度與仰角（cur 且沒有目的地＝原地）；節點上原本附帶的升降一併取代
       if (opts.flat) return;   // 一般難度：不能升降
@@ -4336,7 +4340,7 @@ function keyPan(dt) {
 }
 
 // ── 時間 ──
-function togglePause() { if (GAME.phase === 'simedit') return; /* 模擬室編輯中保持暫停 */ paused = !paused; if (typeof TAC !== 'undefined' && TAC.open) TAC.autoPaused = false; updateTimeUI(); }
+function togglePause() { if (GAME.phase === 'simedit') return; if (NET.on) { toast('多人戰鬥不能暫停', 'hint'); return; } /* 模擬室編輯中保持暫停 */ paused = !paused; if (typeof TAC !== 'undefined' && TAC.open) TAC.autoPaused = false; updateTimeUI(); }
 // 下令時減速：不是暫停時，正在下令（右鍵拖曳、指令輪盤、選攻擊／技能目標、畫陣線）就把速度降到設定值，下完恢復
 function commanding() {
   if (GAME.phase !== 'battle' && GAME.phase !== 'sandbox') return false;
@@ -4350,7 +4354,7 @@ function cmdSlowFrame() {
   const on = !paused && SETTINGS.cmdSlow > 0 && commanding();
   if (on !== cmdSlowOn) { cmdSlowOn = on; updateTimeUI(); document.body.classList.toggle('cmd-slow', on); }
 }
-function setSpeed(i) { speedIdx = Math.max(0, Math.min(SPEEDS.length - 1, i)); updateTimeUI(); }
+function setSpeed(i) { if (NET.on && GAME.phase === 'battle') { toast(`多人戰鬥的速度由房主決定（×${NET.speed}）`, 'hint'); return; } speedIdx = Math.max(0, Math.min(SPEEDS.length - 1, i)); updateTimeUI(); }
 function updateTimeUI() {
   $('st-pause').hidden = !paused;
   $('st-speed').textContent = cmdSlowOn ? `下令中 ×${effSpeed()}` : '×' + SPEEDS[speedIdx];
@@ -4489,7 +4493,8 @@ function simulate(dt) {
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.1);
   // 固定步長：依真實經過時間累積，一次走整數個 tick（太慢時寧可放慢也不跳步）
-  if (!paused) {
+  if (NET.on && GAME.phase === 'battle') netStep(dt);   // 多人：照伺服器的回合推進（不能暫停）
+  else if (!paused) {
     simAcc += dt * effSpeed();
     let n = 0;
     while (simAcc >= SIM_DT && n < MAX_STEPS_PER_FRAME) { stepSim(); simAcc -= SIM_DT; n++; }

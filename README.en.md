@@ -126,7 +126,7 @@ Main menu:
 | Menu | Description |
 |---|---|
 | Single Player (單人戰鬥) | The five battle modes below, plus Commanders and the Tavern |
-| Multiplayer (多人戰鬥) | LAN player-vs-player (in development) |
+| Multiplayer (多人戰鬥) | LAN 1v1 player-vs-player with live spectators (see the Chinese README for details) |
 | Replays (戰鬥回放) | Every battle is stored on the server and can be rewatched |
 | Weapon Layout (武器配置) | Adjust or add weapon mounts for each ship class (shared by 2D and 3D) |
 | Settings (設定) | Key bindings, game speed, interface info |

@@ -12,6 +12,7 @@ const http = require('http');
 const os = require('os');
 const crypto = require('crypto');
 const { loadModels } = require('./models.js');
+const createMulti = require('./multi.js');
 
 const VERSION = '1.0.0';
 let sea = null; try { sea = require('node:sea'); if (!sea.isSea()) sea = null; } catch (e) { sea = null; }
@@ -50,6 +51,7 @@ const stamp = (t = new Date()) => t.toISOString().replace(/[-:]/g, '').replace('
 // ───── 玩家與登入 ─────
 let CFG, DATA, PLAYERS_DIR, BACKUP_DIR, CACHE_DIR, MODELS_DIR, WEB_DIR, MODELS = {}, MODEL_JSON = '{}';
 const sessions = new Map();   // token → { id, exp }
+const MULTI = createMulti({ log: (...a) => log(...a) });
 function sessFile() { return path.join(DATA, 'sessions.json'); }
 function saveSessions() { const o = {}; for (const [k, v] of sessions) o[k] = v; writeAtomic(sessFile(), JSON.stringify(o)); }
 function loadSessions() { const o = readJSON(sessFile(), {}); const now = Date.now(); for (const k in o) if (o[k].exp > now) sessions.set(k, o[k]); }
@@ -212,6 +214,9 @@ async function api(req, res, url) {
     log(`還原存檔：${me.name} ← ${name}`);
     return json(res, 200, { ok: true });
   }
+  // 多人戰鬥：串流收訊息、POST 送動作
+  if (p === '/api/mp/stream' && m === 'GET') return MULTI.stream(req, res, me);
+  if (p === '/api/mp/act' && m === 'POST') { const r = MULTI.act(me, await readBody(req, 1048576)); return json(res, r.error ? 400 : 200, r); }
   if (p === '/api/records' && m === 'GET') return json(res, 200, listRecords(me.id));
   if (p === '/api/records' && m === 'POST') {
     const b = await readBody(req);
