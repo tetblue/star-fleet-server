@@ -57,7 +57,7 @@ const scene = new THREE.Scene();
 
 const camPersp = new THREE.PerspectiveCamera(20, 1, 10, 20000);
 const camOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 20000);
-const view = { target: new THREE.Vector3(0, 0, 0), height: 620, minH: 40, maxH: 1600, yaw: 0, pitch: ELEV };
+const view = { target: new THREE.Vector3(0, 0, 0), height: 620, minH: 40, maxH: 2100, yaw: 0, pitch: ELEV };
 let camera = camPersp;
 
 function updateCamera() {
@@ -966,7 +966,7 @@ function fowOn() { return !!opts.fow && !!battleSetup && !battleSetup.bg; }
 function fowOmni(side) { return !!(battleSetup && battleSetup.omni && battleSetup.omni[side]); }   // 關卡設定：這一方全知
 function sqIdx(q) { return squadrons[q.qi] === q ? q.qi : (q.qi = squadrons.indexOf(q)); }
 function fowReset() {
-  FOW.tick = -1; FOW.scanReady = [0, 0]; FOW.pings = [[], []]; FOW.scans = []; FOW.start = [null, null]; FOW.obs = null; FOW.auto = [true, true]; FOW.rlog = new Map();
+  FOW.tick = -1; FOW.scanReady = [U.uTime.value + FOW_RULE.scanFirst, U.uTime.value + FOW_RULE.scanFirst];   // 開戰 scanFirst 秒後才能第一次掃描 FOW.pings = [[], []]; FOW.scans = []; FOW.start = [null, null]; FOW.obs = null; FOW.auto = [true, true]; FOW.rlog = new Map();
   squadrons.forEach((q, i) => (q.qi = i));
   for (const f of fleets) { f.fowK = new Uint8Array(MAX_SQ); f.fowRev = new Float32Array(MAX_SQ); f.fowLast = new Map(); }
 }
@@ -4691,6 +4691,7 @@ const SENSOR_R = [550, 650, 650, 600, 750, 450];   // 航母、戰列、巡洋�
 SHIP_TYPES.forEach((t, k) => (t.sensor = SENSOR_R[k]));
 // 戰爭迷霧（擬真＋迷霧開啟）：自動攻擊只打「知道位置」的敵人（偵測範圍內、掃描結果、艦載機看到的、開火暴露的）
 //   tick＝每幾個模擬 tick 重算一次；ftr＝攻擊型艦載機周圍看得到的半徑；expose＝敵艦開火後，被打的艦隊看得到它幾秒
+//   scanFirst＝開戰後幾秒才能第一次掃描（自動、手動都一樣）
 //   scanR／scanShow／scanCd＝掃描半徑、掃到的顯示幾秒、冷卻（每一方共用；天賦「偵察」每階 −scanCdRecon 秒、偵測半徑 +sensorRecon）
 //   ping＝被掃到的一方看得到掃描訊號的方向幾秒；last＝畫面上「最後已知位置」保留幾秒
 //   area＝區域攻擊：半徑、持續秒數、看不到目標時的命中率倍率（盲射）
@@ -4699,7 +4700,7 @@ SHIP_TYPES.forEach((t, k) => (t.sensor = SENSOR_R[k]));
 //     天賦「偵察機」每階半徑 +rTal；cd＝每支艦隊的冷卻；speed／hp／size／fuel＝速度、耐久（裝甲薄）、被瞄準的大小係數（難以擊中）、續航秒數
 //     eye＝飛行路徑上（去程、回程）偵察機自己看得到的半徑，看到的也一起回報
 //     被干擾時偵察機照樣起飛、照樣偵察，但即時回報不了：記在機上，干擾結束或飛回母艦時才回報（成為最後已知位置）；中途被打下來＝情報沒了
-const FOW_RULE = { tick: 30, ftr: 250, expose: 4, scanR: 1200, scanShow: 6, scanCd: 40, scanCdRecon: 5, sensorRecon: 0.1, ping: 10, last: 60,
+const FOW_RULE = { tick: 30, ftr: 250, expose: 4, scanR: 800, scanFirst: 15, scanShow: 6, scanCd: 40, scanCdRecon: 5, sensorRecon: 0.1, ping: 10, last: 60,
   area: { r: 70, dur: 20, blind: 0.5 },
   recon: { r: 350, rTal: 0.2, eye: 300, loiter: 8, cd: 20, speed: [115, 130], hp: 3, size: 0.15, fuel: 70,
     acc: 0.2, min: 0.008, gap: 3 } };   // 很難打中：防空砲、副砲、攔截機的命中率 ×acc（下限 min，一般是 5%），每架每 gap 秒才會被一門砲瞄準一次
@@ -4842,40 +4843,40 @@ const ALT_RANGE = 400;   // 戰場的高度範圍 ±400（y＝0 是基準面）
 // aiOmni：true＝這一關的 AI 全知（擬真難度的戰爭迷霧不限制敵方，偵測、自動攻擊都照看得到全部；預設不開）
 const SCENARIOS = [
   {
-    id: 's1', name: '邊境遭遇戰', size: '小型', timeLimit: 180, budget: 2700, maxFleets: 2, level: 1, seed: 101,
+    id: 's1', name: '邊境遭遇戰', size: '小型', timeLimit: 240, budget: 2700, maxFleets: 2, level: 1, seed: 101,
     story: '巡邏艦隊在邊境星域與敵方前鋒遭遇。敵軍規模不大，正面推進。擊退它。',
     terrain: [{ type: 'rock', x: -280, y: 40, z: -60, r: 60 }, { type: 'rock', x: 260, y: -70, z: 20, r: 48 }],
     enemy: [
       { name: '敵前鋒艦隊', commander: { name: '巴爾克', trait: 'dmg', level: 1, skills: ['focus'] },
-        comp: [0, 140, 300, 420, 400], formation: 'line', tactic: 'push', x: 0, z: -330, h: 0 },
+        comp: [0, 140, 300, 420, 400], formation: 'line', tactic: 'push', x: 0, z: -660, h: 0 },
     ],
     events: [],
     intel: { accuracy: 0.9, hide: [] },
   },
   {
-    id: 's2', name: '星雲伏擊', size: '中型', timeLimit: 300, budget: 4400, maxFleets: 3, level: 2, seed: 202,
+    id: 's2', name: '星雲伏擊', size: '中型', timeLimit: 360, budget: 4400, maxFleets: 3, level: 2, seed: 202,
     story: '敵軍在星雲兩側布陣，主力打算拉開距離消耗我方，另一支艦隊伺機包抄。情報不完整。',
     terrain: [{ type: 'nebula', x: 0, y: -40, z: 0, r: 240 }, { type: 'rock', x: -420, y: 90, z: -120, r: 70 }, { type: 'rock', x: 330, y: -30, z: 110, r: 55 }],
     enemy: [
       { name: '敵主力艦隊', commander: { name: '霍斯特', trait: 'shield', level: 2, skills: ['wall', 'focus'] },
-        comp: [60, 320, 380, 200, 200], formation: 'crescent', tactic: 'kite', x: -150, z: -380, h: 0 },
+        comp: [60, 320, 380, 200, 200], formation: 'crescent', tactic: 'kite', x: -150, z: -710, h: 0 },
       { name: '敵機動艦隊', commander: { name: '佩蕾', trait: 'speed', level: 2, skills: ['charge'] },
-        comp: [0, 0, 160, 420, 220], formation: 'column', tactic: 'flank', x: 380, y: 150, z: -300, h: 0 },
+        comp: [0, 0, 160, 420, 220], formation: 'column', tactic: 'flank', x: 380, y: 150, z: -630, h: 0 },
     ],
     events: [{ type: 'reinforce', chance: 0.4, at: [70, 130], name: '敵增援艦隊',
       comp: [0, 80, 160, 220, 140], formation: 'line', edge: 'left' }],
     intel: { accuracy: 0.65, hide: ['events'] },
   },
   {
-    id: 's3', name: '要塞前哨突破', size: '大型', timeLimit: 480, budget: 5600, maxFleets: 3, level: 3, seed: 303,
+    id: 's3', name: '要塞前哨突破', size: '大型', timeLimit: 540, budget: 5600, maxFleets: 3, level: 3, seed: 303,
     story: '敵方前哨站由小行星帶掩護，守軍擅長中央突破反擊，而且可能藏有預備隊。偵察情報極少。',
     terrain: [{ type: 'asteroid', x: -260, y: -60, z: -40, r: 170 }, { type: 'asteroid', x: 280, y: 70, z: 20, r: 150 },
       { type: 'rock', x: -250, y: -40, z: -60, r: 62 }, { type: 'rock', x: 300, y: 90, z: 0, r: 70 }, { type: 'rock', x: 30, y: 10, z: -250, r: 85 }],
     enemy: [
       { name: '敵突擊艦隊', commander: { name: '格倫', trait: 'dmg', level: 3, skills: ['charge', 'focus'] },
-        comp: [0, 110, 420, 480, 220], formation: 'spindle', tactic: 'breakthrough', x: 0, z: -360, h: 0 },
+        comp: [0, 110, 420, 480, 220], formation: 'spindle', tactic: 'breakthrough', x: 0, z: -690, h: 0 },
       { name: '敵守備艦隊', commander: { name: '奧德', trait: 'shield', level: 3, skills: ['wall'] },
-        comp: [120, 320, 300, 120, 260], formation: 'line', tactic: 'push', x: -320, y: -110, z: -420, h: 0 },
+        comp: [120, 320, 300, 120, 260], formation: 'line', tactic: 'push', x: -320, y: -110, z: -750, h: 0 },
     ],
     events: [{ type: 'reinforce', chance: 0.7, at: [90, 160], name: '敵預備隊',
       comp: [40, 160, 220, 160, 120], formation: 'crescent', edge: 'right' }],
@@ -4883,9 +4884,12 @@ const SCENARIOS = [
   },
 ];
 // 部署區（世界座標）：玩家在下方（靠鏡頭），面向上方（−z）
-const DEPLOY_ZONE = { x0: -520, x1: 520, z0: 170, z1: 420 };
-const ENEMY_ZONE = { x0: -560, x1: 560, z0: -460, z1: -200 };
-const MAP_BOUNDS = { x0: -900, x1: 900, z0: -650, z1: 650 };
+//   ZONE_SHIFT＝部署區往外推的距離：雙方起始距離（約 1300）大於偵測半徑、自動掃描半徑，開戰時彼此看不到（戰爭迷霧）
+//   舊編成存的位置（z < DEPLOY_ZONE.z0）載入時一起往後推（zoneFix）
+const ZONE_SHIFT = 330;
+const DEPLOY_ZONE = { x0: -520, x1: 520, z0: 170 + ZONE_SHIFT, z1: 420 + ZONE_SHIFT };
+const ENEMY_ZONE = { x0: -560, x1: 560, z0: -460 - ZONE_SHIFT, z1: -200 - ZONE_SHIFT };
+const MAP_BOUNDS = { x0: -1000, x1: 1000, z0: -1000, z1: 1000 };
 
 // 預設武器掛點（船體模型座標：船長＝1，船頭＋z、上＋y）；w＝武器編號，r＝轉向（度），t＝側傾（度），s＝尺寸
 const MOUNTS_DEFAULT = {"e0":[{"w":3,"p":[-0.2333,0.0083,0.4],"r":0,"s":0.06},{"w":3,"p":[-0.0444,0.0088,0.4],"r":0,"s":0.06},{"w":3,"p":[-0.2667,0.0061,-0.3778],"r":0,"s":0.06},{"w":3,"p":[-0.0111,-0.0015,-0.3778],"r":0,"s":0.06},{"w":1,"p":[0.1156,-0.0227,0.0267],"r":90,"s":0.1},{"w":1,"p":[-0.3,0.0035,0.1556],"r":0,"s":0.09},{"w":2,"p":[0.0267,0.008,-0.1556],"r":90,"s":0.08},{"w":2,"p":[0.0267,0,0.2],"r":90,"s":0.08}],"e1":[{"w":0,"p":[0,-0.0331,0.112],"r":0,"s":0.21},{"w":0,"p":[0,-0.0015,-0.0498],"r":0,"s":0.23},{"w":0,"p":[0,-0.0015,-0.4231],"r":180,"s":0.22},{"w":1,"p":[0,-0.0352,0.3484],"r":0,"s":0.11},{"w":1,"p":[-0.0996,-0.033,-0.112],"r":-90,"s":0.12},{"w":1,"p":[0.0996,-0.0336,-0.112],"r":90,"s":0.12},{"w":3,"p":[-0.1095,-0.0419,0.0311],"r":0,"s":0.07},{"w":3,"p":[0.1095,-0.0426,0.0311],"r":0,"s":0.07},{"w":3,"p":[-0.0871,-0.0189,-0.2987],"r":0,"s":0.06},{"w":3,"p":[0.0871,-0.0188,-0.2987],"r":0,"s":0.06},{"w":2,"p":[-0.1195,-0.0498,0.1493],"r":-90,"s":0.09},{"w":2,"p":[0.1195,-0.0505,0.1493],"r":90,"s":0.09}],"e2":[{"w":1,"p":[0,0.0385,0.112],"r":0,"s":0.2},{"w":1,"p":[0,0.0508,-0.2987],"r":180,"s":0.2},{"w":5,"p":[0,0.0251,0.3484],"r":0,"s":0.14},{"w":4,"p":[-0.0722,0.0174,0.0373],"r":0,"s":0.1},{"w":4,"p":[0.0722,0.0171,0.0373],"r":0,"s":0.1},{"w":3,"p":[-0.0871,0.0242,-0.0871],"r":0,"s":0.06},{"w":3,"p":[0.0871,0.0241,-0.0871],"r":0,"s":0.06},{"w":3,"p":[-0.0996,-0.0197,-0.3111],"r":0,"s":0.06},{"w":3,"p":[0.0996,-0.0191,-0.3111],"r":0,"s":0.06}],"e3":[{"w":1,"p":[0,0.0065,0.0373],"r":0,"s":0.17},{"w":5,"p":[0,-0.0145,0.2738],"r":0,"s":0.16},{"w":3,"p":[-0.0498,-0.0163,0.1182],"r":0,"s":0.06},{"w":3,"p":[0.0498,-0.0162,0.1182],"r":0,"s":0.06},{"w":4,"p":[-0.1145,-0.09,-0.0747],"r":0,"s":0.1},{"w":4,"p":[0.1145,-0.0899,-0.0747],"r":0,"s":0.1}],"e4":[{"w":3,"p":[0,0.1175,-0.1493],"r":0,"s":0.1},{"w":3,"p":[-0.0062,0.0507,0],"r":0,"s":0.09},{"w":3,"p":[-0.168,-0.0631,-0.1307],"r":0,"s":0.06},{"w":3,"p":[0.168,-0.0627,-0.1307],"r":0,"s":0.06},{"w":1,"p":[0,0.0479,0.1867],"r":0,"s":0.1}],"a0":[{"w":3,"p":[-0.1083,-0.003,0.2091],"r":0,"s":0.07},{"w":3,"p":[0.1095,-0.0025,0.2091],"r":0,"s":0.07},{"w":3,"p":[0.1207,0.0258,-0.1493],"r":0,"s":0.06},{"w":1,"p":[-0.0933,0.12,-0.1929],"r":0,"s":0.09},{"w":2,"p":[0.112,0.021,-0.336],"r":0,"s":0.06},{"w":2,"p":[0.112,0.0202,-0.0249],"r":0,"s":0.06}],"a1":[{"w":0,"p":[0,-0.002,0.1717],"r":0,"s":0.2},{"w":0,"p":[0,0.007,0.0436],"r":0,"s":0.21},{"w":0,"p":[0,0.017,-0.0871],"r":0,"s":0.22},{"w":5,"p":[0,0.0014,0.3422],"r":0,"s":0.2},{"w":3,"p":[-0.0933,-0.0346,-0.3858],"r":0,"s":0.06},{"w":3,"p":[0.0933,-0.0338,-0.3858],"r":0,"s":0.06},{"w":2,"p":[-0.1058,-0.0074,-0.0809],"r":0,"s":0.06},{"w":2,"p":[-0.1058,-0.0073,-0.1556],"r":0,"s":0.06},{"w":2,"p":[0.102,-0.0074,-0.0809],"r":0,"s":0.06},{"w":2,"p":[0.102,-0.0074,-0.1556],"r":0,"s":0.06},{"w":3,"p":[-0.0684,-0.0034,0.0249],"r":0,"s":0.05},{"w":3,"p":[0.0684,-0.0041,0.0249],"r":0,"s":0.05}],"a2":[{"w":1,"p":[-0.0062,0.0079,-0.3298],"r":180,"s":0.19},{"w":1,"p":[0,0.0019,0.1618],"r":0,"s":0.15},{"w":2,"p":[0,0.027,0.0498],"r":0,"s":0.06},{"w":2,"p":[0,0.0277,-0.0187],"r":0,"s":0.06},{"w":3,"p":[-0.056,0.0045,0.0249],"r":0,"s":0.06},{"w":3,"p":[-0.056,0.0047,-0.056],"r":0,"s":0.06},{"w":3,"p":[0.0498,0.0046,0.0249],"r":0,"s":0.06},{"w":3,"p":[0.0498,0.0049,-0.056],"r":0,"s":0.06},{"w":4,"p":[-0.112,-0.0142,-0.0373],"r":0,"s":0.08},{"w":4,"p":[0.1058,-0.0105,-0.0373],"r":0,"s":0.08}],"a3":[{"w":5,"p":[0,0.0416,0.1493],"r":0,"s":0.28},{"w":1,"p":[0.0025,0.0671,-0.0622],"r":0,"s":0.12},{"w":3,"p":[-0.0772,0.0565,-0.1867],"r":0,"s":0.07},{"w":3,"p":[0.0747,0.0566,-0.1867],"r":0,"s":0.07},{"w":2,"p":[-0.0871,0.0375,0],"r":0,"s":0.06},{"w":2,"p":[0.0871,0.038,0],"r":0,"s":0.06},{"w":4,"p":[-0.1556,0.023,-0.1742],"r":0,"s":0.09},{"w":4,"p":[0.1556,0.023,-0.1742],"r":0,"s":0.09}],"a4":[{"w":3,"p":[0,0.134,-0.1333],"r":0,"s":0.1},{"w":3,"p":[0.3111,0.0228,-0.1333],"r":0,"s":0.07},{"w":3,"p":[-0.3111,0.0327,-0.1333],"r":0,"s":0.07},{"w":1,"p":[0,0.1264,0.3333],"r":0,"s":0.1},{"w":2,"p":[0,0.122,0.0444],"r":0,"s":0.06}]};
@@ -5365,12 +5369,13 @@ function defaultLoadout(sc, faction = GAME.faction || 0) {
   const fl = [];
   for (let k = 0; k < nF; k++) {
     const x = nF === 1 ? 0 : -220 + 440 * k / (nF - 1);
-    fl.push({ cmdr: pool[k % pool.length].id, comp: defaultComp(share), formation: 'line', x, z: 300, h: Math.PI });
+    fl.push({ cmdr: pool[k % pool.length].id, comp: defaultComp(share), formation: 'line', x, z: 300 + ZONE_SHIFT, h: Math.PI });
   }
   return { faction, fleets: fl };
 }
 // 編成的指揮官要屬於選的陣營、不能重複；不夠就減少艦隊數
 function fixLoadoutCmdrs(lo) {
+  zoneFix(lo);
   const pool = cmdrsOf(lo.faction || 0), used = new Set();
   lo.fleets = lo.fleets.filter((f) => {
     const c = COMMANDERS.find((o) => o.id === f.cmdr);
@@ -5379,6 +5384,11 @@ function fixLoadoutCmdrs(lo) {
     if (!free) return false;
     f.cmdr = free.id; used.add(free.id); return true;
   });
+}
+// 部署區往外推（ZONE_SHIFT）之前存的編成：位置在新部署區前面＝整組往後推
+function zoneFix(lo) {
+  const all = [...lo.fleets, ...supplyList(lo)];
+  if (all.length && all.every((f) => f.z < DEPLOY_ZONE.z0)) for (const f of all) f.z = Math.min(DEPLOY_ZONE.z1, f.z + ZONE_SHIFT);
 }
 // 補給艦隊的 setup（編成的 comp 是 [航母, 戰列, 巡洋, 驅逐, 護衛, 補給]，只會有護衛和補給）
 function supplySetup(side, S, follow, name = '補給艦隊') {
@@ -5393,7 +5403,7 @@ function supplyList(lo) {
 const supplyName = (i) => `補給第${'一二三四'[i]}隊`;
 // 新增第 i 支：預設跟隨同序號的艦隊，擺在它後方
 function defaultSupply(lo, i) {
-  const f = lo.fleets[i] || lo.fleets[0], z = f ? f.z + 120 : 420;
+  const f = lo.fleets[i] || lo.fleets[0], z = f ? f.z + 120 : DEPLOY_ZONE.z1;
   return { comp: SHIP_TYPES.map((_, t) => (t === 4 ? 30 : t === SUPPLY_T ? 30 : 0)), formation: 'ring', x: f ? f.x : 0, z: Math.min(DEPLOY_ZONE.z1, z), h: Math.PI, follow: lo.fleets[i] ? i : lo.fleets.length ? 0 : -1 };
 }
 // 增援的編成：本場預算 × share，照呼叫的艦隊的艦種比例（只算一般艦種）
@@ -5588,7 +5598,7 @@ function aiScan(f, lv, t) {
   const C = centerOf(fleetAlive(f)); if (!C) return;
   const ps = FOW.pings[f.side].filter((p) => p.fleet === f.id), p = ps[ps.length - 1];
   let P = null;
-  if (p) P = { x: C.x + Math.sin(p.a) * 800, y: C.y, z: C.z + Math.cos(p.a) * 800 };   // 掃描來自 scanR（1200）以內：取 800，半徑 350 涵蓋約 450～1150
+  if (p) { const d = FOW_RULE.scanR * 0.65; P = { x: C.x + Math.sin(p.a) * d, y: C.y, z: C.z + Math.cos(p.a) * d }; }   // 掃描來自 scanR 以內：取 0.65 倍，偵察半徑 350 涵蓋大半範圍
   else {
     let best = null; for (const [e, o] of f.fowLast) if (e.alive > 0 && !fowKnows(f, e) && (!best || o.t > best.t)) best = o;
     const st = FOW.start[1 - f.side];
@@ -6093,7 +6103,7 @@ function showLoadout() {
     const free = cmdrsOf(fac).find((c) => !lo.fleets.some((f) => f.cmdr === c.id));
     if (!free) return;
     const left = Math.max(0, sc.budget - used);
-    lo.fleets.push({ cmdr: free.id, comp: defaultComp(Math.max(600, left)), formation: 'line', x: 0, z: 300, h: Math.PI });
+    lo.fleets.push({ cmdr: free.id, comp: defaultComp(Math.max(600, left)), formation: 'line', x: 0, z: 300 + ZONE_SHIFT, h: Math.PI });
     lo.fleets.forEach((f, k) => { f.x = lo.fleets.length === 1 ? 0 : -300 + 600 * k / (lo.fleets.length - 1); });
     redraw();
   };
@@ -6152,7 +6162,7 @@ function startDeploy() {
   applyOp(); overlay(null); setPhase('deploy'); GAME.deploySel = 0; force3D();
   setCmdSide(GAME.playerSide, false);
   rebuildDeploy();
-  camAnim = null; view.target.x = 0; view.target.z = GAME.playerSide ? -40 : 40; view.height = 1250; view.yaw = mode3D && GAME.playerSide ? Math.PI : 0; view.pitch = ELEV; updateCamera();   // 多人的第二方：3D 轉 180°，自己在下方
+  camAnim = null; view.target.x = 0; view.target.z = GAME.playerSide ? -300 : 300; view.height = 1250; view.yaw = mode3D && GAME.playerSide ? Math.PI : 0; view.pitch = ELEV; updateCamera();   // 多人的第二方：3D 轉 180°，自己在下方
 }
 // 部署中選的那一支（序號＝lo.fleets，最後一個是補給艦隊）
 function dpLo() { const lo = GAME.loadout; return GAME.deploySel < lo.fleets.length ? lo.fleets[GAME.deploySel] : supplyList(lo)[GAME.deploySel - lo.fleets.length]; }
@@ -6504,7 +6514,7 @@ function campStage(c) {
   const budget = Math.min(6000, 2400 + 220 * (st - 1));
   const sc = {
     id: 'camp', campaign: true, stage: st, name: `無限戰場 第 ${st} 關`, size: budget < 3400 ? '小型' : budget < 4800 ? '中型' : '大型',
-    timeLimit: 240 + Math.min(240, st * 15), budget, maxFleets: st < 3 ? 2 : 3, level: Math.min(3, 1 + Math.floor(st / 4)),
+    timeLimit: 300 + Math.min(240, st * 15), budget, maxFleets: st < 3 ? 2 : 3, level: Math.min(3, 1 + Math.floor(st / 4)),
     seed: campHash(c.seed, st, c.attempt, 7) % 100000, terrain: campTerrain(R, st), enemy: [], events: [], intel: { accuracy: 0.8, hide: [] },
   };
   sc.story = `隨機宙域。${sc.terrain.length ? '地形：' + [...new Set(sc.terrain.map((t) => TERRAIN_TYPES[t.type].name))].join('、') + '。' : '開闊宙域，沒有地形。'}敵軍會依你出擊的指揮官平均等級（±3）生成。`;
@@ -6517,11 +6527,11 @@ function campTerrain(R, st) {
   const okRock = (x, z, r) => !(z + r > DEPLOY_ZONE.z0 - 30 || z - r < ENEMY_ZONE.z1 + 30 && z + r > ENEMY_ZONE.z0 - 30) && out.every((t) => t.type !== 'rock' || Math.hypot(t.x - x, t.z - z) > t.r + r + 60);
   for (let k = 0; k < n; k++) {
     const p = R();
-    if (p < 0.3) out.push({ type: 'nebula', x: Math.round(rr(-520, 520)), y: Math.round(rr(-90, 90)), z: Math.round(rr(-220, 160)), r: Math.round(rr(140, 260)) });
-    else if (p < 0.55) out.push({ type: 'asteroid', x: Math.round(rr(-560, 560)), y: Math.round(rr(-90, 90)), z: Math.round(rr(-200, 150)), r: Math.round(rr(110, 200)) });
+    if (p < 0.3) out.push({ type: 'nebula', x: Math.round(rr(-520, 520)), y: Math.round(rr(-90, 90)), z: Math.round(rr(-420, 380)), r: Math.round(rr(140, 260)) });
+    else if (p < 0.55) out.push({ type: 'asteroid', x: Math.round(rr(-560, 560)), y: Math.round(rr(-90, 90)), z: Math.round(rr(-400, 370)), r: Math.round(rr(110, 200)) });
     else {
       for (let tries = 0; tries < 12; tries++) {
-        const r = Math.round(rr(40, 90)), x = Math.round(rr(-600, 600)), z = Math.round(rr(-170, 130));
+        const r = Math.round(rr(40, 90)), x = Math.round(rr(-600, 600)), z = Math.round(rr(-450, 420));
         if (okRock(x, z, r)) { out.push({ type: 'rock', x, y: Math.round(rr(-120, 120)), z, r }); break; }
       }
     }
@@ -6548,7 +6558,7 @@ function campEnemy(sc, lo) {
     const cn = names.splice(Math.floor(R() * names.length), 1)[0], fn = fnames.splice(Math.floor(R() * fnames.length), 1)[0];
     const x = nF === 1 ? Math.round((R() - 0.5) * 200) : Math.round(-380 + 760 * k / (nF - 1) + (R() - 0.5) * 120);
     sc.enemy.push({ name: fn, commander: { name: cn, trait: pick(['dmg', 'shield', 'speed']), level: L, skills },
-      comp, formation: pick(A.formations), tactic: pick(A.tactics), x, y: L >= 3 ? Math.round((R() - 0.5) * 240) : 0, z: Math.round(-320 - R() * 100), h: 0, archetype: A.name });
+      comp, formation: pick(A.formations), tactic: pick(A.tactics), x, y: L >= 3 ? Math.round((R() - 0.5) * 240) : 0, z: Math.round(-320 - ZONE_SHIFT - R() * 100), h: 0, archetype: A.name });
   }
   // 等級 4 以上：可能有增援
   sc.events = L >= 4 && R() < Math.min(0.7, 0.2 + 0.06 * L) ? [{ type: 'reinforce', chance: 1, at: [60, 140], name: '敵增援艦隊', comp: defaultComp(total * 0.25), formation: pick(['line', 'crescent', 'wedge']), edge: R() < 0.5 ? 'left' : 'right' }] : [];
@@ -6628,9 +6638,9 @@ function campResult(R) {
 // 不影響無限戰場進度；敵軍一樣依出擊指揮官的平均等級生成（campEnemy），只是等級差由玩家決定
 const RAND_STORE = 'fleet.random';
 const RAND_SIZES = [
-  { name: '小型', budget: 2400, maxFleets: 2, time: 240, stage: 3 },
-  { name: '中型', budget: 3600, maxFleets: 3, time: 360, stage: 6 },
-  { name: '大型', budget: 5000, maxFleets: 3, time: 480, stage: 10 },
+  { name: '小型', budget: 2400, maxFleets: 2, time: 300, stage: 3 },
+  { name: '中型', budget: 3600, maxFleets: 3, time: 420, stage: 6 },
+  { name: '大型', budget: 5000, maxFleets: 3, time: 540, stage: 10 },
 ];
 const RAND_DIFF = [{ name: '較弱', off: -2 }, { name: '相當', off: 0 }, { name: '較強', off: 2 }, { name: '隨機', off: null }];
 const RAND_TERR = [{ name: '無', st: -1 }, { name: '少', st: 0 }, { name: '多', st: 14 }, { name: '隨機', st: null }];
@@ -7512,12 +7522,12 @@ function watchReportHtml(m, R) {
 // 照同樣的命令各自跑模擬（見 main.js 的 issue／frame）。雙方定期互比戰局指紋，不一樣就提示不同步。
 // 多人的指揮官只有初始的幾位，等級與天賦另外存（fleet.pvpcmdrs）；功勳算進單人的星際酒館。
 const MP_SIZES = [
-  { name: '小型', budget: 2400, maxFleets: 2, time: 300 },
-  { name: '中型', budget: 3600, maxFleets: 3, time: 420 },
-  { name: '大型', budget: 5000, maxFleets: 3, time: 540 },
+  { name: '小型', budget: 2400, maxFleets: 2, time: 360 },
+  { name: '中型', budget: 3600, maxFleets: 3, time: 480 },
+  { name: '大型', budget: 5000, maxFleets: 3, time: 600 },
 ];
 const MP_SPEEDS = [0.5, 1, 2, 4];   // 與伺服器一致
-const MP_ZONES = [DEPLOY_ZONE, { x0: -520, x1: 520, z0: -420, z1: -170 }];   // 第二方＝第一方的部署區轉 180°
+const MP_ZONES = [DEPLOY_ZONE, { x0: -520, x1: 520, z0: -420 - ZONE_SHIFT, z1: -170 - ZONE_SHIFT }];   // 第二方＝第一方的部署區轉 180°
 const MP_HASH_EVERY = 120;   // 每 2 秒（模擬時間）互比一次戰局指紋
 const MP_LO_STORE = 'fleet.pvplo';
 
@@ -7826,7 +7836,7 @@ function netBegin(st, cmds, turn) {
   setPhase('battle'); setCmdSide(GAME.playerSide, false); clearSelection();
   paused = false; updateTimeUI();
   force3D(); if (GAME.op === 2 && !NET.spec) enterBridge();
-  camAnim = null; view.target.x = 0; view.target.z = GAME.playerSide ? -60 : 60; view.height = 1250; if (mode3D) view.yaw = GAME.playerSide ? Math.PI : 0; updateCamera();
+  camAnim = null; view.target.x = 0; view.target.z = GAME.playerSide ? -300 : 300; view.height = 1250; if (mode3D) view.yaw = GAME.playerSide ? Math.PI : 0; updateCamera();
   if (!NET.spec && opts.fow && SETTINGS.autoScan === false) issue('autoscan', { on: false });
   const late = NET.bound > NET.K * 30;
   toast(NET.spec ? `觀戰：${st.names[0]} vs ${st.names[1]}${late ? '（快轉追上目前的進度…）' : ''}` : `${late ? '重新連上：快轉追上目前的進度…' : '多人對戰　開戰！'}（不能暫停；速度 ×${NET.speed}）`);

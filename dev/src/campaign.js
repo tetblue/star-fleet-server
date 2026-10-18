@@ -26,7 +26,7 @@ function campStage(c) {
   const budget = Math.min(6000, 2400 + 220 * (st - 1));
   const sc = {
     id: 'camp', campaign: true, stage: st, name: `無限戰場 第 ${st} 關`, size: budget < 3400 ? '小型' : budget < 4800 ? '中型' : '大型',
-    timeLimit: 240 + Math.min(240, st * 15), budget, maxFleets: st < 3 ? 2 : 3, level: Math.min(3, 1 + Math.floor(st / 4)),
+    timeLimit: 300 + Math.min(240, st * 15), budget, maxFleets: st < 3 ? 2 : 3, level: Math.min(3, 1 + Math.floor(st / 4)),
     seed: campHash(c.seed, st, c.attempt, 7) % 100000, terrain: campTerrain(R, st), enemy: [], events: [], intel: { accuracy: 0.8, hide: [] },
   };
   sc.story = `隨機宙域。${sc.terrain.length ? '地形：' + [...new Set(sc.terrain.map((t) => TERRAIN_TYPES[t.type].name))].join('、') + '。' : '開闊宙域，沒有地形。'}敵軍會依你出擊的指揮官平均等級（±3）生成。`;
@@ -39,11 +39,11 @@ function campTerrain(R, st) {
   const okRock = (x, z, r) => !(z + r > DEPLOY_ZONE.z0 - 30 || z - r < ENEMY_ZONE.z1 + 30 && z + r > ENEMY_ZONE.z0 - 30) && out.every((t) => t.type !== 'rock' || Math.hypot(t.x - x, t.z - z) > t.r + r + 60);
   for (let k = 0; k < n; k++) {
     const p = R();
-    if (p < 0.3) out.push({ type: 'nebula', x: Math.round(rr(-520, 520)), y: Math.round(rr(-90, 90)), z: Math.round(rr(-220, 160)), r: Math.round(rr(140, 260)) });
-    else if (p < 0.55) out.push({ type: 'asteroid', x: Math.round(rr(-560, 560)), y: Math.round(rr(-90, 90)), z: Math.round(rr(-200, 150)), r: Math.round(rr(110, 200)) });
+    if (p < 0.3) out.push({ type: 'nebula', x: Math.round(rr(-520, 520)), y: Math.round(rr(-90, 90)), z: Math.round(rr(-420, 380)), r: Math.round(rr(140, 260)) });
+    else if (p < 0.55) out.push({ type: 'asteroid', x: Math.round(rr(-560, 560)), y: Math.round(rr(-90, 90)), z: Math.round(rr(-400, 370)), r: Math.round(rr(110, 200)) });
     else {
       for (let tries = 0; tries < 12; tries++) {
-        const r = Math.round(rr(40, 90)), x = Math.round(rr(-600, 600)), z = Math.round(rr(-170, 130));
+        const r = Math.round(rr(40, 90)), x = Math.round(rr(-600, 600)), z = Math.round(rr(-450, 420));
         if (okRock(x, z, r)) { out.push({ type: 'rock', x, y: Math.round(rr(-120, 120)), z, r }); break; }
       }
     }
@@ -70,7 +70,7 @@ function campEnemy(sc, lo) {
     const cn = names.splice(Math.floor(R() * names.length), 1)[0], fn = fnames.splice(Math.floor(R() * fnames.length), 1)[0];
     const x = nF === 1 ? Math.round((R() - 0.5) * 200) : Math.round(-380 + 760 * k / (nF - 1) + (R() - 0.5) * 120);
     sc.enemy.push({ name: fn, commander: { name: cn, trait: pick(['dmg', 'shield', 'speed']), level: L, skills },
-      comp, formation: pick(A.formations), tactic: pick(A.tactics), x, y: L >= 3 ? Math.round((R() - 0.5) * 240) : 0, z: Math.round(-320 - R() * 100), h: 0, archetype: A.name });
+      comp, formation: pick(A.formations), tactic: pick(A.tactics), x, y: L >= 3 ? Math.round((R() - 0.5) * 240) : 0, z: Math.round(-320 - ZONE_SHIFT - R() * 100), h: 0, archetype: A.name });
   }
   // 等級 4 以上：可能有增援
   sc.events = L >= 4 && R() < Math.min(0.7, 0.2 + 0.06 * L) ? [{ type: 'reinforce', chance: 1, at: [60, 140], name: '敵增援艦隊', comp: defaultComp(total * 0.25), formation: pick(['line', 'crescent', 'wedge']), edge: R() < 0.5 ? 'left' : 'right' }] : [];
@@ -150,9 +150,9 @@ function campResult(R) {
 // 不影響無限戰場進度；敵軍一樣依出擊指揮官的平均等級生成（campEnemy），只是等級差由玩家決定
 const RAND_STORE = 'fleet.random';
 const RAND_SIZES = [
-  { name: '小型', budget: 2400, maxFleets: 2, time: 240, stage: 3 },
-  { name: '中型', budget: 3600, maxFleets: 3, time: 360, stage: 6 },
-  { name: '大型', budget: 5000, maxFleets: 3, time: 480, stage: 10 },
+  { name: '小型', budget: 2400, maxFleets: 2, time: 300, stage: 3 },
+  { name: '中型', budget: 3600, maxFleets: 3, time: 420, stage: 6 },
+  { name: '大型', budget: 5000, maxFleets: 3, time: 540, stage: 10 },
 ];
 const RAND_DIFF = [{ name: '較弱', off: -2 }, { name: '相當', off: 0 }, { name: '較強', off: 2 }, { name: '隨機', off: null }];
 const RAND_TERR = [{ name: '無', st: -1 }, { name: '少', st: 0 }, { name: '多', st: 14 }, { name: '隨機', st: null }];

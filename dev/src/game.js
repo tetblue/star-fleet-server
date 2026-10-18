@@ -73,12 +73,13 @@ function defaultLoadout(sc, faction = GAME.faction || 0) {
   const fl = [];
   for (let k = 0; k < nF; k++) {
     const x = nF === 1 ? 0 : -220 + 440 * k / (nF - 1);
-    fl.push({ cmdr: pool[k % pool.length].id, comp: defaultComp(share), formation: 'line', x, z: 300, h: Math.PI });
+    fl.push({ cmdr: pool[k % pool.length].id, comp: defaultComp(share), formation: 'line', x, z: 300 + ZONE_SHIFT, h: Math.PI });
   }
   return { faction, fleets: fl };
 }
 // 編成的指揮官要屬於選的陣營、不能重複；不夠就減少艦隊數
 function fixLoadoutCmdrs(lo) {
+  zoneFix(lo);
   const pool = cmdrsOf(lo.faction || 0), used = new Set();
   lo.fleets = lo.fleets.filter((f) => {
     const c = COMMANDERS.find((o) => o.id === f.cmdr);
@@ -87,6 +88,11 @@ function fixLoadoutCmdrs(lo) {
     if (!free) return false;
     f.cmdr = free.id; used.add(free.id); return true;
   });
+}
+// 部署區往外推（ZONE_SHIFT）之前存的編成：位置在新部署區前面＝整組往後推
+function zoneFix(lo) {
+  const all = [...lo.fleets, ...supplyList(lo)];
+  if (all.length && all.every((f) => f.z < DEPLOY_ZONE.z0)) for (const f of all) f.z = Math.min(DEPLOY_ZONE.z1, f.z + ZONE_SHIFT);
 }
 // 補給艦隊的 setup（編成的 comp 是 [航母, 戰列, 巡洋, 驅逐, 護衛, 補給]，只會有護衛和補給）
 function supplySetup(side, S, follow, name = '補給艦隊') {
@@ -101,7 +107,7 @@ function supplyList(lo) {
 const supplyName = (i) => `補給第${'一二三四'[i]}隊`;
 // 新增第 i 支：預設跟隨同序號的艦隊，擺在它後方
 function defaultSupply(lo, i) {
-  const f = lo.fleets[i] || lo.fleets[0], z = f ? f.z + 120 : 420;
+  const f = lo.fleets[i] || lo.fleets[0], z = f ? f.z + 120 : DEPLOY_ZONE.z1;
   return { comp: SHIP_TYPES.map((_, t) => (t === 4 ? 30 : t === SUPPLY_T ? 30 : 0)), formation: 'ring', x: f ? f.x : 0, z: Math.min(DEPLOY_ZONE.z1, z), h: Math.PI, follow: lo.fleets[i] ? i : lo.fleets.length ? 0 : -1 };
 }
 // 增援的編成：本場預算 × share，照呼叫的艦隊的艦種比例（只算一般艦種）
@@ -296,7 +302,7 @@ function aiScan(f, lv, t) {
   const C = centerOf(fleetAlive(f)); if (!C) return;
   const ps = FOW.pings[f.side].filter((p) => p.fleet === f.id), p = ps[ps.length - 1];
   let P = null;
-  if (p) P = { x: C.x + Math.sin(p.a) * 800, y: C.y, z: C.z + Math.cos(p.a) * 800 };   // 掃描來自 scanR（1200）以內：取 800，半徑 350 涵蓋約 450～1150
+  if (p) { const d = FOW_RULE.scanR * 0.65; P = { x: C.x + Math.sin(p.a) * d, y: C.y, z: C.z + Math.cos(p.a) * d }; }   // 掃描來自 scanR 以內：取 0.65 倍，偵察半徑 350 涵蓋大半範圍
   else {
     let best = null; for (const [e, o] of f.fowLast) if (e.alive > 0 && !fowKnows(f, e) && (!best || o.t > best.t)) best = o;
     const st = FOW.start[1 - f.side];
@@ -801,7 +807,7 @@ function showLoadout() {
     const free = cmdrsOf(fac).find((c) => !lo.fleets.some((f) => f.cmdr === c.id));
     if (!free) return;
     const left = Math.max(0, sc.budget - used);
-    lo.fleets.push({ cmdr: free.id, comp: defaultComp(Math.max(600, left)), formation: 'line', x: 0, z: 300, h: Math.PI });
+    lo.fleets.push({ cmdr: free.id, comp: defaultComp(Math.max(600, left)), formation: 'line', x: 0, z: 300 + ZONE_SHIFT, h: Math.PI });
     lo.fleets.forEach((f, k) => { f.x = lo.fleets.length === 1 ? 0 : -300 + 600 * k / (lo.fleets.length - 1); });
     redraw();
   };
@@ -860,7 +866,7 @@ function startDeploy() {
   applyOp(); overlay(null); setPhase('deploy'); GAME.deploySel = 0; force3D();
   setCmdSide(GAME.playerSide, false);
   rebuildDeploy();
-  camAnim = null; view.target.x = 0; view.target.z = GAME.playerSide ? -40 : 40; view.height = 1250; view.yaw = mode3D && GAME.playerSide ? Math.PI : 0; view.pitch = ELEV; updateCamera();   // 多人的第二方：3D 轉 180°，自己在下方
+  camAnim = null; view.target.x = 0; view.target.z = GAME.playerSide ? -300 : 300; view.height = 1250; view.yaw = mode3D && GAME.playerSide ? Math.PI : 0; view.pitch = ELEV; updateCamera();   // 多人的第二方：3D 轉 180°，自己在下方
 }
 // 部署中選的那一支（序號＝lo.fleets，最後一個是補給艦隊）
 function dpLo() { const lo = GAME.loadout; return GAME.deploySel < lo.fleets.length ? lo.fleets[GAME.deploySel] : supplyList(lo)[GAME.deploySel - lo.fleets.length]; }

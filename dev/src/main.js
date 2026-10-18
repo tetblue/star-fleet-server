@@ -57,7 +57,7 @@ const scene = new THREE.Scene();
 
 const camPersp = new THREE.PerspectiveCamera(20, 1, 10, 20000);
 const camOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 20000);
-const view = { target: new THREE.Vector3(0, 0, 0), height: 620, minH: 40, maxH: 1600, yaw: 0, pitch: ELEV };
+const view = { target: new THREE.Vector3(0, 0, 0), height: 620, minH: 40, maxH: 2100, yaw: 0, pitch: ELEV };
 let camera = camPersp;
 
 function updateCamera() {
@@ -966,7 +966,7 @@ function fowOn() { return !!opts.fow && !!battleSetup && !battleSetup.bg; }
 function fowOmni(side) { return !!(battleSetup && battleSetup.omni && battleSetup.omni[side]); }   // 關卡設定：這一方全知
 function sqIdx(q) { return squadrons[q.qi] === q ? q.qi : (q.qi = squadrons.indexOf(q)); }
 function fowReset() {
-  FOW.tick = -1; FOW.scanReady = [0, 0]; FOW.pings = [[], []]; FOW.scans = []; FOW.start = [null, null]; FOW.obs = null; FOW.auto = [true, true]; FOW.rlog = new Map();
+  FOW.tick = -1; FOW.scanReady = [U.uTime.value + FOW_RULE.scanFirst, U.uTime.value + FOW_RULE.scanFirst];   // 開戰 scanFirst 秒後才能第一次掃描 FOW.pings = [[], []]; FOW.scans = []; FOW.start = [null, null]; FOW.obs = null; FOW.auto = [true, true]; FOW.rlog = new Map();
   squadrons.forEach((q, i) => (q.qi = i));
   for (const f of fleets) { f.fowK = new Uint8Array(MAX_SQ); f.fowRev = new Float32Array(MAX_SQ); f.fowLast = new Map(); }
 }

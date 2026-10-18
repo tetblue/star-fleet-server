@@ -5,12 +5,12 @@
 // 照同樣的命令各自跑模擬（見 main.js 的 issue／frame）。雙方定期互比戰局指紋，不一樣就提示不同步。
 // 多人的指揮官只有初始的幾位，等級與天賦另外存（fleet.pvpcmdrs）；功勳算進單人的星際酒館。
 const MP_SIZES = [
-  { name: '小型', budget: 2400, maxFleets: 2, time: 300 },
-  { name: '中型', budget: 3600, maxFleets: 3, time: 420 },
-  { name: '大型', budget: 5000, maxFleets: 3, time: 540 },
+  { name: '小型', budget: 2400, maxFleets: 2, time: 360 },
+  { name: '中型', budget: 3600, maxFleets: 3, time: 480 },
+  { name: '大型', budget: 5000, maxFleets: 3, time: 600 },
 ];
 const MP_SPEEDS = [0.5, 1, 2, 4];   // 與伺服器一致
-const MP_ZONES = [DEPLOY_ZONE, { x0: -520, x1: 520, z0: -420, z1: -170 }];   // 第二方＝第一方的部署區轉 180°
+const MP_ZONES = [DEPLOY_ZONE, { x0: -520, x1: 520, z0: -420 - ZONE_SHIFT, z1: -170 - ZONE_SHIFT }];   // 第二方＝第一方的部署區轉 180°
 const MP_HASH_EVERY = 120;   // 每 2 秒（模擬時間）互比一次戰局指紋
 const MP_LO_STORE = 'fleet.pvplo';
 
@@ -319,7 +319,7 @@ function netBegin(st, cmds, turn) {
   setPhase('battle'); setCmdSide(GAME.playerSide, false); clearSelection();
   paused = false; updateTimeUI();
   force3D(); if (GAME.op === 2 && !NET.spec) enterBridge();
-  camAnim = null; view.target.x = 0; view.target.z = GAME.playerSide ? -60 : 60; view.height = 1250; if (mode3D) view.yaw = GAME.playerSide ? Math.PI : 0; updateCamera();
+  camAnim = null; view.target.x = 0; view.target.z = GAME.playerSide ? -300 : 300; view.height = 1250; if (mode3D) view.yaw = GAME.playerSide ? Math.PI : 0; updateCamera();
   if (!NET.spec && opts.fow && SETTINGS.autoScan === false) issue('autoscan', { on: false });
   const late = NET.bound > NET.K * 30;
   toast(NET.spec ? `觀戰：${st.names[0]} vs ${st.names[1]}${late ? '（快轉追上目前的進度…）' : ''}` : `${late ? '重新連上：快轉追上目前的進度…' : '多人對戰　開戰！'}（不能暫停；速度 ×${NET.speed}）`);
