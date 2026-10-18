@@ -10,7 +10,8 @@ A real-time fleet tactics game that runs in the browser, with a Windows LAN serv
 
 ```
 StarFleetServer.exe      Server (Node SEA single executable with the web app embedded; not in git)
-config.json              Server settings
+config.example.json      Example settings; copy to config.json when deploying, then edit
+config.json              Actual settings (one per deployment; not in git)
 update-and-run.bat       Pull latest code → build web app → start server
 build-exe.bat            Package StarFleetServer.exe on Windows
 models/                  3D models (GLB) and the models.json manifest
@@ -29,7 +30,7 @@ data/                    Player accounts, saves, backups (created at runtime; no
 
 Double-click **`update-and-run.bat`** (requires Git and Node.js):
 
-1. `git pull` to fetch the latest code. `web/` and `dev/src/_entry.js` are build outputs, so they are restored first so they don't block the pull.
+1. `git pull` to fetch the latest code. `web/` and `dev/src/_entry.js` are build outputs, so they are restored first so they don't block the pull. If `config.json` is missing, it is copied from `config.example.json`.
 2. Run `npm ci` on first use or when `package.json` / `package-lock.json` changed, then `npm run build` to build the web app.
 3. Start the server: `StarFleetServer.exe` if it exists, otherwise `node dev/server/server.js --base .`.
    If the server is already running, the new web build is already live (players just reload), and the script asks whether to restart it.
@@ -87,6 +88,16 @@ On Linux, `dev/build_server.py` does the same with Wine + rcedit + postject. Its
 ### Running and configuration
 
 Double-click `StarFleetServer.exe`. The window lists the local and LAN URLs (default port 8080). On first launch, allow it through Windows Firewall on private networks. See [說明.txt](說明.txt) (Chinese) for the other `config.json` fields and how to swap models.
+
+### The config.json file
+
+`config.json` holds each deployment's own settings. It is **not in git**, so `git pull` never overwrites it. Create it on first deployment:
+
+```bash
+copy config.example.json config.json
+```
+
+Then edit it as needed. `update-and-run.bat` also copies the example automatically when `config.json` is missing. If you start the server directly without a `config.json`, the server generates one from its built-in defaults.
 
 ### Changing the server port
 

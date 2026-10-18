@@ -10,7 +10,8 @@
 
 ```
 StarFleetServer.exe      サーバー（Node SEA 単一実行ファイル、Web 版を内蔵。git には含めない）
-config.json              サーバー設定
+config.example.json      設定のサンプル。デプロイ時に config.json にコピーして編集
+config.json              実際の設定（デプロイごとに 1 つ。git には含めない）
 update-and-run.bat       最新コードを取得 → Web 版をビルド → サーバー起動
 build-exe.bat            Windows で StarFleetServer.exe をパッケージング
 models/                  3D モデル（GLB）と models.json 一覧
@@ -29,7 +30,7 @@ data/                    プレイヤーのアカウント、セーブ、バッ�
 
 **`update-and-run.bat`** をダブルクリックします（Git と Node.js が必要です）。
 
-1. `git pull` で最新のコードを取得します。`web/` と `dev/src/_entry.js` はビルド成果物なので、pull の妨げにならないよう先に元に戻します。
+1. `git pull` で最新のコードを取得します。`web/` と `dev/src/_entry.js` はビルド成果物なので、pull の妨げにならないよう先に元に戻します。`config.json` がない場合は `config.example.json` からコピーします。
 2. 初回、または `package.json`／`package-lock.json` が変わったときは `npm ci` を実行し、続けて `npm run build` で Web 版をビルドします。
 3. サーバーを起動します。`StarFleetServer.exe` があれば exe を使い、なければ `node dev/server/server.js --base .` で起動します。
    サーバーがすでに起動している場合、新しい Web 版はすでに反映されており（プレイヤーは再読み込みするだけ）、再起動するかどうか確認されます。
@@ -87,6 +88,16 @@ Linux では `dev/build_server.py`（Wine＋rcedit＋postject）を使えます�
 ### 起動と設定
 
 `StarFleetServer.exe` をダブルクリックすると、ウィンドウにローカルと LAN の URL が表示されます（デフォルトのポートは 8080）。初回起動時は Windows ファイアウォールで「プライベート ネットワーク」を許可してください。`config.json` のその他の項目とモデルの差し替え方法は [說明.txt](說明.txt)（中国語）を参照してください。
+
+### 設定ファイル config.json
+
+`config.json` はデプロイごとの設定で、**git には含めません**。そのため `git pull` で上書きされることはありません。初回デプロイ時に作成します。
+
+```bash
+copy config.example.json config.json
+```
+
+その後、必要に応じて編集してください。`update-and-run.bat` も `config.json` がない場合はサンプルから自動でコピーします。`config.json` なしでサーバーを直接起動した場合は、サーバーが内蔵のデフォルト値から自動生成します。
 
 ### サーバーのポート番号の変更
 

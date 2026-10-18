@@ -8,7 +8,8 @@
 
 ```
 StarFleetServer.exe      伺服器（Node SEA 單一執行檔，網頁內建；不在 git 裡）
-config.json              伺服器設定
+config.example.json      設定範例；部署時複製成 config.json 再修改
+config.json              正式設定（每台部署各自一份，不在 git 裡）
 update-and-run.bat       拉取最新程式 → 建置網頁 → 啟動伺服器
 build-exe.bat            在 Windows 打包 StarFleetServer.exe
 models/                  3D 模型（GLB）與 models.json 清單
@@ -27,7 +28,7 @@ data/                    玩家帳號、存檔、備份（執行時自動產生�
 
 雙擊 **`update-and-run.bat`**（需要已安裝 Git 與 Node.js）：
 
-1. `git pull` 拉取最新程式（`web/` 與 `dev/src/_entry.js` 是建置產物，會先還原再拉）。
+1. `git pull` 拉取最新程式（`web/` 與 `dev/src/_entry.js` 是建置產物，會先還原再拉）；沒有 `config.json` 時從 `config.example.json` 複製一份。
 2. 第一次或 `package.json`／`package-lock.json` 有變動時執行 `npm ci`，接著 `npm run build` 建置網頁。
 3. 啟動伺服器：有 `StarFleetServer.exe` 就用 exe，沒有就用 `node dev/server/server.js --base .`。
    伺服器已經在執行時，新網頁已經生效（玩家重新整理即可），會詢問是否要重新啟動。
@@ -85,6 +86,16 @@ Linux 上可改用 `dev/build_server.py`（Wine＋rcedit＋postject，路徑寫�
 ### 執行與設定
 
 雙擊 `StarFleetServer.exe`，視窗會列出本機與內網網址（預設連接埠 8080）。第一次啟動時請允許 Windows 防火牆的「私人網路」。`config.json` 的其他欄位與換模型的方法請見 [說明.txt](說明.txt)。
+
+### 設定檔 config.json
+
+`config.json` 是每台部署自己的設定，**不放進 git**，`git pull` 不會覆蓋它。第一次部署時建立：
+
+```bash
+copy config.example.json config.json
+```
+
+然後依需要修改。`update-and-run.bat` 在找不到 `config.json` 時也會自動從範例複製一份；直接啟動伺服器而沒有 `config.json` 時，伺服器會用內建預設值自動產生。
 
 ### 修改服務的連接埠（port）
 
