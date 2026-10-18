@@ -11,12 +11,15 @@ A real-time fleet tactics game that runs in the browser, with a Windows LAN serv
 ```
 StarFleetServer.exe      Server (Node SEA single executable with the web app embedded; not in git)
 config.json              Server settings
+update-and-run.bat       Pull latest code → build web app → start server
+build-exe.bat            Package StarFleetServer.exe on Windows
 models/                  3D models (GLB) and the models.json manifest
 web/                     Built web app (game.js, index.html); the server prefers these files
 dev/
   src/                   Game source (concatenated in order, then bundled by esbuild)
   server/                Server source (server.js, models.js)
   build.mjs              Web build (Windows / any environment with Node)
+  build_exe.mjs          Builds the exe (Windows)
   build_server.py        Builds the exe (for Linux + Wine)
   web_backup/            Reference copy of the deployed build (includes the 2D assets/)
 data/                    Player accounts, saves, backups (created at runtime; not in git)
@@ -59,15 +62,27 @@ node dev/server/server.js --base .
 
 `--base` is the folder that contains `config.json`, `models/`, `data/` and `web/`.
 
-### 3. Package StarFleetServer.exe
+### 3. Package StarFleetServer.exe (Windows)
 
-`dev/build_server.py` packages the exe on Linux using Wine. Its paths are hard-coded to the original build machine, so adjust them for your environment. The steps are:
+Requires Node.js 22 or later. The exe is built on top of your local `node.exe`, so it runs that Node version. Double-click **`build-exe.bat`**, or:
 
-1. Bundle `dev/server/server.js` into a single `server.cjs` with esbuild (target node22).
-2. Add the web files as assets, write a Node SEA config, and generate the blob with `node --experimental-sea-config`.
-3. Copy the Windows `node.exe` to `StarFleetServer.exe` and set its icon and version info with `rcedit`.
-4. Inject the blob into the exe with `postject`.
-5. Assemble the release folder `dist/release`: the exe, `models/`, `說明.txt` and a default `config.json`.
+```bash
+cd dev
+npm install        # first time only
+npm run build:exe
+```
+
+What `dev/build_exe.mjs` does:
+
+1. `npm run build` to produce `web/`.
+2. Bundle `dev/server/server.js` (including `meshoptimizer`) into a single `dev/dist/server/server.cjs` with esbuild.
+3. Generate the SEA blob with `node --experimental-sea-config`, embedding the files in `web/` and the 2D sprites from `dev/web_backup/assets/`.
+4. Copy `node.exe`, set version info with `rcedit` (and the icon, if `dev/tools/icon.ico` exists), then inject the blob with `postject`.
+5. Write `dev/dist/StarFleetServer.exe` and copy it to the project root. If the server is running, the root exe is locked; the script says so and you copy it by hand after closing the server.
+
+The `The signature seems corrupted!` warning during packaging is expected: injecting the blob invalidates Node's original code signature. It doesn't affect running the exe.
+
+On Linux, `dev/build_server.py` does the same with Wine + rcedit + postject. Its paths are hard-coded to the original build machine, so adjust them for your environment.
 
 ### Running and configuration
 

@@ -11,12 +11,15 @@
 ```
 StarFleetServer.exe      サーバー（Node SEA 単一実行ファイル、Web 版を内蔵。git には含めない）
 config.json              サーバー設定
+update-and-run.bat       最新コードを取得 → Web 版をビルド → サーバー起動
+build-exe.bat            Windows で StarFleetServer.exe をパッケージング
 models/                  3D モデル（GLB）と models.json 一覧
 web/                     ビルド済み Web 版（game.js、index.html）。サーバーはここを優先して使う
 dev/
   src/                   ゲームのソース（順番に連結してから esbuild でバンドル）
   server/                サーバーのソース（server.js、models.js）
   build.mjs              Web 版のビルド（Windows／Node があればどこでも）
+  build_exe.mjs          exe のパッケージング（Windows）
   build_server.py        exe のパッケージング（Linux＋Wine 用）
   web_backup/            デプロイ済み版の参照用コピー（2D 素材 assets/ を含む）
 data/                    プレイヤーのアカウント、セーブ、バックアップ（実行時に自動生成。git には含めない）
@@ -59,15 +62,27 @@ node dev/server/server.js --base .
 
 `--base` には `config.json`、`models/`、`data/`、`web/` があるフォルダを指定します。
 
-### 3. StarFleetServer.exe のパッケージング
+### 3. StarFleetServer.exe のパッケージング（Windows）
 
-`dev/build_server.py` は Linux 上で Wine を使ってパッケージするスクリプトです。パスは元のビルド環境に固定されているので、自分の環境に合わせて修正してください。手順は次のとおりです。
+Node.js 22 以上が必要です。exe はローカルの `node.exe` をベースに作られるため、その Node のバージョンで動きます。**`build-exe.bat`** をダブルクリックするか、次を実行します。
 
-1. esbuild で `dev/server/server.js` を単一の `server.cjs` にバンドル（target node22）。
-2. Web 版のファイルを asset として Node SEA 設定を作り、`node --experimental-sea-config` で blob を生成。
-3. Windows 版 `node.exe` を `StarFleetServer.exe` としてコピーし、`rcedit` でアイコンとバージョン情報を設定。
-4. `postject` で blob を exe に注入。
-5. リリースフォルダ `dist/release` を作成（exe、`models/`、`說明.txt`、デフォルトの `config.json`）。
+```bash
+cd dev
+npm install        # 初回のみ
+npm run build:exe
+```
+
+`dev/build_exe.mjs` の手順：
+
+1. `npm run build` で `web/` を生成。
+2. esbuild で `dev/server/server.js`（`meshoptimizer` を含む）を単一の `dev/dist/server/server.cjs` にバンドル。
+3. `web/` のファイルと `dev/web_backup/assets/` の 2D 素材を asset として埋め込み、`node --experimental-sea-config` で SEA blob を生成。
+4. `node.exe` をコピーし、`rcedit` でバージョン情報を設定（`dev/tools/icon.ico` があればアイコンも）、`postject` で blob を注入。
+5. `dev/dist/StarFleetServer.exe` を出力し、プロジェクトのルートにコピー。サーバーが起動中だとルートの exe は上書きできないので、その旨が表示されます。サーバーを閉じてから手動でコピーしてください。
+
+パッケージング中の `The signature seems corrupted!` という警告は想定どおりです。blob の注入で Node 本来のコード署名が無効になるだけで、実行には影響しません。
+
+Linux では `dev/build_server.py`（Wine＋rcedit＋postject）を使えます。パスは元のビルド環境に固定されているので、自分の環境に合わせて修正してください。
 
 ### 起動と設定
 

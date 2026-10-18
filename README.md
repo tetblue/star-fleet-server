@@ -9,12 +9,15 @@
 ```
 StarFleetServer.exe      伺服器（Node SEA 單一執行檔，網頁內建；不在 git 裡）
 config.json              伺服器設定
+update-and-run.bat       拉取最新程式 → 建置網頁 → 啟動伺服器
+build-exe.bat            在 Windows 打包 StarFleetServer.exe
 models/                  3D 模型（GLB）與 models.json 清單
 web/                     建置好的網頁（game.js、index.html）；伺服器優先使用這裡的檔案
 dev/
   src/                   遊戲原始碼（依序串接後由 esbuild 打包）
   server/                伺服器原始碼（server.js、models.js）
   build.mjs              網頁建置（Windows／任何有 Node 的環境）
+  build_exe.mjs          打包 exe（Windows）
   build_server.py        打包 exe（Linux＋Wine 環境用）
   web_backup/            參考用的已部署版本（含 2D 素材 assets/）
 data/                    玩家帳號、存檔、備份（執行時自動產生；不在 git 裡）
@@ -57,15 +60,27 @@ node dev/server/server.js --base .
 
 `--base` 指定 `config.json`、`models/`、`data/`、`web/` 所在的資料夾。
 
-### 3. 打包 StarFleetServer.exe
+### 3. 打包 StarFleetServer.exe（Windows）
 
-`dev/build_server.py` 是在 Linux 上用 Wine 打包的腳本（路徑寫死在原本的建置環境，需要依你的環境修改），流程：
+需要 Node.js 22 以上（exe 會用本機的 `node.exe` 當底，所以打出來的 exe 就是這個 Node 版本）。雙擊 **`build-exe.bat`**，或：
 
-1. 用 esbuild 把 `dev/server/server.js` 打包成單一 `server.cjs`（target node22）。
-2. 把網頁檔案當成 asset，產生 Node SEA 設定並用 `node --experimental-sea-config` 產生 blob。
-3. 複製 Windows 版 `node.exe` 為 `StarFleetServer.exe`，用 `rcedit` 設定圖示與版本資訊。
-4. 用 `postject` 把 blob 注入 exe。
-5. 組出發行資料夾 `dist/release`：exe、`models/`、`說明.txt`、預設 `config.json`。
+```bash
+cd dev
+npm install        # 第一次
+npm run build:exe
+```
+
+`dev/build_exe.mjs` 的流程：
+
+1. `npm run build` 產生 `web/`。
+2. 用 esbuild 把 `dev/server/server.js`（含 `meshoptimizer`）打包成單一 `dev/dist/server/server.cjs`。
+3. 把 `web/` 的檔案和 `dev/web_backup/assets/` 的 2D 素材當成 asset，用 `node --experimental-sea-config` 產生 SEA blob。
+4. 複製 `node.exe` → 用 `rcedit` 設定版本資訊（有 `dev/tools/icon.ico` 才設定圖示）→ 用 `postject` 注入 blob。
+5. 輸出 `dev/dist/StarFleetServer.exe`，並複製到專案根目錄；伺服器正在執行時無法覆蓋，會提示關掉伺服器後再手動複製。
+
+打包時出現 `The signature seems corrupted!` 是正常的：注入後 Node 原本的數位簽章會失效，不影響執行。
+
+Linux 上可改用 `dev/build_server.py`（Wine＋rcedit＋postject，路徑寫死在原本的建置環境，需要依你的環境修改）。
 
 ### 執行與設定
 
