@@ -428,6 +428,7 @@ scene.add(bgMesh);
 // ───────────────────────── 陣型 ─────────────────────────
 // 每個陣型＝艦隊座標（u 往右、v 往前）裡的一塊區域，依「切片鍵」切給各分艦隊
 const SHIP_AREA = 13;
+const CONE_VOL = SHIP_AREA * 24, CONE_RB = 0.55;   // 圓錐陣：每艘船佔的體積、底面半徑／長度
 // 陣型的戰鬥特性：fire 火力倍率、aa 飛彈攔截、speed 速度倍率、frontTaken 正面受到的傷害倍率、
 //   flankBonus 打敵人側面／背後時的傷害倍率、noFlank＝沒有側背弱點、breach＝前端衝進敵方分艦隊時讓它陣形混亂幾秒
 const FORMATIONS = {
@@ -437,7 +438,7 @@ const FORMATIONS = {
   crescent: { name: '凹形陣', fire: 0.95, aa: 0.30, note: '兩翼向前包住敵軍正面；展開需要時間，兩翼容易被各個擊破。' },
   ring:     { name: '圓陣',   fire: 0.7,  aa: 0.60, noFlank: true, note: '全方位防禦：沒有側背弱點，防空攔截率提高；火力下降。' },
   column:   { name: '縱陣',   fire: 0.6,  aa: 0.25, speed: 1.6, note: '機動最快；正面火力最弱，被橫切損失慘重。' },
-  wedge:    { name: '錐形陣', fire: 0.9, fireNear: 1.0, aa: 0.25, speed: 1.25, frontTaken: 0.85, flankBonus: 1.25, breach: 4,
+  wedge:    { name: '圓錐陣', fire: 0.9, fireNear: 1.0, aa: 0.25, speed: 1.25, frontTaken: 0.85, flankBonus: 1.25, breach: 4,
     note: '快速突擊：速度 ×1.25、正面受傷 −15%，打敵人側面／背後時傷害再 +25%；衝進敵陣讓它混亂 4 秒。適合繞側切入。' },
 };
 const DISORDER = { fire: 0.5, taken: 1.3 };   // 陣形混亂：開火速度 ×0.5、受到傷害 ×1.3
@@ -484,11 +485,14 @@ function formationRegion(kind, total, opt) {
     };
   }
   if (kind === 'wedge') {
-    // 錐形：尖端朝前的實心三角形（底寬約等於長度的 1.3 倍）；重心放在原點
-    const L = Math.sqrt(area * 2 / (1.3 * 0.93)), Wb = 1.3 * L, vb = -L / 3, vt = L * 2 / 3;
+    // 圓錐：尖端朝前的實心圓錐（底面直徑約等於長度的 1.1 倍），截面是圓；重心（距底面 L/4）放在原點
+    // 每艘船佔 CONE_VOL 的體積；inside3 判斷 3D 點，inside 是它在水平面的投影（三角形）
+    const L = Math.cbrt(3 * total * CONE_VOL / (Math.PI * CONE_RB * CONE_RB)), Rb = CONE_RB * L, vb = -L / 4, vt = L * 3 / 4;
+    const rad = (v) => (vt - v) / L * Rb;
     return {
-      bbox: [-Wb / 2, Wb / 2, vb, vt],
-      inside: (u, v) => v >= vb && v <= vt && Math.abs(u) <= (vt - v) / L * Wb / 2,
+      bbox: [-Rb, Rb, vb, vt], L, Rb, rad, cone: true,
+      inside: (u, v) => v >= vb && v <= vt && Math.abs(u) <= rad(v),
+      inside3: (u, y, v) => v >= vb && v <= vt && Math.hypot(u, y) <= rad(v),
       key: (u, v) => -v + Math.abs(u) * 0.35, alt: 1,
     };
   }
@@ -506,12 +510,20 @@ function genFormation(kind, counts, order, R, opt) {
   const total = counts.reduce((a, b) => a + b, 0);
   const reg = formationRegion(kind, total, opt);
   const [u0, u1, v0, v1] = reg.bbox;
-  let cell = Math.sqrt(SHIP_AREA), pts = [];
+  let cell = reg.cone ? Math.cbrt(CONE_VOL) : Math.sqrt(SHIP_AREA), pts = [];
   for (let tries = 0; tries < 12; tries++) {
     pts = [];
-    for (let v = v0; v <= v1; v += cell) for (let u = u0; u <= u1; u += cell) {
-      const uu = u + (R() - 0.5) * cell * 0.9, vv = v + (R() - 0.5) * cell * 0.9;
-      if (reg.inside(uu, vv)) pts.push([uu, vv]);
+    if (reg.cone) {
+      // 圓錐：在 3D 格子裡取點，[u, v, y]
+      for (let v = v0; v <= v1; v += cell) for (let y = -reg.Rb; y <= reg.Rb; y += cell) for (let u = u0; u <= u1; u += cell) {
+        const uu = u + (R() - 0.5) * cell * 0.8, yy = y + (R() - 0.5) * cell * 0.8, vv = v + (R() - 0.5) * cell * 0.8;
+        if (reg.inside3(uu, yy, vv)) pts.push([uu, vv, yy]);
+      }
+    } else {
+      for (let v = v0; v <= v1; v += cell) for (let u = u0; u <= u1; u += cell) {
+        const uu = u + (R() - 0.5) * cell * 0.9, vv = v + (R() - 0.5) * cell * 0.9;
+        if (reg.inside(uu, vv)) pts.push([uu, vv]);
+      }
     }
     if (pts.length >= total) break;
     cell *= 0.93;
@@ -527,7 +539,8 @@ function genFormation(kind, counts, order, R, opt) {
     const chunk = pts.slice(k, k + n); k += n;
     let cu = 0, cv = 0; for (const p of chunk) { cu += p[0]; cv += p[1]; } cu /= n; cv /= n;
     // 往中心收一點，讓分艦隊之間留出縫
-    const local = chunk.map((p) => [(p[0] - cu) * 0.9, gauss(R) * 13 * reg.alt, (p[1] - cv) * 0.9]);
+    // 圓錐的高度來自錐體本身（跟左右一樣縮 0.9，保持圓形截面）；其他陣型的高度隨機散開
+    const local = chunk.map((p) => [(p[0] - cu) * 0.9, reg.cone ? p[2] * 0.9 : gauss(R) * 13 * reg.alt, (p[1] - cv) * 0.9]);
     out[sqi] = { cu, cv, local };
   }
   return out;
@@ -575,14 +588,33 @@ function polarLattice(kind, total, M, s, layers) {
   }
   return pts;
 }
+// 圓錐的 3D 等距網格：放大錐體直到格點夠用，多的從錐面（離軸最遠的）拿掉
+function coneLattice(total, s) {
+  for (let f = 0.3; f < 8; f *= 1.015) {
+    const reg = formationRegion('wedge', total * f), [u0, u1, v0, v1] = reg.bbox, pts = [];
+    for (let j = Math.ceil(v0 / s); j * s <= v1; j++) for (let k = Math.ceil(-reg.Rb / s); k * s <= reg.Rb; k++) for (let i = Math.ceil(u0 / s); i * s <= u1; i++)
+      if (reg.inside3(i * s, k * s, j * s)) pts.push([i * s, j * s, k * s]);
+    if (pts.length >= total) {
+      const rim = (p) => Math.hypot(p[0], p[2]) / Math.max(reg.rad(p[1]), 1e-6);
+      pts.sort((a, b) => (rim(a) - rim(b)) || (b[1] - a[1]));
+      pts.length = total;
+      return pts;
+    }
+  }
+  return [];
+}
 function genOrderly(kind, counts, order, layers = 1, opt) {
   const total = counts.reduce((a, b) => a + b, 0), s = ORDER_SPACING[layers];
-  const M = Math.ceil(total / layers);
-  const pts = (kind === 'ring' || kind === 'crescent') ? polarLattice(kind, total, M, s, layers) : squareLattice(kind, total, M, s, opt);
-  // 疊層，層距也是 s
-  let p3 = [];
-  for (const p of pts) for (let L = 0; L < layers; L++) p3.push([p[0], p[1], (L - (layers - 1) / 2) * s]);
-  for (let k = p3.length - 1; p3.length > total && k >= 0; k--) if (p3[k][2] > 0) p3.splice(k, 1);
+  let p3;
+  if (kind === 'wedge') p3 = coneLattice(total, s);   // 圓錐本身就是立體的，不另外疊層
+  else {
+    const M = Math.ceil(total / layers);
+    const pts = (kind === 'ring' || kind === 'crescent') ? polarLattice(kind, total, M, s, layers) : squareLattice(kind, total, M, s, opt);
+    // 疊層，層距也是 s
+    p3 = [];
+    for (const p of pts) for (let L = 0; L < layers; L++) p3.push([p[0], p[1], (L - (layers - 1) / 2) * s]);
+    for (let k = p3.length - 1; p3.length > total && k >= 0; k--) if (p3[k][2] > 0) p3.splice(k, 1);
+  }
   const key = formationRegion(kind, total, opt).key;
   p3.sort((a, b) => (key(a[0], a[1]) - key(b[0], b[1])) || (a[2] - b[2]));
   const out = new Array(counts.length);
@@ -2550,7 +2582,7 @@ function updateEnemyDist() {   // 每支分艦隊離最近敵方分艦隊（邊�
     for (const o of squadrons) { if (o.side === q.side || o.bg || o.alive <= 0 || o.hidden || !fowKnowsSq(q, o)) continue; const d = Math.hypot(o.x - q.x, (o.y || 0) - (q.y || 0), o.z - q.z) - Math.max(o.W, o.D) / 2 - Math.max(q.W, q.D) / 2; if (d < best) best = d; }
     q.enemyD = Math.max(0, best);
   }
-  // 突破：紡錘陣／錐形陣的前端衝進敵方分艦隊 → 對方陣形混亂
+  // 突破：紡錘陣／圓錐陣的前端衝進敵方分艦隊 → 對方陣形混亂
   const t = U.uTime.value;
   for (const q of squadrons) {
     const F = q.group && FORMATIONS[q.group.formation];
@@ -4235,7 +4267,7 @@ canvas.addEventListener('pointercancel', (e) => { touches.delete(e.pointerId); c
 // [動作, 名稱, 分組, 預設鍵]。分組 radial 的鍵只在輪盤開著時有效，所以可以和鏡頭共用 Q／E
 const KEY_ACTIONS = [
   ['form_line', '橫陣', '陣型', 'Digit1'], ['form_spindle', '紡錘陣', '陣型', 'Digit2'], ['form_crescent', '凹形陣', '陣型', 'Digit3'],
-  ['form_ring', '圓陣', '陣型', 'Digit4'], ['form_column', '縱陣', '陣型', 'Digit5'], ['form_wedge', '錐形陣', '陣型', 'KeyW'], ['orderly', '整齊排列切換', '陣型', 'KeyF'],
+  ['form_ring', '圓陣', '陣型', 'Digit4'], ['form_column', '縱陣', '陣型', 'Digit5'], ['form_wedge', '圓錐陣', '陣型', 'KeyW'], ['orderly', '整齊排列切換', '陣型', 'KeyF'],
   ['attack', '指定攻擊（再點敵軍）', '攻擊', 'KeyA'], ['volley', '全艦齊射', '攻擊', 'KeyZ'], ['missile', '飛彈齊射', '攻擊', 'KeyX'],
   ['area', '區域攻擊（再點地圖）', '攻擊', 'KeyD'], ['scan', '區域掃描：航母派偵察機（再點地圖）', '攻擊', 'KeyC'],
   ['skill_focus', '集中火力', '技能', 'Digit6'], ['skill_wall', '鐵壁', '技能', 'Digit7'], ['skill_charge', '突進', '技能', 'Digit8'],
