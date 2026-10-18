@@ -11,6 +11,7 @@ StarFleetServer.exe      伺服器（Node SEA 單一執行檔，網頁內建；�
 config.example.json      設定範例；部署時複製成 config.json 再修改
 config.json              正式設定（每台部署各自一份，不在 git 裡）
 update-and-run.bat       拉取最新程式 → 建置網頁 → 啟動伺服器
+update-build-restart.bat 關閉伺服器 → 拉取最新程式 → 打包 exe → 啟動
 build-exe.bat            在 Windows 打包 StarFleetServer.exe
 models/                  3D 模型（GLB）與 models.json 清單
 web/                     建置好的網頁（game.js、index.html）；伺服器優先使用這裡的檔案
@@ -32,6 +33,17 @@ data/                    玩家帳號、存檔、備份（執行時自動產生�
 2. 第一次或 `package.json`／`package-lock.json` 有變動時執行 `npm ci`，接著 `npm run build` 建置網頁。
 3. 啟動伺服器：有 `StarFleetServer.exe` 就用 exe，沒有就用 `node dev/server/server.js --base .`。
    伺服器已經在執行時，新網頁已經生效（玩家重新整理即可），會詢問是否要重新啟動。
+
+## 一鍵關閉、更新、打包並重啟
+
+伺服器程式（`dev/server/`）有更新時（例如多人戰鬥），雙擊 **`update-build-restart.bat`**（需要 Git 與 Node.js 22 以上）：
+
+1. 關閉正在執行的 `StarFleetServer.exe`（正在進行的作戰會中斷）。
+2. `git pull` 拉取最新程式（同 `update-and-run.bat`）。
+3. `npm run build:exe`：建置網頁並打包新的 `StarFleetServer.exe`，覆蓋根目錄的 exe。
+4. 啟動新的伺服器。
+
+只改了網頁時用 `update-and-run.bat` 就夠了，不必重新打包。
 
 ## 打包
 
