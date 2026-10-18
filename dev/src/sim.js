@@ -486,6 +486,7 @@ function showSimReport() {
         ${SHIP_TYPES.map((_, t) => t).filter((t) => t < N_COMBAT || st.init[0][t] + st.init[1][t] > 0).map(row).join('')}
         <tr><td><b>合計</b></td><td>${ships5(sumA(st.init[0]))}</td><td>${ships5(sumA(st.init[0]) - sumA(st.left[0]))}</td><td>${ships5(sumA(st.init[1]))}</td><td>${ships5(sumA(st.init[1]) - sumA(st.left[1]))}</td></tr></table>
         <dl class="kv" style="margin-top:10px"><dt>被擊沉方向</dt><dd>${n0} 正／側／背 ${asp(0)}<br>${n1} 正／側／背 ${asp(1)}</dd>
+        ${battleRules && battleRules.ray ? `<dt>光束擋下／流彈／空中擋下</dt><dd>${n0} ${rayStats[0].map(fmtN).join('／')} 發<br>${n1} ${rayStats[1].map(fmtN).join('／')} 發</dd>` : ''}
         ${battleRules && battleRules.ff ? `<dt>友軍誤射</dt><dd>${n0} ${fmtN(ffStats[0][0])} 發（${fmtN(Math.round(ffStats[0][1]))} 傷害）<br>${n1} ${fmtN(ffStats[1][0])} 發（${fmtN(Math.round(ffStats[1][1]))} 傷害）</dd>${battleRules.ff === 2 ? `<dt>射界受阻停火</dt><dd>${n0} ${fmtN(ffHold[0])} 次<br>${n1} ${fmtN(ffHold[1])} 次</dd>` : ''}` : ''}</dl></div>
       <div class="g-card"><h3>各艦隊</h3><div class="g-pc" style="margin-bottom:4px">${n0}</div>${fl(0)}<div class="g-ec" style="margin:8px 0 4px">${n1}</div>${fl(1)}
         <dl class="kv" style="margin-top:10px"><dt>使用技能</dt><dd>${[...used(0), ...used(1)].join('<br>') || '無'}</dd></dl>
