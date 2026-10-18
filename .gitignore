@@ -9,3 +9,6 @@ node_modules/
 
 # Runtime data (player accounts, sessions, backups, cache)
 data/
+
+# Deployment config (copy from config.example.json)
+/config.json

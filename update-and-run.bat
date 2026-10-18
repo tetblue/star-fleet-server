@@ -2,7 +2,13 @@
 rem 從 GitHub 拉最新程式 → 建置網頁 → 啟動伺服器
 chcp 65001 >nul
 setlocal
-cd /d "%~dp0"
+rem git pull 可能改到這個檔案本身，而 cmd 是邊跑邊讀 .bat：先複製到 TEMP 再從那裡執行
+if /i not "%~1"=="--from-temp" (
+  copy /y "%~f0" "%TEMP%\starfleet-update-and-run.bat" >nul
+  "%TEMP%\starfleet-update-and-run.bat" --from-temp "%~dp0."
+  exit /b
+)
+cd /d "%~2"
 
 where git >nul 2>nul || (echo ✗ 找不到 git，請先安裝 Git。& goto :fail)
 where npm >nul 2>nul || (echo ✗ 找不到 npm，請先安裝 Node.js。& goto :fail)
@@ -11,7 +17,19 @@ echo === 1/3 拉取最新程式 ===
 for /f %%i in ('git rev-parse HEAD') do set OLD=%%i
 rem web\ 與 dev\src\_entry.js 是建置產物，下一步會重新產生；先還原，避免擋住 pull
 git restore -- web dev/src/_entry.js
-git pull --ff-only || (echo ✗ git pull 失敗：本機可能有未提交的修改或分支已分岔，請手動處理。& goto :fail)
+rem config.json 已改成不進 git；本機的 git 還在追蹤它時（舊版本），先備份再 pull，pull 完還原
+set CFGBAK=
+git ls-files --error-unmatch config.json >nul 2>nul && (
+  copy /y config.json "%TEMP%\starfleet-config.json" >nul
+  git restore -- config.json
+  set CFGBAK=1
+)
+git pull --ff-only || goto :pullfail
+if defined CFGBAK copy /y "%TEMP%\starfleet-config.json" config.json >nul
+if not exist config.json (
+  copy config.example.json config.json >nul
+  echo 已從 config.example.json 建立 config.json，需要時請修改（例如 port）。
+)
 
 echo.
 echo === 2/3 建置網頁 ===
@@ -49,6 +67,10 @@ echo.
 echo 完成。
 pause
 exit /b 0
+
+:pullfail
+if defined CFGBAK copy /y "%TEMP%\starfleet-config.json" config.json >nul
+echo ✗ git pull 失敗：本機可能有未提交的修改或分支已分岔，請手動處理。
 
 :fail
 echo.
