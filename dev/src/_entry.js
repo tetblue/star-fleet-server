@@ -7734,6 +7734,8 @@ function tutSelFleets() { return new Set([...selected].filter((q) => q.alive > 0
 function tutFoeRatio() { return sideAlive(1) / Math.max(1, GAME.init[1]); }
 function tutWon() { return !!GAME.result && GAME.result.kind === 'win'; }
 function tutForm(f) { const g = f && fleetGroup(f); return g ? g.formation : null; }
+// 命令紀錄第 k 筆之後，玩家下過「換成橫陣」（直接或排進隊列）
+function tutLineSince(k) { return cmdLog.slice(k).some((c) => c.side === GAME.playerSide && !c.auto && ((c.type === 'form' && c.kind === 'line') || (c.type === 'queue' && c.item && c.item.type === 'form' && c.item.kind === 'line'))); }
 
 // 戰場上的艦隊（教學用的設定格式，與模擬室相同）
 function tutFleet(o) {
@@ -7847,7 +7849,7 @@ const TUT_LESSONS = [
       { title: '整齊排列', text: () => `按 ${tutK('orderly')} 切換<b>整齊排列</b>：船排成規則的格子（自然＝較鬆散）。整齊排列比較好預測射界；編成畫面也可以選「整齊・3 層」。`,
         goal: '切換整齊排列', check: (S) => S.cmds('orderly').length > 0 },
       { title: '指令輪盤', text: () => `在艦隊上<b>按住左鍵不動</b>約半秒，會出現<b>指令輪盤</b>：滑向想要的指令再放開＝下令，停在中間放開＝取消。輪盤出現時按 ${tutK('radial_prev')}／${tutK('radial_next')} 切換「陣型／攻擊」兩頁。<br>用輪盤把艦隊換回<b>橫陣</b>。`,
-        goal: '用輪盤換成橫陣', check: (S) => S.flag.radial && tutForm(tutMine()[0]) === 'line', enter: (S) => { if (tutForm(tutMine()[0]) === 'line') S.flag.wasLine = true; } },
+        goal: '用輪盤換成橫陣', check: (S) => S.flag.radial != null && tutForm(tutMine()[0]) === 'line' && tutLineSince(S.flag.radial) },
       { title: '完成', pause: true, text: '小訣竅：<b>行軍用縱陣（最快）、對射用橫陣、怕被包抄用圓陣、突擊用紡錘陣或圓錐陣</b>。下一課開始真正的交戰。' },
     ] },
 
@@ -7894,8 +7896,8 @@ const TUT_LESSONS = [
       { title: '包抄艦隊換陣', text: () => `選取<b>第二艦隊</b>（快速的驅逐艦隊），按 ${tutK('form_wedge')} 換成<b>圓錐陣</b>：速度 ×${FORMATIONS.wedge.speed}、打側背傷害 ×${FORMATIONS.wedge.flankBonus}。`,
         goal: '第二艦隊換成圓錐陣或空心錐陣', check: () => ['wedge', 'hcone'].includes(tutForm(tutMine()[1])) },
       { title: '繞到側面', text: '讓第二艦隊<b>大繞一圈</b>從敵人的側面或背後切入（不要從敵人正面經過）。可以用隊列排兩個點；技能列的「突進」能加速。',
-        goal: '從側面或背後擊沉 8 個以上的敵方圖示', check: () => dmgStats[1][1] + dmgStats[1][2] >= 8,
-        live: () => `敵軍被擊沉 正／側／背：${dmgStats[1].map((v) => ships5(v)).join('／')} 艘` },
+        get goal() { return `從側面或背後擊沉 ${ships5(8)} 艘以上的敵艦`; }, check: () => dmgStats[1][1] + dmgStats[1][2] >= 8,
+        live: () => `敵軍被擊沉 正／側／背：${dmgStats[1].map((v) => ships5(v)).join('／')} 艘（側背合計 ${ships5(dmgStats[1][1] + dmgStats[1][2])}／${ships5(8)}）` },
       { title: '擊潰敵軍', text: () => `兩面夾擊，讓敵軍損失超過 ${Math.round((1 - ROUT_AT) * 100)}%（潰走）。`,
         goal: '打贏這一戰', check: () => tutWon(), live: () => `敵軍剩 ${Math.round(tutFoeRatio() * 100)}%` },
     ] },
@@ -8156,7 +8158,7 @@ function tutTick() {
   if (st.phase && TUT_PH[GAME.phase] > TUT_PH[st.phase]) { tutNext(); return; }
   if (TUT.el && !TUT.min && st.live) { const el = TUT.el.querySelector('.tp-live'); if (el) try { el.innerHTML = st.live(S); } catch (e) { /* 略過 */ } }
   if (st.phase && st.phase !== GAME.phase) return;
-  if (radialOpen()) S.flag.radial = true;
+  if (radialOpen() && S.flag.radial == null) S.flag.radial = cmdLog.length;   // 第一次打開輪盤時的命令紀錄位置（之後的變陣才算用輪盤下的）
   if (TUT.el) {   // 戰術面板（艦橋的戰術台）開著：教學面板縮到它上方，目標與按鈕排在前面
     const tac = TAC.open && gEl('tac'), lim = tac ? tac.getBoundingClientRect().top - TUT.el.getBoundingClientRect().top - 10 : 0;
     TUT.el.style.maxHeight = tac ? Math.max(110, lim) + 'px' : ''; TUT.el.classList.toggle('tac', !!tac);
