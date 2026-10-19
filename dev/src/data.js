@@ -163,6 +163,10 @@ const XP_PER_LEVEL = 200;
 
 // ── 天賦：每升一級得 1 點（Lv 1 就有 1 點），可隨時重新分配 ──
 // kind 'stat'＝強化能力（可多階）；kind 'skill'＝學會技能；req＝需要的指揮官等級
+// 護盾偏折：光束打到護盾還在的船，none＝完全無傷、half＝傷害減半的機率（最大射程時）；天賦「能量調度」每階再加 stepNone／stepHalf
+//   距離越近越低：機率 × (closeMul + (1 − closeMul) × 開火距離 ÷ 最大射程)，貼臉只剩 closeMul 倍
+//   擦邊越容易彈開：機率 × (grazeLo + grazeK × 擦邊²)；擦邊＝船中心到光束的距離 ÷ 受擊半徑（0＝正中 ×0.3、1＝邊緣 ×1.7，平均 ×1）
+const DEFLECT_RULE = { none: 0.05, half: 0.15, stepNone: 0.03, stepHalf: 0.05, halfMul: 0.5, closeMul: 0.2, grazeLo: 0.3, grazeK: 1.4 };
 const TALENT_BRANCHES = [['atk', '攻擊'], ['def', '防禦'], ['mob', '機動'], ['cmd', '指揮']];
 const TALENTS = [
   { id: 'gunnery', br: 'atk', name: '砲術訓練', max: 3, cost: 1, desc: (r) => `光束、飛彈、艦載機傷害 +${r * 5}%` },
@@ -172,6 +176,7 @@ const TALENTS = [
   { id: 'fireline', br: 'atk', name: '火線管制', max: 3, cost: 1, desc: (r) => `擬真難度：射界被同部隊友艦擋住時，誤擊友軍的機率 −${r * 20}%` },
   { id: 's_rapid', br: 'atk', name: '極速射擊', kind: 'skill', skill: 'rapid', cost: 2, req: 3 },
   { id: 'shield', br: 'def', name: '護盾強化', max: 3, cost: 1, desc: (r) => `護盾容量與回充 +${r * 4}%` },
+  { id: 'energy', br: 'def', name: '能量調度', max: 3, cost: 1, desc: (r) => `光束打到還有護盾的船時：完全無傷的機率 +${Math.round(r * DEFLECT_RULE.stepNone * 100)}%、傷害減半的機率 +${Math.round(r * DEFLECT_RULE.stepHalf * 100)}%（基本 ${Math.round(DEFLECT_RULE.none * 100)}%／${Math.round(DEFLECT_RULE.half * 100)}%，以上都是最大射程時的平均值，距離越近越低、擦邊比正中容易彈開）` },
   { id: 'damage', br: 'def', name: '損害管制', max: 3, cost: 1, desc: (r) => `維修機每趟修理量 +${r * 20}%` },
   { id: 'aa', br: 'def', name: '防空網', max: 2, cost: 1, desc: (r) => `防空砲的命中率 ×${(1 + r * 0.08).toFixed(2)}（攔截敵方飛彈與艦載機）` },
   { id: 's_wall', br: 'def', name: '鐵壁', kind: 'skill', skill: 'wall', cost: 2, req: 2 },

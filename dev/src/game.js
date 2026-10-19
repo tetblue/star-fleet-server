@@ -130,7 +130,7 @@ function makeSetup(sc, lo, attempt) {
   // 補給艦隊：不佔艦隊欄位、沒有指揮官；follow＝跟隨的艦隊（setup 裡的 index）
   supplyList(lo).forEach((S, i) => { if (sumA(S.comp) > 0) fleetsS.push(supplySetup(0, S, S.follow >= 0 && S.follow < lo.fleets.length ? S.follow : -1, supplyName(i))); });
   // 呼叫增援：有這個技能的指揮官各準備一支（隱藏在場外，用技能時才決定進場位置）；次數不夠就只準備得起的那幾支
-  const stock = sc.sim ? 0 : Math.min(ROSTER.reinf || 0, REINFORCE_RULE.max);
+  const stock = sc.sim || sc.tut ? 0 : Math.min(ROSTER.reinf || 0, REINFORCE_RULE.max);
   let nR = 0;
   lo.fleets.forEach((f, k) => {
     const cm = fleetsS[k].commander;
@@ -577,7 +577,7 @@ const OP_LEVELS = [
 function opLevel() { let n = 0; try { n = +(STORE.getItem('fleet.oplv') || 0); } catch (e) { n = 0; } return OP_LEVELS[n] ? n : 0; }
 function setOpLevel(n) { try { STORE.setItem('fleet.oplv', String(n)); } catch (e) { /* 只在本次 */ } }
 function opNow() { return ((GAME.phase === 'battle' || GAME.phase === 'deploy') && GAME.op) || 0; }   // 目前生效的難度（作戰、部署中）
-function applyOp(op = GAME.sc && GAME.sc.mp ? GAME.sc.op : opLevel(), fow = true) { GAME.op = op; opts.flat = op === 0; opts.ff = op === 2 ? 2 : false; opts.fow = op === 2 && fow; opts.ray = true; }   // 建立戰場前呼叫（規則會記進回放）；fow＝擬真的戰爭迷霧（模擬室可以關）
+function applyOp(op = GAME.sc && (GAME.sc.mp || GAME.sc.tut) ? GAME.sc.op : opLevel(), fow = true) { GAME.op = op; opts.flat = op === 0; opts.ff = op === 2 ? 2 : false; opts.fow = op === 2 && fow; opts.ray = opts.deflect = true; }   // 建立戰場前呼叫（規則會記進回放）；fow＝擬真的戰爭迷霧（模擬室可以關）
 function opSeg(id) { const cur = opLevel(); return `<div class="wed-seg rd-seg" id="${id}">${OP_LEVELS.map((o, i) => `<button data-v="${i}" class="${cur === i ? 'on' : ''}">${o.name}</button>`).join('')}</div>`; }
 function bindOpSeg(id, redraw) { gEl(id).querySelectorAll('button').forEach((b) => (b.onclick = () => { setOpLevel(+b.dataset.v); redraw(); })); }
 function force3D() { if (opNow() >= 1 && !mode3D) { setRenderMode('3d', false); GAME.forced3D = true; } }   // 進階以上：作戰中強制 3D（不改存檔的畫面設定）
@@ -647,7 +647,7 @@ function showSingle() {
     <div class="g-head"><h2>單人戰鬥</h2><span class="crumb">選擇作戰模式</span><span class="g-sp"></span><button class="g-btn" id="sp-back">← 主選單</button></div>
     <div class="sp-op"><span class="g-dim">操作難度</span>${opSeg('sp-op')}<span class="sp-opd">${OP_LEVELS[opLevel()].desc}</span></div>
     <div class="sp-grid">
-      ${mode('sp-train', 'TRAINING', '訓練作戰', '固定的作戰關卡：讀情報、編成、部署，熟悉各種戰況', `${SCENARIOS.length} 場作戰`)}
+      ${mode('sp-train', 'TRAINING', '訓練作戰', '從零開始的教學課程與戰術手冊，以及固定的作戰關卡：讀情報、編成、部署，熟悉各種戰況', `教學 ${TUT_LESSONS.filter((L) => tutLoad().done[L.id]).length}／${TUT_LESSONS.length}・${SCENARIOS.length} 場作戰`)}
       ${mode('sp-rand', 'SKIRMISH', '隨機戰役', '自選規模與敵軍強度，敵軍和地形每次隨機生成', `${RAND_SIZES[ro.size].name}・敵軍${RAND_DIFF[ro.diff].name}・地形${RAND_TERR[ro.terr].name}`)}
       ${mode('sp-camp', 'ENDLESS', '無限戰場', '無限關卡：敵軍依你的指揮官等級生成，一關比一關大', `目前第 ${c.stage} 關・最高第 ${c.best} 關`)}
       ${mode('sp-sand', 'SIMULATOR', '模擬室', '自由布置雙方艦隊、指揮官與地形，用正式規則測試戰術（可接管任一方）', '不計戰績、不給經驗')}
@@ -659,7 +659,7 @@ function showSingle() {
     </div></div>`);
   gEl('sp-back').onclick = showMenu;
   bindOpSeg('sp-op', showSingle);
-  gEl('sp-train').onclick = () => showBriefing(GAME.sc && SCENARIOS.includes(GAME.sc) ? GAME.sc : SCENARIOS[0]);
+  gEl('sp-train').onclick = () => showTraining();
   gEl('sp-rand').onclick = showRandom;
   gEl('sp-camp').onclick = showCampaign;
   gEl('sp-sand').onclick = () => showSim();
@@ -722,9 +722,9 @@ function showBriefing(sc) {
   const I = GAME.intel;
   const compStr = (c) => c ? c.map((n, t) => n ? `${SHIP_TYPES[t].name} ~${ships5(n)}` : '').filter(Boolean).join('、') : '<span class="unk">不明</span>';
   overlay(`<div class="g-wrap">
-    <div class="g-head"><h2>訓練作戰</h2><span class="crumb">PvE 1v1　·　選擇作戰</span><span class="g-sp"></span><button class="g-btn" id="b-back">← 單人戰鬥</button></div>
+    <div class="g-head"><h2>訓練作戰</h2><span class="crumb">實戰作戰　·　PvE 1v1</span><span class="g-sp"></span><button class="g-btn" id="b-back">← 單人戰鬥</button></div>
     <div class="brief">
-      <div class="sc-list">${SCENARIOS.map((s) => `<button class="sc-item ${s === sc ? 'on' : ''}" data-id="${s.id}"><b>${s.name}</b><span>${s.size}　${Math.round(s.timeLimit / 60)} 分鐘　難度 <span class="stars">${stars(s.level)}</span></span></button>`).join('')}</div>
+      ${trainList()}
       <div style="display:flex;flex-direction:column;gap:12px">
         <div class="g-card"><h3>狀況</h3><div>${sc.story}</div>
           <dl class="kv"><dt>勝利條件</dt><dd>殲滅敵軍，或使敵軍損失超過 75%（潰走）</dd><dt>敗北條件</dt><dd>我軍損失超過 75%</dd>
@@ -744,7 +744,7 @@ function showBriefing(sc) {
         <div class="g-row"><span class="g-sp"></span><button class="g-btn pri" id="b-next">進入編成 →</button></div>
       </div>
     </div></div>`);
-  document.querySelectorAll('.sc-item').forEach((b) => (b.onclick = () => showBriefing(SCENARIOS.find((s) => s.id === b.dataset.id))));
+  bindTrainList();
   gEl('b-back').onclick = showSingle;
   gEl('b-next').onclick = showLoadout;
 }
@@ -771,11 +771,11 @@ function showLoadout() {
       <small title="${st.note}">耐久 ${st.hp}・護盾 ${st.sh}・${GUN_KEYS.filter((k) => st.guns[k]).map((k) => `${GUN_NAME[k]} ${st.guns[k].far}`).join('／')}・速度 ${st.speed}${st.missile ? `・飛彈 ${st.missile.n} 發（每 ${st.missile.cd} 秒）` : ''}${st.supply ? `・補給存量 ${st.supply.stock} 發` : ''}${st.fighters ? `・艦載機 ${st.fighters.n} 架` : ''}${st.repair ? `・維修機 ${st.repair.n}` : ''}</small>
       <span class="ctl"><button class="g-btn sm" data-k="${k}" data-t="${t}" data-d="-20">−</button><input type="number" min="0" step="10" value="${f.comp[t] || 0}" data-k="${k}" data-t="${t}"><button class="g-btn sm" data-k="${k}" data-t="${t}" data-d="20">＋</button></span></div>`).join('');
   overlay(`<div class="g-wrap">
-    <div class="g-head"><h2>編成</h2><span class="crumb">${sc.name}　·　預算 ${fmtN(sc.budget)} 點</span><span class="g-sp"></span><button class="g-btn" id="l-back">${sc.mp ? '← 房間' : '← 簡報'}</button></div>
+    <div class="g-head"><h2>編成</h2><span class="crumb">${sc.name}　·　預算 ${fmtN(sc.budget)} 點</span><span class="g-sp"></span><button class="g-btn" id="l-back">${sc.mp ? '← 房間' : sc.tut ? '← 訓練作戰' : '← 簡報'}</button></div>
     <div class="g-card" style="margin-bottom:12px"><div class="g-row" style="margin-bottom:8px"><span class="g-dim">陣營</span>
       <div class="wed-seg" id="l-fac"><button data-f="0" class="${fac === 0 ? 'on emp' : ''}">帝國軍</button><button data-f="1" class="${fac === 1 ? 'on all' : ''}">聯盟軍</button></div>
       <span class="g-dim" style="font-size:calc(12px * var(--ui))">${sc.mp ? `只能派該陣營的初始指揮官（${cmdrsOf(fac).length} 位），等級與天賦是多人專用的；換陣營會通知房間` : `只能派該陣營的指揮官（${cmdrsOf(fac).length} 位）；敵軍是另一個陣營。指揮官不夠可以到「星際酒館」招募`}</span></div>
-      <div class="g-row" style="margin-bottom:8px"><span class="g-dim">操作難度</span>${sc.mp ? `<b>${OP_LEVELS[sc.op].name}</b><span class="g-dim" style="font-size:calc(12px * var(--ui))">（房主決定）${OP_LEVELS[sc.op].desc}</span>` : `${opSeg('l-op')}<span class="g-dim" style="font-size:calc(12px * var(--ui))">${OP_LEVELS[opLevel()].desc}</span>`}</div>
+      <div class="g-row" style="margin-bottom:8px"><span class="g-dim">操作難度</span>${sc.tut ? `<b>${OP_LEVELS[sc.op].name}</b><span class="g-dim" style="font-size:calc(12px * var(--ui))">（教學固定）${OP_LEVELS[sc.op].desc}</span>` : sc.mp ? `<b>${OP_LEVELS[sc.op].name}</b><span class="g-dim" style="font-size:calc(12px * var(--ui))">（房主決定）${OP_LEVELS[sc.op].desc}</span>` : `${opSeg('l-op')}<span class="g-dim" style="font-size:calc(12px * var(--ui))">${OP_LEVELS[opLevel()].desc}</span>`}</div>
       ${lo.fleets.length ? '' : '<div class="g-warn" style="margin-bottom:8px">這個陣營沒有可派的指揮官，先到星際酒館招募。</div>'}
       <div class="g-row"><span>已用 <b class="${over ? 'g-warn' : 'g-emp'}">${fmtN(used)}</b> / ${fmtN(sc.budget)} 點</span>
       <span class="g-dim">總兵力 ${ships5(sumA(lo.fleets.map((f) => sumA(f.comp))) + sumA(SPS.map((s) => sumA(s.comp))))} 艘</span><span class="g-sp"></span>${SPS.length < Math.max(1, lo.fleets.length) ? `<button class="g-btn sm" id="l-sup" title="補給艦＋護衛艦，不佔艦隊數、沒有指揮官；最多跟艦隊數一樣多支">＋ 補給艦隊（${SPS.length}／${Math.max(1, lo.fleets.length)}）</button>` : ''}
@@ -801,8 +801,8 @@ function showLoadout() {
     <div class="g-row" style="margin-top:12px"><span class="g-sp"></span><button class="g-btn pri" id="l-next" ${over || !used || !lo.fleets.length ? 'disabled' : ''}>下一步：部署 →</button></div>
   </div>`);
   const redraw = () => showLoadout();
-  if (!sc.mp) bindOpSeg('l-op', redraw);
-  gEl('l-back').onclick = () => (sc.mp ? showRoom() : sc.campaign ? showCampBriefing() : sc.random ? showRandom() : showBriefing(sc));
+  if (!sc.mp && !sc.tut) bindOpSeg('l-op', redraw);
+  gEl('l-back').onclick = () => (sc.mp ? showRoom() : sc.tut ? (tutClose(), showTraining(sc.tut)) : sc.campaign ? showCampBriefing() : sc.random ? showRandom() : showBriefing(sc));
   if (gEl('l-add')) gEl('l-add').onclick = () => {
     const free = cmdrsOf(fac).find((c) => !lo.fleets.some((f) => f.cmdr === c.id));
     if (!free) return;
@@ -1015,7 +1015,7 @@ function gameFrame(dt) {
   }
   gEl('bh-tm').textContent = tl >= SIM_INF ? _fmtT(t + SIM.t0) : _fmtT(Math.max(0, tl - t)); gEl('bh-tl').textContent = GAME.replaying ? '回放中' : tl >= SIM_INF ? '經過時間' : '剩餘時間';
   gEl('bh-pause').textContent = NET.on ? '不能暫停' : paused ? '▶ 繼續' : '❚❚ 暫停'; gEl('bh-speed').textContent = NET.on ? `×${NET.speed}${NET.lag ? ' 等待連線…' : ''}` : cmdSlowOn ? `×${effSpeed()} 下令中` : '×' + SPEEDS[speedIdx]; gEl('bh-speed').classList.toggle('slow', cmdSlowOn);
-  if (!gEl('bh-quit').dataset.sure) gEl('bh-quit').textContent = GAME.replaying ? '結束回放' : NET.on ? (NET.spec ? '離開觀戰' : '投降') : GAME.watch ? '結束觀摩' : sim ? '結束模擬' : '撤退';
+  if (!gEl('bh-quit').dataset.sure) gEl('bh-quit').textContent = GAME.replaying ? '結束回放' : NET.on ? (NET.spec ? '離開觀戰' : '投降') : GAME.watch ? '結束觀摩' : sim ? '結束模擬' : GAME.sc && GAME.sc.tut ? '結束教學' : '撤退';
   if (gEl('bh-ctl')) gEl('bh-ctl').textContent = `切換指揮 → ${simSideName(SIM.m, 1 - GAME.playerSide)}`;
   gEl('bh-3d').textContent = mode3D ? '2D 畫面' : '3D 畫面';
   gEl('bh-br').textContent = BR.on ? '離開艦橋' : '艦橋視角'; gEl('bh-br').title = `指揮官視角（${keyLabel(keyOf('bridge'))}）`;
@@ -1058,6 +1058,7 @@ function awardXP(R, st) {
 }
 function showReport() {
   if (GAME.sc && GAME.sc.sim) { showSimReport(); return; }
+  if (GAME.sc && GAME.sc.tut) { tutReport(); return; }   // 教學：不給經驗、不上傳紀錄
   if (GAME.sc && GAME.sc.mp) { mpReport(); return; }   // 多人：依自己這一方的角度   // 模擬室：不給經驗、不上傳紀錄
   const R = GAME.result, sc = GAME.sc, st = battleStats();
   setPhase('report');
@@ -1077,6 +1078,7 @@ function showReport() {
         <tr><td><b>合計</b></td><td>${ships5(sumA(st.init[0]))}</td><td>${ships5(sumA(st.init[0]) - sumA(st.left[0]))}</td><td>${ships5(sumA(st.init[1]))}</td><td>${ships5(sumA(st.init[1]) - sumA(st.left[1]))}</td></tr></table>
         <dl class="kv" style="margin-top:10px"><dt>被擊沉方向</dt><dd>我軍 正／側／背 ${asp(0)}<br>敵軍 正／側／背 ${asp(1)}</dd>
         <dt>使用技能</dt><dd>${skillsUsed.length ? skillsUsed.join('<br>') : '無'}</dd>
+        ${battleRules && battleRules.deflect ? `<dt>護盾偏折（無傷／減半）</dt><dd>我軍 ${fmtN(deflStats[GAME.playerSide][0])}／${fmtN(deflStats[GAME.playerSide][1])} 次（擋掉 ${fmtN(deflStats[GAME.playerSide][2])} 傷害）　敵軍 ${fmtN(deflStats[1 - GAME.playerSide][0])}／${fmtN(deflStats[1 - GAME.playerSide][1])} 次</dd>` : ''}
         ${battleRules && battleRules.ray ? `<dt>光束擋下／流彈／空中擋下</dt><dd>我軍 ${rayStats[GAME.playerSide].map(fmtN).join('／')} 發　敵軍 ${rayStats[1 - GAME.playerSide].map(fmtN).join('／')} 發</dd>` : ''}
         ${battleRules && battleRules.ff ? `<dt>友軍誤射</dt><dd>我軍 ${fmtN(ffStats[GAME.playerSide][0])} 發（${fmtN(Math.round(ffStats[GAME.playerSide][1]))} 傷害）　敵軍 ${fmtN(ffStats[1 - GAME.playerSide][0])} 發</dd>${battleRules.ff === 2 ? `<dt>射界受阻停火</dt><dd>我軍 ${fmtN(ffHold[GAME.playerSide])} 次　敵軍 ${fmtN(ffHold[1 - GAME.playerSide])} 次</dd>` : ''}` : ''}</dl></div>
       <div class="g-card"><h3>指揮官經驗</h3>${gains.map((g) => `<div style="margin-bottom:10px"><b>${g.f.commander.name}</b>（${g.f.name}，存活 ${Math.round(g.surv * 100)}%）

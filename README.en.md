@@ -136,7 +136,7 @@ Main menu:
 
 | Mode | Description |
 |---|---|
-| **Training** (訓練作戰) | Fixed missions: read the briefing → build fleets on a budget and assign commanders → deploy → fight. There are 3 missions: Border Encounter (small), Nebula Ambush (medium) and Fortress Outpost Breakthrough (large) |
+| **Training** (訓練作戰) | **Tutorial lessons** (11: basic controls, combat, terrain and counters, fleet composition, 3D and realistic rules): a tutorial panel watches what you do and advances when each goal is met; the first clear of each lesson gives 50 merit. **Tactics manual**: illustrated reference for ship types, weapons, formations, skills, composition and tactics (numbers come straight from the game data). **Missions** (fixed): read the briefing → build fleets on a budget and assign commanders → deploy → fight. There are 3 missions: Border Encounter (small), Nebula Ambush (medium) and Fortress Outpost Breakthrough (large) |
 | **Skirmish** (隨機戰役) | Pick the size (small / medium / large), enemy strength (weaker / even / stronger / random) and amount of terrain. Enemies and terrain are generated randomly each time |
 | **Endless** (無限戰場) | Endless stages. Enemies scale with your commanders' levels and each stage is larger than the last. Your current and best stage are tracked |
 | **Simulator** (模擬室) | Freely place both sides' fleets, commanders and terrain, and test tactics under the real rules. You can take control of either side. No records or XP |

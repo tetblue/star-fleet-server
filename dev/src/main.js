@@ -44,6 +44,7 @@ const opts = {
   flat: false,                  // 操作難度「一般」：艦隊都在同一平面（不能升降）
   fow: false,                   // 操作難度「擬真」：戰爭迷霧（模擬室可以關掉）
   ff: false,                    // 操作難度「擬真」：射線穿過別的友軍部隊時可能誤傷、同部隊多半停火（2＝現行規則，true＝舊回放）
+  deflect: true,                // 護盾偏折：光束打到護盾還在的船有機率無傷或減半（DEFLECT_RULE；舊回放沒有）
   ray: true,                    // 光束沿射線判定：擋在前面的敵艦先挨打、打偏的可能打中後方的敵艦（舊回放沒有）
 };
 
@@ -1938,7 +1939,7 @@ function skillActive(fleet, id) { const s = fleet && fleet.skills[id]; return !!
 //    ftrRegen 補充新機、ftrDmg 艦載機傷害、morph 變陣時間、fireCd 光束開火間隔、acc 光束命中率倍率、ffP 打中擋路友艦的機率倍率
 //    shield 護盾容量與回充加成、shTaken 護盾受到的傷害倍率
 function fleetMods(fleet) {
-  const m = { dmg: 1, shield: 0, shTaken: 1, taken: 1, speed: 1, fwd: 1, mcd: 1, aa: 0, repair: 1, ftrRegen: 1, ftrDmg: 1, morph: 1, fireCd: 1, acc: 1, ffP: 1 };
+  const m = { dmg: 1, shield: 0, shTaken: 1, taken: 1, speed: 1, fwd: 1, mcd: 1, aa: 0, repair: 1, ftrRegen: 1, ftrDmg: 1, morph: 1, fireCd: 1, acc: 1, ffP: 1, defl: 0 };
   if (!fleet) return m;
   const c = fleet.commander;
   if (c) {
@@ -1949,7 +1950,7 @@ function fleetMods(fleet) {
       const r = (id) => T[id] || 0;
       m.dmg += 0.05 * r('gunnery'); m.mcd *= 1 - 0.1 * r('missile'); m.ftrRegen *= 1 + 0.3 * r('hangar'); m.ftrDmg *= 1 + 0.1 * r('hangar');
       m.shield += 0.04 * r('shield'); m.repair *= 1 + 0.2 * r('damage'); m.aa += 0.08 * r('aa'); m.speed += 0.05 * r('engine'); m.morph *= 1 - 0.12 * r('drill');
-      m.acc *= 1 + 0.05 * r('aim'); m.ffP *= 1 - 0.15 * r('aim');
+      m.acc *= 1 + 0.05 * r('aim'); m.ffP *= 1 - 0.15 * r('aim'); m.defl = r('energy');
     }
   }
   if (skillActive(fleet, 'wall')) { m.shTaken *= 0.6; m.taken *= 0.7; }
@@ -2134,7 +2135,7 @@ function ffHit(sq, x0, y0, z0, x1, y1, z1) {
 //   艦艇每 every 個 tick 重新放進水平格子（cell 寬），射線只走過它經過的格子
 const RAY_RULE = { r: 0.55, cell: 16, every: 3, air: [1.2, 1.6] };
 const _r = new THREE.Vector3();
-let rayT = 0;   // rayCast 打到的距離
+let rayT = 0, rayB = 0;   // rayCast 打到的距離；rayB＝擦邊程度（船中心到射線的距離 ÷ 受擊半徑，0＝正中、1＝擦過邊緣）
 const RAYG = { gen: 0, tick: -1, pos: new Float32Array(0), map: [new Map(), new Map()] };   // pos：各艦 x, y, z, 受擊半徑；map[s]＝陣營 s 的格子（陣列帶 g＝哪一輪）
 function rayGrid() {
   if (RAYG.tick >= 0 && simTick >= RAYG.tick && simTick - RAYG.tick < RAY_RULE.every) return;
@@ -2164,7 +2165,7 @@ function rayGrid() {
 function rayCast(side, x0, y0, z0, ux, uy, uz, tmax, skip) {
   rayGrid();
   const m = RAYG.map[side], P = RAYG.pos, C = RAY_RULE.cell;
-  let best = tmax, bi = -1;
+  let best = tmax, bi = -1, bb = 0;
   // 依序走過射線經過的格子（水平投影）；t 是沿 3D 射線的距離
   let cx = Math.floor(x0 / C), cz = Math.floor(z0 / C);
   const sx = ux > 0 ? 1 : -1, sz = uz > 0 ? 1 : -1;
@@ -2178,11 +2179,11 @@ function rayCast(side, x0, y0, z0, ux, uy, uz, tmax, skip) {
       if (t <= 0) continue;
       const d2 = vx * vx + vy * vy + vz * vz - t * t; if (d2 >= r * r) continue;
       const th = t - Math.sqrt(r * r - d2);   // 射線碰到船身的位置
-      if (th > 0.5 && th < best) { best = th; bi = i; }
+      if (th > 0.5 && th < best) { best = th; bi = i; bb = Math.sqrt(d2) / r; }
     }
     if (nX < nZ) { tIn = nX; nX += dX; cx += sx; } else { tIn = nZ; nZ += dZ; cz += sz; }
   }
-  rayT = best;
+  rayT = best; rayB = bb;
   return bi;
 }
 // 射線途中的敵方空中目標（打向戰艦的光束）：依距離由近到遠，飛彈碰到就吃下這一發；
@@ -2271,7 +2272,7 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
     if (o >= 0) { target = o; ff = true; shipWorldCPU(o, _b); dist = Math.max(1, _a.distanceTo(_b)); }
   }
   const ray = opts.ray && !ff;
-  let blk, hit;
+  let blk, hit, graze;   // graze：擦邊程度（射線判定才有）
   if (ray) {
     // 射線判定：先擲瞄準準不準，決定光束飛的方向，再看沿路第一艘碰到的是誰
     const p = hitChance(gk, gun, dist, target, sq, _a.x, _a.y, _a.z, _b.x, _b.y, _b.z) * accM;
@@ -2285,7 +2286,8 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
     const L = Math.max(1, _a.distanceTo(_b)), ux = (_b.x - _a.x) / L, uy = (_b.y - _a.y) / L, uz = (_b.z - _a.z) / L;
     // 準：只看目標前面有沒有別的敵艦擋住；偏：射程內沿路都算（目標本身已經閃過）
     let i = rayCast(1 - sq.side, _a.x, _a.y, _a.z, ux, uy, uz, ok ? L : far, target), th = rayT;
-    if (i < 0 && ok) { i = target; th = L; }
+    graze = rayB;
+    if (i < 0 && ok) { i = target; th = L; graze = Math.sqrt(rnd()); }   // 打中瞄準的目標：落點在船身截面上均勻分布
     const end = i >= 0 ? th : L;
     blk = ROCKS.length ? rockBlock(_a.x, _a.y, _a.z, _a.x + ux * end, _a.y + uy * end, _a.z + uz * end) : -1;
     // 途中先碰到敵方飛彈／艦載機：由它吃下這一發
@@ -2341,7 +2343,7 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
   let dmg = gun.dmg * dmgMul * fm * fleetMods(sq.fleet).dmg;
   if (sideFocus(sq.side) === tq) dmg *= 1.2;
   if (ff) dmg *= ffMul;
-  pending.push({ t: t0 + dur, target, side: sq.side, ff, dirIdx: dirIndexOf(_b.x - _a.x, _b.z - _a.z), asp, fm, dmg, hm: hitMul(asp, sq, tq), fx: rnd() < fxs.fxP * (0.3 + 0.7 * fm) * (volleyShot ? 0.4 : 1), x: _b.x, y: _b.y, z: _b.z });
+  pending.push({ dr: Math.min(1, dist / far), gr: graze, t: t0 + dur, target, side: sq.side, ff, dirIdx: dirIndexOf(_b.x - _a.x, _b.z - _a.z), asp, fm, dmg, hm: hitMul(asp, sq, tq), fx: rnd() < fxs.fxP * (0.3 + 0.7 * fm) * (volleyShot ? 0.4 : 1), x: _b.x, y: _b.y, z: _b.z });
   return true;
 }
 // 齊射：分艦隊每 VOLLEY_CD 秒只能齊射一次；只有裝填過半（剩餘冷卻 ≤ VOLLEY_READY×冷卻）的砲會跟著開火
@@ -3109,7 +3111,17 @@ function processHits() {
       if (sh0 > 0.5) { shD = Math.min(sh0, raw * MISSILE_RULE.shield * mods.shTaken); hullD = raw * MISSILE_RULE.blast * hm; }
       else hullD = raw * MISSILE_RULE.direct * hm;
     } else {
-      const need = raw * mods.shTaken;
+      // 護盾偏折（opts.deflect）：光束打到護盾還在的船，有機率無傷或減半（天賦「能量調度」提高機率）
+      //   距離越近機率越低：dr＝開火距離 ÷ 最大射程，機率 × (closeMul + (1 − closeMul) × dr)
+      //   擦邊越容易彈開：gr＝擦邊程度（0＝正中、1＝邊緣），再 × (grazeLo + grazeK × gr²)
+      let dm = 1;
+      if (opts.deflect && !e.src && sh0 > 0.5) {
+        const D = DEFLECT_RULE, u = rnd(), dk = (D.closeMul + (1 - D.closeMul) * (e.dr != null ? e.dr : 1)) * (e.gr != null ? D.grazeLo + D.grazeK * e.gr * e.gr : 1);
+        const pn = (D.none + D.stepNone * mods.defl) * dk, ph = (D.half + D.stepHalf * mods.defl) * dk;
+        if (u < pn) { dm = 0; deflStats[tSide][0]++; deflStats[tSide][2] += raw; }
+        else if (u < pn + ph) { dm = D.halfMul; deflStats[tSide][1]++; deflStats[tSide][2] += raw * (1 - D.halfMul); }
+      }
+      const need = raw * dm * mods.shTaken;
       if (sh0 >= need) shD = need; else { shD = sh0; hullD = (need - sh0) / mods.shTaken * hm; }
     }
     ships.sh[ti] = sh0 - shD; if (shD > 0) ships.shT[ti] = t;
@@ -3141,6 +3153,7 @@ function processHits() {
 
 const dmgDealt = [0, 0];
 const ffStats = [[0, 0], [0, 0]];   // 友軍誤射（擬真難度）：各方誤擊的次數、傷害
+const deflStats = [[0, 0, 0], [0, 0, 0]];  // 護盾偏折：各方受擊時 [無傷次數, 減半次數, 擋掉的傷害]
 const rayStats = [[0, 0, 0], [0, 0, 0]];  // 射線判定：各方光束 [被目標前面的敵艦擋下, 打偏後打中別艘敵艦, 被敵方飛彈／艦載機擋下] 的次數
 const ffHold = [0, 0];   // 擬真難度：同部隊擋住射界而停火的次數
 const wDmg = [[0, 0, 0], [0, 0, 0]];   // 傷害來源：光束、飛彈、艦載機
@@ -3217,7 +3230,7 @@ const SIM_HZ = 60, SIM_DT = 1 / SIM_HZ, MAX_STEPS_PER_FRAME = 16;
 let simTick = 0, simAcc = 0;
 const INPUT_DELAY = 0;            // 單機＝0（立即生效）；連線時設成幾個 tick 讓命令先傳到對方
 const cmdQueue = [], cmdLog = [];
-const SIM_RULES = ['fire', 'advance', 'flankSide', 'flankRear', 'beamNear', 'beamFar', 'altitude', 'rangeMul', 'autoFace', 'flat', 'ff', 'fow', 'ray'];
+const SIM_RULES = ['fire', 'advance', 'flankSide', 'flankRear', 'beamNear', 'beamFar', 'altitude', 'rangeMul', 'autoFace', 'flat', 'ff', 'fow', 'ray', 'deflect'];
 let battleRules = null;
 // 多人戰鬥（內容在 multi.js）：on＝這場戰鬥由伺服器的回合推進；spec＝觀戰；bound＝收到的回合允許跑到哪個 tick（不含）
 const NET = { on: false, spec: false, seat: -1, K: 4, speed: 1, bound: 0, start: null, room: null, lobby: [], out: [], want: false, conn: null, screen: null, chat: [] };
@@ -3419,7 +3432,7 @@ function newBattle(seed = battleSeed, setup = null) {
   fxHead = 0; fxDirtyFrom = 0; fxDirtyCount = FX_MAX;
   orderQueue.length = 0; jam[0] = { until: 0, delay: 0 }; jam[1] = { until: 0, delay: 0 }; jamSeen[0] = jamSeen[1] = null;
   for (const a of dmgStats) a.fill(0);
-  dmgDealt.fill(0); ffStats.forEach((a) => a.fill(0)); rayStats.forEach((a) => a.fill(0)); ffHold.fill(0);
+  dmgDealt.fill(0); ffStats.forEach((a) => a.fill(0)); rayStats.forEach((a) => a.fill(0)); deflStats.forEach((a) => a.fill(0)); ffHold.fill(0);
   beamPow.fill(0); beamShots.fill(0); beamLastT.fill(-99); hitAvg.fill(0); for (const g of gunStats) for (const k in g) g[k].fill(0); for (const a of airStats) a.shots = a.hits = 0; for (const f of ftrStats) f.fill(0); fireAcc = [0, 0]; aaAcc = 0;
   cmdQueue.length = 0; cmdLog.length = 0; simTick = 0; simAcc = 0; U.uTime.value = 0;
   simAlt = opts.altitude ? 1 : 0;
@@ -3459,7 +3472,7 @@ function fullHash() {
 }
 // 回放：用同樣的種子與規則重開，照紀錄的 tick 重新下命令
 function replayBattle(log = cmdLog.slice(), rules = battleRules, seed = battleSeed, setup = battleSetup) {
-  Object.assign(opts, { fow: false, ray: false }, rules);   // 舊紀錄沒有戰爭迷霧、射線判定
+  Object.assign(opts, { fow: false, ray: false, deflect: false }, rules);   // 舊紀錄沒有戰爭迷霧、射線判定、護盾偏折
   newBattle(seed, setup);
   for (const c of log) cmdQueue.push({ ...c });
 }
