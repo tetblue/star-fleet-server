@@ -142,7 +142,7 @@ function simFieldHtml(m) {
     <div class="sim-row"><span>戰爭迷霧</span><div class="wed-seg" id="sim-fow"><button data-v="1" class="${m.fow !== false ? 'on' : ''}">開</button><button data-v="0" class="${m.fow === false ? 'on' : ''}">關</button></div></div>
     <div class="g-dim sim-note">${opLevel() === 2 ? '擬真難度：開＝只看得到偵測範圍內（或掃描到）的敵軍，自動攻擊也只打看得到的；關＝雙方都看得到全部' : '只有擬真難度才有戰爭迷霧'}</div>
     <div class="sim-row"><span>${SIM.mid ? '繼續時指揮' : '開戰時指揮'}</span><div class="wed-seg" id="sim-ctl"><button data-v="0" class="${m.ctl === 0 ? 'on' : ''}">我方</button><button data-v="1" class="${m.ctl === 1 ? 'on' : ''}">敵方</button></div></div>
-    <div class="sim-row"><span>勝負判定</span><label><input type="checkbox" id="sim-vic" ${m.victory ? 'checked' : ''}> 一方全滅或潰走（剩 25% 以下）就結束</label></div>
+    <div class="sim-row"><span>勝負判定</span><label><input type="checkbox" id="sim-vic" ${m.victory ? 'checked' : ''}> 一方全滅或潰走（剩 ${Math.round(ROUT_AT * 100)}% 以下）就結束</label></div>
     <div class="sim-row"><span>時限</span><span class="g-dim">模擬室沒有時間限制</span></div>
     <div class="sim-row"><span>隨機種子</span><input class="g-in" type="number" id="sim-seed" value="${m.seed}" style="width:110px"><button class="g-btn sm" id="sim-reseed">換一個</button></div>
     <div class="g-dim" style="font-size:calc(11.5px * var(--ui));margin-top:6px">同一個布局＋同一個種子＋同樣的指令＝同樣的結果；換種子會改變陣型細節與命中的隨機性。<br>規則與正式作戰相同（持續交火、不自動前進、主砲只打前方）。</div></div>`;
@@ -486,6 +486,7 @@ function showSimReport() {
         ${SHIP_TYPES.map((_, t) => t).filter((t) => t < N_COMBAT || st.init[0][t] + st.init[1][t] > 0).map(row).join('')}
         <tr><td><b>合計</b></td><td>${ships5(sumA(st.init[0]))}</td><td>${ships5(sumA(st.init[0]) - sumA(st.left[0]))}</td><td>${ships5(sumA(st.init[1]))}</td><td>${ships5(sumA(st.init[1]) - sumA(st.left[1]))}</td></tr></table>
         <dl class="kv" style="margin-top:10px"><dt>被擊沉方向</dt><dd>${n0} 正／側／背 ${asp(0)}<br>${n1} 正／側／背 ${asp(1)}</dd>
+        ${battleRules && battleRules.rotate ? `<dt>前排輪替／戰地維修</dt><dd>${n0} ${fmtN(wStats[0].rot)} 次／${fmtN(wStats[0].fRep)} 次（修回 ${fmtN(wStats[0].fHeal)}）<br>${n1} ${fmtN(wStats[1].rot)} 次／${fmtN(wStats[1].fRep)} 次（修回 ${fmtN(wStats[1].fHeal)}）</dd>` : ''}
         ${battleRules && battleRules.deflect ? `<dt>護盾偏折（無傷／減半）</dt><dd>${n0} ${fmtN(deflStats[0][0])}／${fmtN(deflStats[0][1])} 次（擋掉 ${fmtN(deflStats[0][2])}）<br>${n1} ${fmtN(deflStats[1][0])}／${fmtN(deflStats[1][1])} 次（擋掉 ${fmtN(deflStats[1][2])}）</dd>` : ''}
         ${battleRules && battleRules.ray ? `<dt>光束擋下／流彈／空中擋下</dt><dd>${n0} ${rayStats[0].map(fmtN).join('／')} 發<br>${n1} ${rayStats[1].map(fmtN).join('／')} 發</dd>` : ''}
         ${battleRules && battleRules.ff ? `<dt>友軍誤射</dt><dd>${n0} ${fmtN(ffStats[0][0])} 發（${fmtN(Math.round(ffStats[0][1]))} 傷害）<br>${n1} ${fmtN(ffStats[1][0])} 發（${fmtN(Math.round(ffStats[1][1]))} 傷害）</dd>${battleRules.ff === 2 ? `<dt>射界受阻停火</dt><dd>${n0} ${fmtN(ffHold[0])} 次<br>${n1} ${fmtN(ffHold[1])} 次</dd>` : ''}` : ''}</dl></div>

@@ -58,6 +58,23 @@ const SHIP_TYPES = [
 const N_COMBAT = 5, SUPPLY_T = 5;   // 一般艦隊能編的艦種（0～4）、補給艦的 index
 // 補給：補給艦 range 內、飛彈沒滿的友艦每 cd 秒補 1 發（從最近的補給艦扣存量）；follow＝跟隨時待在被跟隨艦隊後方多遠
 const SUPPLY_RULE = { range: 250, cd: 6, follow: 230 };
+// AI 難度 minLv 以上的敵軍帶一支補給艦隊：護衛艦 escort、補給艦 supply（佔兵力點數的比例），跟在後方 SUPPLY_RULE.follow
+const AI_SUPPLY = { minLv: 3, escort: 0.04, supply: 0.06 };
+// 依兵力點數產生 AI 補給艦隊的編成 [航母, 戰列, 巡洋, 驅逐, 護衛, 補給]
+function aiSupplyComp(total) { return SHIP_TYPES.map((_, t) => (t === 4 ? Math.max(10, Math.round(total * AI_SUPPLY.escort / 10) * 10) : t === SUPPLY_T ? Math.max(10, Math.round(total * AI_SUPPLY.supply / SHIP_TYPES[SUPPLY_T].cost / 10) * 10) : 0)); }
+// 潰走：一方剩下的船（艘數）低於開戰時的這個比例就判定潰走（戰敗）
+const ROUT_AT = 0.1;
+// 戰地維修：船體低於 below、且 quiet 秒沒被打中，就開始一次維修，在 dur 秒內逐步補上（開始後不會被打斷）
+//   補給艦 SUPPLY_RULE.range 內：第 1 次回復最大耐久的 first，之後每次減半；每艘船基本可修 n 次
+//   不在補給艦範圍內：只有還沒修過的船能修這 1 次，回復 alone（算掉一次次數）
+//   天賦「損害管制」每階：次數 +1、單次上限 +step（first 與 alone 都加）
+const FIELD_REPAIR = { below: 0.6, quiet: 5, dur: 10, first: 0.4, alone: 0.3, n: 1, step: 0.05 };
+// 前排輪替：分艦隊裡受損的船，跟後方（至少深 gap）同艦種、狀態好的船（護盾 ≥ fresh.sh、船體 ≥ fresh.hp）交換位置
+//   換位 dur 秒，期間兩艘都停火；換完 cd 秒內不再換；每 0.5 秒檢查一次，每次每支分艦隊最多換 max＋存活數 × per 對
+//   什麼時候換（看指揮官特性）：一般＝護盾打光；防禦型＝護盾剩 shEarly 以下就換，護盾回充 +shRegen；
+//   攻擊型＝船體剩 hull 以下才換（前排撐得久、火力不斷）；機動型＝換位時間 −fast
+//   天賦「輪替演練」每階換位時間 −tal
+const ROTATE_RULE = { dur: 6, cd: 15, gap: 10, fresh: { sh: 0.8, hp: 0.6 }, max: 2, per: 0.02, shEarly: 0.25, shRegen: 0.3, hull: 0.35, fast: 0.4, tal: 0.15 };
 const AA_TYPE_REF = 0.275;   // 艦種防空係數的基準（一般編成的平均值 ≈ 0.275，平均起來命中率不變）
 // 擬真難度的戰爭迷霧：各艦種的偵測半徑（3D 距離；分艦隊取編成裡最大的那一種）。護衛艦是偵察艦；戰列艦主砲 900 比自己看得到的遠，要靠友軍偵測
 const SENSOR_R = [550, 650, 650, 600, 750, 450];   // 航母、戰列、巡洋、驅逐、護衛、補給
@@ -158,6 +175,12 @@ const COMMANDERS = [
 ];
 const FACTION_NAME = ['帝國軍', '聯盟軍'];
 const TRAIT_NAME = { dmg: '攻擊', shield: '防禦', speed: '機動' };
+// 特性對前排輪替的影響（見 ROTATE_RULE）
+const TRAIT_ROT = {
+  dmg: `前排輪替：船體剩 ${Math.round(ROTATE_RULE.hull * 100)}% 才換下（前排撐得久、火力不斷）`,
+  shield: `前排輪替：護盾剩 ${Math.round(ROTATE_RULE.shEarly * 100)}% 就換下，護盾回充 +${Math.round(ROTATE_RULE.shRegen * 100)}%`,
+  speed: `前排輪替：換位時間 −${Math.round(ROTATE_RULE.fast * 100)}%`,
+};
 // 沒有天賦的指揮官（敵方）：特性加成照等級算；玩家的指揮官：固有特性固定 +8%，其餘靠天賦
 function traitBonus(trait, level) { return 0.08 + 0.02 * (level - 1); }
 const XP_PER_LEVEL = 200;
@@ -178,11 +201,12 @@ const TALENTS = [
   { id: 's_rapid', br: 'atk', name: '極速射擊', kind: 'skill', skill: 'rapid', cost: 2, req: 3 },
   { id: 'shield', br: 'def', name: '護盾強化', max: 3, cost: 1, desc: (r) => `護盾容量與回充 +${r * 4}%` },
   { id: 'energy', br: 'def', name: '能量調度', max: 3, cost: 1, desc: (r) => `光束打到還有護盾的船時：完全無傷的機率 +${Math.round(r * DEFLECT_RULE.stepNone * 100)}%、傷害減半的機率 +${Math.round(r * DEFLECT_RULE.stepHalf * 100)}%（基本 ${Math.round(DEFLECT_RULE.none * 100)}%／${Math.round(DEFLECT_RULE.half * 100)}%，以上都是最大射程時的平均值，距離越近越低、擦邊比正中容易彈開）` },
-  { id: 'damage', br: 'def', name: '損害管制', max: 3, cost: 1, desc: (r) => `維修機每趟修理量 +${r * 20}%` },
+  { id: 'damage', br: 'def', name: '損害管制', max: 3, cost: 1, desc: (r) => `戰地維修次數 +${r}、單次回復上限 +${Math.round(r * FIELD_REPAIR.step * 100)}%；維修機每趟修理量 +${r * 20}%` },
   { id: 'aa', br: 'def', name: '防空網', max: 2, cost: 1, desc: (r) => `防空砲的命中率 ×${(1 + r * 0.08).toFixed(2)}（攔截敵方飛彈與艦載機）` },
   { id: 's_wall', br: 'def', name: '鐵壁', kind: 'skill', skill: 'wall', cost: 2, req: 2 },
   { id: 'engine', br: 'mob', name: '推進強化', max: 3, cost: 1, desc: (r) => `移動速度 +${r * 5}%` },
   { id: 'drill', br: 'mob', name: '陣型演練', max: 2, cost: 1, desc: (r) => `變換陣型時間 −${r * 12}%` },
+  { id: 'rotate', br: 'mob', name: '輪替演練', max: 3, cost: 1, desc: (r) => `前排輪替的換位時間 −${Math.round(r * ROTATE_RULE.tal * 100)}%` },
   { id: 'perfect', br: 'mob', name: '完美布陣', max: 3, cost: 1, desc: (r) => `擬真難度：射界被同部隊友艦擋住時照樣開火（不停火），誤擊友軍的傷害 −${r * 25}%` },
   { id: 's_charge', br: 'mob', name: '突進', kind: 'skill', skill: 'charge', cost: 2, req: 2 },
   { id: 's_evade', br: 'mob', name: '機動迴避', kind: 'skill', skill: 'evade', cost: 2, req: 3 },
@@ -251,6 +275,7 @@ const SCENARIOS = [
     story: '敵方前哨站由小行星帶掩護，守軍擅長中央突破反擊，而且可能藏有預備隊。偵察情報極少。',
     terrain: [{ type: 'asteroid', x: -260, y: -60, z: -40, r: 170 }, { type: 'asteroid', x: 280, y: 70, z: 20, r: 150 },
       { type: 'rock', x: -250, y: -40, z: -60, r: 62 }, { type: 'rock', x: 300, y: 90, z: 0, r: 70 }, { type: 'rock', x: 30, y: 10, z: -250, r: 85 }],
+    enemySupply: { comp: [0, 0, 0, 0, 220, 110], formation: 'ring', x: -320, y: -110, z: -980, h: 0, follow: 1 },   // 跟著守備艦隊
     enemy: [
       { name: '敵突擊艦隊', commander: { name: '格倫', trait: 'dmg', level: 3, skills: ['charge', 'focus'] },
         comp: [0, 110, 420, 480, 220], formation: 'spindle', tactic: 'breakthrough', x: 0, z: -690, h: 0 },

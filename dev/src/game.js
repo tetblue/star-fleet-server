@@ -142,7 +142,7 @@ function makeSetup(sc, lo, attempt) {
   const e0 = fleetsS.length;
   sc.enemy.forEach((ef) => fleetsS.push({ side: 1, name: ef.name, ax: ef.x, az: ef.z, ay: ef.y || 0, h: ef.h, formation: ef.formation, comp: ef.comp.slice(),
     commander: { ...ef.commander }, ai: { tactic: ef.tactic, level: sc.level } }));
-  if (sc.enemySupply && sc.enemy.length) fleetsS.push(supplySetup(1, sc.enemySupply, e0));
+  if (sc.enemySupply && sc.enemy.length) fleetsS.push(supplySetup(1, sc.enemySupply, e0 + Math.min(sc.enemySupply.follow || 0, sc.enemy.length - 1)));
   // 突發事件：開戰前就抽好（同一個 attempt 回放時一樣）
   const R = mulberry32(sc.seed * 31 + attempt * 977);
   for (const ev of sc.events) {
@@ -471,9 +471,9 @@ function checkVictory() {
   const a0 = sideAlive(0), a1 = sideAlive(1), p = a0 / Math.max(1, GAME.init[0]), e = a1 / Math.max(1, GAME.init[1]);
   let r = null;
   if (a1 === 0) r = ['win', '殲滅敵軍'];
-  else if (e < 0.25) r = ['win', '敵軍潰走'];
+  else if (e < ROUT_AT) r = ['win', '敵軍潰走'];
   else if (a0 === 0) r = ['lose', '我軍全滅'];
-  else if (p < 0.25) r = ['lose', '我軍潰走'];
+  else if (p < ROUT_AT) r = ['lose', '我軍潰走'];
   else if (t >= tl) {
     const lp = 1 - p, le = 1 - e;
     r = le - lp > 0.08 ? ['win', '時間到・判定勝利（敵方損失較重）'] : lp - le > 0.08 ? ['lose', '時間到・判定敗北（我方損失較重）'] : ['draw', '時間到・平手'];
@@ -577,7 +577,7 @@ const OP_LEVELS = [
 function opLevel() { let n = 0; try { n = +(STORE.getItem('fleet.oplv') || 0); } catch (e) { n = 0; } return OP_LEVELS[n] ? n : 0; }
 function setOpLevel(n) { try { STORE.setItem('fleet.oplv', String(n)); } catch (e) { /* 只在本次 */ } }
 function opNow() { return ((GAME.phase === 'battle' || GAME.phase === 'deploy') && GAME.op) || 0; }   // 目前生效的難度（作戰、部署中）
-function applyOp(op = GAME.sc && (GAME.sc.mp || GAME.sc.tut) ? GAME.sc.op : opLevel(), fow = true) { GAME.op = op; opts.flat = op === 0; opts.ff = op === 2 ? 2 : false; opts.fow = op === 2 && fow; opts.ray = opts.deflect = true; }   // 建立戰場前呼叫（規則會記進回放）；fow＝擬真的戰爭迷霧（模擬室可以關）
+function applyOp(op = GAME.sc && (GAME.sc.mp || GAME.sc.tut) ? GAME.sc.op : opLevel(), fow = true) { GAME.op = op; opts.flat = op === 0; opts.ff = op === 2 ? 2 : false; opts.fow = op === 2 && fow; opts.ray = opts.deflect = opts.rotate = true; }   // 建立戰場前呼叫（規則會記進回放）；fow＝擬真的戰爭迷霧（模擬室可以關）
 function opSeg(id) { const cur = opLevel(); return `<div class="wed-seg rd-seg" id="${id}">${OP_LEVELS.map((o, i) => `<button data-v="${i}" class="${cur === i ? 'on' : ''}">${o.name}</button>`).join('')}</div>`; }
 function bindOpSeg(id, redraw) { gEl(id).querySelectorAll('button').forEach((b) => (b.onclick = () => { setOpLevel(+b.dataset.v); redraw(); })); }
 function force3D() { if (opNow() >= 1 && !mode3D) { setRenderMode('3d', false); GAME.forced3D = true; } }   // 進階以上：作戰中強制 3D（不改存檔的畫面設定）
@@ -691,7 +691,7 @@ function showCommanders(back) {
         <div class="tal-head"><div><h3 class="tal-name">${sel.title} ${sel.name}</h3><div class="g-dim" style="font-size:calc(12.5px * var(--ui))">${sel.bio}</div></div>
           <div class="tal-lv"><b>Lv ${lv}</b><div class="xpbar"><i style="width:${(xp % XP_PER_LEVEL) / XP_PER_LEVEL * 100}%"></i></div><span class="g-dim">${xp % XP_PER_LEVEL} / ${XP_PER_LEVEL} 經驗</span></div>
           <div class="tal-pt"><span class="g-dim">天賦點數</span><b class="${pts > 0 ? 'g-emp' : ''}">${pts}</b><span class="g-dim">／${lv}</span><button class="g-btn sm" id="c-reset" ${talSpent(tal) ? '' : 'disabled'}>全部退回</button></div></div>
-        <dl class="kv"><dt>固有特性</dt><dd>${TRAIT_NAME[sel.trait]} +8%</dd><dt>可用技能</dt><dd>${skills}</dd></dl>
+        <dl class="kv"><dt>固有特性</dt><dd>${TRAIT_NAME[sel.trait]} +8%<br><small class="g-dim">${TRAIT_ROT[sel.trait]}</small></dd><dt>可用技能</dt><dd>${skills}</dd></dl>
         <div class="tal-tree">${tree}</div></div></div></div>`);
   const root = gEl('game'); root.scrollTop = keepScroll; GAME.talOpen = true;
   root.querySelectorAll('[data-c]').forEach((b) => (b.onclick = () => { GAME.talSel = b.dataset.c; showCommanders(); }));
@@ -727,7 +727,7 @@ function showBriefing(sc) {
       ${trainList()}
       <div style="display:flex;flex-direction:column;gap:12px">
         <div class="g-card"><h3>狀況</h3><div>${sc.story}</div>
-          <dl class="kv"><dt>勝利條件</dt><dd>殲滅敵軍，或使敵軍損失超過 75%（潰走）</dd><dt>敗北條件</dt><dd>我軍損失超過 75%</dd>
+          <dl class="kv"><dt>勝利條件</dt><dd>殲滅敵軍，或使敵軍損失超過 ${Math.round((1 - ROUT_AT) * 100)}%（潰走）</dd><dt>敗北條件</dt><dd>我軍損失超過 ${Math.round((1 - ROUT_AT) * 100)}%</dd>
           <dt>時間限制</dt><dd>${Math.round(sc.timeLimit / 60)} 分鐘（時間到依雙方損失比例判定）</dd><dt>編成預算</dt><dd>${fmtN(sc.budget)} 點　最多 ${sc.maxFleets} 支艦隊</dd>
           <dt>情報準確度</dt><dd>${Math.round(I.acc * 100)}%${I.acc < 0.7 ? '　<span class="g-warn">情報可能有誤</span>' : ''}</dd></dl></div>
         <div class="intel-grid">
@@ -1078,6 +1078,7 @@ function showReport() {
         <tr><td><b>合計</b></td><td>${ships5(sumA(st.init[0]))}</td><td>${ships5(sumA(st.init[0]) - sumA(st.left[0]))}</td><td>${ships5(sumA(st.init[1]))}</td><td>${ships5(sumA(st.init[1]) - sumA(st.left[1]))}</td></tr></table>
         <dl class="kv" style="margin-top:10px"><dt>被擊沉方向</dt><dd>我軍 正／側／背 ${asp(0)}<br>敵軍 正／側／背 ${asp(1)}</dd>
         <dt>使用技能</dt><dd>${skillsUsed.length ? skillsUsed.join('<br>') : '無'}</dd>
+        ${battleRules && battleRules.rotate ? `<dt>前排輪替／戰地維修</dt><dd>我軍 ${fmtN(wStats[GAME.playerSide].rot)} 次／${fmtN(wStats[GAME.playerSide].fRep)} 次（修回 ${fmtN(wStats[GAME.playerSide].fHeal)}）　敵軍 ${fmtN(wStats[1 - GAME.playerSide].rot)} 次／${fmtN(wStats[1 - GAME.playerSide].fRep)} 次（修回 ${fmtN(wStats[1 - GAME.playerSide].fHeal)}）</dd>` : ''}
         ${battleRules && battleRules.deflect ? `<dt>護盾偏折（無傷／減半）</dt><dd>我軍 ${fmtN(deflStats[GAME.playerSide][0])}／${fmtN(deflStats[GAME.playerSide][1])} 次（擋掉 ${fmtN(deflStats[GAME.playerSide][2])} 傷害）　敵軍 ${fmtN(deflStats[1 - GAME.playerSide][0])}／${fmtN(deflStats[1 - GAME.playerSide][1])} 次</dd>` : ''}
         ${battleRules && battleRules.ray ? `<dt>光束擋下／流彈／空中擋下</dt><dd>我軍 ${rayStats[GAME.playerSide].map(fmtN).join('／')} 發　敵軍 ${rayStats[1 - GAME.playerSide].map(fmtN).join('／')} 發</dd>` : ''}
         ${battleRules && battleRules.ff ? `<dt>友軍誤射</dt><dd>我軍 ${fmtN(ffStats[GAME.playerSide][0])} 發（${fmtN(Math.round(ffStats[GAME.playerSide][1]))} 傷害）　敵軍 ${fmtN(ffStats[1 - GAME.playerSide][0])} 發</dd>${battleRules.ff === 2 ? `<dt>射界受阻停火</dt><dd>我軍 ${fmtN(ffHold[GAME.playerSide])} 次　敵軍 ${fmtN(ffHold[1 - GAME.playerSide])} 次</dd>` : ''}` : ''}</dl></div>

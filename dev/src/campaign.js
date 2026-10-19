@@ -74,8 +74,8 @@ function campEnemy(sc, lo) {
   }
   // 等級 4 以上：可能有增援
   sc.events = L >= 4 && R() < Math.min(0.7, 0.2 + 0.06 * L) ? [{ type: 'reinforce', chance: 1, at: [60, 140], name: '敵增援艦隊', comp: defaultComp(total * 0.25), formation: pick(['line', 'crescent', 'wedge']), edge: R() < 0.5 ? 'left' : 'right' }] : [];
-  // 等級 6 以上：帶補給艦隊（約兵力的 10%，跟在第一艦隊後方）；AI 飛彈打完會回去補
-  sc.enemySupply = L >= 6 ? { comp: SHIP_TYPES.map((_, t) => (t === 4 ? Math.max(10, Math.round(total * 0.04 / 10) * 10) : t === SUPPLY_T ? Math.max(10, Math.round(total * 0.06 / SHIP_TYPES[SUPPLY_T].cost / 10) * 10) : 0)),
+  // AI 難度 3 以上（等級 6 起）：帶補給艦隊（約兵力的 10%，跟在第一艦隊後方）；AI 飛彈打完會回去補，受損的船輪替到後排也能戰地維修
+  sc.enemySupply = aiLv >= AI_SUPPLY.minLv ? { comp: aiSupplyComp(total),
     formation: 'ring', x: sc.enemy[0].x, z: sc.enemy[0].z - 230, h: 0 } : null;
   sc.level = aiLv; sc.enemyLevel = L; sc.avgLevel = avg;
   return sc;
@@ -120,7 +120,7 @@ function showCampBriefing() {
     <div class="g-head"><h2>${sc.name}</h2><span class="crumb">無限戰場　·　${sc.size}　·　${Math.round(sc.timeLimit / 60)} 分鐘</span><span class="g-sp"></span><button class="g-btn" id="cb-back">← 無限戰場</button></div>
     <div class="intel-grid">
       <div class="g-card"><h3>狀況</h3><div>${sc.story}</div>
-        <dl class="kv"><dt>勝利條件</dt><dd>殲滅敵軍，或使敵軍損失超過 75%（潰走）</dd><dt>敗北條件</dt><dd>我軍損失超過 75%</dd>
+        <dl class="kv"><dt>勝利條件</dt><dd>殲滅敵軍，或使敵軍損失超過 ${Math.round((1 - ROUT_AT) * 100)}%（潰走）</dd><dt>敗北條件</dt><dd>我軍損失超過 ${Math.round((1 - ROUT_AT) * 100)}%</dd>
         <dt>編成預算</dt><dd>${fmtN(sc.budget)} 點　最多 ${sc.maxFleets} 支艦隊</dd>
         <dt>敵軍等級</dt><dd>出擊指揮官平均等級 ±3（目前編成的平均是 Lv ${avg}，敵軍會在 Lv ${Math.max(1, avg - 3)}～${avg + 3}）</dd>
         <dt>敵軍編成</dt><dd><span class="unk">不明：部署時才會偵測到</span></dd></dl></div>
@@ -205,7 +205,7 @@ function showRandom() {
         <dl class="kv rd-opts"><dt>規模</dt><dd>${seg('size', RAND_SIZES)}<div class="g-dim">預算 ${fmtN(S.budget)} 點・最多 ${S.maxFleets} 支艦隊・${Math.round(S.time / 60)} 分鐘</div></dd>
         <dt>敵軍強度</dt><dd>${seg('diff', RAND_DIFF)}<div class="g-dim">依出擊指揮官的平均等級（目前 Lv ${avg}）：敵軍 ${D.off == null ? `Lv ${Math.max(1, avg - 3)}～${avg + 3} 隨機` : `Lv ${Math.max(1, avg + D.off)}`}。等級越高，敵方技能越多、AI 越會打、兵力越多</div></dd>
         <dt>地形</dt><dd>${seg('terr', RAND_TERR)}<div class="g-dim">星雲、小行星帶、巨大小行星隨機放在戰場中段</div></dd>
-        <dt>勝利條件</dt><dd>殲滅敵軍，或使敵軍損失超過 75%（潰走）</dd><dt>敗北條件</dt><dd>我軍損失超過 75%</dd>
+        <dt>勝利條件</dt><dd>殲滅敵軍，或使敵軍損失超過 ${Math.round((1 - ROUT_AT) * 100)}%（潰走）</dd><dt>敗北條件</dt><dd>我軍損失超過 ${Math.round((1 - ROUT_AT) * 100)}%</dd>
         <dt>敵軍編成</dt><dd><span class="unk">不明：部署時才會偵測到</span></dd>
         <dt>獎勵</dt><dd>指揮官經驗、功勳（規模越大、敵軍等級越高越多）</dd></dl></div>
       <div class="g-card"><h3>戰場環境</h3>${minimapSVG(sc, GAME.intel, GAME.loadout)}<div style="margin-top:8px;font-size:calc(12.5px * var(--ui))">${terr}</div></div>

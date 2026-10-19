@@ -45,6 +45,7 @@ const opts = {
   fow: false,                   // 操作難度「擬真」：戰爭迷霧（模擬室可以關掉）
   ff: false,                    // 操作難度「擬真」：射線穿過別的友軍部隊時可能誤傷、同部隊多半停火（2＝現行規則，true＝舊回放）
   deflect: true,                // 護盾偏折：光束打到護盾還在的船有機率無傷或減半（DEFLECT_RULE；舊回放沒有）
+  rotate: true,                 // 前排輪替＋戰地維修（ROTATE_RULE、FIELD_REPAIR；舊回放沒有）
   ray: true,                    // 光束沿射線判定：擋在前面的敵艦先挨打、打偏的可能打中後方的敵艦（舊回放沒有）
 };
 
@@ -122,7 +123,7 @@ const COMMON_GLSL = /* glsl */`
   uniform float uTime; uniform vec2 uRes; uniform vec4 uSq[${MAX_SQ}]; uniform vec4 uSqT[${MAX_SQ}]; uniform vec4 uSqM[${MAX_SQ}]; uniform vec4 uSqP[${MAX_SQ}];
   uniform vec4 uRock[8]; uniform float uRockN;
   uniform float uAlt; uniform float uFog; uniform vec3 uCamDir;
-  attribute vec3 aLocal; attribute vec3 aLocal2; attribute vec4 aInfo; attribute vec2 aState; attribute float aScale; attribute vec4 aPath;
+  attribute vec3 aLocal; attribute vec3 aLocal2; attribute vec4 aInfo; attribute vec2 aState; attribute float aScale; attribute vec4 aPath; attribute vec4 aSwap; attribute float aSwapD;
   const float PI = 3.14159265;
   float easeIO(float x){ x = clamp(x,0.,1.); return x*x*(3.-2.*x); }
   float sqHeading(int i, float lag){
@@ -144,6 +145,7 @@ const COMMON_GLSL = /* glsl */`
     // 陣型變換：起點 → 目標，每艘船依 lag 稍晚出發，像水流一樣重組
     vec4 m = uSqM[si];
     vec3 L = m.y > 0. ? mix(aLocal, aLocal2, easeIO((uTime - m.x - aState.y * 0.9) / m.y)) : aLocal2;
+    if (aSwapD > 0.) L += aSwap.xyz * (1. - easeIO((uTime - aSwap.w) / aSwapD));   // 前排輪替：從舊位置滑到新位置
     // 整齊度：0 自然、1 整齊（高度層固定、不漂浮）
     float om = m.y > 0. ? mix(m.z, m.w, easeIO((uTime - m.x) / m.y)) : m.w;
     float ly = L.y * mix(uAlt, 1., om);
@@ -828,8 +830,13 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
     // 自動武器：飛彈冷卻、艦載機出擊冷卻、維修機出動冷卻、機上剩餘維修機
     mcd: new Float32Array(total), fcd: new Float32Array(total), rcd: new Float32Array(total), rep: new Uint8Array(total),
     fout: new Uint8Array(total), fbt: new Float32Array(total), hang: new Uint8Array(total * 4), foutR: new Uint8Array(total * 4),   // 機庫：各任務的架數、在外面飛的架數   // 航母：在外面飛的艦載機數、補充新機的進度
+    hT: new Float32Array(total).fill(-99),   // 最後一次受到傷害的時間（戰地維修看這個）
+    // 前排輪替：換位開始時間、換位秒數（0＝沒在換）、下次可以再換的時間、換位起點相對新位置的偏移（陣型座標）
+    swS: new Float32Array(total), swD: new Float32Array(total), swE: new Float32Array(total), sox: new Float32Array(total), soy: new Float32Array(total), soz: new Float32Array(total),
+    // 戰地維修：已經修過幾次、這次還要補多少、每秒補多少
+    rpN: new Uint8Array(total), rpLeft: new Float32Array(total), rpRate: new Float32Array(total),
   };
-  const aLocal = new Float32Array(total * 3), aLocal2 = new Float32Array(total * 3), aInfo = new Float32Array(total * 4), aState = new Float32Array(total * 2), aScale = new Float32Array(total), aPath = new Float32Array(total * 4);
+  const aLocal = new Float32Array(total * 3), aLocal2 = new Float32Array(total * 3), aInfo = new Float32Array(total * 4), aState = new Float32Array(total * 2), aScale = new Float32Array(total), aPath = new Float32Array(total * 4), aSwap = new Float32Array(total * 4), aSwapD = new Float32Array(total);
 
   let si = 0;
   plans.forEach((p, sqi) => {
@@ -902,6 +909,8 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
   shipGeo.setAttribute('aState', new THREE.InstancedBufferAttribute(aState, 2).setUsage(THREE.DynamicDrawUsage));
   shipGeo.setAttribute('aScale', new THREE.InstancedBufferAttribute(aScale, 1));
   shipGeo.setAttribute('aPath', new THREE.InstancedBufferAttribute(aPath, 4).setUsage(THREE.DynamicDrawUsage));
+  shipGeo.setAttribute('aSwap', new THREE.InstancedBufferAttribute(aSwap, 4).setUsage(THREE.DynamicDrawUsage));
+  shipGeo.setAttribute('aSwapD', new THREE.InstancedBufferAttribute(aSwapD, 1).setUsage(THREE.DynamicDrawUsage));
   shipGeo.instanceCount = total;
   shipMesh = new THREE.Mesh(shipGeo, shipMat); shipMesh.frustumCulled = false; shipMesh.renderOrder = 1;
   glowMesh = new THREE.Mesh(shipGeo, glowMat); glowMesh.frustumCulled = false; glowMesh.renderOrder = 2;
@@ -970,6 +979,7 @@ function changeFormation(g, kind, orderly, opt) {
     const omNow = sq.mDur > 0 ? (sq.oFrom + (sq.oTo - sq.oFrom) * eNow) : (sq.oTo || 0);
     const list = live[k];
     const oldL = list.map((i) => shipLocalCPU(i, t, [0, 0, 0]));
+    swapClear([sq]);   // 換位中的船從目前位置直接走向新陣型
     // 旗艦固定佔最靠近中心後方的位置
     const fi = sq.flagship >= 0 ? list.indexOf(sq.flagship) : -1;
     let newL = lay[k].local;
@@ -1286,6 +1296,7 @@ function formGroup(list) {
   const g0 = list[0].group;
   if (g0 && g0.sqs.filter((s) => s.alive > 0 && !s.bg).length === list.length && list.every((s) => s.group === g0)) return g0;
   for (const og of new Set(list.map((q) => q.group))) if (og) endManeuver(og, false);
+  swapClear(list);
   const t = U.uTime.value;
   let sx = 0, sy = 0, sz = 0, ss = 0, sc = 0;
   for (const q of list) { sx += q.x; sy += q.y || 0; sz += q.z; ss += Math.sin(q.h); sc += Math.cos(q.h); }
@@ -1337,6 +1348,7 @@ function turnGroupTo(g, Ht) {
 }
 // 原地轉向：陣型座標立即換到新朝向（船的世界位置不變），之後由變陣把船帶到新位置
 function reframeGroup(g, Hn) {
+  swapClear(g.sqs);
   const t = U.uTime.value, H0 = groupHeading(g, t);
   Hn = H0 + wrapAngle(Hn - H0);
   const d = Hn - H0;   // 舊座標 → 新座標
@@ -1459,6 +1471,7 @@ function snakeMerge(pl) {
 }
 // 開始蛇行：凍結目前陣型（進行中的變陣目標先存起來，結束後接著做）
 function startSnake(g, pl) {
+  swapClear(g.sqs);
   const t = U.uTime.value;
   prepSnake(pl);
   const aL = shipGeo.getAttribute('aLocal'), aL2 = shipGeo.getAttribute('aLocal2');
@@ -1851,6 +1864,8 @@ function shipLocalCPU(i, t, out = _L) {
   out[0] = ships.lx0[i] + (ships.lx1[i] - ships.lx0[i]) * e;
   out[1] = ships.ly0[i] + (ships.ly1[i] - ships.ly0[i]) * e;
   out[2] = ships.lz0[i] + (ships.lz1[i] - ships.lz0[i]) * e;
+  const sd = ships.swD[i];   // 前排輪替：從舊位置滑到新位置（同著色器）
+  if (sd > 0 && t < ships.swS[i] + sd) { const k = 1 - ease((t - ships.swS[i]) / sd); out[0] += ships.sox[i] * k; out[1] += ships.soy[i] * k; out[2] += ships.soz[i] * k; }
   return out;
 }
 function shipWorldCPU(i, out) {
@@ -1939,12 +1954,16 @@ function skillActive(fleet, id) { const s = fleet && fleet.skills[id]; return !!
 //    ftrRegen 補充新機、ftrDmg 艦載機傷害、morph 變陣時間、fireCd 光束開火間隔、acc 光束命中率倍率、ffP 打中擋路友艦的機率倍率
 //    shield 護盾容量與回充加成、shTaken 護盾受到的傷害倍率
 function fleetMods(fleet) {
-  const m = { dmg: 1, shield: 0, shTaken: 1, taken: 1, speed: 1, fwd: 1, mcd: 1, aa: 0, repair: 1, ftrRegen: 1, ftrDmg: 1, morph: 1, fireCd: 1, acc: 1, ffP: 1, defl: 0 };
+  const m = { dmg: 1, shield: 0, shTaken: 1, taken: 1, speed: 1, fwd: 1, mcd: 1, aa: 0, repair: 1, ftrRegen: 1, ftrDmg: 1, morph: 1, fireCd: 1, acc: 1, ffP: 1, defl: 0,
+    rot: 'shield', rotDur: ROTATE_RULE.dur, shRegen: 1, repN: FIELD_REPAIR.n, repCap: 0 };
   if (!fleet) return m;
   const c = fleet.commander;
   if (c) {
     const b = c.tal ? 0.08 : traitBonus(c.trait, c.level || 1);   // 玩家：固有特性固定 +8%，其餘靠天賦；敵方：照等級
     if (c.trait === 'dmg') m.dmg += b; else if (c.trait === 'shield') m.shield += b; else if (c.trait === 'speed') m.speed += b;
+    // 前排輪替：攻擊型晚退、防禦型早退（回盾較快）、機動型換位快
+    if (c.trait === 'dmg') m.rot = 'hull'; else if (c.trait === 'shield') { m.rot = 'early'; m.shRegen += ROTATE_RULE.shRegen; } else if (c.trait === 'speed') m.rotDur *= 1 - ROTATE_RULE.fast;
+    if (c.tal) { const r = (id) => c.tal[id] || 0; m.rotDur *= 1 - ROTATE_RULE.tal * r('rotate'); m.repN += r('damage'); m.repCap += FIELD_REPAIR.step * r('damage'); }
     const T = c.tal;
     if (T) {
       const r = (id) => T[id] || 0;
@@ -2756,7 +2775,7 @@ function launchFighters(side, perCarrier = 8, set = null) {
 }
 function ftrDmgMul(home) { const q = home >= 0 && home < shipCount ? squadrons[ships.sq[home]] : null, m = q && (q.mods || fleetMods(q.fleet)); return m ? m.dmg * m.ftrDmg : 1; }
 // ───── 自動武器：飛彈、艦載機、維修機（各艦各自冷卻；敵人進入射程才用） ─────
-const wStats = [{ mFired: 0, mInt: 0, mMiss: 0, healed: 0, fLaunch: 0, rLaunch: 0, fLand: 0, fLost: 0, fBuilt: 0 }, { mFired: 0, mInt: 0, mMiss: 0, healed: 0, fLaunch: 0, rLaunch: 0, fLand: 0, fLost: 0, fBuilt: 0 }];
+const wStats = [{ mFired: 0, mInt: 0, mMiss: 0, healed: 0, fLaunch: 0, rLaunch: 0, fLand: 0, fLost: 0, fBuilt: 0, rot: 0, fRep: 0, fHeal: 0 }, { mFired: 0, mInt: 0, mMiss: 0, healed: 0, fLaunch: 0, rLaunch: 0, fLand: 0, fLost: 0, fBuilt: 0, rot: 0, fRep: 0, fHeal: 0 }];
 function maxHp(i) { return SHIP_TYPES[ships.type[i]].hp * (squadrons[ships.sq[i]].flagship === i ? 3 : 1); }
 function updateEnemyDist() {   // 每支分艦隊離最近敵方分艦隊（邊緣）的距離，每 0.5 秒更新
   for (const q of squadrons) {
@@ -2798,6 +2817,90 @@ function resupply() {
       if (d < bd) { bd = d; best = s; }
     }
     if (best >= 0) { ships.ammo[i]++; ships.stock[best]--; wStats[ships.side[i]].resup = (wStats[ships.side[i]].resup || 0) + 1; }
+  }
+}
+// ───── 前排輪替（ROTATE_RULE）：受損的船跟後方同艦種、狀態好的船交換位置 ─────
+// 換位中的船（swD > 0）沿偏移量從舊位置滑到新位置；陣型有其他變化（變陣、轉向、迴轉）時直接取消
+function swapClear(sqs) {
+  if (!shipGeo) return;
+  const aD = shipGeo.getAttribute('aSwapD'); let dirty = false;
+  for (const q of sqs) for (const i of q.list) if (ships.swD[i] > 0) { ships.swD[i] = 0; aD.array[i] = 0; dirty = true; }
+  if (dirty) aD.needsUpdate = true;
+}
+function rotNeed(i, M) {
+  if (M.rot === 'hull') return ships.hp[i] < ROTATE_RULE.hull * maxHp(i);           // 攻擊型：船體快撐不住才換
+  if (M.rot === 'early') return ships.sh[i] < ROTATE_RULE.shEarly * ships.shMax[i];  // 防禦型：護盾快沒了就換
+  return ships.sh[i] <= 0.5;                                                         // 一般：護盾打光
+}
+function rotFresh(j) { return ships.sh[j] >= ROTATE_RULE.fresh.sh * ships.shMax[j] && ships.hp[j] >= ROTATE_RULE.fresh.hp * maxHp(j); }
+function rotateLines(t) {
+  if (simTick % 30 !== 7) return;   // 每 0.5 秒
+  const A = ['aLocal', 'aLocal2', 'aSwap', 'aSwapD'].map((k) => shipGeo.getAttribute(k));
+  let dirty = false;
+  for (const q of squadrons) {
+    const pk = q.group && q.group.plan && q.group.plan.kind;   // 平移、原地轉向照常輪替；蛇行迴轉、打散重組時不換
+    if (q.bg || q.hidden || !q.group || q.group.inactive || pk === 'snake' || pk === 'scatter' || q.alive < 2 || sqMorphing(q, t)) continue;
+    const M = q.mods || fleetMods(q.fleet), need = [], cand = [];
+    for (const i of q.list) {
+      if (!ships.alive[i] || i === q.flagship || ships.swE[i] > t) continue;
+      if (rotNeed(i, M)) need.push(i); else if (rotFresh(i)) cand.push(i);
+    }
+    if (!need.length || !cand.length) continue;
+    need.sort((a, b) => ships.lz1[b] - ships.lz1[a] || a - b);   // 越前排越優先
+    cand.sort((a, b) => ships.lz1[a] - ships.lz1[b] || a - b);   // 替補：越後排越優先
+    let left = ROTATE_RULE.max + Math.floor(q.alive * ROTATE_RULE.per);
+    for (const i of need) {
+      if (left <= 0) break;
+      const zMax = ships.lz1[i] - ROTATE_RULE.gap;
+      const k = cand.findIndex((j) => j >= 0 && ships.type[j] === ships.type[i] && ships.lz1[j] < zMax);
+      if (k < 0) continue;
+      swapPair(i, cand[k], t, M.rotDur, A); cand[k] = -1; left--; dirty = true;
+      wStats[q.side].rot++;
+    }
+  }
+  if (dirty) for (const a of A) a.needsUpdate = true;
+}
+function swapPair(i, j, t, dur, A) {
+  const pi = [ships.lx1[i], ships.ly1[i], ships.lz1[i]], pj = [ships.lx1[j], ships.ly1[j], ships.lz1[j]];
+  const put = (a, P, O) => {
+    ships.lx0[a] = ships.lx1[a] = P[0]; ships.ly0[a] = ships.ly1[a] = P[1]; ships.lz0[a] = ships.lz1[a] = P[2];
+    ships.sox[a] = O[0] - P[0]; ships.soy[a] = O[1] - P[1]; ships.soz[a] = O[2] - P[2];
+    ships.swS[a] = t; ships.swD[a] = dur; ships.swE[a] = t + dur + ROTATE_RULE.cd;
+    A[0].array.set(P, a * 3); A[1].array.set(P, a * 3);
+    A[2].array.set([ships.sox[a], ships.soy[a], ships.soz[a], t], a * 4); A[3].array[a] = dur;
+  };
+  put(i, pj, pi); put(j, pi, pj);
+}
+// ───── 戰地維修（FIELD_REPAIR）：脫離火力的受損船逐步回復船體 ─────
+function fieldRepair(dt, t) {
+  for (let i = 0; i < shipCount; i++) {
+    if (ships.rpLeft[i] <= 0) continue;
+    if (!ships.alive[i]) { ships.rpLeft[i] = 0; continue; }
+    const mh = maxHp(i), amt = Math.min(ships.rpLeft[i], ships.rpRate[i] * dt, mh - ships.hp[i]);
+    ships.hp[i] += amt; ships.rpLeft[i] -= amt; wStats[ships.side[i]].fHeal += amt;
+    if (ships.hp[i] >= mh - 1e-3) ships.rpLeft[i] = 0;
+  }
+  if (simTick % 30 !== 22) return;   // 每 0.5 秒看一次有沒有船可以開始維修
+  const F = FIELD_REPAIR, R2 = SUPPLY_RULE.range * SUPPLY_RULE.range;
+  let sup = null;
+  for (const q of squadrons) {
+    if (q.bg || q.hidden || (q.group && q.group.inactive)) continue;
+    const M = q.mods || fleetMods(q.fleet);
+    for (const i of q.list) {
+      if (!ships.alive[i] || ships.rpLeft[i] > 0 || ships.rpN[i] >= M.repN || t - ships.hT[i] < F.quiet) continue;
+      const mh = maxHp(i);
+      if (ships.hp[i] >= F.below * mh) continue;
+      if (!sup) { sup = []; for (let s = 0; s < shipCount; s++) if (ships.alive[s] && ships.type[s] === SUPPLY_T && !squadrons[ships.sq[s]].bg) { shipWorldCPU(s, _a); sup.push(s, _a.x, _a.y, _a.z); } }
+      shipWorldCPU(i, _a);
+      let near = false;
+      for (let k = 0; k < sup.length; k += 4) if (ships.side[sup[k]] === ships.side[i] && (sup[k + 1] - _a.x) ** 2 + (sup[k + 2] - _a.y) ** 2 + (sup[k + 3] - _a.z) ** 2 < R2) { near = true; break; }
+      let frac;
+      if (near) frac = (F.first + M.repCap) * 0.5 ** ships.rpN[i];   // 補給艦旁：40%、20%、10%…
+      else if (ships.rpN[i] === 0) frac = F.alone + M.repCap;           // 沒有補給艦：只能修這一次
+      else continue;
+      ships.rpN[i]++; ships.rpLeft[i] = frac * mh; ships.rpRate[i] = ships.rpLeft[i] / F.dur;
+      wStats[q.side].fRep++;
+    }
   }
 }
 // 一方目前的補給存量（存活補給艦的合計）與飛彈存量（攜彈的比例）
@@ -3129,6 +3232,7 @@ function processHits() {
     if (sh0 > 0.5 && ships.sh[ti] <= 0.5) ships.shT[ti] = t + SHIELD_RULE.broken - SHIELD_RULE.delay;
     else if (sh0 <= 0.5 && hullD > 0) ships.shT[ti] = Math.max(ships.shT[ti], t);
     ships.hp[ti] -= hullD;
+    if (shD + hullD > 0) ships.hT[ti] = t;
     const eff = shD + hullD;
     e.kill = ships.hp[ti] <= 0;
     e.hull = hullD > 0;
@@ -3192,7 +3296,7 @@ function continuousFire(dt) {
   for (let i = 0; i < shipCount; i++) {
     if (!ships.alive[i] || ships.sh[i] >= ships.shMax[i] || t - ships.shT[i] < SHIELD_RULE.delay) continue;
     const q = squadrons[ships.sq[i]];
-    ships.sh[i] = Math.min(ships.shMax[i], ships.sh[i] + ships.shMax[i] * SHIELD_RULE.rate * dt);
+    ships.sh[i] = Math.min(ships.shMax[i], ships.sh[i] + ships.shMax[i] * SHIELD_RULE.rate * (q.mods ? q.mods.shRegen : 1) * dt);   // 防禦型指揮官回充較快
   }
   if (!opts.fire) return;
   for (let k = 0; k < squadrons.length; k++) {
@@ -3205,9 +3309,9 @@ function continuousFire(dt) {
     if (!ships.alive[i]) continue;
     const r = _rate[ships.sq[i]];
     if (r <= 0) continue;
-    const G = SHIP_TYPES[ships.type[i]].guns;
+    const G = SHIP_TYPES[ships.type[i]].guns, sw = ships.swD[i] > 0 && t < ships.swS[i] + ships.swD[i];   // 前排輪替換位中：主砲、副砲停火（防空照打）
     for (let g = 0; g < 3; g++) {
-      const gk = GUN_KEYS[g], gun = G[gk]; if (!gun) continue;
+      const gk = GUN_KEYS[g], gun = G[gk]; if (!gun || (sw && gk !== 'aa')) continue;
       const arr = CDS[g], cd = arr[i] - dt * (gk === 'aa' ? 1 : r);   // 防空不受陣型火力影響
       if (cd > 0) { arr[i] = cd; continue; }
       arr[i] = fireGun(i, gk) ? gun.cd * (0.85 + rnd() * 0.3) : 0.4 + rnd() * 0.4;
@@ -3219,7 +3323,7 @@ function resetCombat() {
   for (const k in FT) FT[k].fill(k === 'tgt' ? -1 : 0);
   fP.fill(0); fV.fill(0); fI.fill(0); ftrAttrs.aFI.needsUpdate = true;
   aliveF[0].length = 0; aliveF[1].length = 0; misHead = 0; ftrHead = 0;
-  for (const w of wStats) { w.mFired = w.mInt = w.mMiss = w.healed = w.fLaunch = w.rLaunch = w.fLand = w.fLost = w.fBuilt = 0; } for (const a of wDmg) a.fill(0);
+  for (const w of wStats) { w.mFired = w.mInt = w.mMiss = w.healed = w.fLaunch = w.rLaunch = w.fLand = w.fLost = w.fBuilt = w.rot = w.fRep = w.fHeal = 0; } for (const a of wDmg) a.fill(0);
   for (const q of squadrons) { q.enemyD = null; q.drones = 0; q.disorderUntil = 0; q.volleyT = -1e9; }
   for (let i = 0; i < MIS_MAX; i++) misT[i * 4] = -999;
   misLive.fill(0); AIR.tick = -1;
@@ -3233,7 +3337,7 @@ const SIM_HZ = 60, SIM_DT = 1 / SIM_HZ, MAX_STEPS_PER_FRAME = 16;
 let simTick = 0, simAcc = 0;
 const INPUT_DELAY = 0;            // 單機＝0（立即生效）；連線時設成幾個 tick 讓命令先傳到對方
 const cmdQueue = [], cmdLog = [];
-const SIM_RULES = ['fire', 'advance', 'flankSide', 'flankRear', 'beamNear', 'beamFar', 'altitude', 'rangeMul', 'autoFace', 'flat', 'ff', 'fow', 'ray', 'deflect'];
+const SIM_RULES = ['fire', 'advance', 'flankSide', 'flankRear', 'beamNear', 'beamFar', 'altitude', 'rangeMul', 'autoFace', 'flat', 'ff', 'fow', 'ray', 'deflect', 'rotate'];
 let battleRules = null;
 // 多人戰鬥（內容在 multi.js）：on＝這場戰鬥由伺服器的回合推進；spec＝觀戰；bound＝收到的回合允許跑到哪個 tick（不含）
 const NET = { on: false, spec: false, seat: -1, K: 4, speed: 1, bound: 0, start: null, room: null, lobby: [], out: [], want: false, conn: null, screen: null, chat: [] };
@@ -3475,7 +3579,7 @@ function fullHash() {
 }
 // 回放：用同樣的種子與規則重開，照紀錄的 tick 重新下命令
 function replayBattle(log = cmdLog.slice(), rules = battleRules, seed = battleSeed, setup = battleSetup) {
-  Object.assign(opts, { fow: false, ray: false, deflect: false }, rules);   // 舊紀錄沒有戰爭迷霧、射線判定、護盾偏折
+  Object.assign(opts, { fow: false, ray: false, deflect: false, rotate: false }, rules);   // 舊紀錄沒有戰爭迷霧、射線判定、護盾偏折
   newBattle(seed, setup);
   for (const c of log) cmdQueue.push({ ...c });
 }
@@ -4715,6 +4819,7 @@ function simulate(dt) {
   pushSquadronUniforms();
   continuousFire(dt);
   autoWeapons(dt);
+  if (opts.fire && opts.rotate) { rotateLines(U.uTime.value); fieldRepair(dt, U.uTime.value); }
   updateFighters(dt);
   processHits();
   decayHits(dt);

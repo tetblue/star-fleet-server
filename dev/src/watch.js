@@ -63,9 +63,11 @@ function watchLayout(o) {
     const li = sd.lv < 0 ? Math.floor(R() * WATCH_LV.length) : sd.lv, L = WATCH_LV[li].cl, tac = sd.tac === 'rand' ? pick(WATCH_TAC) : sd.tac;
     const nF = sd.n < 0 ? 1 + Math.floor(R() * S.maxFleets) : Math.max(1, Math.min(S.maxFleets, sd.n));
     m.sides.push({ lv: li, tac });
+    const sup = li + 1 >= AI_SUPPLY.minLv, budget = S.budget * (sup ? 1 - AI_SUPPLY.escort - AI_SUPPLY.supply : 1);   // 高難度帶補給艦隊（從總兵力裡分出來，雙方點數仍相同）
+    const first = m.fleets.length;
     for (let k = 0; k < nF; k++) {
       const A = sd.arch >= 0 ? CAMP_ARCHETYPES[sd.arch] : pick(CAMP_ARCHETYPES);
-      const per = A.mix.reduce((s, x, t) => s + x * SHIP_TYPES[t].cost, 0), n = S.budget / nF / per;
+      const per = A.mix.reduce((s, x, t) => s + x * SHIP_TYPES[t].cost, 0), n = budget / nF / per;
       const comp = A.mix.map((x) => Math.round(n * x / 10) * 10);
       const t = tac === 'flank' && nF >= 2 && k === 0 ? 'push' : tac;   // 包抄：第一艦隊在正面牽制，其他繞側
       const skills = [], nSk = Math.min(3, 1 + Math.floor(L / 4));
@@ -76,6 +78,9 @@ function watchLayout(o) {
         x: nF === 1 ? 0 : Math.round(-380 + 760 * k / (nF - 1)), z: side ? -360 : 360, y: 0, h: side ? 0 : Math.PI,
         ai: { tactic: t, level: li + 1 }, reserve: false, at: 60 });
     }
+    if (sup) m.fleets.push({ side, name: '補給艦隊', supply: true, follow: first, cmdr: { base: null, name: '', title: '', trait: 'shield', level: 1, mode: 'lv', tal: {}, skills: [] },
+      comp: aiSupplyComp(S.budget), hangar: HANGAR_DEFAULT.slice(), formation: 'ring', orderly: false, layers: 1,
+      x: 0, z: side ? -360 - SUPPLY_RULE.follow : 360 + SUPPLY_RULE.follow, y: 0, h: side ? 0 : Math.PI, ai: null, reserve: false, at: 60 });
   });
   m.name = `${S.name}・` + m.sides.map((s) => `${WATCH_LV[s.lv].name}・${TACTICS[s.tac].name}`).join(' vs ');
   return m;

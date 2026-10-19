@@ -182,7 +182,7 @@ const TUT_LESSONS = [
       { title: '繞到側面', text: '讓第二艦隊<b>大繞一圈</b>從敵人的側面或背後切入（不要從敵人正面經過）。可以用隊列排兩個點；技能列的「突進」能加速。',
         goal: '從側面或背後擊沉 8 個以上的敵方圖示', check: () => dmgStats[1][1] + dmgStats[1][2] >= 8,
         live: () => `敵軍被擊沉 正／側／背：${dmgStats[1].map((v) => ships5(v)).join('／')} 艘` },
-      { title: '擊潰敵軍', text: '兩面夾擊，讓敵軍損失超過 75%（潰走）。',
+      { title: '擊潰敵軍', text: () => `兩面夾擊，讓敵軍損失超過 ${Math.round((1 - ROUT_AT) * 100)}%（潰走）。`,
         goal: '打贏這一戰', check: () => tutWon(), live: () => `敵軍剩 ${Math.round(tutFoeRatio() * 100)}%` },
     ] },
 
@@ -561,7 +561,7 @@ function manBody(id) {
       return P('<b>作戰簡報</b>：讀狀況、敵方配置、地形。情報有<b>準確度</b>：準確度低時兵力、陣型可能有誤，打法、編成、增援可能「不明」。天賦「偵察」能提高準確度。') +
         P('<b>編成</b>：用預算決定每支艦隊的艦種與數量（1 個圖示＝' + opts.rep + ' 艘）、指派指揮官（每位只能帶一支）、起始陣型、排列；可以加<b>補給艦隊</b>（不佔艦隊數）。') +
         P(`<b>部署</b>：在橘色部署區放置艦隊（右鍵＝放置、拖曳＝朝向）。雙方起始距離約 1300，比偵測與掃描範圍遠。`) +
-        P(`<b>勝負</b>：敵軍損失超過 <b>75%</b>＝潰走（勝利），我軍損失超過 75%＝敗北；時間到時依雙方損失比例判定（差距 8% 以內平手）。開戰 ${RETREAT_MIN_T} 秒內撤退不給獎勵，之後撤退獎勵減半。`) +
+        P(`<b>勝負</b>：敵軍損失超過 <b>${Math.round((1 - ROUT_AT) * 100)}%</b>＝潰走（勝利），我軍損失超過 ${Math.round((1 - ROUT_AT) * 100)}%＝敗北；時間到時依雙方損失比例判定（差距 8% 以內平手）。開戰 ${RETREAT_MIN_T} 秒內撤退不給獎勵，之後撤退獎勵減半。`) +
         P('<b>獎勵</b>：指揮官經驗（勝 60／平 35／敗 20，加上擊沉量、艦隊存活過半 +10）與功勳（到星際酒館招募指揮官、購買增援）。每場戰鬥都存成<b>回放</b>，可以從主選單「戰鬥回放」重看、檢討。');
     case 'ships':
       return tutShipTable() + `<table class="tut-tbl" style="margin-top:10px"><tr><th>艦種</th><th class="tl">說明</th><th>防空係數</th><th>大小</th><th>維修機</th></tr>${SHIP_TYPES.map((s, t) => `<tr><td><b>${s.name}</b></td><td class="tl">${s.note}</td><td>${s.aa}</td><td>${HIT_RULE.size[t]}</td><td>${s.repair ? s.repair.n : '—'}</td></tr>`).join('')}</table>` +
@@ -587,6 +587,8 @@ function manBody(id) {
       return `<table class="tut-tbl"><tr><th>艦載機</th><th>耐久</th><th>續航</th><th class="tl">任務</th></tr>${CRAFT.map((c) => `<tr><td><b>${c.name}</b></td><td>${c.hp}</td><td>${c.fuel} 秒</td><td class="tl">${c.note}</td></tr>`).join('')}</table>` +
         P(`<b>航母</b>每艘機庫 ${SHIP_TYPES[0].fighters.n} 架，在編成畫面設定四種機的比例（預設 ${HANGAR_DEFAULT.join('／')}）。艦載機自動出擊、返航補給；被打下的機庫每 ${SHIP_TYPES[0].fighters.build} 秒補一架。天賦「機庫整備」加快補充、提高傷害。`) +
         P(`<b>防空</b>：防空砲優先打飛彈、其次艦載機；副砲在全威力距離內也會打。命中率受艦種防空係數（護衛艦 ${SHIP_TYPES[4].aa} 最高）、陣型（圓陣最好）與天賦「防空網」影響。同時到達的飛彈越多，越容易突破防空。`) +
+        P(`<b>前排輪替</b>：分艦隊裡受損的船會自動跟後方同艦種、狀態好的船（護盾 ≥ ${Math.round(ROTATE_RULE.fresh.sh * 100)}%、船體 ≥ ${Math.round(ROTATE_RULE.fresh.hp * 100)}%）交換位置，換位 ${ROTATE_RULE.dur} 秒、期間主砲副砲停火。一般在護盾打光時換；指揮官特性會改變時機——攻擊型船體剩 ${Math.round(ROTATE_RULE.hull * 100)}% 才換、防禦型護盾剩 ${Math.round(ROTATE_RULE.shEarly * 100)}% 就換（護盾回充 +${Math.round(ROTATE_RULE.shRegen * 100)}%）、機動型換位快 ${Math.round(ROTATE_RULE.fast * 100)}%；天賦「輪替演練」再加快。陣型越厚，後排越有船可以替換；變陣、轉向時會中斷。`) +
+        P(`<b>戰地維修</b>：船體低於 ${Math.round(FIELD_REPAIR.below * 100)}%、${FIELD_REPAIR.quiet} 秒沒被打中，就在 ${FIELD_REPAIR.dur} 秒內逐步修理。在補給艦 ${SUPPLY_RULE.range} 範圍內：第 1 次回復最大耐久的 ${Math.round(FIELD_REPAIR.first * 100)}%、之後每次減半，每艘船基本可修 ${FIELD_REPAIR.n} 次；不在範圍內：只有還沒修過的船能修 1 次（${Math.round(FIELD_REPAIR.alone * 100)}%）。天賦「損害管制」每階次數 +1、單次 +${Math.round(FIELD_REPAIR.step * 100)}%。所以<b>輪替到後排的船能在補給艦旁修整</b>。`) +
         P(`<b>補給</b>：巡洋艦 ${SHIP_TYPES[2].missile.n} 發、驅逐艦 ${SHIP_TYPES[3].missile.n} 發，打完要補。補給艦隊（補給艦＋護衛艦）${SUPPLY_RULE.range} 範圍內、飛彈沒滿的友艦每 ${SUPPLY_RULE.cd} 秒補 1 發，每艘補給艦帶 ${SHIP_TYPES[5].supply.stock} 發，被擊沉就跟著沒了。補給艦隊可以設定<b>跟隨</b>某支艦隊（待在後方 ${SUPPLY_RULE.follow}）；直接對它下移動命令會取消跟隨。`);
     case 'skills':
       return tutSkillTable() +

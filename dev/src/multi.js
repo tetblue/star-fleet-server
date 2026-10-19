@@ -239,7 +239,7 @@ function showRoom() {
           <dt>地形</dt><dd>${seg('terr', RAND_TERR)}${host ? '<button class="g-btn sm" id="rm-reroll" style="margin-left:6px">⟳ 換一張地圖</button>' : ''}</dd>
           <dt>操作難度</dt><dd>${seg('op', OP_LEVELS)}<div class="g-dim">${OP_LEVELS[r.opts.op].desc}</div></dd>
           <dt>速度</dt><dd>${seg('speed', MP_SPEEDS, (v) => '×' + v)}<div class="g-dim">戰鬥中不能暫停、不能調速度</div></dd>
-          <dt>勝負</dt><dd>對方損失超過 75% 就潰走；時間到依雙方損失比例判定</dd>
+          <dt>勝負</dt><dd>對方損失超過 ${Math.round((1 - ROUT_AT) * 100)}% 就潰走；時間到依雙方損失比例判定</dd>
           <dt>增援</dt><dd>每位指揮官每場可以呼叫 1 次增援（本場預算的 25%），不用天賦、不扣酒館的次數</dd></dl></div>
         ${mine ? `<div class="g-card"><h3>你的艦隊</h3><div class="g-row"><span class="g-dim">陣營</span><div class="wed-seg" id="rm-fac"><button data-f="0" class="${mine.faction === 0 ? 'on emp' : ''}" ${mine.ready ? 'disabled' : ''}>帝國軍</button><button data-f="1" class="${mine.faction === 1 ? 'on all' : ''}" ${mine.ready ? 'disabled' : ''}>聯盟軍</button></div>
             <span class="g-dim" style="font-size:calc(12px * var(--ui))">雙方可以同陣營</span><span class="g-sp"></span><button class="g-btn sm" id="rm-cmdr">多人指揮官</button></div>
