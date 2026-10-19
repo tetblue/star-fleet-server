@@ -740,7 +740,7 @@
     <h4 style="margin-top:14px">移動規則</h4>
     <p style="margin:0;color:var(--dim);font-size:calc(13px * var(--ui));line-height:1.6">指定朝向與目前朝向差 60° 以內：直接過去，邊走邊微調；目標在後方就倒退（半速），在側面 0.6 倍速。差 60°～120°：原地轉向，重排、移動、轉向同時進行。差 120° 以上：反向迴轉——窄的陣型（縱陣等）蛇行，艦首帶頭繞彎、後面沿同一條路跟上；寬的陣型（橫陣等）打散，每艘船各自繞弧線掉頭，到目的地重新組成陣型。可在測試場面板「反向迴轉」固定用其中一種。迴轉途中下的變陣命令，會在迴轉完成後執行。</p>
     <h4 style="margin-top:14px">光束射程</h4>
-    <p style="margin:0;color:var(--dim);font-size:calc(13px * var(--ui));line-height:1.6">光束在有效射程（預設 250）內全威力，之後隨距離線性衰減，到最大射程（預設 700）剩 50%，超過最大射程不開火。開戰時兩軍約相距 480，威力約七成五；拉近距離才能打出全部火力。飛彈不受影響。左上角顯示兩軍光束目前的平均威力。</p>
+    <p style="margin:0;color:var(--dim);font-size:calc(13px * var(--ui));line-height:1.6">光束在有效射程（預設 250）內全威力，之後隨距離線性衰減，到最大射程（預設 700）剩 30%，超過最大射程不開火。開戰時兩軍約相距 480，威力約六成五；拉近距離才能打出全部火力。飛彈不受影響。左上角顯示兩軍光束目前的平均威力。</p>
     <h4 style="margin-top:14px">側面與背後</h4>
     <p style="margin:0;color:var(--dim);font-size:calc(13px * var(--ui));line-height:1.6">被攻擊的方向以目標艦當下的船頭判斷：前方 ±60° 是正面，船尾 ±60° 是背後，其餘是側面。側面、背後受擊的擊沉機率預設加倍（面板「戰況」可調）。分艦隊最近受到的攻擊有三成以上來自側背時，標籤會顯示紅字警示；左上角統計各方向被擊沉的艦數。下令前地面會顯示路線、到達位置和朝向箭頭。</p></div>
   </div>
@@ -804,7 +804,7 @@
   <label class="t"><input type="checkbox" id="t-adv"><span>雙方前進</span></label>
   <label class="t"><input type="checkbox" id="t-face"><span>停著時自動迎敵<small>主砲只能打前方：沒下令的部隊會自己把船頭轉向敵人</small></span></label>
   <div class="slider"><span>光束射程倍率</span><output id="n-range-v">×1.00</output><input id="n-range" type="range" min="0.5" max="2" step="0.05" value="1"></div>
-  <p class="note">各艦種有自己的有效射程與最大射程（戰列艦最遠）。有效射程內全威力，之後線性減弱到最大射程時剩 50%，再遠就不開火。</p>
+  <p class="note">各艦種有自己的有效射程與最大射程（戰列艦最遠）。有效射程內全威力，之後線性減弱到最大射程時剩 30%，再遠就不開火。</p>
   <div class="slider"><span>側面受擊（船體）</span><output id="n-flank-side-v">×1.5</output><input id="n-flank-side" type="range" min="1" max="4" step="0.25" value="1.5"></div>
   <div class="slider"><span>背後受擊（船體）</span><output id="n-flank-rear-v">×1.75</output><input id="n-flank-rear" type="range" min="1" max="4" step="0.25" value="1.75"></div>
   <p class="note">以目標艦當下的船頭判斷：前方 ±60° 正面、船尾 ±60° 背後，其餘為側面。迴轉中最容易被打側背。</p>

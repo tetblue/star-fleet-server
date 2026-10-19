@@ -38,7 +38,7 @@ const opts = {
   uturn: 'auto',
   autoFace: true,               // 停著的部隊自動把船頭轉向敵人（主砲有射角）
   flankSide: 1.5, flankRear: 1.75,   // 側面、背後受擊時「船體」傷害倍率（護盾沒有方向）
-  beamNear: 250, beamFar: 700,  // 光束：有效射程內全威力，之後線性衰減到最大射程時剩 BEAM_FALLOFF_MIN（50%），超過不開火
+  beamNear: 250, beamFar: 700,  // 光束：有效射程內全威力，之後線性衰減到最大射程時剩 BEAM_FALLOFF_MIN（30%），超過不開火
   perSide: 3000, rep: 5, persp: true, altitude: true, fog: true, glow: true,
   bloom: true, fire: true, labels: true, background: true, advance: false,
   flat: false,                  // 操作難度「一般」：艦隊都在同一平面（不能升降）
@@ -3125,6 +3125,9 @@ function processHits() {
       if (sh0 >= need) shD = need; else { shD = sh0; hullD = (need - sh0) / mods.shTaken * hm; }
     }
     ships.sh[ti] = sh0 - shD; if (shD > 0) ships.shT[ti] = t;
+    // 護盾被打光：至少 broken 秒後才重新啟動；已經沒護盾時船體再被打，也要重新等 delay 秒
+    if (sh0 > 0.5 && ships.sh[ti] <= 0.5) ships.shT[ti] = t + SHIELD_RULE.broken - SHIELD_RULE.delay;
+    else if (sh0 <= 0.5 && hullD > 0) ships.shT[ti] = Math.max(ships.shT[ti], t);
     ships.hp[ti] -= hullD;
     const eff = shD + hullD;
     e.kill = ships.hp[ti] <= 0;

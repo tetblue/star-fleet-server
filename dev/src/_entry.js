@@ -38,7 +38,7 @@ const opts = {
   uturn: 'auto',
   autoFace: true,               // 停著的部隊自動把船頭轉向敵人（主砲有射角）
   flankSide: 1.5, flankRear: 1.75,   // 側面、背後受擊時「船體」傷害倍率（護盾沒有方向）
-  beamNear: 250, beamFar: 700,  // 光束：有效射程內全威力，之後線性衰減到最大射程時剩 BEAM_FALLOFF_MIN（50%），超過不開火
+  beamNear: 250, beamFar: 700,  // 光束：有效射程內全威力，之後線性衰減到最大射程時剩 BEAM_FALLOFF_MIN（30%），超過不開火
   perSide: 3000, rep: 5, persp: true, altitude: true, fog: true, glow: true,
   bloom: true, fire: true, labels: true, background: true, advance: false,
   flat: false,                  // 操作難度「一般」：艦隊都在同一平面（不能升降）
@@ -3125,6 +3125,9 @@ function processHits() {
       if (sh0 >= need) shD = need; else { shD = sh0; hullD = (need - sh0) / mods.shTaken * hm; }
     }
     ships.sh[ti] = sh0 - shD; if (shD > 0) ships.shT[ti] = t;
+    // 護盾被打光：至少 broken 秒後才重新啟動；已經沒護盾時船體再被打，也要重新等 delay 秒
+    if (sh0 > 0.5 && ships.sh[ti] <= 0.5) ships.shT[ti] = t + SHIELD_RULE.broken - SHIELD_RULE.delay;
+    else if (sh0 <= 0.5 && hullD > 0) ships.shT[ti] = Math.max(ships.shT[ti], t);
     ships.hp[ti] -= hullD;
     const eff = shD + hullD;
     e.kill = ships.hp[ti] <= 0;
@@ -4889,14 +4892,14 @@ const SHIP_TYPES = [
     guns: { main: { dmg: 15, cd: 4.5, near: 280, far: 700, arc: 30, acc: 0.85 },
       sec: { dmg: 7, cd: 2.5, near: 200, far: 480, arc: 120, acc: 0.8 },
       aa: { dmg: 1.2, cd: 1, near: 90, far: 170, arc: 180, acc: 0.7 } },
-    missile: { dmg: 40, cd: 50, range: 800, n: 4 }, fighters: null, repair: { n: 2, amount: 24, cd: 18 },
-    note: '均衡；遠距離自動發射飛彈（攜彈 4 發）。' },
+    missile: { dmg: 40, cd: 60, range: 800, n: 3 }, fighters: null, repair: { n: 2, amount: 24, cd: 18 },
+    note: '均衡；遠距離自動發射飛彈（攜彈 3 發）。' },
   { key: 'destroyer', name: '驅逐艦', cost: 1.5, hp: 70, sh: 35, speed: 1.25, aa: 0.2,
     guns: { main: { dmg: 10, cd: 4, near: 220, far: 520, arc: 25, acc: 0.85 },
       sec: { dmg: 5, cd: 2, near: 160, far: 400, arc: 120, acc: 0.8 },
       aa: { dmg: 1, cd: 1, near: 80, far: 160, arc: 180, acc: 0.7 } },
-    missile: { dmg: 40, cd: 36, range: 650, n: 6 }, fighters: null, repair: { n: 1, amount: 24, cd: 18 },
-    note: '快、飛彈發射最頻繁（攜彈 6 發）；適合包抄與追擊。' },
+    missile: { dmg: 40, cd: 45, range: 650, n: 4 }, fighters: null, repair: { n: 1, amount: 24, cd: 18 },
+    note: '快、飛彈發射最頻繁（攜彈 4 發）；適合包抄與追擊。' },
   { key: 'escort', name: '護衛艦', cost: 1, hp: 50, sh: 25, speed: 1.3, aa: 0.45,
     guns: { main: null,
       sec: { dmg: 5, cd: 2, near: 160, far: 420, arc: 135, acc: 0.8 },
@@ -4937,7 +4940,7 @@ const GUN_NAME = { main: '主砲', sec: '副砲', aa: '防空' };
 for (const t of SHIP_TYPES) { const g = t.guns.main || t.guns.sec || t.guns.aa; t.beam = { near: g.near, far: g.far, dmg: g.dmg, cd: g.cd }; }
 // 命中率＝基本命中率 × 距離 × 目標大小 × 目標速度 × 環境，限制在 5%～97%
 const HIT_RULE = {
-  farMul: 0.6,                                   // 最大射程時命中率剩幾成（全威力距離內 100%）
+  farMul: 0.4,                                  // 最大射程時命中率剩幾成（全威力距離內 100%）
   size: [1.15, 1.1, 1.0, 0.85, 0.75, 1.05],      // 目標艦種的大小係數（航母、戰列、巡洋、驅逐、護衛、補給）
   mainSizePow: 1.5,                              // 主砲轉得慢：大小係數再取這個次方（打小船更吃虧）
   speedRef: 25, speedMax: 0.35,                  // 目標速度達 speedRef（每秒單位）時命中率 −35%
@@ -4948,7 +4951,7 @@ const HIT_RULE = {
 // 對空：防空砲優先打飛彈、其次艦載機；副砲在全威力距離內也會打。命中率同上公式，大小係數換成下面的值
 //   formBase＋陣型 aa（橫陣 0.3、圓陣 0.6…）＝對空命中倍率；飛彈一發打中就毀，艦載機有耐久
 //   missileShots：每顆飛彈最多被瞄準幾次（太多門砲同時打一顆會全部攔下）；fighterGap：同一架艦載機每隔幾秒才會再被瞄準
-const AIR_RULE = { missileSize: 0.45, droneSize: 0.4, formBase: 0.7, droneHp: 6, missileShots: 3, fighterGap: 1.2 };   // 艦載機的大小、耐久見 CRAFT
+const AIR_RULE = { missileSize: 0.55, droneSize: 0.4, formBase: 0.7, droneHp: 6, missileShots: 3, fighterGap: 1.2 };   // 艦載機的大小、耐久見 CRAFT
 // 飛彈、艦載機攻擊船的命中率（另外還會被防空砲／副砲攔截）：基本 × 目標大小^sizePow × 目標速度 × 星雲 × 被干擾
 //   飛彈有導引：對大小、速度比較不敏感；lance＝光束攻擊機的持續光束
 const STRIKE_RULE = {
@@ -4972,11 +4975,12 @@ const CRAFT = [
 const HANGAR_DEFAULT = [2, 2, 1, 1];   // 攔截、攻擊、飛彈、光束
 // 攔截機：巡邏半徑、交戰半徑（以艦隊中心算）、對艦載機／飛彈的命中率、每發傷害、射擊間隔、開火距離
 const INTERCEPT_RULE = { patrol: 160, engage: 340, acc: { fighter: 0.7, missile: 0.5 }, dmg: 3, cd: [0.3, 0.55], range: 60 };
-const BEAM_FALLOFF_MIN = 0.5;                    // 距離減傷：最大射程時傷害剩 50%（全威力距離內 100%）
+const BEAM_FALLOFF_MIN = 0.3;                    // 距離減傷：最大射程時傷害剩 30%（全威力距離內 100%）
 // 護盾回充：最後一次被打 delay 秒後開始，每秒回 rate × 容量
-const SHIELD_RULE = { delay: 10, rate: 0.02 };
+//   broken＝護盾被完全打光後，至少要等這麼多秒才重新啟動（沒護盾時船體再被打，也要重新等 delay 秒）
+const SHIELD_RULE = { delay: 5, rate: 0.05, broken: 15 };
 // 飛彈：護盾還在時，護盾吃 shield 倍、爆炸同時傷到船體 blast 倍；護盾沒了直擊船體 direct 倍
-const MISSILE_RULE = { shield: 0.6, blast: 0.35, direct: 1.4 };
+const MISSILE_RULE = { shield: 0.6, blast: 0.3, direct: 1.0 };
 const SHIP_ORDER_FRONT_TO_BACK = [4, 3, 2, 1, 5, 0];   // 陣型中由前到後的擺放順序（補給艦在中後方）
 
 // 技能：targetMode＝'enemy' 需要點選敵方分艦隊；scope＝'fleet' 只影響該指揮官的艦隊，'side' 影響全軍
@@ -7736,7 +7740,7 @@ const TUT_LESSONS = [
         goal: '飛彈齊射一次', check: (S) => S.cmds('missile').length > 0 },
       { title: '全艦齊射', text: () => `按 ${tutK('volley')} <b>全艦齊射</b>：冷卻好的光束砲同時開火。適合在敵人剛進入全威力距離、或護盾剛被打穿時爆發。`,
         goal: '全艦齊射一次', check: (S) => S.cmds('volley').length > 0 },
-      { title: '殲滅標靶', text: () => `把兩支標靶打到剩不到 25%。<br><small>護盾沒有方向，要先打光護盾才傷得到船體；護盾在 ${SHIELD_RULE.delay} 秒沒被打後開始回充——所以<b>火力要集中、不要分散</b>。${typeof DEFLECT_RULE !== 'undefined' ? `光束打在護盾上有 ${Math.round(DEFLECT_RULE.none * 100)}% 機率被完全偏折、${Math.round(DEFLECT_RULE.half * 100)}% 機率減半。` : ''}</small>`,
+      { title: '殲滅標靶', text: () => `把兩支標靶打到剩不到 25%。<br><small>護盾沒有方向，要先打光護盾才傷得到船體；護盾在 ${SHIELD_RULE.delay} 秒沒被打後開始回充（被打光則要 ${SHIELD_RULE.broken} 秒）——所以<b>火力要集中、不要分散</b>。${typeof DEFLECT_RULE !== 'undefined' ? `光束打在護盾上有 ${Math.round(DEFLECT_RULE.none * 100)}% 機率被完全偏折、${Math.round(DEFLECT_RULE.half * 100)}% 機率減半。` : ''}</small>`,
         goal: '標靶兵力剩不到 25%', check: () => tutFoeRatio() < 0.25, live: () => `標靶剩 ${Math.round(tutFoeRatio() * 100)}%` },
       { title: '完成', pause: true, text: '武器會自己打，指揮官決定的是<b>距離、角度與目標</b>。下一課學習傷害加倍的<b>側背攻擊</b>。' },
     ] },
@@ -8148,7 +8152,7 @@ function manBody(id) {
       return tutGunTable() +
         P(`<b>三種光束砲</b>：主砲只打船頭前方（約 ±30°）、射程最遠、單發最重；副砲射角大（前方＋兩側）；防空砲全方向，優先打飛彈、其次艦載機，射程內都沒有才打船。每種砲各自冷卻、各自選目標。`) +
         P(`<b>命中率</b>＝基本命中率 × 距離 × 目標大小 × 目標速度 × 環境，限制在 ${Math.round(HIT_RULE.min * 100)}%～${Math.round(HIT_RULE.max * 100)}%。全威力距離內 100%，最大射程剩 ${Math.round(HIT_RULE.farMul * 100)}%；目標越快越難打中（最多 −${Math.round(HIT_RULE.speedMax * 100)}%）；星雲 ×${HIT_RULE.nebula}；被干擾 ×${HIT_RULE.jammed}。`) +
-        P(`<b>傷害</b>：距離越遠越低（最大射程剩 ${Math.round(BEAM_FALLOFF_MIN * 100)}%）。光束要先打光<b>護盾</b>才傷到船體；護盾在 ${SHIELD_RULE.delay} 秒沒被打後以每秒 ${SHIELD_RULE.rate * 100}% 回充——受損的艦隊退到後方能恢復護盾。${typeof DEFLECT_RULE !== 'undefined' ? `光束打在護盾上有 ${Math.round(DEFLECT_RULE.none * 100)}% 完全偏折、${Math.round(DEFLECT_RULE.half * 100)}% 減半（天賦「能量調度」提高）。` : ''}`) +
+        P(`<b>傷害</b>：距離越遠越低（最大射程剩 ${Math.round(BEAM_FALLOFF_MIN * 100)}%）。光束要先打光<b>護盾</b>才傷到船體；護盾在 ${SHIELD_RULE.delay} 秒沒被打後以每秒 ${Math.round(SHIELD_RULE.rate * 100)}% 回充；被完全打光的護盾要 ${SHIELD_RULE.broken} 秒後才重新啟動——受損的艦隊退到後方能恢復護盾，前排輪替很重要。${typeof DEFLECT_RULE !== 'undefined' ? `光束打在護盾上有 ${Math.round(DEFLECT_RULE.none * 100)}% 完全偏折、${Math.round(DEFLECT_RULE.half * 100)}% 減半（天賦「能量調度」提高）。` : ''}`) +
         P(`<b>飛彈</b>：射程比光束遠、不衰減、有導引（對小船、快船也準），但會被防空攔截。護盾還在時：護盾吃 ×${MISSILE_RULE.shield}、船體同時受 ×${MISSILE_RULE.blast}；護盾打光後直擊船體 ×${MISSILE_RULE.direct}。所以<b>先用光束剝護盾、再用飛彈收割</b>。`) +
         P('<b>射線</b>：光束沿射線判定，擋在前面的敵艦先挨打、打偏的可能打中後方的敵艦；巨大小行星會擋住光束與飛彈。') +
         P(`<b>指定攻擊</b>（${tutK('attack')}＋點敵軍）不加傷害、沒有次數限制；<b>集中火力</b>（技能）全軍 +20%。<b>全艦齊射</b>（${tutK('volley')}）、<b>飛彈齊射</b>（${tutK('missile')}）讓冷卻好的武器一起發射，適合爆發。`);

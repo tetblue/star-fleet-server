@@ -35,14 +35,14 @@ const SHIP_TYPES = [
     guns: { main: { dmg: 15, cd: 4.5, near: 280, far: 700, arc: 30, acc: 0.85 },
       sec: { dmg: 7, cd: 2.5, near: 200, far: 480, arc: 120, acc: 0.8 },
       aa: { dmg: 1.2, cd: 1, near: 90, far: 170, arc: 180, acc: 0.7 } },
-    missile: { dmg: 40, cd: 50, range: 800, n: 4 }, fighters: null, repair: { n: 2, amount: 24, cd: 18 },
-    note: '均衡；遠距離自動發射飛彈（攜彈 4 發）。' },
+    missile: { dmg: 40, cd: 60, range: 800, n: 3 }, fighters: null, repair: { n: 2, amount: 24, cd: 18 },
+    note: '均衡；遠距離自動發射飛彈（攜彈 3 發）。' },
   { key: 'destroyer', name: '驅逐艦', cost: 1.5, hp: 70, sh: 35, speed: 1.25, aa: 0.2,
     guns: { main: { dmg: 10, cd: 4, near: 220, far: 520, arc: 25, acc: 0.85 },
       sec: { dmg: 5, cd: 2, near: 160, far: 400, arc: 120, acc: 0.8 },
       aa: { dmg: 1, cd: 1, near: 80, far: 160, arc: 180, acc: 0.7 } },
-    missile: { dmg: 40, cd: 36, range: 650, n: 6 }, fighters: null, repair: { n: 1, amount: 24, cd: 18 },
-    note: '快、飛彈發射最頻繁（攜彈 6 發）；適合包抄與追擊。' },
+    missile: { dmg: 40, cd: 45, range: 650, n: 4 }, fighters: null, repair: { n: 1, amount: 24, cd: 18 },
+    note: '快、飛彈發射最頻繁（攜彈 4 發）；適合包抄與追擊。' },
   { key: 'escort', name: '護衛艦', cost: 1, hp: 50, sh: 25, speed: 1.3, aa: 0.45,
     guns: { main: null,
       sec: { dmg: 5, cd: 2, near: 160, far: 420, arc: 135, acc: 0.8 },
@@ -83,7 +83,7 @@ const GUN_NAME = { main: '主砲', sec: '副砲', aa: '防空' };
 for (const t of SHIP_TYPES) { const g = t.guns.main || t.guns.sec || t.guns.aa; t.beam = { near: g.near, far: g.far, dmg: g.dmg, cd: g.cd }; }
 // 命中率＝基本命中率 × 距離 × 目標大小 × 目標速度 × 環境，限制在 5%～97%
 const HIT_RULE = {
-  farMul: 0.6,                                   // 最大射程時命中率剩幾成（全威力距離內 100%）
+  farMul: 0.4,                                  // 最大射程時命中率剩幾成（全威力距離內 100%）
   size: [1.15, 1.1, 1.0, 0.85, 0.75, 1.05],      // 目標艦種的大小係數（航母、戰列、巡洋、驅逐、護衛、補給）
   mainSizePow: 1.5,                              // 主砲轉得慢：大小係數再取這個次方（打小船更吃虧）
   speedRef: 25, speedMax: 0.35,                  // 目標速度達 speedRef（每秒單位）時命中率 −35%
@@ -94,7 +94,7 @@ const HIT_RULE = {
 // 對空：防空砲優先打飛彈、其次艦載機；副砲在全威力距離內也會打。命中率同上公式，大小係數換成下面的值
 //   formBase＋陣型 aa（橫陣 0.3、圓陣 0.6…）＝對空命中倍率；飛彈一發打中就毀，艦載機有耐久
 //   missileShots：每顆飛彈最多被瞄準幾次（太多門砲同時打一顆會全部攔下）；fighterGap：同一架艦載機每隔幾秒才會再被瞄準
-const AIR_RULE = { missileSize: 0.45, droneSize: 0.4, formBase: 0.7, droneHp: 6, missileShots: 3, fighterGap: 1.2 };   // 艦載機的大小、耐久見 CRAFT
+const AIR_RULE = { missileSize: 0.55, droneSize: 0.4, formBase: 0.7, droneHp: 6, missileShots: 3, fighterGap: 1.2 };   // 艦載機的大小、耐久見 CRAFT
 // 飛彈、艦載機攻擊船的命中率（另外還會被防空砲／副砲攔截）：基本 × 目標大小^sizePow × 目標速度 × 星雲 × 被干擾
 //   飛彈有導引：對大小、速度比較不敏感；lance＝光束攻擊機的持續光束
 const STRIKE_RULE = {
@@ -118,11 +118,12 @@ const CRAFT = [
 const HANGAR_DEFAULT = [2, 2, 1, 1];   // 攔截、攻擊、飛彈、光束
 // 攔截機：巡邏半徑、交戰半徑（以艦隊中心算）、對艦載機／飛彈的命中率、每發傷害、射擊間隔、開火距離
 const INTERCEPT_RULE = { patrol: 160, engage: 340, acc: { fighter: 0.7, missile: 0.5 }, dmg: 3, cd: [0.3, 0.55], range: 60 };
-const BEAM_FALLOFF_MIN = 0.5;                    // 距離減傷：最大射程時傷害剩 50%（全威力距離內 100%）
+const BEAM_FALLOFF_MIN = 0.3;                    // 距離減傷：最大射程時傷害剩 30%（全威力距離內 100%）
 // 護盾回充：最後一次被打 delay 秒後開始，每秒回 rate × 容量
-const SHIELD_RULE = { delay: 10, rate: 0.02 };
+//   broken＝護盾被完全打光後，至少要等這麼多秒才重新啟動（沒護盾時船體再被打，也要重新等 delay 秒）
+const SHIELD_RULE = { delay: 5, rate: 0.05, broken: 15 };
 // 飛彈：護盾還在時，護盾吃 shield 倍、爆炸同時傷到船體 blast 倍；護盾沒了直擊船體 direct 倍
-const MISSILE_RULE = { shield: 0.6, blast: 0.35, direct: 1.4 };
+const MISSILE_RULE = { shield: 0.6, blast: 0.3, direct: 1.0 };
 const SHIP_ORDER_FRONT_TO_BACK = [4, 3, 2, 1, 5, 0];   // 陣型中由前到後的擺放順序（補給艦在中後方）
 
 // 技能：targetMode＝'enemy' 需要點選敵方分艦隊；scope＝'fleet' 只影響該指揮官的艦隊，'side' 影響全軍

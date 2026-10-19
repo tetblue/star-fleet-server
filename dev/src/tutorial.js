@@ -158,7 +158,7 @@ const TUT_LESSONS = [
         goal: '飛彈齊射一次', check: (S) => S.cmds('missile').length > 0 },
       { title: '全艦齊射', text: () => `按 ${tutK('volley')} <b>全艦齊射</b>：冷卻好的光束砲同時開火。適合在敵人剛進入全威力距離、或護盾剛被打穿時爆發。`,
         goal: '全艦齊射一次', check: (S) => S.cmds('volley').length > 0 },
-      { title: '殲滅標靶', text: () => `把兩支標靶打到剩不到 25%。<br><small>護盾沒有方向，要先打光護盾才傷得到船體；護盾在 ${SHIELD_RULE.delay} 秒沒被打後開始回充——所以<b>火力要集中、不要分散</b>。${typeof DEFLECT_RULE !== 'undefined' ? `光束打在護盾上有 ${Math.round(DEFLECT_RULE.none * 100)}% 機率被完全偏折、${Math.round(DEFLECT_RULE.half * 100)}% 機率減半。` : ''}</small>`,
+      { title: '殲滅標靶', text: () => `把兩支標靶打到剩不到 25%。<br><small>護盾沒有方向，要先打光護盾才傷得到船體；護盾在 ${SHIELD_RULE.delay} 秒沒被打後開始回充（被打光則要 ${SHIELD_RULE.broken} 秒）——所以<b>火力要集中、不要分散</b>。${typeof DEFLECT_RULE !== 'undefined' ? `光束打在護盾上有 ${Math.round(DEFLECT_RULE.none * 100)}% 機率被完全偏折、${Math.round(DEFLECT_RULE.half * 100)}% 機率減半。` : ''}</small>`,
         goal: '標靶兵力剩不到 25%', check: () => tutFoeRatio() < 0.25, live: () => `標靶剩 ${Math.round(tutFoeRatio() * 100)}%` },
       { title: '完成', pause: true, text: '武器會自己打，指揮官決定的是<b>距離、角度與目標</b>。下一課學習傷害加倍的<b>側背攻擊</b>。' },
     ] },
@@ -570,7 +570,7 @@ function manBody(id) {
       return tutGunTable() +
         P(`<b>三種光束砲</b>：主砲只打船頭前方（約 ±30°）、射程最遠、單發最重；副砲射角大（前方＋兩側）；防空砲全方向，優先打飛彈、其次艦載機，射程內都沒有才打船。每種砲各自冷卻、各自選目標。`) +
         P(`<b>命中率</b>＝基本命中率 × 距離 × 目標大小 × 目標速度 × 環境，限制在 ${Math.round(HIT_RULE.min * 100)}%～${Math.round(HIT_RULE.max * 100)}%。全威力距離內 100%，最大射程剩 ${Math.round(HIT_RULE.farMul * 100)}%；目標越快越難打中（最多 −${Math.round(HIT_RULE.speedMax * 100)}%）；星雲 ×${HIT_RULE.nebula}；被干擾 ×${HIT_RULE.jammed}。`) +
-        P(`<b>傷害</b>：距離越遠越低（最大射程剩 ${Math.round(BEAM_FALLOFF_MIN * 100)}%）。光束要先打光<b>護盾</b>才傷到船體；護盾在 ${SHIELD_RULE.delay} 秒沒被打後以每秒 ${SHIELD_RULE.rate * 100}% 回充——受損的艦隊退到後方能恢復護盾。${typeof DEFLECT_RULE !== 'undefined' ? `光束打在護盾上有 ${Math.round(DEFLECT_RULE.none * 100)}% 完全偏折、${Math.round(DEFLECT_RULE.half * 100)}% 減半（天賦「能量調度」提高）。` : ''}`) +
+        P(`<b>傷害</b>：距離越遠越低（最大射程剩 ${Math.round(BEAM_FALLOFF_MIN * 100)}%）。光束要先打光<b>護盾</b>才傷到船體；護盾在 ${SHIELD_RULE.delay} 秒沒被打後以每秒 ${Math.round(SHIELD_RULE.rate * 100)}% 回充；被完全打光的護盾要 ${SHIELD_RULE.broken} 秒後才重新啟動——受損的艦隊退到後方能恢復護盾，前排輪替很重要。${typeof DEFLECT_RULE !== 'undefined' ? `光束打在護盾上有 ${Math.round(DEFLECT_RULE.none * 100)}% 完全偏折、${Math.round(DEFLECT_RULE.half * 100)}% 減半（天賦「能量調度」提高）。` : ''}`) +
         P(`<b>飛彈</b>：射程比光束遠、不衰減、有導引（對小船、快船也準），但會被防空攔截。護盾還在時：護盾吃 ×${MISSILE_RULE.shield}、船體同時受 ×${MISSILE_RULE.blast}；護盾打光後直擊船體 ×${MISSILE_RULE.direct}。所以<b>先用光束剝護盾、再用飛彈收割</b>。`) +
         P('<b>射線</b>：光束沿射線判定，擋在前面的敵艦先挨打、打偏的可能打中後方的敵艦；巨大小行星會擋住光束與飛彈。') +
         P(`<b>指定攻擊</b>（${tutK('attack')}＋點敵軍）不加傷害、沒有次數限制；<b>集中火力</b>（技能）全軍 +20%。<b>全艦齊射</b>（${tutK('volley')}）、<b>飛彈齊射</b>（${tutK('missile')}）讓冷卻好的武器一起發射，適合爆發。`);
