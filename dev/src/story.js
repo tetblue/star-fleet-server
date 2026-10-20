@@ -35,9 +35,9 @@ const STORY_STAGES = [
     story: '正面強攻只會白白送死。亞倫決定用干擾癱瘓要塞的防衛網。' },
   { id: '10', ch: 2, side: 0, name: '殿後', place: '歐倫星系', x: 420, y: 560, cast: ['rein', 'kas'], goal: '讓主力撤出戰場',
     story: '埃吉斯失守，帝國艦隊全面撤退。總要有人留下來擋住追兵。' },
-  { id: '11', ch: 3, side: 0, name: '和平的使者', place: '洛珊航道', x: 570, y: 700, cast: ['erin'], goal: '護送使節艦',
+  { id: '11', ch: 3, merc: true, side: 0, name: '和平的使者', place: '洛珊航道', x: 570, y: 700, cast: ['erin'], goal: '護送使節艦',
     story: '兩國同意在洛珊舉行停戰談判。艾琳負責護送帝國使節艦，沿途出現身分不明的艦隊。' },
-  { id: '12', ch: 3, side: 1, name: '破局', place: '洛珊港外', x: 960, y: 760, cast: ['aaron'], goal: '突圍脫出',
+  { id: '12', ch: 3, merc: true, side: 1, name: '破局', place: '洛珊港外', x: 960, y: 760, cast: ['aaron'], goal: '突圍脫出',
     story: '使節艦在洛珊港外遇襲，兩國互指對方背信。亞倫手上的戰前情報，從一開始就是假的。' },
   { id: '13', ch: 3, side: 0, name: '同室操戈', place: '布雷克星系', x: 300, y: 230, cast: ['rein', 'erin'], goal: '擊破格倫的艦隊',
     story: '雷恩查到了襲擊的主使：凡德林公爵與赫爾墨斯軍需集團。攝政派宣布雷恩叛國，帝國內戰爆發。' },
@@ -60,26 +60,40 @@ const STORY_STAGES = [
     story: '走廊已經打通，前方就是聯盟首都。議會集結了最後的防衛艦隊。' },
   { id: '20a', ch: 5, side: 1, route: 'a', name: '帝都陷落', place: '維斯特拉', x: 210, y: 470, cast: ['aaron'], goal: '擊破近衛艦隊',
     story: '聯盟艦隊第一次看見帝都的天空。近衛艦隊和攝政派殘黨在軌道上列陣。' },
-  { id: '21e', ch: 5, side: 0, route: 'e', name: '新王朝', place: '洛珊', x: 760, y: 800, cast: ['rein', 'erin'], goal: '擊潰赫爾墨斯私兵艦隊',
+  { id: '21e', ch: 5, merc: true, side: 0, route: 'e', name: '新王朝', place: '洛珊', x: 760, y: 800, cast: ['rein', 'erin'], goal: '擊潰赫爾墨斯私兵艦隊',
     story: '赫爾墨斯軍需集團不打算交出洛珊，私兵艦隊封鎖了港口。這是這場戰爭的最後一筆帳。',
     ending: '洛珊歸順，聯盟議會投降。雷恩登基，奧瑞利安帝國統治了約八成五的人類星域。共和制度從此成為歷史。' },
-  { id: '21a', ch: 5, side: 1, route: 'a', name: '共和之星', place: '洛珊', x: 760, y: 800, cast: ['aaron'], goal: '擊潰赫爾墨斯私兵艦隊',
+  { id: '21a', ch: 5, merc: true, side: 1, route: 'a', name: '共和之星', place: '洛珊', x: 760, y: 800, cast: ['aaron'], goal: '擊潰赫爾墨斯私兵艦隊',
     story: '赫爾墨斯軍需集團不打算交出洛珊，私兵艦隊封鎖了港口。這是這場戰爭的最後一筆帳。',
     ending: '洛珊與帝國各星區以加盟國的身分併入聯盟，自由星系聯盟擁有約八成五的人類星域。議會依然腐敗，而亞倫成了不得不從政的英雄。' },
+  // ── 支線：灰鴉傭兵團（第一章；不打也能繼續主線）。req＝要先打完的關、at＝劇情時間點（在哪一關之後：決定誰已經退場）、merc＝跟傭兵有關的任務 ──
+  { id: 's1', sub: true, merc: true, req: ['5'], at: '5', ch: 1, side: 0, name: '鏽色的海盜', place: '卡德倫外緣', x: 340, y: 170, cast: ['kas'], goal: '擊退海盜艦隊',
+    story: '卡德倫的補給線接連被「海盜」劫掠。卡斯追了上去，才發現對方的陣形和裝備都不像海盜。',
+    reward: '第一次打完跟傭兵有關的任務：星際酒館開始出現灰鴉傭兵團的指揮官（兩個陣營都能派）。' },
+  { id: 's2', sub: true, merc: true, req: ['6'], at: '6', ch: 1, side: 1, name: '價碼', place: '費茲外緣', x: 1200, y: 240, cast: ['grace'], goal: '撐過灰鴉的背叛',
+    story: '議會為了戰果，雇用「灰鴉傭兵團」協同作戰。葛瑞絲不喜歡這個安排，但命令就是命令。',
+    reward: '第一次打完跟傭兵有關的任務：星際酒館開始出現灰鴉傭兵團的指揮官（兩個陣營都能派）。' },
+  { id: 's3', sub: true, merc: true, req: ['s1', 's2'], at: '6', ch: 1, side: 0, name: '渡鴉之巢', place: '暗黑星雲北段', x: 690, y: 232, cast: ['kas'], goal: '攻陷傭兵基地',
+    story: '卡斯追蹤灰鴉的補給船，找到了他們藏在暗黑星雲裡的基地。聯盟那邊，似乎也有人在找他們。',
+    reward: '解鎖「傭兵支援」：之後每場戰鬥可以花功勳呼叫一次灰鴉的艦隊。' },
 ];
 const STORY_BY = Object.fromEntries(STORY_STAGES.map((s) => [s.id, s]));
-const STORY_COMMON = STORY_STAGES.filter((s) => !s.route).map((s) => s.id);
+const STORY_COMMON = STORY_STAGES.filter((s) => !s.route && !s.sub).map((s) => s.id);
+const STORY_SUBS = STORY_STAGES.filter((s) => s.sub);
 const storySeq = (route) => STORY_COMMON.concat(route ? ['19', '20', '21'].map((n) => n + route) : []);
 // 星圖上的節點：19、21 兩條路線在同一個位置，合成一個節點（選邊前顯示成分岔點）
 const STORY_NODES = STORY_COMMON.map((id) => ({ key: id, ids: [id] })).concat([
-  { key: '19', ids: ['19e', '19a'] }, { key: '20e', ids: ['20e'] }, { key: '20a', ids: ['20a'] }, { key: '21', ids: ['21e', '21a'] }]);
-const STORY_LINKS = STORY_COMMON.slice(1).map((id, k) => [STORY_COMMON[k], id]).concat([['18', '19'], ['19', '20e'], ['19', '20a'], ['20e', '21'], ['20a', '21']]);
+  { key: '19', ids: ['19e', '19a'] }, { key: '20e', ids: ['20e'] }, { key: '20a', ids: ['20a'] }, { key: '21', ids: ['21e', '21a'] }], STORY_SUBS.map((s) => ({ key: s.id, ids: [s.id], sub: true })));
+const STORY_LINKS = STORY_COMMON.slice(1).map((id, k) => [STORY_COMMON[k], id]).concat([['18', '19'], ['19', '20e'], ['19', '20a'], ['20e', '21'], ['20a', '21']],
+  STORY_SUBS.flatMap((s) => s.req.map((r) => [r, s.id])));
+const storyNo = (s) => (s.sub ? '支線' : `第 ${s.id.replace(/[ea]$/, '')} 關`);
 
 function storyLoad() { let p = null; try { p = JSON.parse(STORE.getItem(STORY_STORE) || 'null'); } catch (e) { p = null; } return p && p.done ? p : { done: {}, route: null }; }
 // 每一關的狀態：done 已完成、avail 可以打、locked 還沒開放、off 另一條路線（已經選了另一邊）
 function storyState(p, id) {
   const s = STORY_BY[id];
   if (p.done[id]) return 'done';
+  if (s.sub) return s.req.every((x) => p.done[x]) ? 'avail' : 'locked';   // 支線：前置關卡都打完就開放
   if (s.route && p.route && s.route !== p.route) return 'off';
   const seq = storySeq(s.route || p.route), k = seq.indexOf(id);
   if (k < 0) return 'locked';
@@ -120,17 +134,17 @@ function storyMapSVG(p, sel) {
     const nb = STORY_NODES.find((o) => o.key === b), st = storyNodeState(p, nb), s = storyNodeStage(p, nb);
     const c = s ? STORY_SIDE[s.side].cls : 'fork', [x1, y1] = storyPos(a), [x2, y2] = storyPos(b);
     const mx = (x1 + x2) / 2 + (y2 - y1) * 0.12, my = (y1 + y2) / 2 - (x2 - x1) * 0.12;   // 稍微彎曲
-    return `<path class="st-link ${st} ${c}" d="M${x1} ${y1}Q${mx.toFixed(0)} ${my.toFixed(0)} ${x2} ${y2}"/>`;
+    return `<path class="st-link ${st} ${c} ${nb.sub ? 'sub' : ''}" d="M${x1} ${y1}Q${mx.toFixed(0)} ${my.toFixed(0)} ${x2} ${y2}"/>`;
   }).join('');
   const nodes = STORY_NODES.map((n) => {
     const s = storyNodeStage(p, n), st = storyNodeState(p, n), [x, y] = storyPos(n.key);
     const c = s ? STORY_SIDE[s.side].cls : 'fork', label = st === 'locked' || st === 'off' ? '' : s ? s.name : '選擇陣營';
-    const no = n.key.replace(/[ea]$/, '');
-    return `<g class="st-node ${st} ${c} ${sel === n.key ? 'sel' : ''}" data-k="${n.key}" transform="translate(${x} ${y})" tabindex="0">
-      <circle class="st-hit" r="34"/>${st === 'avail' ? '<circle class="st-pulse" r="22"/>' : ''}
-      <circle class="st-ring" r="22"/>${c === 'fork' && st !== 'off' ? '<path class="st-half" d="M0 -17A17 17 0 0 0 0 17z"/><path class="st-half2" d="M0 -17A17 17 0 0 1 0 17z"/>' : '<circle class="st-core" r="17"/>'}
+    const no = n.sub ? '支' : n.key.replace(/[ea]$/, ''), r = n.sub ? 16 : 22;   // 支線：小一號的節點
+    return `<g class="st-node ${st} ${c} ${n.sub ? 'sub' : ''} ${sel === n.key ? 'sel' : ''}" data-k="${n.key}" transform="translate(${x} ${y})" tabindex="0">
+      <circle class="st-hit" r="34"/>${st === 'avail' ? `<circle class="st-pulse" r="${r}"/>` : ''}
+      <circle class="st-ring" r="${r}"/>${c === 'fork' && st !== 'off' ? '<path class="st-half" d="M0 -17A17 17 0 0 0 0 17z"/><path class="st-half2" d="M0 -17A17 17 0 0 1 0 17z"/>' : `<circle class="st-core" r="${r - 5}"/>`}
       <text class="st-no" y="6">${st === 'done' ? '✓' : no}</text>
-      ${label ? `<text class="st-lb" y="48">${label}</text>` : ''}</g>`;
+      ${label ? `<text class="st-lb" y="${r + 26}">${label}</text>` : ''}</g>`;
   }).join('');
   return `<svg class="st-svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid meet" role="img" aria-label="雙星記星圖">
     <defs>
@@ -168,11 +182,11 @@ function storyPanel(p, key) {
   const side = STORY_SIDE[s.side], ch = STORY_CH[s.ch], open = st !== 'locked' && st !== 'off';
   const cast = s.cast.map((id) => { const c = COMMANDERS.find((o) => o.id === id); return c ? `${c.title} ${c.name}` : id; }).join('、');
   return `<div class="st-panel g-card ${side.cls}">
-    <div class="st-ch">${ch.no}　${ch.name}・第 ${s.id.replace(/[ea]$/, '')} 關</div>
+    <div class="st-ch">${ch.no}　${ch.name}・${storyNo(s)}</div>
     <h3 class="st-h">${open ? s.name : '？？？'}</h3>
     <div class="st-meta"><span class="g-${side.cls}">${side.name}視角</span>・${s.place}</div>
-    ${open ? `<p>${s.story}</p><dl class="kv"><dt>出擊指揮官</dt><dd>${cast}</dd><dt>作戰目標</dt><dd>${s.goal}</dd><dt>建議等級</dt><dd>Lv ${storyRec(s.id)} 以上</dd></dl>`
-      : `<p class="g-dim">${st === 'off' ? '你選擇了另一方的路線。' : '完成前一場作戰後開放。'}</p>`}
+    ${open ? `<p>${s.story}</p><dl class="kv"><dt>出擊指揮官</dt><dd>${cast}</dd><dt>作戰目標</dt><dd>${s.goal}</dd><dt>建議等級</dt><dd>Lv ${storyRec(s.id)} 以上</dd>${s.reward ? `<dt>獎勵</dt><dd>${s.reward}</dd>` : ''}</dl>`
+      : `<p class="g-dim">${st === 'off' ? '你選擇了另一方的路線。' : s.sub ? `完成${s.req.map((q) => (STORY_BY[q].sub ? `支線「${STORY_BY[q].name}」` : `第 ${q} 關`)).join('、')}後開放。支線不打也能繼續主線。` : '完成前一場作戰後開放。'}</p>`}
     ${st === 'done' && s.ending ? `<div class="st-end"><b>結局</b><p>${s.ending}</p></div>` : ''}
     <div class="g-row" style="margin-top:12px"><span class="g-sp"></span>${open ? `<button class="g-btn ${st === 'done' ? '' : 'pri'}" data-go="${s.id}">${st === 'done' ? '重打這一關' : '出擊 →'}</button>` : ''}</div>
   </div>`;
@@ -185,9 +199,10 @@ function showStory() {
   setPhase('briefing');
   const total = storySeq('e').length, cnt = storySeq(p.route || 'e').filter((id) => p.done[id]).length;
   const chs = STORY_CH.map((c, k) => {
-    const ids = STORY_STAGES.filter((s) => s.ch === k && (!s.route || !p.route || s.route === p.route)).map((s) => s.id);
+    const ids = STORY_STAGES.filter((s) => s.ch === k && !s.sub && (!s.route || !p.route || s.route === p.route)).map((s) => s.id);
+    const subs = STORY_SUBS.filter((s) => s.ch === k), sd = subs.filter((s) => p.done[s.id]).length;
     const ids2 = k === 5 && !p.route ? ids.filter((id) => !id.endsWith('a')) : ids, d = ids2.filter((id) => p.done[id]).length;
-    return `<button class="st-chb ${d === ids2.length ? 'done' : d ? 'on' : ''}" data-ch="${k}"><span>${c.no}</span><b>${c.name}</b><i>${d}／${ids2.length}</i></button>`;
+    return `<button class="st-chb ${d === ids2.length ? 'done' : d ? 'on' : ''}" data-ch="${k}"><span>${c.no}</span><b>${c.name}</b><i>${d}／${ids2.length}${subs.length ? `・支線 ${sd}／${subs.length}` : ''}</i></button>`;
   }).join('');
   overlay(`<div class="g-wrap st-wrap">
     <div class="g-head"><h2>雙星記</h2><span class="crumb">劇情戰役・${cnt}／${total} 場作戰</span><span class="g-sp"></span><button class="g-btn sm" id="st-diff" title="更改難度（進度不會重置）">難度：${storyDiffOf(p).name}</button><button class="g-btn sm" id="st-reset">重新開始劇情</button><button class="g-btn" id="st-back">← 單人戰鬥</button></div>

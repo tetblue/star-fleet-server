@@ -214,7 +214,7 @@ function drawTac() {
     c.fillStyle = col; c.font = `${uiPx(12.5)}px system-ui`; c.textAlign = 'center'; c.fillText(TERRAIN_TYPES[t.type].name + ty, tx(t.x), tz(t.z - t.r) - 4);
   }
   // 艦艇：每 3 艘畫一點（看得出陣型）
-  const col = ['#f2b35a', '#7cc4ff'];
+  const col = FACTION.map((f) => f.ui);
   const fog = pFiltered(), me = GAME.playerSide, hid = (side) => fog && side !== me;   // 被干擾／戰爭迷霧：敵軍只畫看得到的，其他畫最後已知位置
   // 戰爭迷霧：我方的偵測範圍（淡色圈）、掃描波紋、被掃描的方向
   if (fowView()) drawFowTac(c, k, me);
@@ -234,7 +234,7 @@ function drawTac() {
     const sel = selected.has(q0);
     c.save(); c.translate(tx(q.x), tz(q.z)); c.rotate(-q.h + Math.PI);   // 世界的 h：前方＝(sin h, cos h)；畫布 y 向下
     if (q !== q0) { c.globalAlpha = 0.45; c.setLineDash([4, 3]); }
-    c.strokeStyle = sel ? '#ffffff' : (SIDE_FAC[q.side] ? 'rgba(124,196,255,.55)' : 'rgba(242,179,90,.55)'); c.lineWidth = sel ? 1.6 : 1;
+    c.strokeStyle = sel ? '#ffffff' : ['rgba(242,179,90,.55)', 'rgba(124,196,255,.55)', 'rgba(226,115,90,.55)'][sqFac(q)]; c.lineWidth = sel ? 1.6 : 1;
     c.strokeRect(-q0.W * k / 2, -q0.D * k / 2, q0.W * k, q0.D * k);
     c.beginPath(); c.moveTo(-5, -q0.D * k / 2 - 2); c.lineTo(0, -q0.D * k / 2 - 8); c.lineTo(5, -q0.D * k / 2 - 2); c.stroke();
     c.restore(); c.globalAlpha = 1; c.setLineDash([]);
@@ -253,7 +253,7 @@ function drawTac() {
   gEl('tac-fit').classList.toggle('on', TAC.auto);
   for (const g of groups) {
     if (!g.sqs.length || g.inactive || g.side === cmdSide || hid(g.side)) continue;   // 我方的路線、預覽、隊列由 drawOverlay2D 畫；被干擾、戰爭迷霧時看不到敵方路線
-    const c0 = col[g.side];
+    const c0 = col[SIDE_FAC[g.side]];
     if (g.plan && g.plan.segs) {
       const pts = planPoints(g.plan.segs, g.plan.i || 0, g.plan.s || 0, g.plan.kind === 'snake' ? null : [g.ax, g.az]);
       c.strokeStyle = c0; c.globalAlpha = 0.6; c.setLineDash([5, 4]); c.beginPath();
@@ -292,7 +292,7 @@ function drawTac() {
     let maxD = 0; for (const q of al) maxD = Math.max(maxD, Math.hypot(q.x - g.ax, q.z - g.az) + Math.max(q.W, q.D) / 2);
     const txt = `${al.map((q) => q.name).join('、')}　${FORMATIONS[g.formation].name}`, lx = tx(g.ax) + 6, lz = tz(g.az) + maxD * k + 12, w = c.measureText(txt).width + 10;
     const bh = uiPx(19);
-    c.fillStyle = 'rgba(5,8,16,.8)'; c.fillRect(lx - 5, lz - 1, w, bh); c.fillStyle = col[g.side]; c.fillRect(lx - 5, lz - 1, 2, bh); c.fillText(txt, lx, lz + bh - 6);
+    c.fillStyle = 'rgba(5,8,16,.8)'; c.fillRect(lx - 5, lz - 1, w, bh); c.fillStyle = col[SIDE_FAC[g.side]]; c.fillRect(lx - 5, lz - 1, 2, bh); c.fillText(txt, lx, lz + bh - 6);
   }
   // 艦橋：目前看的方向
   if (BR.on && BR.pose.L != null) {
@@ -312,7 +312,7 @@ function drawTac() {
 
 // ── 側欄：我方艦隊卡片（下令）＋敵方概況 ──
 function buildTacSide() {
-  const mine = fleets.filter((f) => f.side === GAME.playerSide && !f.reserve);
+  const mine = fleets.filter((f) => f.side === GAME.playerSide && !f.reserve && !f.ally);
   TAC.side.innerHTML = `<div class="tac-h">我方艦隊</div>${mine.map((f) => `<div class="tac-card" data-f="${f.id}">
       <div class="g-row"><b class="g-pc">${f.name}</b><span class="g-dim">${f.commander ? f.commander.name + ' Lv ' + f.commander.level : ''}</span><span class="g-sp"></span><span class="tac-st"></span></div>
       <div class="tac-bar"><i></i></div><div class="tac-info g-dim"></div>
@@ -602,7 +602,7 @@ function drawSideView() {
     c.fillStyle = col + (def.solid ? '99' : '1c'); c.fill(); c.strokeStyle = col + (def.solid ? 'ee' : '77'); c.setLineDash(def.solid ? [] : [4, 4]); c.stroke(); c.setLineDash([]);
   }
   // 艦艇：每 3 艘一點；同時算出每支分艦隊在側視圖上的範圍
-  const col = ['#f2b35a', '#7cc4ff'];
+  const col = FACTION.map((f) => f.ui);
   SV.ext = squadrons.map(() => [1e9, -1e9, 1e9, -1e9]);
   for (let sd = 0; sd < 2; sd++) {
     c.fillStyle = col[SIDE_FAC[sd]];
@@ -618,7 +618,7 @@ function drawSideView() {
   squadrons.forEach((q, qi) => {
     const e = SV.ext[qi]; if (q.bg || q.alive <= 0 || e[0] > e[1]) return;
     const sel = selected.has(q);
-    c.strokeStyle = sel ? '#ffffff' : (SIDE_FAC[q.side] ? 'rgba(124,196,255,.45)' : 'rgba(242,179,90,.45)'); c.lineWidth = sel ? 1.6 : 1;
+    c.strokeStyle = sel ? '#ffffff' : ['rgba(242,179,90,.45)', 'rgba(124,196,255,.45)', 'rgba(226,115,90,.45)'][sqFac(q)]; c.lineWidth = sel ? 1.6 : 1;
     c.strokeRect(e[0] - 3, e[2] - 3, e[1] - e[0] + 6, e[3] - e[2] + 6);
   });
   c.lineWidth = 1;

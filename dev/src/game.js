@@ -83,7 +83,7 @@ function fixLoadoutCmdrs(lo) {
   const pool = cmdrPool(GAME.sc, lo.faction || 0), used = new Set();
   lo.fleets = lo.fleets.filter((f) => {
     const c = COMMANDERS.find((o) => o.id === f.cmdr);
-    if (c && (c.faction || 0) === (lo.faction || 0) && !used.has(c.id)) { used.add(c.id); return true; }
+    if (c && canLead(c, lo.faction || 0) && !used.has(c.id)) { used.add(c.id); return true; }
     const free = pool.find((o) => !used.has(o.id) && !lo.fleets.some((g) => g !== f && g.cmdr === o.id));
     if (!free) return false;
     f.cmdr = free.id; used.add(free.id); return true;
@@ -139,8 +139,18 @@ function makeSetup(sc, lo, attempt) {
     fleetsS.push({ side: 0, name: `${fleetsS[k].name}增援`, ax: 0, az: MAP_BOUNDS.z1 + 900, ay: 0, h: Math.PI, formation: f.formation, comp: reinforceComp(f.comp, sc.budget),
       commander: null, reserve: true, activateAt: null, reinfOf: k });
   });
+  // 傭兵支援：打下灰鴉的基地、功勳夠才準備（第一艦隊的指揮官多一個技能）；對手就是灰鴉的關卡不能叫
+  if (ROSTER.mercSup && !sc.sim && !sc.tut && !sc.mp && sc.enemyFac !== 2 && lo.fleets.length && (ROSTER.merit || 0) >= MERC_RULE.cost) {
+    const A = CAMP_ARCHETYPES.find((a) => a.key === 'raider'), per = A.mix.reduce((t, m, i) => t + m * SHIP_TYPES[i].cost, 0), n = sc.budget * MERC_RULE.share / per;
+    fleetsS[0].commander.skills = fleetsS[0].commander.skills.concat('merc');
+    fleetsS.push({ side: 0, fac: 2, name: '灰鴉傭兵團', ax: 0, az: MAP_BOUNDS.z1 + 900, ay: 0, h: Math.PI, formation: 'wedge', comp: A.mix.map((m) => Math.round(n * m / 10) * 10),
+      commander: { name: '賽隆', trait: 'speed', level: fleetsS[0].commander.level, skills: ['charge'] }, reserve: true, activateAt: null, mercOf: 0 });
+  }
   // 劇情戰役的護送目標（不能部署，跟著第一艦隊；損失太多就敗北）
   if (sc.vip) fleetsS.push({ ...supplySetup(0, sc.vip, lo.fleets.length ? 0 : -1, sc.vip.name), vip: true });
+  // 劇情戰役的友軍（傭兵外觀）：AI 自己打、玩家不能指揮；defectAt 秒後倒戈成敵軍
+  for (const a of sc.allies || []) fleetsS.push({ side: 0, fac: a.fac, name: a.name, ax: a.x, az: a.z, ay: 0, h: a.h, formation: a.formation, comp: a.comp.slice(),
+    commander: { ...a.commander }, ai: { tactic: a.tactic, level: sc.level }, ally: true, defectAt: a.defectAt });
   const e0 = fleetsS.length;
   sc.enemy.forEach((ef) => fleetsS.push({ side: 1, name: ef.name, ax: ef.x, az: ef.z, ay: ef.y || 0, h: ef.h, formation: ef.formation, comp: ef.comp.slice(),
     commander: { ...ef.commander }, ai: { tactic: ef.tactic, level: sc.level } }));
@@ -169,6 +179,7 @@ function useSkill(f, id, target, pt) {
   if (def.targetMode === 'enemy' && (!target || target.side === f.side || target.alive <= 0)) return false;
   if (def.targetMode === 'point' && !pt) return false;
   if (id === 'reinforce' && !callReinforce(f, pt)) return false;
+  if (id === 'merc' && !callMercs(f, pt)) return false;
   s.left--; s.until = t + def.dur; s.ready = t + def.cd * (1 - 0.15 * talentRank(f.commander, 'tempo')); s.target = target; s.used = (s.used || 0) + 1;   // 指揮效率：冷卻縮短
   if (id === 'jam') setJam(1 - f.side, def.dur, 6);   // 干擾：敵方變陣延遲 6 秒
   const who = GAME.watch ? `${FACTION_NAME[SIDE_FAC[f.side]]}・${f.name}　` : f.side === GAME.playerSide ? '' : '敵方';   // 觀摩：兩邊都是 AI，用陣營名稱
@@ -190,6 +201,33 @@ function callReinforce(f, pt) {
   if (!GAME.replaying && f.side === GAME.playerSide && GAME.phase === 'battle' && !(GAME.sc && (GAME.sc.sim || GAME.sc.mp))) {   /* 多人：每場固定次數，不扣酒館的存量 */ ROSTER.reinf = Math.max(0, (ROSTER.reinf || 0) - 1); rosterSave(); }
   if (f.side === GAME.playerSide) toast(`${rf.name}：${REINFORCE_RULE.delay} 秒後從${{ x0: '左', x1: '右', z0: '前', z1: '後' }[d]}方進場`);
   return true;
+}
+// 傭兵支援：跟呼叫增援一樣從最近的地圖邊緣進場；正式作戰第一次執行時才扣功勳（回放不扣）
+function callMercs(f, pt) {
+  const rf = fleets.find((o) => o.mercOf === f.id && o.reserve && o.activateAt == null);
+  const real = !GAME.replaying && f.side === GAME.playerSide && GAME.phase === 'battle';
+  if (!rf) return false;
+  if (real && (ROSTER.merit || 0) < MERC_RULE.cost) { toast(`功勳不夠（傭兵支援要 ${MERC_RULE.cost} 功勳）`); return false; }
+  const g = rf.sqs[0] && rf.sqs[0].group; if (!g) return false;
+  const B = MAP_BOUNDS, P = clampMap({ x: pt.x, z: pt.z });
+  const d = [[P.x - B.x0, 'x0'], [B.x1 - P.x, 'x1'], [P.z - B.z0, 'z0'], [B.z1 - P.z, 'z1']].sort((a, b) => a[0] - b[0])[0][1];
+  const E = { x: d === 'x0' ? B.x0 - 80 : d === 'x1' ? B.x1 + 80 : P.x, z: d === 'z0' ? B.z0 - 80 : d === 'z1' ? B.z1 + 80 : P.z };
+  warpGroup(g, E.x, E.z, Math.atan2(P.x - E.x, P.z - E.z));
+  rf.activateAt = U.uTime.value + MERC_RULE.delay; rf.entryGoal = P;
+  if (real) { ROSTER.merit -= MERC_RULE.cost; rosterSave(); }
+  if (f.side === GAME.playerSide) toast(`灰鴉傭兵團：收到 ${MERC_RULE.cost} 功勳，${MERC_RULE.delay} 秒後從${{ x0: '左', x1: '右', z0: '前', z1: '後' }[d]}方進場`);
+  return true;
+}
+// 友軍倒戈：整支艦隊換到對面（船、分艦隊、艦隊群組、艦載機），之後算敵軍兵力
+function defectFleet(f) {
+  f.ally = false; f.side = 1 - f.side; f.aiS = {};
+  const sqSet = new Set(f.sqs);
+  for (const q of f.sqs) { q.side = f.side; q.target = null; if (q.group) { q.group.side = f.side; q.group.target = null; q.group.goal = null; } selected.delete(q); }
+  for (let i = 0; i < shipCount; i++) if (sqSet.has(squadrons[ships.sq[i]])) ships.side[i] = f.side;
+  for (let j = 0; j < FT.side.length; j++) if (FT.state[j] && sqSet.has(squadrons[ships.sq[FT.carrier[j]]])) FT.side[j] = f.side;
+  let n = 0; for (const q of f.sqs) n += q.alive;
+  GAME.init[f.side] += n;
+  toast(`警告：${f.name}倒戈了！`, 'bad');
 }
 function skillCmd(f, id, target, pt) {
   const args = { fleet: f.id, skill: id, target: target ? squadrons.indexOf(target) : null, ...(pt ? { x: Math.round(pt.x), z: Math.round(pt.z) } : {}) };
@@ -220,7 +258,7 @@ function skillKey(id) {
   if (GAME.phase !== 'battle') return false;
   if (!SKILLS[id]) return false;
   const sel = [...selected].map((q) => q.fleet).filter(Boolean);
-  const pool = [...sel, ...fleets.filter((f) => f.side === GAME.playerSide)];
+  const pool = [...sel, ...fleets.filter((f) => f.side === GAME.playerSide && !f.ally)];
   const f = pool.find((o) => o.skills[id] && o.skills[id].left > 0 && U.uTime.value >= o.skills[id].ready);
   if (f) armSkill(f, id);
   return true;
@@ -467,7 +505,7 @@ function aiResupply(f, S, H) {
 }
 
 // ───── 勝負 ─────
-function sideAlive(side) { let n = 0; for (const f of fleets) if (f.side === side && !f.reserve) for (const q of f.sqs) n += q.alive; return n; }
+function sideAlive(side) { let n = 0; for (const f of fleets) if (f.side === side && !f.reserve && !f.ally) for (const q of f.sqs) n += q.alive; return n; }   // 友軍（還沒倒戈的傭兵）不算進勝負
 // 劇情戰役的護送目標：剩不到 VIP_KEEP 就算護送失敗
 const VIP_KEEP = 0.4;
 function vipLost() { const f = fleets.find((o) => o.vip); if (!f) return false; let n = 0; for (const q of f.sqs) n += q.alive; return n < f.initial * VIP_KEEP; }
@@ -506,6 +544,7 @@ function gameTick() {
   if (end && simTick >= end.tick) { GAME.result = battleResult(end.kind, end.why, { retreat: !!end.retreat }); return; }
   const t = U.uTime.value;
   for (const f of fleets) if (f.reserve && f.activateAt != null && t >= f.activateAt) activateReserve(f);
+  for (const f of fleets) if (f.ally && f.defectAt != null && t >= f.defectAt) defectFleet(f);
   if (simTick % 30 === 0) for (const f of fleets) if (f.ai && !f.reserve && f.side !== GAME.simCtl) aiThink(f);
   if (simTick % 30 === 7) for (const f of fleets) if (f.supply && f.follow >= 0 && !f.reserve) supplyFollow(f);
   if (simTick % 30 === 22 && battleSetup.lines) storyLines(t);   // 劇情戰役：戰鬥中的通訊台詞
@@ -572,7 +611,7 @@ function drawField(showZones) {
     setPts(ring, pts); fieldGroup.add(ring);
     if (Math.abs(y) > 5) { const st = lineObj(def.color, 0.35); setPts(st, [[tr.x, tr.z, y], [tr.x, tr.z, 0], [tr.x - 10, tr.z, 0], [tr.x + 10, tr.z, 0]]); fieldGroup.add(st); }
   }
-  if (showZones) { const mp = GAME.sc && GAME.sc.mp, me = mp ? MP_ZONES[GAME.playerSide] : DEPLOY_ZONE; fieldGroup.add(rectLine(me, 0xf2b35a, 0.8), rectLine(mp ? MP_ZONES[1 - GAME.playerSide] : ENEMY_ZONE, 0x7cc4ff, 0.5)); }
+  if (showZones) { const mp = GAME.sc && GAME.sc.mp, me = mp ? MP_ZONES[GAME.playerSide] : DEPLOY_ZONE; const zc = (sd) => new THREE.Color(FACTION[SIDE_FAC[sd]].ui).getHex(); fieldGroup.add(rectLine(me, zc(GAME.playerSide), 0.8), rectLine(mp ? MP_ZONES[1 - GAME.playerSide] : ENEMY_ZONE, zc(1 - GAME.playerSide), 0.5)); }   // 部署區用雙方陣營的顏色
 }
 
 // ═════ 操作難度 ═════
@@ -685,7 +724,7 @@ function showCommanders(back) {
   if (back) GAME.talBack = back;
   const sel = COMMANDERS.find((c) => c.id === GAME.talSel) || COMMANDERS[0]; GAME.talSel = sel.id;
   const lv = cmdrLevel(sel.id), xp = cmdrXP(sel.id), tal = cmdrTal(sel.id), pts = cmdrPoints(sel.id);
-  const list = COMMANDERS.map((c) => `<button class="tal-who ${c === sel ? 'on' : ''}" data-c="${c.id}"><b>${c.title} ${c.name}</b><span><span class="${c.faction ? 'g-all' : 'g-emp'}">${FACTION_NAME[c.faction || 0].slice(0, 2)}</span>・Lv ${cmdrLevel(c.id)}・${TRAIT_NAME[c.trait]}</span>${cmdrPoints(c.id) > 0 ? `<i>${cmdrPoints(c.id)}</i>` : ''}</button>`).join('');
+  const list = COMMANDERS.map((c) => `<button class="tal-who ${c === sel ? 'on' : ''}" data-c="${c.id}"><b>${c.title} ${c.name}</b><span><span class="g-${FACTION_CLS[c.faction || 0]}">${FACTION_NAME[c.faction || 0].slice(0, 2)}</span>・Lv ${cmdrLevel(c.id)}・${TRAIT_NAME[c.trait]}</span>${cmdrPoints(c.id) > 0 ? `<i>${cmdrPoints(c.id)}</i>` : ''}</button>`).join('');
   const node = (t) => {
     const r = tal[t.id] || 0, can = talentCan(sel, t), innate = t.kind === 'skill' && sel.skills.includes(t.skill);
     const pips = t.kind === 'skill' ? '' : `<span class="tal-pips">${Array.from({ length: t.max }, (_, k) => `<i class="${k < r ? 'on' : ''}"></i>`).join('')}</span>`;
@@ -1004,7 +1043,7 @@ function buildBattleHud() {
     quitBattle();
   };
   watchHud();   // 觀摩：雙方 AI 的解說面板
-  const mine = GAME.watch || NET.spec ? [] : fleets.filter((f) => f.side === GAME.playerSide && f.commander);   // 觀摩：不能放技能
+  const mine = GAME.watch || NET.spec ? [] : fleets.filter((f) => f.side === GAME.playerSide && f.commander && !f.ally);   // 觀摩：不能放技能；友軍傭兵的技能由 AI 自己用
   gEl('skillbar').innerHTML = mine.map((f) => `<div class="sk-fleet"><div class="nm"><b>${f.name}</b>　${f.commander.name} Lv ${f.commander.level}</div>${Object.keys(f.skills).map((id) =>
     `<button class="g-btn sk-btn" data-f="${f.id}" data-s="${id}" title="${SKILLS[id].desc}">${SKILLS[id].name}<small></small><i class="cdv"></i></button>`).join('')}</div>`).join('');
   document.querySelectorAll('#skillbar .sk-btn').forEach((b) => (b.onclick = () => armSkill(fleets[+b.dataset.f], b.dataset.s)));
@@ -1049,7 +1088,7 @@ function gameFrame(dt) {
     const act = t < s.until, cd = Math.max(0, s.ready - t), arm = !!GAME.skillArm && GAME.skillArm.f === f && GAME.skillArm.id === id;
     b.querySelector('small').textContent = act ? `生效 ${Math.ceil(s.until - t)} 秒` : s.left <= 0 ? '已用完' : cd > 0 ? `冷卻 ${Math.ceil(cd)} 秒` : `剩 ${s.left} 次・鍵 ${keyLabel(keyOf('skill_' + id))}`;
     b.classList.toggle('active', act); b.classList.toggle('arm', arm);
-    b.disabled = s.left <= 0 || cd > 0 || f.sqs.every((q) => q.alive <= 0);
+    b.disabled = s.left <= 0 || cd > 0 || f.reserve || f.sqs.every((q) => q.alive <= 0);   // 還沒進場的艦隊（傭兵支援）不能放技能
     b.querySelector('.cdv').style.width = cd > 0 ? (1 - cd / def.cd) * 100 + '%' : '0';
   });
 }

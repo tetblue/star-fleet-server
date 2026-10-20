@@ -158,11 +158,15 @@ const SKILLS = {
   jam: { name: '干擾', uses: 1, cd: 90, dur: 25, scope: 'side',
     desc: '干擾敵軍通訊 25 秒：敵方雷達失效（看到的我方位置停在干擾開始那一刻、兵力與狀態不明，AI 也會用舊情報判斷）；下令變陣（包括原地轉向後的重排、畫陣線）要多等 6 秒才開始；開火（光束、飛彈、防空）命中率 −15%。擬真難度開啟戰爭迷霧時：敵方各艦隊不能共享情報（只看得到自己偵測到的），掃描也沒有結果，偵察機的情報要等飛回母艦才回報。' },
   // targetMode 'point'＝點選地圖上的位置；fixed＝次數不受「戰術熟練」影響
+  merc: { name: '傭兵支援', uses: 1, cd: 0, dur: 0, scope: 'fleet', targetMode: 'point', fixed: true,
+    desc: '點選地圖上的位置：15 秒後灰鴉傭兵團的艦隊（本場預算的 30%）從最近的地圖邊緣進場，開往該位置，之後聽你指揮。呼叫時扣 200 功勳；每場一次（打下劇情支線「渡鴉之巢」之後才有）。' },
   reinforce: { name: '呼叫增援', uses: 1, cd: 0, dur: 0, scope: 'fleet', targetMode: 'point', fixed: true,
     desc: '點選地圖上的位置：20 秒後一支增援艦隊（本場預算的 25%，照這支艦隊的編成比例）從最近的地圖邊緣進場，開往該位置。每次消耗 1 次增援次數（星際酒館用功勳購買），每位指揮官每場 1 次。' },
 };
 // 增援：share 兵力＝本場預算的比例、delay 呼叫後幾秒進場、cost 每次的功勳、max 最多存幾次
 const REINFORCE_RULE = { share: 0.25, delay: 20, cost: 150, max: 9 };
+// 傭兵支援（打下灰鴉的基地之後）：每場一次，呼叫時才扣功勳；share 兵力＝本場預算的比例
+const MERC_RULE = { share: 0.3, delay: 15, cost: 200 };
 
 // 指揮官（原創人物）。trait：固有特性（固定 +8%）；skills：固有技能（不用天賦點數）
 // 初始指揮官（faction：0 帝國、1 聯盟）；其他的到「星際酒館」招募（見 tavern.js，招募來的會加進這個陣列）
@@ -173,7 +177,10 @@ const COMMANDERS = [
   { id: 'aaron', name: '亞倫・楊森', title: '少將', trait: 'shield', skills: ['wall', 'jam'], faction: 1, base: true, bio: '守勢型。擅長以干擾打亂敵軍節奏。' },
   { id: 'grace', name: '葛瑞絲・卡特萊', title: '准將', trait: 'dmg', skills: ['focus', 'rapid'], faction: 1, base: true, bio: '攻勢型。相信火力集中就是一切。' },
 ];
-const FACTION_NAME = ['帝國軍', '聯盟軍'];
+const FACTION_NAME = ['帝國軍', '聯盟軍', '灰鴉傭兵團'];   // 2＝傭兵：不能當玩家的陣營，傭兵指揮官可以替兩個陣營出擊
+const FACTION_CLS = ['emp', 'all', 'mer'];
+// 指揮官能不能替這個陣營出擊（傭兵兩邊都行）
+const canLead = (c, faction) => (c.faction || 0) === faction || (c.faction === 2 && faction < 2);
 const TRAIT_NAME = { dmg: '攻擊', shield: '防禦', speed: '機動' };
 // 特性對前排輪替的影響（見 ROTATE_RULE）
 const TRAIT_ROT = {

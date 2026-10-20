@@ -7,20 +7,25 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 // ───────────────────────── 常數 ─────────────────────────
-const SHIP_ATLAS = window.__ASSETS.ships;   // 4096×1024, 16 cols (2 陣營 × 8 方向) × 5 rows (艦種), 每格 256×192
+const SHIP_ATLAS = window.__ASSETS.ships;   // 4096×2048, 每格 256×192：上半 16 cols (帝國、聯盟 × 8 方向) × 5 rows (艦種)；下半（y≥1024）傭兵 8 cols × 5 rows
 const FX_ATLAS = window.__ASSETS.fx;        // 2048×2304, 16 frames × 18 rows (0-1 爆炸, 2-9 帝國護盾, 10-17 聯盟護盾)
-const FTR_ATLAS = window.__ASSETS.fighters; // 2048×128, 16 cols (2 陣營 × 8 方向)
+const FTR_ATLAS = window.__ASSETS.fighters; // 2048×256, 每格 128×128：上排 16 cols (帝國、聯盟 × 8 方向)；下排傭兵 8 cols
 let VW = innerWidth, VH = innerHeight;   // 戰場畫面大小（戰術面板會讓出空間）
 function tacDockSize() { if (typeof TAC === 'undefined' || !TAC.open || BR.on) return { w: 0, h: 0 }; return { w: 0, h: Math.round(Math.min(760, Math.max(300, innerHeight * (innerWidth >= 760 ? 0.58 : 0.6)))) }; }   // 戰術面板固定在下方
 const ELEV = 30 * Math.PI / 180;
 const BR = { on: false };
-// 陣營（外觀）與模擬的「邊」分開：邊 0＝玩家（畫面下方）、邊 1＝對手；SIDE_FAC[邊]＝那一邊用哪個陣營（0 帝國、1 聯盟）
+// 陣營（外觀）與模擬的「邊」分開：邊 0＝玩家（畫面下方）、邊 1＝對手；SIDE_FAC[邊]＝那一邊用哪個陣營（0 帝國、1 聯盟、2 傭兵）
+// 單一艦隊也可以有自己的外觀（fleet.fac，例如友軍傭兵、傭兵支援）；畫船、光束、飛彈、艦載機都用 sqFac／shipFac
 let SIDE_FAC = [0, 1];
 // 作戰介面跟著玩家的陣營換主題（顏色、紋飾）
-function applyPlayerTheme() { const f = SIDE_FAC[typeof cmdSide === 'number' ? cmdSide : 0] || 0; document.body.classList.toggle('pf-0', f === 0); document.body.classList.toggle('pf-1', f === 1); }
+function applyPlayerTheme() { const sd = typeof cmdSide === 'number' ? cmdSide : 0, f = SIDE_FAC[sd] || 0; document.body.classList.toggle('pf-0', f !== 1); document.body.classList.toggle('pf-1', f === 1); document.body.classList.toggle('ef-2', SIDE_FAC[1 - sd] === 2); }   // 傭兵不是玩家陣營：對手是傭兵時敵方顏色（--ec）改成傭兵色
+const FAC_KEY = ['e', 'a', 'm'];   // 模型鍵的字首
+const sqFac = (sq) => (sq.fleet && sq.fleet.fac != null ? sq.fleet.fac : SIDE_FAC[sq.side]);
+const shipFac = (i) => sqFac(squadrons[ships.sq[i]]);
+const fxFac = (side) => (SIDE_FAC[side] === 1 ? 1 : 0);   // 爆炸、護盾特效只有帝國、聯盟兩套：傭兵用帝國的
 function applySideNames() {
   document.querySelectorAll('[data-fn]').forEach((el) => { const f = SIDE_FAC[+el.dataset.fn]; el.textContent = el.dataset.short ? FACTION[f].name[0] : FACTION[f].name; });
-  document.querySelectorAll('[data-fs]').forEach((el) => { el.classList.toggle('e', SIDE_FAC[+el.dataset.fs] === 0); el.classList.toggle('a', SIDE_FAC[+el.dataset.fs] === 1); });
+  document.querySelectorAll('[data-fs]').forEach((el) => { el.classList.toggle('e', SIDE_FAC[+el.dataset.fs] === 0); el.classList.toggle('a', SIDE_FAC[+el.dataset.fs] === 1); el.classList.toggle('m', SIDE_FAC[+el.dataset.fs] === 2); });
 }   // 指揮官視角狀態（內容在 bridge.js）
 const CAM_DIR = new THREE.Vector3(0, Math.sin(ELEV), Math.cos(ELEV)); // 目標點 → 相機
 const TYPE_W = [6.0, 5.6, 4.6, 3.8, 3.2, 5.0];     // 航母 戰列 巡洋 驅逐 護衛 補給（貼圖寬，世界單位）
@@ -30,6 +35,7 @@ const MAX_SQ = 40;
 const FACTION = [
   { name: '帝國軍', beam: new THREE.Color(1.0, 0.62, 0.22), glow: new THREE.Color(1.0, 0.45, 0.18), ui: '#f2b35a' },
   { name: '聯盟軍', beam: new THREE.Color(0.45, 0.80, 1.0), glow: new THREE.Color(0.35, 0.65, 1.0), ui: '#7cc4ff' },
+  { name: '灰鴉傭兵團', beam: new THREE.Color(1.0, 0.36, 0.28), glow: new THREE.Color(1.0, 0.3, 0.22), ui: '#e2735a' },
 ];
 
 let simAlt = 1;
@@ -185,11 +191,12 @@ const shipMat = new THREE.ShaderMaterial({
       clip.xy += position.xy * sizePx * 2. / uRes * clip.w;
       gl_Position = clip;
       float dir = dirIndex(hShip);
-      float col = aInfo.z * 8. + dir;
+      bool merc = aInfo.z > 1.5;   // 傭兵在貼圖的下半（y≥1024）
+      float col = merc ? dir : aInfo.z * 8. + dir;
       float row = floor(aInfo.y);
       vAlt = fract(aInfo.y);
       vec2 uv = position.xy + 0.5;
-      vUv = vec2((col + uv.x) / 16., 1. - (row + 1. - uv.y) * 192. / 1024.);
+      vUv = vec2((col + uv.x) / 16., 1. - ((merc ? 1024. : 0.) + (row + 1. - uv.y) * 192.) / 2048.);
       // 景深霧：越遠（畫面越上方、高度越低）越暗越藍
       float depth = dot(p, -uCamDir);
       vFog = uFog * smoothstep(-260., 620., depth) * 0.75;
@@ -218,7 +225,7 @@ const shipMat = new THREE.ShaderMaterial({
 });
 
 const glowMat = new THREE.ShaderMaterial({
-  uniforms: { ...U, u3D: { value: 0 }, uColA: { value: FACTION[0].glow }, uColB: { value: FACTION[1].glow } },
+  uniforms: { ...U, u3D: { value: 0 }, uColA: { value: FACTION[0].glow }, uColB: { value: FACTION[1].glow }, uColC: { value: FACTION[2].glow } },
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   vertexShader: COMMON_GLSL + /* glsl */`
     uniform float uGlowOn; uniform float u3D;
@@ -247,13 +254,13 @@ const glowMat = new THREE.ShaderMaterial({
       vFac = aInfo.z;
     }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uColA; uniform vec3 uColB;
+    uniform vec3 uColA; uniform vec3 uColB; uniform vec3 uColC;
     varying vec2 vUv; varying float vI; varying float vFac;
     void main(){
       float d = length(vUv);
       float g = exp(-d * d * 7.) ;
       float core = exp(-d * d * 40.);
-      vec3 c = (vFac < 0.5 ? uColA : uColB);
+      vec3 c = ((vFac < 0.5 ? uColA : vFac < 1.5 ? uColB : uColC));
       gl_FragColor = vec4((c * g * 0.75 + vec3(1.) * core * 0.6) * vI, 1.);
     }`,
 });
@@ -272,7 +279,7 @@ const beamGeo = new THREE.InstancedBufferGeometry();
   beamGeo.instanceCount = BEAM_MAX;
 }
 const beamMat = new THREE.ShaderMaterial({
-  uniforms: { ...U, uColA: { value: FACTION[0].beam }, uColB: { value: FACTION[1].beam } },
+  uniforms: { ...U, uColA: { value: FACTION[0].beam }, uColB: { value: FACTION[1].beam }, uColC: { value: FACTION[2].beam } },
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   vertexShader: /* glsl */`
     uniform float uTime; uniform vec2 uRes;
@@ -302,14 +309,14 @@ const beamMat = new THREE.ShaderMaterial({
       vFac = floor(aT.z); vFade *= fract(aT.z);
     }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uColA; uniform vec3 uColB;
+    uniform vec3 uColA; uniform vec3 uColB; uniform vec3 uColC;
     varying vec2 vUv; varying float vFade; varying float vFac;
     void main(){
       float y = abs(vUv.y);
       float glow = exp(-y * y * 9.);
       float core = exp(-y * y * 90.);
       float along = pow(vUv.x, 1.6);
-      vec3 c = vFac < 0.5 ? uColA : uColB;
+      vec3 c = (vFac < 0.5 ? uColA : vFac < 1.5 ? uColB : uColC);
       vec3 col = (c * glow * 0.55 + vec3(1.0) * core * 1.05) * along * vFade;
       gl_FragColor = vec4(col, 1.);
     }`,
@@ -365,7 +372,7 @@ scene.add(fxMesh);
 let fxHead = 0, fxDirtyFrom = -1, fxDirtyCount = 0;
 
 function spawnFx(x, y, z, row, scale, fps = 20) {
-  if (row < 2) row = SIDE_FAC[row]; else if (row < 18) row = 2 + SIDE_FAC[(row - 2) >> 3] * 8 + ((row - 2) & 7);   // 邊 → 陣營（爆炸、護盾的顏色）
+  if (row < 2) row = fxFac(row); else if (row < 18) row = 2 + fxFac((row - 2) >> 3) * 8 + ((row - 2) & 7);   // 邊 → 陣營（爆炸、護盾的顏色）
   const i = fxHead; fxHead = (fxHead + 1) % FX_MAX;
   fxP[i * 3] = x; fxP[i * 3 + 1] = y; fxP[i * 3 + 2] = z;
   fxF[i * 4] = U.uTime.value; fxF[i * 4 + 1] = row; fxF[i * 4 + 2] = scale; fxF[i * 4 + 3] = fps;
@@ -776,11 +783,11 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
     const order = counts.map((_, i) => i);
     const lay = fd.orderly ? genOrderly(fd.formation, counts, order, fd.layers || 1) : genFormation(fd.formation, counts, order, R);
     const fleet = { id: fi, side: fd.side, name: fd.name, commander: fd.commander || null, hangar: fd.hangar || null, sqs: [], reserve: !!fd.reserve, entry: fd.entry || null,
-      supply: !!fd.supply, vip: !!fd.vip, follow: fd.follow != null ? fd.follow : -1, reinfOf: fd.reinfOf != null ? fd.reinfOf : null, keep: fd.keep || null,
+      supply: !!fd.supply, vip: !!fd.vip, fac: fd.fac != null ? fd.fac : SIDE_FAC[fd.side], ally: !!fd.ally, defectAt: fd.defectAt != null ? fd.defectAt : null, follow: fd.follow != null ? fd.follow : -1, reinfOf: fd.reinfOf != null ? fd.reinfOf : null, mercOf: fd.mercOf != null ? fd.mercOf : null, keep: fd.keep || null,
       skills: {}, initial: total + (fd.supply ? 0 : 1), ai: fd.ai || null, activateAt: fd.activateAt != null ? fd.activateAt : null, aiS: {} };
     for (const sk of (fd.commander && fd.commander.skills) || []) {
       // 戰術熟練：每階 +1 次（fixed 的技能除外）；呼叫增援：這場有準備增援艦隊才能用
-      const left = sk === 'reinforce' && !setup.fleets.some((o) => o.reinfOf === fi) ? 0 : SKILLS[sk].uses + (SKILLS[sk].fixed ? 0 : talentRank(fd.commander, 'veteran'));
+      const left = (sk === 'reinforce' && !setup.fleets.some((o) => o.reinfOf === fi)) || (sk === 'merc' && !setup.fleets.some((o) => o.mercOf === fi)) ? 0 : SKILLS[sk].uses + (SKILLS[sk].fixed ? 0 : talentRank(fd.commander, 'veteran'));
       fleet.skills[sk] = { left, ready: 0, until: 0, target: null };
       const ks = fd.keep && fd.keep.skills && fd.keep.skills[sk];   // 模擬室接續：技能剩餘次數與冷卻
       if (ks) { fleet.skills[sk].left = Math.min(left, ks.left); fleet.skills[sk].ready = ks.cd; }
@@ -885,7 +892,7 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
       ships.lx0[si] = ships.lx1[si] = l[0]; ships.ly0[si] = ships.ly1[si] = p.fleet && (p.fleet.orderly || p.fleet.formation === 'hcone') ? l[1] : isFlag ? 4 : l[1] * (t <= 1 ? 0.6 : 1); ships.lz0[si] = ships.lz1[si] = l[2];
       ships.lag[si] = R() * 1.6 + R() * 0.6;
       aLocal.set([ships.lx0[si], ships.ly0[si], ships.lz0[si]], si * 3); aLocal2.set([ships.lx0[si], ships.ly0[si], ships.lz0[si]], si * 3);
-      aInfo.set([sqi, st.look != null ? st.look + 0.5 : t, SIDE_FAC[p.side], R()], si * 4);   // 貼圖列；借用外觀的艦種 +0.5（著色器換色區分）
+      aInfo.set([sqi, st.look != null ? st.look + 0.5 : t, p.fleetObj && p.fleetObj.fac != null ? p.fleetObj.fac : SIDE_FAC[p.side], R()], si * 4);   // 貼圖列；借用外觀的艦種 +0.5（著色器換色區分）
       aState.set([0, ships.lag[si]], si * 2);
       aScale[si] = isFlag ? TYPE_W[1] * 2.4 : TYPE_W[t] * (0.92 + R() * 0.16);
       if (isFlag) sq.flagship = si;
@@ -917,7 +924,7 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
 
   // 戰術符號：單位方框，用 scale 表示分艦隊大小
   squadrons.forEach((sq) => {
-    const col = new THREE.Color(FACTION[SIDE_FAC[sq.side]].ui);
+    const col = new THREE.Color(FACTION[sqFac(sq)].ui);
     const g = new THREE.Group();
     const pts = [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5], [-0.5, -0.5]].map(([x, z]) => new THREE.Vector3(x, 0, z));
     const box = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: 0.6, depthTest: false }));
@@ -928,8 +935,8 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
     outlineGroup.add(g);
     sq.outline = g;
     const el = document.createElement('div');
-    el.className = 'sq-label s' + SIDE_FAC[sq.side] + (sq.bg ? ' bg' : '');
-    el.innerHTML = `<b>${sq.fleet && battleSetup && !battleSetup.bg ? sq.fleet.name : FACTION[SIDE_FAC[sq.side]].name}</b> ${sq.name}<span></span><i></i>`;
+    el.className = 'sq-label s' + sqFac(sq) + (sq.bg ? ' bg' : '');
+    el.innerHTML = `<b>${sq.fleet && battleSetup && !battleSetup.bg ? sq.fleet.name : FACTION[sqFac(sq)].name}</b> ${sq.name}<span></span><i></i>`;
     labelLayer.appendChild(el);
     sq.label = el; sq.labelNum = el.querySelector('span'); sq.labelState = el.querySelector('i');
   });
@@ -2102,7 +2109,7 @@ function fireAir(attacker, gk, gun, sq, o, delay) {
   let tx = o.x + o.vx * lead, ty = o.y + o.vy * lead, tz = o.z + o.vz * lead;
   if (!hit) { tx += (rnd() - 0.5) * 10; ty += (rnd() - 0.5) * 6; tz += (rnd() - 0.5) * 10; }
   const fxs = GUN_FX[gk], t0 = U.uTime.value + delay, dur = Math.hypot(tx - _a.x, ty - _a.y, tz - _a.z) / 900;
-  spawnBeam(_a.x, _a.y, _a.z, tx, ty, tz, t0, dur, sq.side, fxs.inten * 0.8, Math.min(0.5, 30 / Math.max(1, dist)));
+  spawnBeam(_a.x, _a.y, _a.z, tx, ty, tz, t0, dur, sq.side, fxs.inten * 0.8, Math.min(0.5, 30 / Math.max(1, dist)), sqFac(sq));
   if (hit) pending.push({ kind: 'ak', t: t0 + dur, a: o.a, i: o.i, g: o.g, dmg: gun.dmg, side: sq.side });
   return true;
 }
@@ -2265,7 +2272,7 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
         const r = FOW_RULE.area.r; _b.set(ar.x + (rnd() - 0.5) * r * 1.4, ar.y + (rnd() - 0.5) * r * 0.4, ar.z + (rnd() - 0.5) * r * 1.4);
         const fxs = GUN_FX[gk], L = _a.distanceTo(_b), t0 = U.uTime.value + delay, blk = ROCKS.length ? rockBlock(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z) : -1;
         if (blk >= 0) _b.set(_a.x + (_b.x - _a.x) * blk, _a.y + (_b.y - _a.y) * blk, _a.z + (_b.z - _a.z) * blk);
-        spawnBeam(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z, t0, _a.distanceTo(_b) / (fxs.spd + rnd() * 120), sq.side, (volleyShot ? 0.6 : 1) * fxs.inten * (0.4 + 0.6 * beamFalloff(L, gun)), Math.min(fxs.len, 60 / L));
+        spawnBeam(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z, t0, _a.distanceTo(_b) / (fxs.spd + rnd() * 120), sq.side, (volleyShot ? 0.6 : 1) * fxs.inten * (0.4 + 0.6 * beamFalloff(L, gun)), Math.min(fxs.len, 60 / L), sqFac(sq));
         gunStats[sq.side][gk][0]++; beamLastT[sq.side] = U.uTime.value;
         return true;
       }
@@ -2319,7 +2326,7 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
       hitAvg[sq.side] -= hitAvg[sq.side] * 0.01;
       beamPow[sq.side] += (fA - beamPow[sq.side]) * (beamShots[sq.side] ? 0.01 : 1); beamShots[sq.side]++; beamLastT[sq.side] = U.uTime.value;
       const t0 = U.uTime.value + delay, dur = tA / (fxs.spd + rnd() * 120);
-      spawnBeam(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z, t0, dur, sq.side, (volleyShot ? 0.6 : 1) * fxs.inten * (0.4 + 0.6 * fA), Math.min(fxs.len, 60 / tA));
+      spawnBeam(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z, t0, dur, sq.side, (volleyShot ? 0.6 : 1) * fxs.inten * (0.4 + 0.6 * fA), Math.min(fxs.len, 60 / tA), sqFac(sq));
       pending.push({ kind: 'ak', t: t0 + dur, a: o.a, i: o.i, g: o.g, dmg: gun.dmg * dmgMul * fA, side: sq.side });
       return true;
     }
@@ -2354,7 +2361,7 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
   const inten = (volleyShot ? 0.6 : 1) * fxs.inten * (0.4 + 0.6 * fm);   // 遠距離的光束比較暗
   const L = _a.distanceTo(_b), dur = L / (fxs.spd + rnd() * 120);
   const t0 = U.uTime.value + delay;
-  spawnBeam(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z, t0, dur, sq.side, inten, Math.min(fxs.len, 60 / L));
+  spawnBeam(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z, t0, dur, sq.side, inten, Math.min(fxs.len, 60 / L), sqFac(sq));
   if (blk >= 0) { if (rnd() < 0.25) pending.push({ kind: 'sp', t: t0 + dur * (ray ? 1 : blk), side: sq.side, x: _b.x, y: _b.y, z: _b.z }); return true; }
   if (!hit) return true;
   const asp = hitAspect(target, _a.x, _a.z, _b.x, _b.z, _a.y, _b.y);
@@ -2393,11 +2400,11 @@ function flash(side) {
 }
 
 // ───────────────────────── 共用：光束、擊沉 ─────────────────────────
-function spawnBeam(ax, ay, az, bx, by, bz, t0, dur, side, inten, len) {
+function spawnBeam(ax, ay, az, bx, by, bz, t0, dur, side, inten, len, fac) {   // fac：開火那支艦隊的外觀（省略＝那一邊的陣營）
   const i = beamHead; beamHead = (beamHead + 1) % BEAM_MAX;
   beamA[i * 3] = ax; beamA[i * 3 + 1] = ay; beamA[i * 3 + 2] = az;
   beamB[i * 3] = bx; beamB[i * 3 + 1] = by; beamB[i * 3 + 2] = bz;
-  beamT[i * 4] = t0; beamT[i * 4 + 1] = dur; beamT[i * 4 + 2] = SIDE_FAC[side] + inten; beamT[i * 4 + 3] = len;
+  beamT[i * 4] = t0; beamT[i * 4 + 1] = dur; beamT[i * 4 + 2] = (fac != null ? fac : SIDE_FAC[side]) + inten; beamT[i * 4 + 3] = len;
   markDirty('beam', i);
 }
 function dirIndexOf(dx, dz) { return ((Math.round(-Math.atan2(dx, dz) / (Math.PI / 4)) % 8) + 8) % 8; }
@@ -2439,9 +2446,9 @@ const MIS_GLSL = /* glsl */`
   attribute vec3 aM0; attribute vec3 aM1; attribute vec3 aM2; attribute vec4 aMT;
   vec3 bez(float u){ float a = 1. - u; return a * a * aM0 + 2. * a * u * aM1 + u * u * aM2; }
 `;
-const MIS_COL = [new THREE.Color(1.0, 0.42, 0.14), new THREE.Color(0.55, 0.85, 1.0)];
+const MIS_COL = [new THREE.Color(1.0, 0.42, 0.14), new THREE.Color(0.55, 0.85, 1.0), new THREE.Color(1.0, 0.3, 0.3)];
 const misTrailMat = new THREE.ShaderMaterial({
-  uniforms: { uTime: U.uTime, uRes: U.uRes, uColA: { value: MIS_COL[0] }, uColB: { value: MIS_COL[1] } },
+  uniforms: { uTime: U.uTime, uRes: U.uRes, uColA: { value: MIS_COL[0] }, uColB: { value: MIS_COL[1] }, uColC: { value: MIS_COL[2] } },
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   vertexShader: MIS_GLSL + /* glsl */`
     varying float vS; varying float vY; varying float vI; varying float vFac;
@@ -2466,17 +2473,17 @@ const misTrailMat = new THREE.ShaderMaterial({
       vS = s; vY = position.y * 2.; vI = 1. - k; vFac = floor(aMT.z);
     }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uColA; uniform vec3 uColB;
+    uniform vec3 uColA; uniform vec3 uColB; uniform vec3 uColC;
     varying float vS; varying float vY; varying float vI; varying float vFac;
     void main(){
       float y = abs(vY);
       float glow = exp(-y * y * 6.), core = exp(-y * y * 50.);
-      vec3 c = vFac < 0.5 ? uColA : uColB;
+      vec3 c = (vFac < 0.5 ? uColA : vFac < 1.5 ? uColB : uColC);
       gl_FragColor = vec4((c * glow * 0.55 + vec3(1.) * core * 0.45 * vS) * pow(vS, 1.8) * vI, 1.);
     }`,
 });
 const misHeadMat = new THREE.ShaderMaterial({
-  uniforms: { uTime: U.uTime, uRes: U.uRes, uColA: { value: MIS_COL[0] }, uColB: { value: MIS_COL[1] } },
+  uniforms: { uTime: U.uTime, uRes: U.uRes, uColA: { value: MIS_COL[0] }, uColB: { value: MIS_COL[1] }, uColC: { value: MIS_COL[2] } },
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   vertexShader: MIS_GLSL + /* glsl */`
     varying vec2 vUv; varying float vFac; varying float vI;
@@ -2493,11 +2500,11 @@ const misHeadMat = new THREE.ShaderMaterial({
       vI = 0.8 + 0.2 * sin(uTime * 40. + aMT.x * 97.);
     }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uColA; uniform vec3 uColB;
+    uniform vec3 uColA; uniform vec3 uColB; uniform vec3 uColC;
     varying vec2 vUv; varying float vFac; varying float vI;
     void main(){
       float d = length(vUv);
-      vec3 c = vFac < 0.5 ? uColA : uColB;
+      vec3 c = (vFac < 0.5 ? uColA : vFac < 1.5 ? uColB : uColC);
       gl_FragColor = vec4((c * exp(-d * d * 6.) * 0.7 + vec3(1.) * exp(-d * d * 30.) * 0.9) * vI, 1.);
     }`,
 });
@@ -2541,7 +2548,7 @@ function launchMissileAt(x, y, z, side, msq, target, dmg, t0, src, accM = 1) {
   else { const off = TYPE_W[ships.type[target]] * (1.2 + rnd() * 1.5) * (rnd() < 0.5 ? -1 : 1); misC.set([_b.x + dx / dist * 12 + lx * off, _b.y + (rnd() - 0.5) * 6, _b.z + dz / dist * 12 + lz * off], i * 3); }
   const dur = dist / (85 + rnd() * 35);
   const blk = ROCKS.length ? rockBlock(x, y, z, _b.x, _b.y, _b.z) : -1, cut = blk >= 0 ? Math.max(0.05, blk) : 1;   // 被巨大小行星擋住＝撞上岩石（同艦艇飛彈）
-  misT.set([t0, dur, SIDE_FAC[side] + 0.5, cut], i * 4);
+  misT.set([t0, dur, (msq ? sqFac(msq) : SIDE_FAC[side]) + 0.5, cut], i * 4);
   if (misDirtyFrom < 0) misDirtyFrom = i; misDirtyCount++;
   misGen[i]++; misShot[i] = 0; misLive[i] = blk >= 0 ? 0 : 1; misSide[i] = side; misSpd[i] = dist / dur;
   const tHit = t0 + dur;
@@ -2583,7 +2590,7 @@ function launchMissile(launcher, t0, maxRange = 0) {
   // 攔截不再開火時就決定：飛彈真的在空中飛，由對方的防空砲／副砲打下來（見 fireAir）
   const intercepted = blk >= 0;   // 只有撞上岩石是一開始就知道的
   const cut = blk >= 0 ? Math.max(0.05, blk) : 1;
-  misT.set([t0, dur, SIDE_FAC[sq.side] + 0.5, cut], i * 4);
+  misT.set([t0, dur, sqFac(sq) + 0.5, cut], i * 4);
   if (misDirtyFrom < 0) misDirtyFrom = i; misDirtyCount++;
   misGen[i]++; misShot[i] = 0; misLive[i] = intercepted ? 0 : 1; misSide[i] = sq.side; misSpd[i] = dist / dur;
   const tHit = t0 + dur * cut;
@@ -2615,7 +2622,7 @@ function launchMissileArea(launcher, t0, A) {
   misB.set([(_a.x + bx) / 2 + lx * lat, (_a.y + by) / 2 + up, (_a.z + bz) / 2 + lz * lat], i * 3);
   misC.set([bx, by, bz], i * 3);
   const dur = dist / (85 + rnd() * 35), blk = ROCKS.length ? rockBlock(_a.x, _a.y, _a.z, bx, by, bz) : -1, cut = blk >= 0 ? Math.max(0.05, blk) : 1;
-  misT.set([t0, dur, SIDE_FAC[sq.side] + 0.5, cut], i * 4);
+  misT.set([t0, dur, sqFac(sq) + 0.5, cut], i * 4);
   if (misDirtyFrom < 0) misDirtyFrom = i; misDirtyCount++;
   misGen[i]++; misShot[i] = 0; misLive[i] = blk >= 0 ? 0 : 1; misSide[i] = sq.side; misSpd[i] = dist / dur;
   bezCPU(i, cut, _c);
@@ -2683,7 +2690,7 @@ const ftrSpriteMat = new THREE.ShaderMaterial({
       float h = atan(aFV.x, aFV.z);
       float dir = mod(floor(-h / (PI / 4.) + 0.5) + 16., 8.);
       vec2 uv = position.xy + 0.5;
-      vUv = vec2((aFI.x * 8. + dir + uv.x) / 16., uv.y);
+      vUv = aFI.x > 1.5 ? vec2((dir + uv.x) / 16., uv.y * 0.5) : vec2((aFI.x * 8. + dir + uv.x) / 16., 0.5 + uv.y * 0.5);   // 傭兵在下排
       vDie = die;
       vFog = uFog * smoothstep(-260., 620., dot(aFP, -uCamDir)) * 0.6;
     }`,
@@ -2697,9 +2704,9 @@ const ftrSpriteMat = new THREE.ShaderMaterial({
       gl_FragColor = vec4(col, 1.);
     }`,
 });
-const FTR_COL = [new THREE.Color(1.0, 0.55, 0.25), new THREE.Color(0.5, 0.8, 1.0)];
+const FTR_COL = [new THREE.Color(1.0, 0.55, 0.25), new THREE.Color(0.5, 0.8, 1.0), new THREE.Color(1.0, 0.4, 0.3)];
 const ftrTrailMat = new THREE.ShaderMaterial({
-  uniforms: { uTime: U.uTime, uRes: U.uRes, uCamDir: U.uCamDir, uFog: U.uFog, uColA: { value: FTR_COL[0] }, uColB: { value: FTR_COL[1] } },
+  uniforms: { uTime: U.uTime, uRes: U.uRes, uCamDir: U.uCamDir, uFog: U.uFog, uColA: { value: FTR_COL[0] }, uColB: { value: FTR_COL[1] }, uColC: { value: FTR_COL[2] } },
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   vertexShader: FTR_GLSL + /* glsl */`
     varying vec2 vUv; varying float vFac;
@@ -2717,13 +2724,13 @@ const ftrTrailMat = new THREE.ShaderMaterial({
       vec2 s = mix(st, sh, t) + vec2(-dn.y, dn.x) * position.y * w + dn * position.x * w * 0.6;
       c.xy = s / (uRes * 0.5) * c.w;
       gl_Position = c;
-      vUv = vec2(t, position.y * 2.); vFac = kind > 0.5 ? 2. : aFI.x;   // 2＝維修機（綠色尾焰）
+      vUv = vec2(t, position.y * 2.); vFac = kind > 0.5 ? 3. : aFI.x;   // 3＝維修機（綠色尾焰）；0～2＝陣營
     }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uColA; uniform vec3 uColB; varying vec2 vUv; varying float vFac;
+    uniform vec3 uColA; uniform vec3 uColB; uniform vec3 uColC; varying vec2 vUv; varying float vFac;
     void main(){
       float y = abs(vUv.y);
-      vec3 c = vFac > 1.5 ? vec3(0.45, 1.0, 0.6) : vFac < 0.5 ? uColA : uColB;
+      vec3 c = vFac > 2.5 ? vec3(0.45, 1.0, 0.6) : (vFac < 0.5 ? uColA : vFac < 1.5 ? uColB : uColC);
       gl_FragColor = vec4((c * exp(-y * y * 6.) * 0.6 + vec3(1.) * exp(-y * y * 40.) * 0.5 * vUv.x) * pow(vUv.x, 1.3), 1.);
     }`,
 });
@@ -3012,7 +3019,7 @@ function updateFighters(dt) {
     let st = FT.state[i];
     if (st === 1 && t >= FT.t0[i]) { activateFighter(i); st = FT.state[i]; }
     if (st === 3 && t - FT.t0[i] > 0.7) { FT.state[i] = 0; st = 0; }
-    fI[i * 4] = SIDE_FAC[FT.side[i]]; fI[i * 4 + 1] = st; fI[i * 4 + 2] = FT.t0[i]; fI[i * 4 + 3] = FT.seed[i] + (FT.kind[i] === 1 ? 2 : 0);   // w：整數部分＝種類（畫維修機用；偵察機畫成一般艦載機）
+    fI[i * 4] = shipFac(FT.carrier[i]); fI[i * 4 + 1] = st; fI[i * 4 + 2] = FT.t0[i]; fI[i * 4 + 3] = FT.seed[i] + (FT.kind[i] === 1 ? 2 : 0);   // w：整數部分＝種類（畫維修機用；偵察機畫成一般艦載機）
     if (st !== 2) continue;
     const i3 = i * 3, s = FT.side[i], seed = FT.seed[i];
     let px = fP[i3], py = fP[i3 + 1], pz = fP[i3 + 2], vx = fV[i3], vy = fV[i3 + 1], vz = fV[i3 + 2];
@@ -3694,7 +3701,7 @@ function init3D() {
   R3.ready = true;
 }
 // 艦種鍵（e0～e5／a0～a5，掛點用）與模型鍵（沒有自己模型的艦種借用 look 的模型，例如補給艦借巡洋艦）
-function typeKey(i) { return (SIDE_FAC[ships.side[i]] ? 'a' : 'e') + ships.type[i]; }
+function typeKey(i) { return FAC_KEY[shipFac(i)] + ships.type[i]; }
 function hullKey(i) { const k = typeKey(i), lk = SHIP_TYPES[ships.type[i]].look; return lk == null || R3.models[k] ? k : k[0] + lk; }
 // 依目前艦艇數建立 (模型, 細節) 的 InstancedMesh
 function rebuild3D() {
@@ -3703,7 +3710,8 @@ function rebuild3D() {
   const cap = {};
   const capT = {};   // 依艦種（e0～e5／a0～a5）算船數；cap 是依模型（借用外觀的艦種算在被借的模型上）
   for (let i = 0; i < shipCount; i++) { const k = hullKey(i), tk = typeKey(i); cap[k] = (cap[k] || 0) + 1; capT[tk] = (capT[tk] || 0) + 1; }
-  cap.ef = FTR_MAX; cap.af = FTR_MAX;
+  for (const k of FAC_KEY) if (R3.models[k + 'f']) cap[k + 'f'] = FTR_MAX;
+  cap.ef = FTR_MAX;
   // 武器：每艘船的掛點數 × 船數（只有細節夠的船才畫，但容量照最多的算）；借用外觀的艦種只畫被借模型上的防空砲
   R3.mounts = {};
   for (const tk of Object.keys(capT)) {
@@ -3813,7 +3821,7 @@ function update3D(cam = camera, vh = VH) {   // cam／vh：子畫面（其他旗
     const lod = pick(FTR_LEN3, x, y, z);
     if (lod < 0 || lod > 3) continue;
     let vx = fV[j3], vy = fV[j3 + 1], vz = fV[j3 + 2]; const vl = Math.hypot(vx, vy, vz) || 1;
-    writeMatrix(R3.meshByKey[SIDE_FAC[FT.side[j]] ? 'af' : 'ef'][lod], x, y, z, vx / vl, vy / vl, vz / vl, FTR_LEN3 * (FT.kind[j] ? 0.6 : 1));   // 維修機小一點
+    writeMatrix((R3.meshByKey[FAC_KEY[shipFac(FT.carrier[j])] + 'f'] || R3.meshByKey.ef)[lod], x, y, z, vx / vl, vy / vl, vz / vl, FTR_LEN3 * (FT.kind[j] ? 0.6 : 1));   // 維修機小一點
   }
   for (const it of R3.list) if (it.mesh.count) { const a = it.mesh.instanceMatrix; a.clearUpdateRanges && a.clearUpdateRanges(); a.addUpdateRange(0, it.mesh.count * 16); a.needsUpdate = true; }
 }
@@ -4009,7 +4017,7 @@ function squadronAt(cx, cy) {
 // ── 選取 ──
 function sideSquadrons(sd) { return squadrons.filter((q) => !q.bg && q.side === sd && q.alive > 0); }
 function setSelection(list, add = false) {
-  if (GAME.phase === 'battle' || GAME.phase === 'deploy') list = list.filter((q) => q.side === GAME.playerSide && !q.bg);   // 作戰中只能選自己的
+  if (GAME.phase === 'battle' || GAME.phase === 'deploy') list = list.filter((q) => q.side === GAME.playerSide && !q.bg && !(q.fleet && q.fleet.ally));   // 作戰中只能選自己的（友軍傭兵自己打，不聽指揮）
   if (!add) selected.clear();
   for (const q of list) {
     if (q.side !== cmdSide) { selected.clear(); setCmdSide(q.side, false); }
@@ -4135,7 +4143,7 @@ function updateStalks() {
   const put = (x, y, z) => { P[n * 3] = x; P[n * 3 + 1] = y; P[n * 3 + 2] = z; C[n * 3] = _stc.r; C[n * 3 + 1] = _stc.g; C[n * 3 + 2] = _stc.b; n++; };
   for (const q of squadrons) {
     if (q.bg || q.hidden || q.alive <= 0 || Math.abs(q.y || 0) < 8 || n + 6 > STALK_MAX || fowHidden(q)) continue;
-    _stc.set(FACTION[SIDE_FAC[q.side]].ui);
+    _stc.set(FACTION[sqFac(q)].ui);
     put(q.x, q.y, q.z); put(q.x, 0, q.z); put(q.x - 9, 0, q.z); put(q.x + 9, 0, q.z); put(q.x, 0, q.z - 9); put(q.x, 0, q.z + 9);
   }
   stalkGeo.setDrawRange(0, n); stalkGeo.attributes.position.needsUpdate = stalkGeo.attributes.color.needsUpdate = n > 0;

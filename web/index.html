@@ -8,7 +8,7 @@
   :root {
     --bg: #03050b; --panel: rgba(8, 12, 22, .82); --line: rgba(150, 175, 220, .16);
     --ui: 1.2; --sp: calc(var(--ui) * 1.2);
-    --text: #d8e0ee; --dim: #8592a8; --emp: #f2b35a; --all: #7cc4ff; --pc: var(--emp); --ec: var(--all);
+    --text: #d8e0ee; --dim: #8592a8; --emp: #f2b35a; --all: #7cc4ff; --mer: #e2735a; --pc: var(--emp); --ec: var(--all);
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
@@ -20,7 +20,7 @@
   .sq-label { position: absolute; left: 0; top: 0; white-space: nowrap; font-size: calc(12px * var(--ui)); letter-spacing: .02em;
     padding: 1px 7px; border-radius: 2px; background: rgba(3,6,14,.55); border-left: 2px solid; text-shadow: 0 1px 2px #000; }
   .sq-label.s0 { border-color: var(--emp); } .sq-label.s0 b { color: var(--emp); }
-  .sq-label.s1 { border-color: var(--all); } .sq-label.s1 b { color: var(--all); }
+  .sq-label.s1 { border-color: var(--all); } .sq-label.s1 b { color: var(--all); } .sq-label.s2 { border-color: var(--mer); } .sq-label.s2 b { color: var(--mer); }
   .sq-label b { font-weight: 600; margin-right: 4px; }
   .sq-label span { color: var(--dim); font-variant-numeric: tabular-nums; }
   .sq-label.bg { font-size: calc(11px * var(--ui)); opacity: .7; }
@@ -32,7 +32,7 @@
   #hud .row.gpu { margin-top: calc(2px * var(--sp)); }
   #hud .gpuname { color: var(--dim); font-size: calc(11px * var(--ui)); opacity: .75; margin-top: calc(2px * var(--sp)); max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #hud .forces { margin-top: calc(8px * var(--sp)); display: flex; gap: calc(22px * var(--sp)); font-size: calc(14px * var(--ui)); font-variant-numeric: tabular-nums; }
-  #hud .forces .e b { color: var(--emp); } #hud .forces .a b { color: var(--all); }
+  #hud .forces .e b { color: var(--emp); } #hud .forces .a b { color: var(--all); } #hud .forces .m b { color: var(--mer); }
   #hud .forces i { font-style: normal; }
   #hud .forces em { font-style: normal; font-size: calc(12px * var(--ui)); color: var(--dim); }
   #hud .row.air { margin-top: calc(4px * var(--sp)); } #hud .row b.e { color: var(--emp); } #hud .row b.a { color: var(--all); }
@@ -81,11 +81,11 @@
   .sq-label.sel { background: rgba(255,255,255,.14); box-shadow: 0 0 0 1px rgba(255,255,255,.35); }
   .sq-label.relay i { color: #ff8a7a; }
   .sq-label.flank i { color: #ff5d4d; font-weight: 600; }
-  #hud .row.dmg { margin-top: calc(2px * var(--sp)); } #hud .row.dmg .e b { color: var(--emp); } #hud .row.dmg .a b { color: var(--all); }
+  #hud .row.dmg { margin-top: calc(2px * var(--sp)); } #hud .row.dmg .e b { color: var(--emp); } #hud .row.dmg .a b { color: var(--all); } #hud .row.dmg .m b { color: var(--mer); }
   #boxsel { position: fixed; display: none; border: 1px solid rgba(220,230,255,.8); background: rgba(160,190,255,.08); pointer-events: none; z-index: 3; }
   #selbar { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); max-width: calc(100vw - calc(32px * var(--ui))); padding: calc(6px * var(--sp)) calc(14px * var(--sp));
     background: var(--panel); border: 1px solid var(--line); border-radius: 6px; font-size: calc(13px * var(--ui)); pointer-events: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #selbar .dim { color: var(--dim); } #selbar b.s0 { color: var(--emp); } #selbar b.s1 { color: var(--all); } #selbar .tgt { color: #ff9a7a; }
+  #selbar .dim { color: var(--dim); } #selbar b.s0 { color: var(--emp); } #selbar b.s1 { color: var(--all); } #selbar b.s2 { color: var(--mer); } #selbar .tgt { color: #ff9a7a; }
   #status { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); display: flex; gap: calc(10px * var(--sp)); align-items: center; pointer-events: none; }
   #st-pause { font-size: calc(15px * var(--ui)); letter-spacing: .3em; padding: calc(4px * var(--sp)) calc(14px * var(--sp)); border: 1px solid rgba(255,210,122,.6); color: #ffd27a; background: rgba(30,20,5,.6); border-radius: 4px; }
   #st-speed { font-size: calc(13px * var(--ui)); color: var(--dim); font-variant-numeric: tabular-nums; }
@@ -222,7 +222,7 @@
   .g-sp { flex: 1; }
   .g-card { background: rgba(10,15,28,.82); border: 1px solid var(--line); border-radius: 6px; padding: calc(14px * var(--sp)) calc(16px * var(--sp)); }
   .g-card h3 { margin: 0 0 calc(10px * var(--sp)); font-size: calc(13px * var(--ui)); letter-spacing: .14em; color: var(--dim); font-weight: 600; }
-  .g-dim { color: var(--dim); } .g-emp { color: var(--emp); } .g-all { color: var(--all); } .g-pc { color: var(--pc); } .g-ec { color: var(--ec); } .g-warn { color: #ff8a7a; } .g-good { color: #8fe3a5; }
+  .g-dim { color: var(--dim); } .g-emp { color: var(--emp); } .g-all { color: var(--all); } .g-mer { color: var(--mer); } .g-pc { color: var(--pc); } .g-ec { color: var(--ec); } .g-warn { color: #ff8a7a; } .g-good { color: #8fe3a5; }
   .g-menu { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: safe center; gap: calc(12px * var(--sp)); text-align: center; padding: calc(24px * var(--sp)) 0; }
   .g-menu h1 { font-size: calc(34px * var(--ui)); letter-spacing: .3em; margin: 0; font-weight: 600; }
   .g-menu .sub { color: var(--dim); letter-spacing: .2em; margin-bottom: calc(18px * var(--sp)); }
@@ -568,7 +568,7 @@
   .wed-seg { display: flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
   .wed-seg button { border: 0; background: transparent; color: var(--dim); padding: calc(4px * var(--sp)) calc(9px * var(--sp)); font: inherit; cursor: pointer; }
   .wed-seg button + button { border-left: 1px solid var(--line); }
-  .wed-seg button.on.emp { background: rgba(242,179,90,.18); color: var(--emp); } .wed-seg button.on.all { background: rgba(124,196,255,.18); color: var(--all); }
+  .wed-seg button.on.emp { background: rgba(242,179,90,.18); color: var(--emp); } .wed-seg button.on.all { background: rgba(124,196,255,.18); color: var(--all); } .wed-seg button.on.mer { background: rgba(226,115,90,.18); color: var(--mer); }
   /* 操作難度 */
   .sp-op { display: flex; align-items: center; gap: calc(10px * var(--sp)); margin-bottom: calc(12px * var(--sp)); flex-wrap: wrap; } .sp-opd { color: var(--dim); font-size: calc(12px * var(--ui)); }
   body.op-flat .tac-svbox { display: none; }
@@ -668,7 +668,7 @@
   .cp-top { display: flex; gap: calc(28px * var(--sp)); flex-wrap: wrap; align-items: baseline; } .cp-top > div { display: flex; gap: calc(8px * var(--sp)); align-items: baseline; } .cp-top b { font-size: calc(18px * var(--ui)); } .cp-top .cp-stage { font-size: calc(26px * var(--ui)); color: var(--emp); }
 
   /* 星際酒館 */
-  .tv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: calc(12px * var(--sp)); } .tv-col h4 { margin: 0 0 calc(8px * var(--sp)); letter-spacing: .14em; }
+  .tv-grid.tv-3 { grid-template-columns: 1fr 1fr 1fr; } .tv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: calc(12px * var(--sp)); } .tv-col h4 { margin: 0 0 calc(8px * var(--sp)); letter-spacing: .14em; }
   .tv-c { background: rgba(10,15,28,.82); border: 1px solid var(--line); border-radius: 6px; padding: calc(10px * var(--sp)) calc(12px * var(--sp)); margin-bottom: calc(8px * var(--sp)); }
   .tv-c.tv-elite { border-color: rgba(143,227,165,.4); } .tv-c.tv-ace { border-color: rgba(255,210,122,.7); box-shadow: 0 0 12px rgba(255,210,122,.15); }
   .tv-h { display: flex; justify-content: space-between; align-items: baseline; gap: calc(8px * var(--sp)); } .tv-r { font-size: calc(11px * var(--ui)); color: var(--dim); }
@@ -680,6 +680,7 @@
 
   /* ── 陣營主題（作戰中的介面）：body.pf-0＝帝國（金、雙框、菱形紋飾），body.pf-1＝聯盟（青藍、切角、掃描線）── */
   body.pf-1 { --pc: var(--all); --ec: var(--emp); }
+  body.ef-2 { --ec: var(--mer); }   /* 對手是灰鴉傭兵團 */
   body.pf-0 #battlehud, body.pf-0 .sk-fleet, body.pf-0 #selbar, body.pf-0 #deploybar {
     background: linear-gradient(180deg, rgba(24,18,10,.92), rgba(10,11,18,.9)); border: 1px solid rgba(242,179,90,.5);
     box-shadow: inset 0 0 0 2px rgba(8,9,14,.9), inset 0 0 0 3px rgba(242,179,90,.22), 0 2px 10px rgba(0,0,0,.5); border-radius: 3px; }
@@ -894,7 +895,7 @@
 
 <div id="boot"><div class="boot-card"><h1>星海艦隊戰</h1><div class="sub">FLEET TACTICS · 內網伺服器</div><div id="boot-body"><p class="boot-st">連線中…</p></div></div></div>
 <div id="save-badge" hidden>⚠ 存檔還沒同步到伺服器，重試中…</div>
-<script>window.__BUILD = "20261021000812"; window.__ASSETS = { ships: "assets/ships.webp", fx: "assets/fx.webp", fighters: "assets/fighters.webp" };</script>
+<script>window.__BUILD = "20261021004157"; window.__ASSETS = { ships: "assets/ships.webp", fx: "assets/fx.webp", fighters: "assets/fighters.webp" };</script>
 <script>// ═══ 啟動前：登入伺服器、取得存檔、提供 STORE（取代 localStorage，寫入會自動同步到伺服器）═══
 (() => {
   'use strict';

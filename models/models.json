@@ -1,5 +1,5 @@
 {
-  "說明": "鍵名固定：e0～e4／a0～a4＝帝國／聯盟的 航母、戰列、巡洋、驅逐、護衛；ew0～ew5／aw0～aw5＝武器（三聯裝、雙聯裝、舷砲或垂直飛彈、防空、魚雷、衝角或貫穿主砲）；ef／af＝艦載機。file＝相對於這個資料夾的路徑；forward＝模型的船頭（砲口）朝向，+z、-z、+x、-x 其中之一；kind＝hull／weapon／fighter。換模型：把新的 GLB 放進來、改 file，重開伺服器就會重算遠景細節。",
+  "說明": "鍵名固定：e0～e4／a0～a4／m0～m4＝帝國／聯盟／傭兵的 航母、戰列、巡洋、驅逐、護衛；ew0～ew5／aw0～aw5／mw0～mw5＝武器（三聯裝、雙聯裝、舷砲或垂直飛彈、防空、魚雷、衝角或貫穿主砲）；ef／af／mf＝艦載機。file＝相對於這個資料夾的路徑；forward＝模型的船頭（砲口）朝向，+z、-z、+x、-x 其中之一；kind＝hull／weapon／fighter。換模型：把新的 GLB 放進來、改 file，重開伺服器就會重算遠景細節。",
   "version": 1,
   "models": {
     "e0": {
@@ -145,6 +145,78 @@
       "kind": "fighter",
       "forward": "+z",
       "name": "聯盟 艦載機"
+    },
+    "m0": {
+      "file": "傭兵/船體/01_航空母艦.glb",
+      "kind": "hull",
+      "forward": "+x",
+      "name": "傭兵 航空母艦"
+    },
+    "m1": {
+      "file": "傭兵/船體/02_戰列艦.glb",
+      "kind": "hull",
+      "forward": "+x",
+      "name": "傭兵 戰列艦"
+    },
+    "m2": {
+      "file": "傭兵/船體/03_巡洋艦.glb",
+      "kind": "hull",
+      "forward": "+z",
+      "name": "傭兵 巡洋艦"
+    },
+    "m3": {
+      "file": "傭兵/船體/04_驅逐艦.glb",
+      "kind": "hull",
+      "forward": "-z",
+      "name": "傭兵 驅逐艦"
+    },
+    "m4": {
+      "file": "傭兵/船體/05_護衛艦.glb",
+      "kind": "hull",
+      "forward": "+x",
+      "name": "傭兵 護衛艦"
+    },
+    "mw0": {
+      "file": "傭兵/武器/01_拼裝三聯裝主砲塔.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "傭兵 拼裝三聯裝主砲塔"
+    },
+    "mw1": {
+      "file": "傭兵/武器/02_臨時加裝軌道砲.glb",
+      "kind": "weapon",
+      "forward": "+x",
+      "name": "傭兵 臨時加裝軌道砲"
+    },
+    "mw2": {
+      "file": "傭兵/武器/03_外掛飛彈箱.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "傭兵 外掛飛彈箱"
+    },
+    "mw3": {
+      "file": "傭兵/武器/04_雙管機砲塔.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "傭兵 雙管機砲塔"
+    },
+    "mw4": {
+      "file": "傭兵/武器/05_纜帶綁掛魚雷管.glb",
+      "kind": "weapon",
+      "forward": "+x",
+      "name": "傭兵 纜帶綁掛魚雷管"
+    },
+    "mw5": {
+      "file": "傭兵/武器/06_機械抓臂.glb",
+      "kind": "weapon",
+      "forward": "+x",
+      "name": "傭兵 機械抓臂"
+    },
+    "mf": {
+      "file": "傭兵/艦載機/01_能量炮.glb",
+      "kind": "fighter",
+      "forward": "+z",
+      "name": "傭兵 艦載機"
     }
   }
 }

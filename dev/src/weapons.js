@@ -4,12 +4,17 @@
 const WEAPON_NAMES = [
   ['三聯裝巨砲塔', '雙聯裝砲塔', '舷砲砲座模組', '防空砲塔', '魚雷發射管組', '金色衝角砲'],
   ['三聯裝主砲塔', '雙聯裝副砲塔', '垂直飛彈發射模組', '防空砲塔', '魚雷發射管組', '貫穿式主砲'],
+  ['拼裝三聯裝主砲塔', '臨時加裝軌道砲', '外掛飛彈箱', '雙管機砲塔', '纜帶綁掛魚雷管', '機械抓臂'],
 ];
 const WEAPON_DEF_S = [0.2, 0.12, 0.08, 0.06, 0.09, 0.18];   // 新放上去的預設尺寸（船長的比例）
 const HULL_NAMES = ['航空母艦', '戰列艦', '巡洋艦', '驅逐艦', '護衛艦'];
 // 2D 貼圖的鏡頭校正（用船體輪廓對齊原圖求得，30° 俯角、正交）：每單位幾 px、垂直位移 px
-const ATLAS_CAL = { e0: [244, -5.0], e1: [252, -12.3], e2: [248, -10.7], e3: [248, -14.5], e4: [248, -12.6], a0: [248, -6.6], a1: [248, -6.4], a2: [248, -10.0], a3: [248, -1.0], a4: [252, 4.3] };
-const HULL_KEYS = ['e0', 'e1', 'e2', 'e3', 'e4', 'a0', 'a1', 'a2', 'a3', 'a4'];
+const ATLAS_CAL = { e0: [244, -5.0], e1: [252, -12.3], e2: [248, -10.7], e3: [248, -14.5], e4: [248, -12.6], a0: [248, -6.6], a1: [248, -6.4], a2: [248, -10.0], a3: [248, -1.0], a4: [252, 4.3],
+  m0: [248, -8.0], m1: [248, -8.0], m2: [248, -8.0], m3: [248, -8.0], m4: [248, -8.0] };   // 傭兵：還沒對齊原圖，先用平均值（2D 武器可能略有偏移）
+const HULL_KEYS = ['e0', 'e1', 'e2', 'e3', 'e4', 'a0', 'a1', 'a2', 'a3', 'a4', 'm0', 'm1', 'm2', 'm3', 'm4'];
+const facOfKey = (hk) => Math.max(0, 'eam'.indexOf(hk[0]));   // 模型鍵 → 陣營（0 帝國、1 聯盟、2 傭兵）
+// 貼圖裡的格子（左上角，影像座標）：帝國、聯盟在上半（陣營 × 8 方向），傭兵在下半（y≥1024）
+const atlasXY = (fac, t, d) => (fac < 2 ? [(fac * 8 + d) * 256, t * 192] : [d * 256, 1024 + t * 192]);
 const D2R = Math.PI / 180;
 const MOUNT_STORE = 'fleet.mounts';
 
@@ -81,15 +86,15 @@ function renderWeaponCells(rdr, rt, cells, list) {
   if (mips) { rt.texture.generateMipmaps = true; rdr.setRenderTarget(rt); rdr.render(new THREE.Scene(), WCOPY.cam); }   // 最後一次才產生 mipmap
   rdr.setRenderTarget(prevRT); rdr.autoClear = prevAuto; rdr.setClearColor(cc, ca);
 }
-function atlasCells(hk) { const side = hk[0] === 'a' ? 1 : 0, t = +hk[1]; return Array.from({ length: 8 }, (_, d) => ({ hk, d, x: (side * 8 + d) * 256, y: 1024 - (t + 1) * 192 })); }
+function atlasCells(hk) { const fac = facOfKey(hk), t = +hk[1]; return Array.from({ length: 8 }, (_, d) => { const [x, y] = atlasXY(fac, t, d); return { hk, d, x, y: 2048 - y - 192 }; }); }   // rt 的 y 從下往上
 async function buildWeaponAtlas(only) {
-  const keys = only && only.length ? only : HULL_KEYS;
+  const keys = (only && only.length ? only : HULL_KEYS).filter((k) => getModel(k));   // 沒有模型的船體（素材還沒放）就不畫
   const need = new Set(); for (const hk of keys) { need.add(hk); for (const m of MOUNTS[hk] || []) need.add(hk[0] + 'w' + m.w); }
   await Promise.all([...need].map((k) => getModel(k) && getModel(k).ready));
   if (!WA.rt) {
-    WA.rt = new THREE.WebGLRenderTarget(4096, 1024, { depthBuffer: false, colorSpace: THREE.SRGBColorSpace, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter });
+    WA.rt = new THREE.WebGLRenderTarget(4096, 2048, { depthBuffer: false, colorSpace: THREE.SRGBColorSpace, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter });
     WA.rt.texture.anisotropy = 4;
-    renderWeaponCells(renderer, WA.rt, HULL_KEYS.flatMap(atlasCells));
+    renderWeaponCells(renderer, WA.rt, keys.flatMap(atlasCells));
   } else renderWeaponCells(renderer, WA.rt, keys.flatMap(atlasCells));
   applyWeapon2D();
 }
@@ -123,7 +128,7 @@ function closeWeaponEditor() {
 function buildWeaponEditor() {
   const el = WE.el = document.createElement('div'); el.id = 'wed'; el.hidden = true;
   el.innerHTML = `<div class="wed-top"><h2>武器配置</h2>
-      <div class="wed-seg" id="wed-fac"><button data-f="e">帝國軍</button><button data-f="a">聯盟軍</button></div>
+      <div class="wed-seg" id="wed-fac"><button data-f="e">帝國軍</button><button data-f="a">聯盟軍</button><button data-f="m">傭兵</button></div>
       <div class="wed-seg" id="wed-type">${HULL_NAMES.map((n, i) => `<button data-t="${i}">${n}</button>`).join('')}</div>
       <span class="g-sp"></span>
       <button class="g-btn sm" id="wed-undo" title="復原（Ctrl＋Z）">↶</button><button class="g-btn sm" id="wed-redo" title="重做（Ctrl＋Y）">↷</button>
@@ -205,10 +210,11 @@ function weCamPreset(c) {
 }
 function weLoadHull() {
   const M = getModel(WE.hk);
+  if (!M) { WE.hk = 'e1'; weLoadHull(); return; }   // 這個陣營的模型還沒放進 models/：退回帝國戰列艦
   WE.hullMesh.geometry = M.lods[0]; WE.hullMesh.material = M.mat;
   WE.sel = -1; WE.place = -1;
   const need = [WE.hk, ...[0, 1, 2, 3, 4, 5].map((w) => WE.hk[0] + 'w' + w)];
-  Promise.all(need.map((k) => getModel(k).ready)).then(() => weDraw2D());
+  Promise.all(need.map((k) => getModel(k) && getModel(k).ready)).then(() => weDraw2D());
   weSync(); weUI(); if (!WE.raf) weLoop();
 }
 function weMounts() { return MOUNTS[WE.hk] || (MOUNTS[WE.hk] = []); }
@@ -231,9 +237,9 @@ function weSnap() { WE.undo.push(JSON.stringify(MOUNTS)); if (WE.undo.length > 8
 function weUndo() { if (!WE.undo.length) return; WE.redo.push(JSON.stringify(MOUNTS)); MOUNTS = readMounts(JSON.parse(WE.undo.pop())); WE.sel = Math.min(WE.sel, weMounts().length - 1); weChanged(true); }
 function weRedo() { if (!WE.redo.length) return; WE.undo.push(JSON.stringify(MOUNTS)); MOUNTS = readMounts(JSON.parse(WE.redo.pop())); WE.sel = Math.min(WE.sel, weMounts().length - 1); weChanged(true); }
 function weUI() {
-  const el = WE.el, fac = WE.hk[0] === 'a' ? 1 : 0, list = weMounts(), names = WEAPON_NAMES[fac];
-  el.querySelectorAll('#wed-fac button').forEach((b) => b.className = b.dataset.f === WE.hk[0] ? 'on ' + (fac ? 'all' : 'emp') : '');
-  el.querySelectorAll('#wed-type button').forEach((b) => b.className = +b.dataset.t === +WE.hk[1] ? 'on ' + (fac ? 'all' : 'emp') : '');
+  const el = WE.el, fac = facOfKey(WE.hk), list = weMounts(), names = WEAPON_NAMES[fac], cls = FACTION_CLS[fac];
+  el.querySelectorAll('#wed-fac button').forEach((b) => b.className = b.dataset.f === WE.hk[0] ? 'on ' + cls : '');
+  el.querySelectorAll('#wed-type button').forEach((b) => b.className = +b.dataset.t === +WE.hk[1] ? 'on ' + cls : '');
   el.querySelector('#wed-pal').innerHTML = names.map((n, w) => `<button class="g-btn sm ${WE.place === w ? 'pri' : ''}" data-w="${w}">${n}</button>`).join('');
   el.querySelector('#wed-n').textContent = `（${list.length}）`;
   el.querySelector('#wed-list').innerHTML = list.length ? list.map((m, i) => `<button class="wed-it ${i === WE.sel ? 'on' : ''}" data-i="${i}"><b>${i + 1}</b>${names[m.w]}<span>${m.p[0] < -0.01 ? '左' : m.p[0] > 0.01 ? '右' : '中'}・${m.p[2] > 0.15 ? '前' : m.p[2] < -0.15 ? '後' : '中段'}</span></button>`).join('') : '<p class="g-dim">還沒有武器，從上面挑一個放上去。</p>';
@@ -383,7 +389,7 @@ function weLoop() {
 function weDraw2DSoon() { clearTimeout(WE.t2); WE.t2 = setTimeout(weDraw2D, 60); }
 function weDraw2D() {
   if (!WE.open || !WE.shipImg.complete) return;
-  const hk = WE.hk, side = hk[0] === 'a' ? 1 : 0, t = +hk[1];
+  const hk = WE.hk, fac = facOfKey(hk), t = +hk[1], [sx, sy] = atlasXY(fac, t, 0);
   renderWeaponCells(WE.r, WE.rt2, Array.from({ length: 8 }, (_, d) => ({ hk, d, x: d * 256, y: 0 })));
   const px = new Uint8Array(2048 * 192 * 4); WE.r.readRenderTargetPixels(WE.rt2, 0, 0, 2048, 192, px);
   const img = new ImageData(2048, 192);
@@ -393,7 +399,7 @@ function weDraw2D() {
     img.data[d] = Math.min(255, px[s] * 255 / a); img.data[d + 1] = Math.min(255, px[s + 1] * 255 / a); img.data[d + 2] = Math.min(255, px[s + 2] * 255 / a); img.data[d + 3] = a;
   }
   const c = WE.c2.getContext('2d'); c.clearRect(0, 0, 2048, 192);
-  c.drawImage(WE.shipImg, side * 2048, t * 192, 2048, 192, 0, 0, 2048, 192);
+  c.drawImage(WE.shipImg, sx, sy, 2048, 192, 0, 0, 2048, 192);
   const tmp = document.createElement('canvas'); tmp.width = 2048; tmp.height = 192; tmp.getContext('2d').putImageData(img, 0, 0);
   c.drawImage(tmp, 0, 0);
 }
