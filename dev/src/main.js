@@ -776,7 +776,7 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
     const order = counts.map((_, i) => i);
     const lay = fd.orderly ? genOrderly(fd.formation, counts, order, fd.layers || 1) : genFormation(fd.formation, counts, order, R);
     const fleet = { id: fi, side: fd.side, name: fd.name, commander: fd.commander || null, hangar: fd.hangar || null, sqs: [], reserve: !!fd.reserve, entry: fd.entry || null,
-      supply: !!fd.supply, follow: fd.follow != null ? fd.follow : -1, reinfOf: fd.reinfOf != null ? fd.reinfOf : null, keep: fd.keep || null,
+      supply: !!fd.supply, vip: !!fd.vip, follow: fd.follow != null ? fd.follow : -1, reinfOf: fd.reinfOf != null ? fd.reinfOf : null, keep: fd.keep || null,
       skills: {}, initial: total + (fd.supply ? 0 : 1), ai: fd.ai || null, activateAt: fd.activateAt != null ? fd.activateAt : null, aiS: {} };
     for (const sk of (fd.commander && fd.commander.skills) || []) {
       // 戰術熟練：每階 +1 次（fixed 的技能除外）；呼叫增援：這場有準備增援艦隊才能用

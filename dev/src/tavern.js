@@ -34,6 +34,8 @@ function rosterApply() {
 }
 rosterApply();
 function cmdrsOf(faction) { return COMMANDERS.filter((c) => (c.faction || 0) === faction); }
+// 編成能派的指揮官：劇情戰役裡已經在劇情中退場的不能派
+function cmdrPool(sc, faction) { const p = cmdrsOf(faction); return sc && sc.saga ? p.filter((c) => !sc.dead.includes(c.id)) : p; }
 
 // 候選人
 function genCandidate(faction, R) {
