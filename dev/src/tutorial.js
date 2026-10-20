@@ -151,12 +151,12 @@ const TUT_LESSONS = [
     ],
     steps: [
       { title: '自動開火', pause: true, text: () => `船上的武器都是<b>自動開火</b>的：敵人進入射程就打。你要做的是<b>把艦隊帶到好的位置、選擇目標</b>。<br>${tutGunTable()}
-        <small>主砲只能打正前方 ±30° 左右、射程最遠、單發最重，但打小船命中率差；副砲射角大；防空砲全方向、優先打飛彈和艦載機。<br>距離越遠命中率越低（最大射程剩 ${Math.round(HIT_RULE.farMul * 100)}%）、傷害越低（剩 ${Math.round(BEAM_FALLOFF_MIN * 100)}%）。</small>` },
+        <small>主砲只能打正前方 ±${SHIP_TYPES[1].guns.main.arc}° 左右、射程最遠、單發最重，但打小船命中率差；副砲射角大；防空砲全方向、優先打飛彈和艦載機。<br>距離越遠命中率越低（最大射程剩 ${Math.round(HIT_RULE.farMul * 100)}%）、傷害越低（剩 ${Math.round(BEAM_FALLOFF_MIN * 100)}%）。</small>` },
       { title: '進入射程', text: '前方有兩支不會動的標靶艦隊（藍色）。把第一艦隊往前移動、<b>船頭對著它們</b>，進入射程後就會開火。',
         goal: '第一次命中敵艦', check: () => dmgDealt[0] > 0 },
       { title: '指定攻擊', text: () => `平常每艘船會自己挑目標。按 ${tutK('attack')} 再<b>左鍵點一支敵方分艦隊</b>＝選取的艦隊集中攻擊它（沒有選取＝全軍）。集中打一個目標，讓它更快失去戰力。<br><small>觸控：「攻擊」按鈕。</small>`,
         goal: '指定攻擊一個目標', check: (S) => S.cmds('attack').length > 0 },
-      { title: '飛彈齊射', text: () => `巡洋艦與驅逐艦帶飛彈：射程比光束遠、不衰減，平常自動發射。按 ${tutK('missile')} 讓選取的艦隊<b>立刻一起發射</b>——同時到達的飛彈比較容易突破防空。<br><small>飛彈打完要回補給艦隊補充；護盾還在時飛彈的傷害主要被護盾吃掉（×${MISSILE_RULE.shield}），護盾打光後直擊船體 ×${MISSILE_RULE.direct}。</small>`,
+      { title: '飛彈齊射', text: () => `巡洋艦與驅逐艦帶飛彈：射程比副砲遠、比主砲短（巡洋 ${SHIP_TYPES[2].missile.range}、驅逐 ${SHIP_TYPES[3].missile.range}），不衰減，平常自動發射。按 ${tutK('missile')} 讓選取的艦隊<b>立刻一起發射</b>——同時到達的飛彈比較容易突破防空。<br><small>飛彈打完要回補給艦隊補充；護盾還在時飛彈的傷害主要被護盾吃掉（×${MISSILE_RULE.shield}），護盾打光後直擊船體 ×${MISSILE_RULE.direct}。</small>`,
         goal: '飛彈齊射一次', check: (S) => S.cmds('missile').length > 0 },
       { title: '全艦齊射', text: () => `按 ${tutK('volley')} <b>全艦齊射</b>：冷卻好的光束砲同時開火。適合在敵人剛進入全威力距離、或護盾剛被打穿時爆發。`,
         goal: '全艦齊射一次', check: (S) => S.cmds('volley').length > 0 },
@@ -570,10 +570,10 @@ function manBody(id) {
         P('<b>大小</b>越小越難被打中（護衛艦 0.75、航母 1.15）；主砲轉得慢，打小船的命中率再打折。<b>維修機</b>會自動修理受損的友艦。');
     case 'weapons':
       return tutGunTable() +
-        P(`<b>三種光束砲</b>：主砲只打船頭前方（約 ±30°）、射程最遠、單發最重；副砲射角大（前方＋兩側）；防空砲全方向，優先打飛彈、其次艦載機，射程內都沒有才打船。每種砲各自冷卻、各自選目標。`) +
+        P(`<b>三種光束砲</b>：主砲只打船頭前方（約 ±${SHIP_TYPES[1].guns.main.arc}°）、射程最遠、單發最重；副砲射角較大（前方約 ±${SHIP_TYPES[1].guns.sec.arc}°，側後方是死角）；防空砲全方向，優先打飛彈、其次艦載機，射程內都沒有才打船。每種砲各自冷卻、各自選目標。`) +
         P(`<b>命中率</b>＝基本命中率 × 距離 × 目標大小 × 目標速度 × 環境，限制在 ${Math.round(HIT_RULE.min * 100)}%～${Math.round(HIT_RULE.max * 100)}%。全威力距離內 100%，最大射程剩 ${Math.round(HIT_RULE.farMul * 100)}%；目標越快越難打中（最多 −${Math.round(HIT_RULE.speedMax * 100)}%）；星雲 ×${HIT_RULE.nebula}；被干擾 ×${HIT_RULE.jammed}。`) +
         P(`<b>傷害</b>：距離越遠越低（最大射程剩 ${Math.round(BEAM_FALLOFF_MIN * 100)}%）。光束要先打光<b>護盾</b>才傷到船體；護盾在 ${SHIELD_RULE.delay} 秒沒被打後以每秒 ${Math.round(SHIELD_RULE.rate * 100)}% 回充；被完全打光的護盾要 ${SHIELD_RULE.broken} 秒後才重新啟動——受損的艦隊退到後方能恢復護盾，前排輪替很重要。${typeof DEFLECT_RULE !== 'undefined' ? `光束打在護盾上有 ${Math.round(DEFLECT_RULE.none * 100)}% 完全偏折、${Math.round(DEFLECT_RULE.half * 100)}% 減半（天賦「能量調度」提高）。` : ''}`) +
-        P(`<b>飛彈</b>：射程比光束遠、不衰減、有導引（對小船、快船也準），但會被防空攔截。護盾還在時：護盾吃 ×${MISSILE_RULE.shield}、船體同時受 ×${MISSILE_RULE.blast}；護盾打光後直擊船體 ×${MISSILE_RULE.direct}。所以<b>先用光束剝護盾、再用飛彈收割</b>。`) +
+        P(`<b>飛彈</b>：射程比副砲遠、比主砲短（巡洋 ${SHIP_TYPES[2].missile.range}、驅逐 ${SHIP_TYPES[3].missile.range}），不衰減、有導引（對小船、快船也準），但會被防空攔截。護盾還在時：護盾吃 ×${MISSILE_RULE.shield}、船體同時受 ×${MISSILE_RULE.blast}；護盾打光後直擊船體 ×${MISSILE_RULE.direct}。所以<b>先用光束剝護盾、再用飛彈收割</b>。`) +
         P('<b>射線</b>：光束沿射線判定，擋在前面的敵艦先挨打、打偏的可能打中後方的敵艦；巨大小行星會擋住光束與飛彈。') +
         P(`<b>指定攻擊</b>（${tutK('attack')}＋點敵軍）不加傷害、沒有次數限制；<b>集中火力</b>（技能）全軍 +20%。<b>全艦齊射</b>（${tutK('volley')}）、<b>飛彈齊射</b>（${tutK('missile')}）讓冷卻好的武器一起發射，適合爆發。`);
     case 'forms':
@@ -590,7 +590,7 @@ function manBody(id) {
         P(`<b>航母</b>每艘機庫 ${SHIP_TYPES[0].fighters.n} 架，在編成畫面設定四種機的比例（預設 ${HANGAR_DEFAULT.join('／')}）。艦載機自動出擊、返航補給；被打下的機庫每 ${SHIP_TYPES[0].fighters.build} 秒補一架。天賦「機庫整備」加快補充、提高傷害。`) +
         P(`<b>防空</b>：防空砲優先打飛彈、其次艦載機；副砲在全威力距離內也會打。命中率受艦種防空係數（護衛艦 ${SHIP_TYPES[4].aa} 最高）、陣型（圓陣最好）與天賦「防空網」影響。同時到達的飛彈越多，越容易突破防空。`) +
         P(`<b>前排輪替</b>：分艦隊裡受損的船會自動跟後方同艦種、狀態好的船（護盾 ≥ ${Math.round(ROTATE_RULE.fresh.sh * 100)}%、船體 ≥ ${Math.round(ROTATE_RULE.fresh.hp * 100)}%）交換位置，換位 ${ROTATE_RULE.dur} 秒、期間主砲副砲停火。一般在護盾打光時換；指揮官特性會改變時機——攻擊型船體剩 ${Math.round(ROTATE_RULE.hull * 100)}% 才換、防禦型護盾剩 ${Math.round(ROTATE_RULE.shEarly * 100)}% 就換（護盾回充 +${Math.round(ROTATE_RULE.shRegen * 100)}%）、機動型換位快 ${Math.round(ROTATE_RULE.fast * 100)}%；天賦「輪替演練」再加快。陣型越厚，後排越有船可以替換；變陣、轉向時會中斷。`) +
-        P(`<b>戰地維修</b>：船體低於 ${Math.round(FIELD_REPAIR.below * 100)}%、${FIELD_REPAIR.quiet} 秒沒被打中，就在 ${FIELD_REPAIR.dur} 秒內逐步修理。在補給艦 ${SUPPLY_RULE.range} 範圍內：第 1 次回復最大耐久的 ${Math.round(FIELD_REPAIR.first * 100)}%、之後每次減半，每艘船基本可修 ${FIELD_REPAIR.n} 次；不在範圍內：只有還沒修過的船能修 1 次（${Math.round(FIELD_REPAIR.alone * 100)}%）。天賦「損害管制」每階次數 +1、單次 +${Math.round(FIELD_REPAIR.step * 100)}%。所以<b>輪替到後排的船能在補給艦旁修整</b>。`) +
+        P(`<b>戰地維修</b>：船體低於 ${Math.round(FIELD_REPAIR.below * 100)}% 就開始修理（交戰中也會修），在 ${FIELD_REPAIR.dur} 秒內逐步修理。在補給艦 ${SUPPLY_RULE.range} 範圍內：第 1 次回復最大耐久的 ${Math.round(FIELD_REPAIR.first * 100)}%、之後每次減半，每艘船基本可修 ${FIELD_REPAIR.n} 次；不在範圍內：只有還沒修過的船能修 1 次（${Math.round(FIELD_REPAIR.alone * 100)}%）。天賦「損害管制」每階次數 +1、單次 +${Math.round(FIELD_REPAIR.step * 100)}%。所以<b>輪替到後排的船能在補給艦旁修整</b>。`) +
         P(`<b>補給</b>：巡洋艦 ${SHIP_TYPES[2].missile.n} 發、驅逐艦 ${SHIP_TYPES[3].missile.n} 發，打完要補。補給艦隊（補給艦＋護衛艦）${SUPPLY_RULE.range} 範圍內、飛彈沒滿的友艦每 ${SUPPLY_RULE.cd} 秒補 1 發，每艘補給艦帶 ${SHIP_TYPES[5].supply.stock} 發，被擊沉就跟著沒了。補給艦隊可以設定<b>跟隨</b>某支艦隊（待在後方 ${SUPPLY_RULE.follow}）；直接對它下移動命令會取消跟隨。`);
     case 'skills':
       return tutSkillTable() +

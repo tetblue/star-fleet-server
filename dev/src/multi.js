@@ -322,6 +322,7 @@ function netBegin(st, cmds, turn) {
   camAnim = null; view.target.x = 0; view.target.z = GAME.playerSide ? -300 : 300; view.height = 1250; if (mode3D) view.yaw = GAME.playerSide ? Math.PI : 0; updateCamera();
   if (!NET.spec && opts.fow && SETTINGS.autoScan === false) issue('autoscan', { on: false });
   const late = NET.bound > NET.K * 30;
+  if (!late) cutPlay(cutSpecStart(sc));
   toast(NET.spec ? `觀戰：${st.names[0]} vs ${st.names[1]}${late ? '（快轉追上目前的進度…）' : ''}` : `${late ? '重新連上：快轉追上目前的進度…' : '多人對戰　開戰！'}（不能暫停；速度 ×${NET.speed}）`);
 }
 let _netOutT = 0;

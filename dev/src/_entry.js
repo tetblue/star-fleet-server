@@ -830,7 +830,6 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
     // 自動武器：飛彈冷卻、艦載機出擊冷卻、維修機出動冷卻、機上剩餘維修機
     mcd: new Float32Array(total), fcd: new Float32Array(total), rcd: new Float32Array(total), rep: new Uint8Array(total),
     fout: new Uint8Array(total), fbt: new Float32Array(total), hang: new Uint8Array(total * 4), foutR: new Uint8Array(total * 4),   // 機庫：各任務的架數、在外面飛的架數   // 航母：在外面飛的艦載機數、補充新機的進度
-    hT: new Float32Array(total).fill(-99),   // 最後一次受到傷害的時間（戰地維修看這個）
     // 前排輪替：換位開始時間、換位秒數（0＝沒在換）、下次可以再換的時間、換位起點相對新位置的偏移（陣型座標）
     swS: new Float32Array(total), swD: new Float32Array(total), swE: new Float32Array(total), sox: new Float32Array(total), soy: new Float32Array(total), soz: new Float32Array(total),
     // 戰地維修：已經修過幾次、這次還要補多少、每秒補多少
@@ -2362,7 +2361,7 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
   let dmg = gun.dmg * dmgMul * fm * fleetMods(sq.fleet).dmg;
   if (sideFocus(sq.side) === tq) dmg *= 1.2;
   if (ff) dmg *= ffMul;
-  pending.push({ dr: Math.min(1, dist / far), gr: graze, t: t0 + dur, target, side: sq.side, ff, dirIdx: dirIndexOf(_b.x - _a.x, _b.z - _a.z), asp, fm, dmg, hm: hitMul(asp, sq, tq), fx: rnd() < fxs.fxP * (0.3 + 0.7 * fm) * (volleyShot ? 0.4 : 1), x: _b.x, y: _b.y, z: _b.z });
+  pending.push({ gk, dr: Math.min(1, dist / far), gr: graze, t: t0 + dur, target, side: sq.side, ff, dirIdx: dirIndexOf(_b.x - _a.x, _b.z - _a.z), asp, fm, dmg, hm: hitMul(asp, sq, tq), fx: rnd() < fxs.fxP * (0.3 + 0.7 * fm) * (volleyShot ? 0.4 : 1), x: _b.x, y: _b.y, z: _b.z });
   return true;
 }
 // 齊射：分艦隊每 VOLLEY_CD 秒只能齊射一次；只有裝填過半（剩餘冷卻 ≤ VOLLEY_READY×冷卻）的砲會跟著開火
@@ -2887,7 +2886,7 @@ function fieldRepair(dt, t) {
     if (q.bg || q.hidden || (q.group && q.group.inactive)) continue;
     const M = q.mods || fleetMods(q.fleet);
     for (const i of q.list) {
-      if (!ships.alive[i] || ships.rpLeft[i] > 0 || ships.rpN[i] >= M.repN || t - ships.hT[i] < F.quiet) continue;
+      if (!ships.alive[i] || ships.rpLeft[i] > 0 || ships.rpN[i] >= M.repN) continue;
       const mh = maxHp(i);
       if (ships.hp[i] >= F.below * mh) continue;
       if (!sup) { sup = []; for (let s = 0; s < shipCount; s++) if (ships.alive[s] && ships.type[s] === SUPPLY_T && !squadrons[ships.sq[s]].bg) { shipWorldCPU(s, _a); sup.push(s, _a.x, _a.y, _a.z); } }
@@ -3232,7 +3231,6 @@ function processHits() {
     if (sh0 > 0.5 && ships.sh[ti] <= 0.5) ships.shT[ti] = t + SHIELD_RULE.broken - SHIELD_RULE.delay;
     else if (sh0 <= 0.5 && hullD > 0) ships.shT[ti] = Math.max(ships.shT[ti], t);
     ships.hp[ti] -= hullD;
-    if (shD + hullD > 0) ships.hT[ti] = t;
     const eff = shD + hullD;
     e.kill = ships.hp[ti] <= 0;
     e.hull = hullD > 0;
@@ -3241,7 +3239,7 @@ function processHits() {
       if (e.kill) dmgStats[tSide][e.asp]++;
     }
     if (e.ff) { ffStats[e.side][0]++; ffStats[e.side][1] += eff; }   // 友軍誤射：不算進對敵傷害
-    else { dmgDealt[e.side] += eff; wDmg[e.side][e.src || 0] += eff; }
+    else { dmgDealt[e.side] += eff; wDmg[e.side][e.src || 0] += eff; cStatHit(e, ti, shD, hullD); }
     if (e.kind === 'mh' || e.kind === 'lb') {
       if (e.kill) { killShip(e.target, t, e.x, e.y, e.z, e.kind === 'mh' ? 1.25 : 1); continue; }
       if (e.kind === 'lb') { if (e.fx) spawnFx(e.x, e.y, e.z, e.hull ? e.side : 2 + tSide * 8 + e.dirIdx, TYPE_W[ships.type[e.target]] * (e.hull ? 0.4 : 0.9), 24); continue; }
@@ -3264,6 +3262,16 @@ const deflStats = [[0, 0, 0], [0, 0, 0]];  // 護盾偏折：各方受擊時 [�
 const rayStats = [[0, 0, 0], [0, 0, 0]];  // 射線判定：各方光束 [被目標前面的敵艦擋下, 打偏後打中別艘敵艦, 被敵方飛彈／艦載機擋下] 的次數
 const ffHold = [0, 0];   // 擬真難度：同部隊擋住射界而停火的次數
 const wDmg = [[0, 0, 0], [0, 0, 0]];   // 傷害來源：光束、飛彈、艦載機
+// 平衡用的細項統計（不顯示，供除錯／模擬分析）：各方打出的傷害依武器分 [護盾, 船體]、受到的傷害依艦種分、擊沉數、護盾回充量
+const C_SRC = ['main', 'sec', 'aa', 'msl', 'ftr', 'lance'];
+const cStats = [0, 1].map(() => ({ src: C_SRC.map(() => [0, 0]), taken: [0, 1, 2, 3, 4, 5].map(() => [0, 0]), lost: [0, 0, 0, 0, 0, 0], regen: 0 }));   // 艦種 6 種（data.js 比 main.js 晚載入）
+function cStatHit(e, ti, shD, hullD) {
+  const k = e.kind === 'mh' ? 3 : e.kind === 'lb' ? 5 : e.src === 2 ? 4 : e.gk === 'sec' ? 1 : e.gk === 'aa' ? 2 : 0;
+  const a = cStats[e.side].src[k], d = cStats[1 - e.side], ty = ships.type[ti];
+  a[0] += shD; a[1] += hullD; d.taken[ty][0] += shD; d.taken[ty][1] += hullD;
+  if (e.kill) d.lost[ty]++;
+}
+function cStatReset() { for (const c of cStats) { c.src.forEach((a) => a.fill(0)); c.taken.forEach((a) => a.fill(0)); c.lost.fill(0); c.regen = 0; } }
 let fireAcc = [0, 0];
 // 每艘艦各自冷卻：艦種決定開火間隔；陣型火力倍率、變換陣型中減半
 const _rate = new Float32Array(MAX_SQ);
@@ -3296,7 +3304,8 @@ function continuousFire(dt) {
   for (let i = 0; i < shipCount; i++) {
     if (!ships.alive[i] || ships.sh[i] >= ships.shMax[i] || t - ships.shT[i] < SHIELD_RULE.delay) continue;
     const q = squadrons[ships.sq[i]];
-    ships.sh[i] = Math.min(ships.shMax[i], ships.sh[i] + ships.shMax[i] * SHIELD_RULE.rate * (q.mods ? q.mods.shRegen : 1) * dt);   // 防禦型指揮官回充較快
+    const s0 = ships.sh[i]; ships.sh[i] = Math.min(ships.shMax[i], s0 + ships.shMax[i] * SHIELD_RULE.rate * (q.mods ? q.mods.shRegen : 1) * dt);
+    if (!q.bg) cStats[ships.side[i]].regen += ships.sh[i] - s0;   // 防禦型指揮官回充較快
   }
   if (!opts.fire) return;
   for (let k = 0; k < squadrons.length; k++) {
@@ -3539,7 +3548,7 @@ function newBattle(seed = battleSeed, setup = null) {
   fxHead = 0; fxDirtyFrom = 0; fxDirtyCount = FX_MAX;
   orderQueue.length = 0; jam[0] = { until: 0, delay: 0 }; jam[1] = { until: 0, delay: 0 }; jamSeen[0] = jamSeen[1] = null;
   for (const a of dmgStats) a.fill(0);
-  dmgDealt.fill(0); ffStats.forEach((a) => a.fill(0)); rayStats.forEach((a) => a.fill(0)); deflStats.forEach((a) => a.fill(0)); ffHold.fill(0);
+  dmgDealt.fill(0); cStatReset(); ffStats.forEach((a) => a.fill(0)); rayStats.forEach((a) => a.fill(0)); deflStats.forEach((a) => a.fill(0)); ffHold.fill(0);
   beamPow.fill(0); beamShots.fill(0); beamLastT.fill(-99); hitAvg.fill(0); for (const g of gunStats) for (const k in g) g[k].fill(0); for (const a of airStats) a.shots = a.hits = 0; for (const f of ftrStats) f.fill(0); fireAcc = [0, 0]; aaAcc = 0;
   cmdQueue.length = 0; cmdLog.length = 0; simTick = 0; simAcc = 0; U.uTime.value = 0;
   simAlt = opts.altitude ? 1 : 0;
@@ -4592,8 +4601,8 @@ const UI_OPTS = [
   ['compass', '艦橋方位儀', '指揮官視角上方的方位刻度與各艦隊方位'],
 ];
 const SETTINGS = (() => {
-  const d = { keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
-  try { const s = JSON.parse(STORE.getItem('fleet.settings') || 'null'); if (s) { Object.assign(d.keys, s.keys || {}); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan']) if (s[k] != null) d[k] = s[k]; } } catch (e) { /* 用預設值 */ }
+  const d = { keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
+  try { const s = JSON.parse(STORE.getItem('fleet.settings') || 'null'); if (s) { Object.assign(d.keys, s.keys || {}); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin']) if (s[k] != null) d[k] = s[k]; } } catch (e) { /* 用預設值 */ }
   return d;
 })();
 function saveSettings() { try { STORE.setItem('fleet.settings', JSON.stringify(SETTINGS)); } catch (e) { /* 只在本次有效 */ } }
@@ -4968,7 +4977,7 @@ function frame() {
 //   aa：艦種的防空係數（防空砲、副砲打飛彈與艦載機的命中率 × aa / AA_TYPE_REF）
 // 自動武器（不用按鍵，敵人進入射程就自己用，各艦各自冷卻）：
 //   missile：飛彈（巡洋、驅逐）。dmg 每發傷害、cd 冷卻秒數、range 射程、n 攜彈量（打完要回補給艦隊補充）。
-//            射程比光束遠、不衰減，但會被防空攔截
+//            射程比副砲遠、比主砲短，不衰減，但會被防空攔截
 //   fighters：攻擊型艦載機（航母專屬）。n 機庫容量、wave 每次放出幾架、cd 出擊間隔（續航見 CRAFT）、
 //             build 機庫補一架新機的秒數（被打下的會慢慢補回來，機庫＋在外的不超過 n）
 //   supply：補給艦專屬。stock 每艘（圖示）帶的飛彈存量（被擊沉就跟著沒了）
@@ -4982,32 +4991,32 @@ function frame() {
 const SHIP_TYPES = [
   { key: 'carrier', name: '航母', cost: 5, hp: 140, sh: 70, speed: 0.85, aa: 0.2,
     guns: { main: null,
-      sec: { dmg: 4, cd: 3, near: 160, far: 400, arc: 120, acc: 0.8 },
+      sec: { dmg: 4, cd: 3, near: 160, far: 400, arc: 90, acc: 0.8 },
       aa: { dmg: 1.6, cd: 0.9, near: 100, far: 200, arc: 180, acc: 0.7 } },
     missile: null,
     fighters: { n: 6, wave: 3, cd: 20, range: 1000, build: 14 }, repair: { n: 4, amount: 24, cd: 18 },
     note: '自身火力弱，靠艦載機（自動出擊、返航補給）。也帶最多維修機。' },
   { key: 'battleship', name: '戰列艦', cost: 4, hp: 220, sh: 130, speed: 0.8, aa: 0.15,
-    guns: { main: { dmg: 27, cd: 5, near: 350, far: 900, arc: 30, acc: 0.85 },
-      sec: { dmg: 8, cd: 2.5, near: 220, far: 520, arc: 120, acc: 0.8 },
+    guns: { main: { dmg: 27, cd: 7.5, near: 350, far: 900, arc: 20, acc: 0.85 },
+      sec: { dmg: 8, cd: 2.5, near: 220, far: 520, arc: 90, acc: 0.8 },
       aa: { dmg: 1.5, cd: 1, near: 90, far: 180, arc: 180, acc: 0.7 } },
     missile: null, fighters: null, repair: { n: 3, amount: 24, cd: 18 },
     note: '主砲射程最遠、單發最重，護盾最厚；最慢。主砲只能打正前方。' },
   { key: 'cruiser', name: '巡洋艦', cost: 2.5, hp: 120, sh: 75, speed: 1.0, aa: 0.25,
-    guns: { main: { dmg: 15, cd: 4.5, near: 280, far: 700, arc: 30, acc: 0.85 },
-      sec: { dmg: 7, cd: 2.5, near: 200, far: 480, arc: 120, acc: 0.8 },
+    guns: { main: { dmg: 15, cd: 7, near: 280, far: 700, arc: 20, acc: 0.85 },
+      sec: { dmg: 7, cd: 2.5, near: 200, far: 480, arc: 90, acc: 0.8 },
       aa: { dmg: 1.2, cd: 1, near: 90, far: 170, arc: 180, acc: 0.7 } },
-    missile: { dmg: 40, cd: 60, range: 800, n: 3 }, fighters: null, repair: { n: 2, amount: 24, cd: 18 },
+    missile: { dmg: 40, cd: 60, range: 600, n: 3 }, fighters: null, repair: { n: 2, amount: 24, cd: 18 },
     note: '均衡；遠距離自動發射飛彈（攜彈 3 發）。' },
   { key: 'destroyer', name: '驅逐艦', cost: 1.5, hp: 70, sh: 35, speed: 1.25, aa: 0.2,
-    guns: { main: { dmg: 10, cd: 4, near: 220, far: 520, arc: 25, acc: 0.85 },
-      sec: { dmg: 5, cd: 2, near: 160, far: 400, arc: 120, acc: 0.8 },
+    guns: { main: { dmg: 10, cd: 6, near: 220, far: 520, arc: 20, acc: 0.85 },
+      sec: { dmg: 5, cd: 2, near: 160, far: 400, arc: 90, acc: 0.8 },
       aa: { dmg: 1, cd: 1, near: 80, far: 160, arc: 180, acc: 0.7 } },
-    missile: { dmg: 40, cd: 45, range: 650, n: 4 }, fighters: null, repair: { n: 1, amount: 24, cd: 18 },
+    missile: { dmg: 40, cd: 45, range: 490, n: 4 }, fighters: null, repair: { n: 1, amount: 24, cd: 18 },
     note: '快、飛彈發射最頻繁（攜彈 4 發）；適合包抄與追擊。' },
   { key: 'escort', name: '護衛艦', cost: 1, hp: 50, sh: 25, speed: 1.3, aa: 0.45,
     guns: { main: null,
-      sec: { dmg: 5, cd: 2, near: 160, far: 420, arc: 135, acc: 0.8 },
+      sec: { dmg: 5, cd: 2, near: 160, far: 420, arc: 100, acc: 0.8 },
       aa: { dmg: 1.8, cd: 0.8, near: 100, far: 200, arc: 180, acc: 0.75 } },
     missile: null, fighters: null, repair: null,
     note: '便宜、小而快（難被打中）；防空最好。太小，沒有維修機與主砲。' },
@@ -5026,11 +5035,11 @@ const AI_SUPPLY = { minLv: 3, escort: 0.04, supply: 0.06 };
 function aiSupplyComp(total) { return SHIP_TYPES.map((_, t) => (t === 4 ? Math.max(10, Math.round(total * AI_SUPPLY.escort / 10) * 10) : t === SUPPLY_T ? Math.max(10, Math.round(total * AI_SUPPLY.supply / SHIP_TYPES[SUPPLY_T].cost / 10) * 10) : 0)); }
 // 潰走：一方剩下的船（艘數）低於開戰時的這個比例就判定潰走（戰敗）
 const ROUT_AT = 0.1;
-// 戰地維修：船體低於 below、且 quiet 秒沒被打中，就開始一次維修，在 dur 秒內逐步補上（開始後不會被打斷）
+// 戰地維修：船體低於 below 就開始一次維修（交戰中也會修），在 dur 秒內逐步補上（開始後不會被打斷）
 //   補給艦 SUPPLY_RULE.range 內：第 1 次回復最大耐久的 first，之後每次減半；每艘船基本可修 n 次
 //   不在補給艦範圍內：只有還沒修過的船能修這 1 次，回復 alone（算掉一次次數）
 //   天賦「損害管制」每階：次數 +1、單次上限 +step（first 與 alone 都加）
-const FIELD_REPAIR = { below: 0.6, quiet: 5, dur: 10, first: 0.4, alone: 0.3, n: 1, step: 0.05 };
+const FIELD_REPAIR = { below: 0.6, dur: 10, first: 0.4, alone: 0.3, n: 1, step: 0.05 };
 // 前排輪替：分艦隊裡受損的船，跟後方（至少深 gap）同艦種、狀態好的船（護盾 ≥ fresh.sh、船體 ≥ fresh.hp）交換位置
 //   換位 dur 秒，期間兩艘都停火；換完 cd 秒內不再換；每 0.5 秒檢查一次，每次每支分艦隊最多換 max＋存活數 × per 對
 //   什麼時候換（看指揮官特性）：一般＝護盾打光；防禦型＝護盾剩 shEarly 以下就換，護盾回充 +shRegen；
@@ -6528,6 +6537,7 @@ function startDeploy() {
   applyOp(); overlay(null); setPhase('deploy'); GAME.deploySel = 0; force3D();
   setCmdSide(GAME.playerSide, false);
   rebuildDeploy();
+  cutPrepare(cutSpecStart(GAME.sc));   // 部署時先把開戰切入編成 APNG
   camAnim = null; view.target.x = 0; view.target.z = GAME.playerSide ? -300 : 300; view.height = 1250; view.yaw = mode3D && GAME.playerSide ? Math.PI : 0; view.pitch = ELEV; updateCamera();   // 多人的第二方：3D 轉 180°，自己在下方
 }
 // 部署中選的那一支（序號＝lo.fleets，最後一個是補給艦隊）
@@ -6622,6 +6632,7 @@ function startBattle() {
   paused = false; setSpeed(SETTINGS.speedIdx);
   force3D(); if (GAME.op === 2) enterBridge();   // 擬真：開戰直接上艦橋
   if (opts.fow && SETTINGS.autoScan === false) issue('autoscan', { on: false });   // 戰爭迷霧：玩家關掉了自動掃描（記在命令裡）
+  cutPlay(cutSpecStart(GAME.sc));
   toast(`${GAME.sc.name}　開戰！${GAME.op ? `（${OP_LEVELS[GAME.op].name}難度）` : ''}（${keyLabel(keyOf('pause'))} 暫停、${keyLabel(keyOf('speed_up'))}／${keyLabel(keyOf('speed_down'))} 調速度、${keyLabel(keyOf('attack'))}＋左鍵點敵軍＝指定攻擊）`);
 }
 const _fmtT = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -6658,7 +6669,10 @@ function gameFrame(dt) {
   if (GAME.result && !GAME.reportShown) {
     paused = true; updateTimeUI();
     GAME.reportShown = true;
-    setTimeout(() => (GAME.replaying ? endReplay() : showReport()), 1100);
+    // 結算切入（回放、觀戰不播）；玩家在第 1 邊（多人）時換成自己這一方的角度
+    const R = GAME.result, kind = GAME.playerSide === 1 ? { win: 'lose', lose: 'win' }[R.kind] || R.kind : R.kind;
+    const ms = GAME.replaying || (NET.on && NET.spec) || (GAME.sc && GAME.sc.sim) ? 0 : cutPlay(cutSpecResult(kind, R.why));
+    setTimeout(() => (GAME.replaying ? endReplay() : showReport()), Math.max(1100, ms - 300));
   }
   if (_hudAcc < 0.15) return;
   _hudAcc = 0;
@@ -6782,6 +6796,7 @@ function startReplay(rec) {
   drawField(false);
   setPhase('replay');
   paused = false; updateTimeUI();
+  cutPlay(cutSpecReplay(GAME.sc));
   toast('回放：同一個開局，照紀錄的命令重演（不能下令；左鍵拖曳＝移動畫面、右鍵拖曳＝調整視角）');
 }
 function endReplay() {
@@ -7865,12 +7880,12 @@ const TUT_LESSONS = [
     ],
     steps: [
       { title: '自動開火', pause: true, text: () => `船上的武器都是<b>自動開火</b>的：敵人進入射程就打。你要做的是<b>把艦隊帶到好的位置、選擇目標</b>。<br>${tutGunTable()}
-        <small>主砲只能打正前方 ±30° 左右、射程最遠、單發最重，但打小船命中率差；副砲射角大；防空砲全方向、優先打飛彈和艦載機。<br>距離越遠命中率越低（最大射程剩 ${Math.round(HIT_RULE.farMul * 100)}%）、傷害越低（剩 ${Math.round(BEAM_FALLOFF_MIN * 100)}%）。</small>` },
+        <small>主砲只能打正前方 ±${SHIP_TYPES[1].guns.main.arc}° 左右、射程最遠、單發最重，但打小船命中率差；副砲射角大；防空砲全方向、優先打飛彈和艦載機。<br>距離越遠命中率越低（最大射程剩 ${Math.round(HIT_RULE.farMul * 100)}%）、傷害越低（剩 ${Math.round(BEAM_FALLOFF_MIN * 100)}%）。</small>` },
       { title: '進入射程', text: '前方有兩支不會動的標靶艦隊（藍色）。把第一艦隊往前移動、<b>船頭對著它們</b>，進入射程後就會開火。',
         goal: '第一次命中敵艦', check: () => dmgDealt[0] > 0 },
       { title: '指定攻擊', text: () => `平常每艘船會自己挑目標。按 ${tutK('attack')} 再<b>左鍵點一支敵方分艦隊</b>＝選取的艦隊集中攻擊它（沒有選取＝全軍）。集中打一個目標，讓它更快失去戰力。<br><small>觸控：「攻擊」按鈕。</small>`,
         goal: '指定攻擊一個目標', check: (S) => S.cmds('attack').length > 0 },
-      { title: '飛彈齊射', text: () => `巡洋艦與驅逐艦帶飛彈：射程比光束遠、不衰減，平常自動發射。按 ${tutK('missile')} 讓選取的艦隊<b>立刻一起發射</b>——同時到達的飛彈比較容易突破防空。<br><small>飛彈打完要回補給艦隊補充；護盾還在時飛彈的傷害主要被護盾吃掉（×${MISSILE_RULE.shield}），護盾打光後直擊船體 ×${MISSILE_RULE.direct}。</small>`,
+      { title: '飛彈齊射', text: () => `巡洋艦與驅逐艦帶飛彈：射程比副砲遠、比主砲短（巡洋 ${SHIP_TYPES[2].missile.range}、驅逐 ${SHIP_TYPES[3].missile.range}），不衰減，平常自動發射。按 ${tutK('missile')} 讓選取的艦隊<b>立刻一起發射</b>——同時到達的飛彈比較容易突破防空。<br><small>飛彈打完要回補給艦隊補充；護盾還在時飛彈的傷害主要被護盾吃掉（×${MISSILE_RULE.shield}），護盾打光後直擊船體 ×${MISSILE_RULE.direct}。</small>`,
         goal: '飛彈齊射一次', check: (S) => S.cmds('missile').length > 0 },
       { title: '全艦齊射', text: () => `按 ${tutK('volley')} <b>全艦齊射</b>：冷卻好的光束砲同時開火。適合在敵人剛進入全威力距離、或護盾剛被打穿時爆發。`,
         goal: '全艦齊射一次', check: (S) => S.cmds('volley').length > 0 },
@@ -8284,10 +8299,10 @@ function manBody(id) {
         P('<b>大小</b>越小越難被打中（護衛艦 0.75、航母 1.15）；主砲轉得慢，打小船的命中率再打折。<b>維修機</b>會自動修理受損的友艦。');
     case 'weapons':
       return tutGunTable() +
-        P(`<b>三種光束砲</b>：主砲只打船頭前方（約 ±30°）、射程最遠、單發最重；副砲射角大（前方＋兩側）；防空砲全方向，優先打飛彈、其次艦載機，射程內都沒有才打船。每種砲各自冷卻、各自選目標。`) +
+        P(`<b>三種光束砲</b>：主砲只打船頭前方（約 ±${SHIP_TYPES[1].guns.main.arc}°）、射程最遠、單發最重；副砲射角較大（前方約 ±${SHIP_TYPES[1].guns.sec.arc}°，側後方是死角）；防空砲全方向，優先打飛彈、其次艦載機，射程內都沒有才打船。每種砲各自冷卻、各自選目標。`) +
         P(`<b>命中率</b>＝基本命中率 × 距離 × 目標大小 × 目標速度 × 環境，限制在 ${Math.round(HIT_RULE.min * 100)}%～${Math.round(HIT_RULE.max * 100)}%。全威力距離內 100%，最大射程剩 ${Math.round(HIT_RULE.farMul * 100)}%；目標越快越難打中（最多 −${Math.round(HIT_RULE.speedMax * 100)}%）；星雲 ×${HIT_RULE.nebula}；被干擾 ×${HIT_RULE.jammed}。`) +
         P(`<b>傷害</b>：距離越遠越低（最大射程剩 ${Math.round(BEAM_FALLOFF_MIN * 100)}%）。光束要先打光<b>護盾</b>才傷到船體；護盾在 ${SHIELD_RULE.delay} 秒沒被打後以每秒 ${Math.round(SHIELD_RULE.rate * 100)}% 回充；被完全打光的護盾要 ${SHIELD_RULE.broken} 秒後才重新啟動——受損的艦隊退到後方能恢復護盾，前排輪替很重要。${typeof DEFLECT_RULE !== 'undefined' ? `光束打在護盾上有 ${Math.round(DEFLECT_RULE.none * 100)}% 完全偏折、${Math.round(DEFLECT_RULE.half * 100)}% 減半（天賦「能量調度」提高）。` : ''}`) +
-        P(`<b>飛彈</b>：射程比光束遠、不衰減、有導引（對小船、快船也準），但會被防空攔截。護盾還在時：護盾吃 ×${MISSILE_RULE.shield}、船體同時受 ×${MISSILE_RULE.blast}；護盾打光後直擊船體 ×${MISSILE_RULE.direct}。所以<b>先用光束剝護盾、再用飛彈收割</b>。`) +
+        P(`<b>飛彈</b>：射程比副砲遠、比主砲短（巡洋 ${SHIP_TYPES[2].missile.range}、驅逐 ${SHIP_TYPES[3].missile.range}），不衰減、有導引（對小船、快船也準），但會被防空攔截。護盾還在時：護盾吃 ×${MISSILE_RULE.shield}、船體同時受 ×${MISSILE_RULE.blast}；護盾打光後直擊船體 ×${MISSILE_RULE.direct}。所以<b>先用光束剝護盾、再用飛彈收割</b>。`) +
         P('<b>射線</b>：光束沿射線判定，擋在前面的敵艦先挨打、打偏的可能打中後方的敵艦；巨大小行星會擋住光束與飛彈。') +
         P(`<b>指定攻擊</b>（${tutK('attack')}＋點敵軍）不加傷害、沒有次數限制；<b>集中火力</b>（技能）全軍 +20%。<b>全艦齊射</b>（${tutK('volley')}）、<b>飛彈齊射</b>（${tutK('missile')}）讓冷卻好的武器一起發射，適合爆發。`);
     case 'forms':
@@ -8304,7 +8319,7 @@ function manBody(id) {
         P(`<b>航母</b>每艘機庫 ${SHIP_TYPES[0].fighters.n} 架，在編成畫面設定四種機的比例（預設 ${HANGAR_DEFAULT.join('／')}）。艦載機自動出擊、返航補給；被打下的機庫每 ${SHIP_TYPES[0].fighters.build} 秒補一架。天賦「機庫整備」加快補充、提高傷害。`) +
         P(`<b>防空</b>：防空砲優先打飛彈、其次艦載機；副砲在全威力距離內也會打。命中率受艦種防空係數（護衛艦 ${SHIP_TYPES[4].aa} 最高）、陣型（圓陣最好）與天賦「防空網」影響。同時到達的飛彈越多，越容易突破防空。`) +
         P(`<b>前排輪替</b>：分艦隊裡受損的船會自動跟後方同艦種、狀態好的船（護盾 ≥ ${Math.round(ROTATE_RULE.fresh.sh * 100)}%、船體 ≥ ${Math.round(ROTATE_RULE.fresh.hp * 100)}%）交換位置，換位 ${ROTATE_RULE.dur} 秒、期間主砲副砲停火。一般在護盾打光時換；指揮官特性會改變時機——攻擊型船體剩 ${Math.round(ROTATE_RULE.hull * 100)}% 才換、防禦型護盾剩 ${Math.round(ROTATE_RULE.shEarly * 100)}% 就換（護盾回充 +${Math.round(ROTATE_RULE.shRegen * 100)}%）、機動型換位快 ${Math.round(ROTATE_RULE.fast * 100)}%；天賦「輪替演練」再加快。陣型越厚，後排越有船可以替換；變陣、轉向時會中斷。`) +
-        P(`<b>戰地維修</b>：船體低於 ${Math.round(FIELD_REPAIR.below * 100)}%、${FIELD_REPAIR.quiet} 秒沒被打中，就在 ${FIELD_REPAIR.dur} 秒內逐步修理。在補給艦 ${SUPPLY_RULE.range} 範圍內：第 1 次回復最大耐久的 ${Math.round(FIELD_REPAIR.first * 100)}%、之後每次減半，每艘船基本可修 ${FIELD_REPAIR.n} 次；不在範圍內：只有還沒修過的船能修 1 次（${Math.round(FIELD_REPAIR.alone * 100)}%）。天賦「損害管制」每階次數 +1、單次 +${Math.round(FIELD_REPAIR.step * 100)}%。所以<b>輪替到後排的船能在補給艦旁修整</b>。`) +
+        P(`<b>戰地維修</b>：船體低於 ${Math.round(FIELD_REPAIR.below * 100)}% 就開始修理（交戰中也會修），在 ${FIELD_REPAIR.dur} 秒內逐步修理。在補給艦 ${SUPPLY_RULE.range} 範圍內：第 1 次回復最大耐久的 ${Math.round(FIELD_REPAIR.first * 100)}%、之後每次減半，每艘船基本可修 ${FIELD_REPAIR.n} 次；不在範圍內：只有還沒修過的船能修 1 次（${Math.round(FIELD_REPAIR.alone * 100)}%）。天賦「損害管制」每階次數 +1、單次 +${Math.round(FIELD_REPAIR.step * 100)}%。所以<b>輪替到後排的船能在補給艦旁修整</b>。`) +
         P(`<b>補給</b>：巡洋艦 ${SHIP_TYPES[2].missile.n} 發、驅逐艦 ${SHIP_TYPES[3].missile.n} 發，打完要補。補給艦隊（補給艦＋護衛艦）${SUPPLY_RULE.range} 範圍內、飛彈沒滿的友艦每 ${SUPPLY_RULE.cd} 秒補 1 發，每艘補給艦帶 ${SHIP_TYPES[5].supply.stock} 發，被擊沉就跟著沒了。補給艦隊可以設定<b>跟隨</b>某支艦隊（待在後方 ${SUPPLY_RULE.follow}）；直接對它下移動命令會取消跟隨。`);
     case 'skills':
       return tutSkillTable() +
@@ -8866,6 +8881,7 @@ function netBegin(st, cmds, turn) {
   camAnim = null; view.target.x = 0; view.target.z = GAME.playerSide ? -300 : 300; view.height = 1250; if (mode3D) view.yaw = GAME.playerSide ? Math.PI : 0; updateCamera();
   if (!NET.spec && opts.fow && SETTINGS.autoScan === false) issue('autoscan', { on: false });
   const late = NET.bound > NET.K * 30;
+  if (!late) cutPlay(cutSpecStart(sc));
   toast(NET.spec ? `觀戰：${st.names[0]} vs ${st.names[1]}${late ? '（快轉追上目前的進度…）' : ''}` : `${late ? '重新連上：快轉追上目前的進度…' : '多人對戰　開戰！'}（不能暫停；速度 ×${NET.speed}）`);
 }
 let _netOutT = 0;
@@ -8956,6 +8972,381 @@ function mpReport() {
   .mp-chat{height:160px;overflow:auto;font-size:calc(13px * var(--ui));line-height:1.5}.mp-opt.ro button{cursor:default}.mp-tbl td{vertical-align:middle}`;
   document.head.appendChild(s);
 })();
+
+// ═══════════════════════ 過場動畫：文字切入 → APNG ═══════════════════════
+// 移植自 tetblue/apng_gen（RUBICON PROTOCOL 文字動畫 APNG 產生器）的精簡版：
+//   排版（逐字量寬）→ 時間軸（登場／顯示／退場、逐字延遲）→ 效果與裝飾 → 逐格描繪 → APNG 編碼（CompressionStream + 自組 chunk）
+// 遊戲裡用在「開戰」「勝利／敗北／平手」「戰鬥回放」的切入畫面；設定 →「過場動畫工坊」可以自己打字、預覽、下載 APNG。
+// 所有隨機都由（時間、字的索引）決定，所以即時預覽（canvas）與輸出（APNG）每一格完全一樣：
+//   已經編好的 APNG → 直接用 <img> 播；還沒編好（或瀏覽器沒有 CompressionStream）→ 先用 canvas 即時畫，同時在背景編好留著下次用。
+
+// ───── PNG / APNG 編碼（apng_gen js/codec/png.js）─────
+const CUT_CRC = new Uint32Array(256).map((_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+function cutCrc(b) { let c = ~0 >>> 0; for (let i = 0; i < b.length; i++) c = CUT_CRC[(c ^ b[i]) & 0xff] ^ (c >>> 8); return ~c >>> 0; }
+const cutCanEncode = () => typeof CompressionStream === 'function';
+async function cutDeflate(bytes) { return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate'))).arrayBuffer()); }
+const PNG_SIG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+function pngChunk(type, data) {
+  const out = new Uint8Array(12 + data.length), v = new DataView(out.buffer);
+  v.setUint32(0, data.length);
+  for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+  out.set(data, 8);
+  v.setUint32(8 + data.length, cutCrc(out.subarray(4, 8 + data.length)));
+  return out;
+}
+// RGBA 矩形 → 加上濾波位元組的列資料；每列從 None/Sub/Up/Paeth 挑變化量最小的
+function pngFilter(rgba, stride, x, y, w, h) {
+  const rl = w * 4, out = new Uint8Array(h * (rl + 1)), prev = new Uint8Array(rl), cur = new Uint8Array(rl);
+  const cand = [new Uint8Array(rl), new Uint8Array(rl), new Uint8Array(rl), new Uint8Array(rl)], [c0, c1, c2, c3] = cand;
+  for (let r = 0; r < h; r++) {
+    const st = ((y + r) * stride + x) * 4;
+    cur.set(rgba.subarray(st, st + rl));
+    let s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+    for (let i = 0; i < rl; i++) {
+      const v = cur[i], a = i >= 4 ? cur[i - 4] : 0, b = prev[i], c = i >= 4 ? prev[i - 4] : 0;
+      const p = a + b - c, pa = p > a ? p - a : a - p, pb = p > b ? p - b : b - p, pc = p > c ? p - c : c - p;
+      const pred = pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+      const v1 = (v - a) & 255, v2 = (v - b) & 255, v3 = (v - pred) & 255;
+      c0[i] = v; c1[i] = v1; c2[i] = v2; c3[i] = v3;
+      s0 += v < 128 ? v : 256 - v; s1 += v1 < 128 ? v1 : 256 - v1; s2 += v2 < 128 ? v2 : 256 - v2; s3 += v3 < 128 ? v3 : 256 - v3;
+    }
+    const sums = [s0, s1, s2, s3];
+    let best = 0;
+    for (let f = 1; f < 4; f++) if (sums[f] < sums[best]) best = f;
+    out[r * (rl + 1)] = [0, 1, 2, 4][best];
+    out.set(cand[best], r * (rl + 1) + 1);
+    prev.set(cur);
+  }
+  return out;
+}
+// 兩張畫面的差異矩形（完全相同＝null）
+function pngDiffRect(a, b, W, H) {
+  const A = new Uint32Array(a.buffer, a.byteOffset, W * H), B = new Uint32Array(b.buffer, b.byteOffset, W * H);
+  let minX = W, minY = H, maxX = -1, maxY = -1;
+  for (let y = 0; y < H; y++) {
+    const row = y * W;
+    let x0 = -1;
+    for (let x = 0; x < W; x++) if (A[row + x] !== B[row + x]) { x0 = x; break; }
+    if (x0 < 0) continue;
+    let x1 = x0;
+    for (let x = W - 1; x > x0; x--) if (A[row + x] !== B[row + x]) { x1 = x; break; }
+    if (y < minY) minY = y;
+    maxY = y; if (x0 < minX) minX = x0; if (x1 > maxX) maxX = x1;
+  }
+  return maxY < 0 ? null : { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+}
+// 逐格加入的 APNG 組裝器：只存與上一格不同的矩形，相同影格合併延長
+class ApngWriter {
+  constructor(width, height, fps, plays) { Object.assign(this, { width, height, fps, plays }); this.frames = []; this.prev = null; }
+  async addFrame(buf) {
+    const W = this.width, H = this.height;
+    let rect = { x: 0, y: 0, w: W, h: H };
+    if (this.prev) {
+      rect = pngDiffRect(this.prev, buf, W, H);
+      if (!rect) { this.frames[this.frames.length - 1].delay++; return false; }
+    }
+    this.prev = buf.slice();
+    this.frames.push({ ...rect, data: await cutDeflate(pngFilter(buf, W, rect.x, rect.y, rect.w, rect.h)), delay: 1 });
+    return true;
+  }
+  finish() {
+    const W = this.width, H = this.height, u32 = (...n) => { const o = new Uint8Array(n.length * 4), v = new DataView(o.buffer); n.forEach((x, i) => v.setUint32(i * 4, x)); return o; };
+    const ihdr = new Uint8Array(13); new DataView(ihdr.buffer).setUint32(0, W); new DataView(ihdr.buffer).setUint32(4, H); ihdr[8] = 8; ihdr[9] = 6;
+    const out = [PNG_SIG, pngChunk('IHDR', ihdr), pngChunk('acTL', u32(this.frames.length, this.plays))];
+    let seq = 0;
+    this.frames.forEach((f, i) => {
+      const fc = new Uint8Array(26), v = new DataView(fc.buffer);
+      v.setUint32(0, seq++); v.setUint32(4, f.w); v.setUint32(8, f.h); v.setUint32(12, f.x); v.setUint32(16, f.y);
+      let num = f.delay, den = this.fps;   // 影格數／FPS 直接當分數，不累積四捨五入誤差
+      while (num > 65535) { num = Math.round(num / 2); den = Math.max(1, Math.round(den / 2)); }
+      v.setUint16(20, num); v.setUint16(22, den); fc[24] = 0; fc[25] = 0;   // dispose NONE、blend SOURCE（矩形內整塊取代，含透明）
+      out.push(pngChunk('fcTL', fc));
+      if (i === 0) out.push(pngChunk('IDAT', f.data));
+      else { const fd = new Uint8Array(4 + f.data.length); new DataView(fd.buffer).setUint32(0, seq++); fd.set(f.data, 4); out.push(pngChunk('fdAT', fd)); }
+    });
+    out.push(pngChunk('IEND', new Uint8Array(0)));
+    return new Blob(out, { type: 'image/apng' });
+  }
+}
+
+// ───── 樣式（模板）─────
+// 每種切入＝一組 登場效果／退場效果／裝飾／顏色；顏色跟著玩家陣營（帝國金、聯盟藍），敗北一律紅色警戒
+const CUT_FAC = [
+  { font: '"Noto Serif TC", "PMingLiU", "Songti TC", serif', main: '#ffe2b0', edge: '#7a4a12', glow: '#f2b35a', deco: '#f2b35a' },
+  { font: '"Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif', main: '#e6f6ff', edge: '#123a5a', glow: '#7cc4ff', deco: '#7cc4ff' },
+];
+const CUT_STYLES = {
+  start: { name: '開戰', inFx: 'slam', outFx: 'spread', deco: 'band', inDur: 0.42, stagger: 0.07, hold: 1.0, outDur: 0.45, spacing: 0.5 },
+  win: { name: '勝利', inFx: 'drop', outFx: 'rise', deco: 'lines', inDur: 0.55, stagger: 0.12, hold: 1.5, outDur: 0.5, spacing: 0.6 },
+  lose: { name: '敗北', inFx: 'glitch', outFx: 'glitch', deco: 'tape', inDur: 0.5, stagger: 0.1, hold: 1.4, outDur: 0.4, spacing: 0.6, color: { main: '#ffd6d0', edge: '#5a0d0d', glow: '#ff4a3a', deco: '#ff5a3a' } },
+  draw: { name: '平手', inFx: 'converge', outFx: 'spread', deco: 'lines', inDur: 0.6, stagger: 0, hold: 1.3, outDur: 0.45, spacing: 0.5, color: { main: '#eef1f5', edge: '#2a3240', glow: '#aab4c4', deco: '#aab4c4' } },
+  replay: { name: '回放', inFx: 'type', outFx: 'fade', deco: 'frame', inDur: 0, stagger: 0.09, hold: 0.9, outDur: 0.35, spacing: 0.35 },
+};
+const CUT_W = 960, CUT_H = 300, CUT_FPS = 20;
+
+// ───── 小工具 ─────
+function cutHash(a, b = 0, c = 0) { let h = Math.imul(a | 0, 0x27d4eb2d) ^ Math.imul(b | 0, 0x165667b1) ^ Math.imul(c | 0, 0x9e3779b1); h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d); h ^= h >>> 12; return (h >>> 0) / 4294967296; }
+const cl01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+const eOut = (p) => 1 - (1 - p) ** 3, eIn = (p) => p * p * p, eBack = (p) => 1 + 2.4 * (p - 1) ** 3 + 1.4 * (p - 1) ** 2;
+function eBounce(p) { const n = 7.5625, d = 2.75; if (p < 1 / d) return n * p * p; if (p < 2 / d) return n * (p -= 1.5 / d) * p + 0.75; if (p < 2.5 / d) return n * (p -= 2.25 / d) * p + 0.9375; return n * (p -= 2.625 / d) * p + 0.984375; }
+
+// ───── 排版＋時間軸：spec → 每個字的位置與登場／退場時刻 ─────
+// spec：{ main, sub, style, fac, w, h, fps }
+function cutLayout(spec) {
+  const st = CUT_STYLES[spec.style] || CUT_STYLES.start, W = spec.w || CUT_W, H = spec.h || CUT_H;
+  const col = { ...CUT_FAC[spec.fac || 0], ...(st.color || {}) }, font = CUT_FAC[spec.fac || 0].font;
+  const mc = document.createElement('canvas').getContext('2d');
+  const chars = [...(spec.main || '')];
+  // 自動縮小：主文字太長就縮到畫面寬的 86%
+  let size = Math.round(H * 0.36);
+  const widthAt = (sz) => { mc.font = `900 ${sz}px ${font}`; return chars.reduce((s, ch) => s + mc.measureText(ch).width, 0) + sz * st.spacing * Math.max(0, chars.length - 1); };
+  while (size > 18 && widthAt(size) > W * 0.86) size -= 2;
+  mc.font = `900 ${size}px ${font}`;
+  const total = widthAt(size), gap = size * st.spacing, cy = spec.sub ? H * 0.45 : H * 0.5;
+  let x = (W - total) / 2;
+  const glyphs = chars.map((ch, i) => { const w = mc.measureText(ch).width, g = { ch, i, x: x + w / 2, y: cy, w }; x += w + gap; return g; });
+  const n = glyphs.length, mid = (n - 1) / 2;
+  // 逐字延遲：開戰從中央向外，其餘從頭到尾
+  glyphs.forEach((g) => { const k = st.inFx === 'slam' ? Math.abs(g.i - mid) : g.i; g.in0 = 0.25 + k * st.stagger; g.in1 = g.in0 + st.inDur; });
+  const inEnd = Math.max(0.25, ...glyphs.map((g) => g.in1));
+  const subIn = inEnd - 0.1, holdEnd = Math.max(inEnd, subIn + 0.4) + st.hold;
+  glyphs.forEach((g) => { g.out0 = holdEnd + (st.outFx === 'glitch' ? cutHash(g.i, 9) * 0.15 : 0); g.out1 = g.out0 + st.outDur; });
+  const outEnd = Math.max(holdEnd + st.outDur, ...glyphs.map((g) => g.out1));
+  const subSize = Math.round(size * 0.3);
+  return { st, col, font, W, H, size, glyphs, total, cy, sub: spec.sub || '', subSize, subY: cy + size * 0.62 + subSize * 0.7, subIn, holdEnd, inEnd, outEnd, dur: outEnd + 0.15, fps: spec.fps || CUT_FPS };
+}
+
+// ───── 描繪：L（版面）在時間 t 的一格 ─────
+function cutDraw(ctx, L, t) {
+  const { st, col, W, H, size } = L;
+  ctx.clearRect(0, 0, W, H);
+  const fIdx = Math.floor(t * L.fps);   // 故障類的亂數以影格為單位（預覽與輸出一致）
+  // 裝飾的展開／收起
+  const dIn = eOut(cl01(t / 0.35)), dOut = 1 - eIn(cl01((t - L.holdEnd) / (st.outDur + 0.1)));
+  const dk = Math.min(dIn, dOut);
+  if (dk > 0) cutDeco(ctx, L, dk, t, fIdx);
+  // 登場閃光（重擊／故障）
+  if (st.inFx === 'slam' || st.inFx === 'glitch') {
+    const ft = t - L.inEnd;
+    if (ft > -0.05 && ft < 0.25) { const a = (1 - cl01(ft / 0.25)) * 0.55; ctx.fillStyle = st.inFx === 'glitch' ? `rgba(255,80,60,${a})` : `rgba(255,255,255,${a})`; ctx.fillRect(0, L.cy - size * 0.75, W, size * 1.5); }
+  }
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const g of L.glyphs) cutGlyph(ctx, L, g, t, fIdx);
+  // 副文字：主文字到齊前淡入上浮，退場跟著淡出
+  if (L.sub) {
+    const a = Math.min(eOut(cl01((t - L.subIn) / 0.4)), 1 - cl01((t - L.holdEnd) / st.outDur));
+    if (a > 0) {
+      ctx.save(); ctx.globalAlpha = a; ctx.font = `700 ${L.subSize}px ${L.font}`;
+      if (ctx.letterSpacing !== undefined) ctx.letterSpacing = `${Math.round(L.subSize * 0.25)}px`;
+      ctx.fillStyle = col.main; ctx.shadowColor = col.glow; ctx.shadowBlur = 8;
+      ctx.fillText(L.sub, W / 2, L.subY + (1 - a) * 10);
+      ctx.restore();
+    }
+  }
+}
+function cutGlyph(ctx, L, g, t, fIdx) {
+  const { st, col, size, W } = L;
+  let a = 1, dx = 0, dy = 0, sc = 1, blur = 0, split = 0;
+  if (t < g.in1 || st.inDur === 0) {
+    const p = st.inDur ? cl01((t - g.in0) / st.inDur) : t >= g.in0 ? 1 : 0;
+    if (p <= 0) return;
+    switch (st.inFx) {
+      case 'slam': sc = 1 + (1 - eIn(p)) * 2.2; a = cl01(p * 1.6); blur = (1 - p) * 10; break;   // 重擊：由大砸下
+      case 'drop': dy = -(1 - eBounce(p)) * size * 1.4; a = cl01(p * 3); break;   // 落下彈跳
+      case 'glitch': { const r = cutHash(g.i, fIdx, 3); a = p < 1 && r < 0.35 ? 0.15 : 1; dx = (1 - p) * (cutHash(g.i, fIdx, 5) - 0.5) * size * 0.8; split = (1 - p) * size * 0.12; break; }   // 故障
+      case 'converge': dx = (g.x - W / 2) * (1 - eOut(p)) * 1.6; a = eOut(p); blur = (1 - p) * 6; break;   // 字距收攏
+      case 'type': break;   // 打字機：到時間直接出現
+    }
+  }
+  if (t > g.out0) {
+    const q = cl01((t - g.out0) / st.outDur);
+    if (q >= 1) return;
+    switch (st.outFx) {
+      case 'spread': dx += (g.x - W / 2) * eIn(q) * 1.2; sc *= 1 + q * 0.25; a *= 1 - q; blur += q * 8; break;
+      case 'rise': dy -= eIn(q) * size * 0.5; a *= 1 - q; break;
+      case 'glitch': { const r = cutHash(g.i, fIdx, 7); a *= r < q ? 0 : 1 - q * 0.5; dx += (cutHash(g.i, fIdx, 11) - 0.5) * q * size; split += q * size * 0.15; break; }
+      default: a *= 1 - q;
+    }
+  }
+  // 顯示中：敗北偶爾抖一下
+  if (st.inFx === 'glitch' && t > g.in1 && t < g.out0 && cutHash(fIdx, 13) < 0.06) { dx += (cutHash(g.i, fIdx, 17) - 0.5) * size * 0.2; split = Math.max(split, size * 0.05); }
+  ctx.save();
+  ctx.translate(g.x + dx, g.y + dy); ctx.scale(sc, sc);
+  ctx.font = `900 ${size}px ${L.font}`;
+  if (blur > 0.5 && 'filter' in ctx) ctx.filter = `blur(${blur.toFixed(1)}px)`;
+  if (split > 0.5) {   // 故障色：紅藍錯開
+    ctx.globalAlpha = a * 0.7; ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = '#ff2a3a'; ctx.fillText(g.ch, -split, 0);
+    ctx.fillStyle = '#2ad4ff'; ctx.fillText(g.ch, split, 0);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  ctx.globalAlpha = a;
+  ctx.shadowColor = col.glow; ctx.shadowBlur = size * 0.28;   // 外發光
+  ctx.lineJoin = 'round'; ctx.lineWidth = Math.max(3, size * 0.07); ctx.strokeStyle = col.edge; ctx.strokeText(g.ch, 0, 0);   // 描邊
+  ctx.shadowBlur = 0;
+  const gr = ctx.createLinearGradient(0, -size / 2, 0, size / 2); gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.55, col.main); gr.addColorStop(1, col.glow);   // 漸層填色
+  ctx.fillStyle = gr; ctx.fillText(g.ch, 0, 0);
+  ctx.restore();
+}
+// 裝飾：色帶／上下線／警戒膠帶／角框；k＝展開程度 0～1
+function cutDeco(ctx, L, k, t, fIdx) {
+  const { st, col, W, H, size, cy } = L;
+  ctx.save();
+  if (st.deco === 'band') {   // 色帶：從中央向兩側伸展，兩端淡化
+    const bh = size * 1.25 * (0.4 + 0.6 * k), half = W * 0.5 * k;
+    const gr = ctx.createLinearGradient(W / 2 - half, 0, W / 2 + half, 0);
+    gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(0.18, 'rgba(8,12,22,.82)'); gr.addColorStop(0.82, 'rgba(8,12,22,.82)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gr; ctx.fillRect(W / 2 - half, cy - bh / 2, half * 2, bh);
+    ctx.globalAlpha = 0.9; ctx.fillStyle = col.deco;
+    ctx.fillRect(W / 2 - half * 0.9, cy - bh / 2, half * 1.8, 2); ctx.fillRect(W / 2 - half * 0.9, cy + bh / 2 - 2, half * 1.8, 2);
+    if (L.sub) { ctx.globalAlpha = 0.75 * k; ctx.fillStyle = 'rgba(8,12,22,.7)'; ctx.fillRect(W / 2 - half * 0.6, L.subY - L.subSize * 0.75, half * 1.2, L.subSize * 1.5); }
+  } else if (st.deco === 'lines') {   // 上下線：從中央拉開
+    const len = L.total * 0.62 * k + size * 0.6 * k, y0 = cy - size * 0.72, y1 = (L.sub ? L.subY + L.subSize * 0.9 : cy + size * 0.72);
+    ctx.strokeStyle = col.deco; ctx.lineWidth = 2; ctx.shadowColor = col.glow; ctx.shadowBlur = 10;
+    for (const y of [y0, y1]) {
+      const gr = ctx.createLinearGradient(W / 2 - len, 0, W / 2 + len, 0); gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(0.5, col.deco); gr.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.strokeStyle = gr; ctx.beginPath(); ctx.moveTo(W / 2 - len, y); ctx.lineTo(W / 2 + len, y); ctx.stroke();
+    }
+    ctx.fillStyle = col.deco; ctx.globalAlpha = k;
+    for (const s of [-1, 1]) { ctx.beginPath(); const x = W / 2 + s * (len + 8); ctx.moveTo(x, cy - 6); ctx.lineTo(x + s * 8, cy); ctx.lineTo(x, cy + 6); ctx.closePath(); ctx.fill(); }
+  } else if (st.deco === 'tape') {   // 警戒膠帶：上下兩條斜紋向反方向捲動、偶爾閃爍
+    const th = Math.max(16, size * 0.2), stripe = th * 1.2, off = (t * 140) % (stripe * 2);
+    const flick = cutHash(fIdx, 21) < 0.08 ? 0.45 : 1;
+    [[cy - size * 0.95, 1], [L.sub ? L.subY + L.subSize * 1.1 : cy + size * 0.8, -1]].forEach(([y, dir]) => {
+      const w = W * k, x0 = dir > 0 ? 0 : W - w;
+      ctx.save(); ctx.beginPath(); ctx.rect(x0, y, w, th); ctx.clip();
+      ctx.globalAlpha = 0.9 * flick; ctx.fillStyle = '#1a0606'; ctx.fillRect(x0, y, w, th);
+      ctx.fillStyle = col.deco;
+      for (let x = -stripe * 2 + dir * off; x < W + stripe * 2; x += stripe * 2) { ctx.beginPath(); ctx.moveTo(x, y + th); ctx.lineTo(x + stripe, y + th); ctx.lineTo(x + stripe + th, y); ctx.lineTo(x + th, y); ctx.closePath(); ctx.fill(); }
+      ctx.restore();
+    });
+  } else if (st.deco === 'frame') {   // 角框
+    const fw = (L.total / 2 + size * 0.7) * (0.6 + 0.4 * k), fh = size * 0.8 * (0.6 + 0.4 * k), c = size * 0.35;
+    ctx.globalAlpha = k; ctx.strokeStyle = col.deco; ctx.lineWidth = 3; ctx.shadowColor = col.glow; ctx.shadowBlur = 8;
+    for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { const x = W / 2 + sx * fw, y = cy + sy * fh; ctx.beginPath(); ctx.moveTo(x - sx * c, y); ctx.lineTo(x, y); ctx.lineTo(x, y - sy * c); ctx.stroke(); }
+    if (Math.floor(t * 2.5) % 2 === 0) { ctx.fillStyle = '#ff4a3a'; ctx.beginPath(); ctx.arc(W / 2 - fw + c * 0.9, cy - fh + c * 0.9, 6, 0, Math.PI * 2); ctx.fill(); }   // 錄影燈
+  }
+  ctx.restore();
+}
+
+// ───── 輸出：spec → APNG Blob ─────
+async function cutEncode(spec, onProgress) {
+  const L = cutLayout(spec), cv = document.createElement('canvas'); cv.width = L.W; cv.height = L.H;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  const n = Math.max(1, Math.ceil(L.dur * L.fps)), wr = new ApngWriter(L.W, L.H, L.fps, spec.loop ? 0 : 1);
+  let stored = 0;
+  for (let f = 0; f <= n; f++) {   // 最後一格＝退場完的透明畫面（播一次就停在空白）
+    cutDraw(ctx, L, f / L.fps);
+    if (await wr.addFrame(ctx.getImageData(0, 0, L.W, L.H).data)) stored++;
+    if (onProgress) onProgress((f + 1) / (n + 1));
+  }
+  const blob = wr.finish();
+  return { blob, frames: n + 1, stored, dur: L.dur, w: L.W, h: L.H };
+}
+
+// ───── 遊戲裡播放 ─────
+const CUT = { cache: new Map(), busy: new Map(), el: null, timer: 0, raf: 0, url: null };
+const cutKey = (s) => JSON.stringify([s.main, s.sub || '', s.style, s.fac || 0]);
+function cutOn() { return SETTINGS.cutin !== false; }
+// 背景先編好（同一個 key 只編一次）；回傳 Promise<Blob|null>
+function cutPrepare(spec) {
+  const key = cutKey(spec);
+  if (CUT.cache.has(key)) return Promise.resolve(CUT.cache.get(key).blob);
+  if (!cutCanEncode()) return Promise.resolve(null);
+  if (!CUT.busy.has(key)) CUT.busy.set(key, cutEncode(spec).then((r) => {
+    CUT.busy.delete(key);
+    CUT.cache.set(key, { blob: r.blob, dur: r.dur });
+    while (CUT.cache.size > 12) CUT.cache.delete(CUT.cache.keys().next().value);
+    return r.blob;
+  }).catch(() => { CUT.busy.delete(key); return null; }));
+  return CUT.busy.get(key);
+}
+function cutStop() {
+  clearTimeout(CUT.timer); cancelAnimationFrame(CUT.raf); CUT.raf = 0;
+  if (CUT.el) CUT.el.innerHTML = '';
+  if (CUT.url) { URL.revokeObjectURL(CUT.url); CUT.url = null; }
+}
+// 播一段切入，回傳長度（毫秒；關掉時 0）
+function cutPlay(spec) {
+  if (!cutOn() || !spec.main) return 0;
+  if (!CUT.el) { CUT.el = document.createElement('div'); CUT.el.id = 'cutin'; document.body.appendChild(CUT.el); }
+  cutStop();
+  const key = cutKey(spec), hit = CUT.cache.get(key), L = cutLayout(spec);
+  if (hit) {   // 已經編好：用 <img> 播 APNG（每次給新的 blob 網址，瀏覽器才會從第一格播，不會沿用已經播完的動畫）
+    const img = new Image(); img.alt = spec.main; img.src = CUT.url = URL.createObjectURL(hit.blob);
+    CUT.el.appendChild(img);
+  } else {   // 還沒編好：canvas 即時畫同一套動畫，並在背景編好留著
+    const cv = document.createElement('canvas'); cv.width = L.W; cv.height = L.H; CUT.el.appendChild(cv);
+    const ctx = cv.getContext('2d'), t0 = performance.now();
+    const step = () => { const t = (performance.now() - t0) / 1000; cutDraw(ctx, L, Math.min(t, L.dur)); if (t < L.dur) CUT.raf = requestAnimationFrame(step); };
+    step();
+    cutPrepare(spec);
+  }
+  const ms = Math.round(L.dur * 1000);
+  CUT.timer = setTimeout(cutStop, ms + 50);
+  return ms;
+}
+// 遊戲用的幾種切入
+const playerFac = () => SIDE_FAC[GAME.playerSide || 0] || 0;
+function cutSpecStart(sc) { return { main: '開戰', sub: sc && sc.name ? sc.name : '', style: 'start', fac: playerFac() }; }
+function cutSpecResult(kind, why) {
+  const main = { win: '勝利', lose: '敗北', draw: '平手' }[kind];
+  return main ? { main, sub: why || '', style: kind, fac: playerFac() } : null;
+}
+function cutSpecReplay(sc) { return { main: '戰鬥回放', sub: sc && sc.name ? sc.name : '', style: 'replay', fac: playerFac() }; }
+
+// ───── 過場動畫工坊：自己打字、預覽、下載 APNG ─────
+const CS = { el: null, spec: { main: '戰鬥開始', sub: '第一艦隊　出擊', style: 'start', fac: 0, fps: 20, loop: false }, url: null, info: '', prevT: 0, raf: 0 };
+function openCutStudio() {
+  if (!CS.el) {
+    CS.el = document.createElement('div'); CS.el.id = 'cutstudio'; document.body.appendChild(CS.el);
+    CS.el.addEventListener('click', (e) => { if (e.target === CS.el) closeCutStudio(); });
+  }
+  CS.el.hidden = false; CS.spec.fac = playerFac();
+  renderCutStudio();
+}
+function closeCutStudio() { if (!CS.el) return; cancelAnimationFrame(CS.raf); CS.el.hidden = true; }
+function renderCutStudio() {
+  const s = CS.spec, esc = (v) => String(v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  CS.el.innerHTML = `<div class="set-card cs-card"><div class="g-head" style="margin-bottom:10px"><h2>過場動畫工坊</h2><span class="crumb">文字切入 → APNG（移植自 apng_gen）</span><span class="g-sp"></span><button class="g-btn" id="cs-close">完成</button></div>
+    <div class="cs-prev"><canvas id="cs-cv" width="${CUT_W}" height="${CUT_H}"></canvas></div>
+    <div class="set-row"><span>主文字</span><input class="g-sel cs-in" id="cs-main" maxlength="12" value="${esc(s.main)}"></div>
+    <div class="set-row"><span>副文字</span><input class="g-sel cs-in" id="cs-sub" maxlength="30" value="${esc(s.sub)}"></div>
+    <div class="set-row"><span>模板</span><span class="g-row">${Object.entries(CUT_STYLES).map(([k, v]) => `<button class="g-btn sm ${s.style === k ? 'pri' : ''}" data-cst="${k}">${v.name}</button>`).join('')}</span></div>
+    <div class="set-row"><span>陣營配色</span><span class="g-row">${[0, 1].map((f) => `<button class="g-btn sm ${s.fac === f ? 'pri' : ''}" data-csf="${f}">${FACTION[f].name}</button>`).join('')}</span></div>
+    <div class="set-row"><span>FPS／循環</span><span class="g-row"><select class="g-sel" id="cs-fps">${[12, 15, 20, 24, 30].map((v) => `<option ${s.fps === v ? 'selected' : ''}>${v}</option>`).join('')}</select>
+      <label class="g-row"><input type="checkbox" id="cs-loop" ${s.loop ? 'checked' : ''}> 無限循環</label></span></div>
+    <div class="g-row" style="margin-top:12px"><button class="g-btn sm" id="cs-play">▶ 重播預覽</button><span class="g-dim cs-info">${CS.info}</span><span class="g-sp"></span>
+      ${cutCanEncode() ? `<button class="g-btn pri" id="cs-enc">輸出 APNG</button>${CS.url ? `<a class="g-btn" id="cs-dl" href="${CS.url}" download="${esc(s.main || 'cutin')}.png">下載</a>` : ''}` : '<span class="g-dim">這個瀏覽器不支援 CompressionStream，無法輸出</span>'}</div></div>`;
+  const q = (x) => CS.el.querySelector(x);
+  q('#cs-close').onclick = closeCutStudio;
+  const edit = (fn) => { fn(); if (CS.url) { URL.revokeObjectURL(CS.url); CS.url = null; CS.info = ''; } renderCutStudio(); };
+  q('#cs-main').onchange = (e) => edit(() => (s.main = e.target.value.trim()));
+  q('#cs-sub').onchange = (e) => edit(() => (s.sub = e.target.value.trim()));
+  q('#cs-fps').onchange = (e) => edit(() => (s.fps = +e.target.value));
+  q('#cs-loop').onchange = (e) => edit(() => (s.loop = e.target.checked));
+  CS.el.querySelectorAll('[data-cst]').forEach((b) => (b.onclick = () => edit(() => (s.style = b.dataset.cst))));
+  CS.el.querySelectorAll('[data-csf]').forEach((b) => (b.onclick = () => edit(() => (s.fac = +b.dataset.csf))));
+  q('#cs-play').onclick = cutStudioPreview;
+  if (q('#cs-enc')) q('#cs-enc').onclick = async () => {
+    const btn = q('#cs-enc'); btn.disabled = true;
+    const r = await cutEncode(s, (p) => { btn.textContent = `編碼中 ${Math.round(p * 100)}%`; });
+    if (CS.url) URL.revokeObjectURL(CS.url);
+    CS.url = URL.createObjectURL(r.blob);
+    CS.info = `${r.w}×${r.h}　${r.dur.toFixed(2)} 秒　${r.frames} 格（實際存 ${r.stored} 張）　${(r.blob.size / 1024).toFixed(0)} KB${r.blob.size > 5 * 1024 * 1024 ? '（超過 5MB：降低 FPS、或換成動作較少的模板可以變小）' : ''}`;
+    renderCutStudio();
+    const img = new Image(); img.src = CS.url; img.className = 'cs-out';   // 直接用輸出的 APNG 取代預覽畫面
+    cancelAnimationFrame(CS.raf); q('.cs-prev').replaceChildren(img);
+  };
+  cutStudioPreview();
+}
+function cutStudioPreview() {
+  cancelAnimationFrame(CS.raf);
+  const cv = CS.el.querySelector('#cs-cv'); if (!cv) { renderCutStudio(); return; }
+  const L = cutLayout(CS.spec), ctx = cv.getContext('2d'), t0 = performance.now();
+  const step = () => { if (CS.el.hidden) return; const t = (performance.now() - t0) / 1000; cutDraw(ctx, L, CS.spec.loop ? t % L.dur : Math.min(t, L.dur)); if (CS.spec.loop || t < L.dur) CS.raf = requestAnimationFrame(step); };
+  step();
+}
 
 // ═══════════════════════ 命令預覽：目的地、變陣後的樣子、戰術隊列 ═══════════════════════
 // 主畫面與戰術面板共用同一份「圖形清單」（世界座標），各自畫出來。
@@ -10515,6 +10906,8 @@ function renderSettings() {
       <div class="set-row"><span>下令時自動減速<br><small class="g-dim">沒有暫停時，按住右鍵移動、打開指令輪盤、選攻擊或技能目標的期間，遊戲變慢，下完命令恢復原本速度</small></span>
         <select class="g-sel" id="set-cmdslow">${[[0, '關閉'], [0.1, '×0.1'], [0.2, '×0.2'], [0.5, '×0.5']].map(([v, n]) => `<option value="${v}" ${SETTINGS.cmdSlow === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
       <label class="set-row set-chk"><span>打開戰術面板時自動暫停<br><small class="g-dim">只限單人模式</small></span><input type="checkbox" id="set-tacpause" ${SETTINGS.tacPause ? 'checked' : ''}></label>
+      <label class="set-row set-chk"><span>過場動畫<br><small class="g-dim">開戰、勝利／敗北／平手、戰鬥回放時的文字切入（APNG）</small></span><input type="checkbox" id="set-cutin" ${SETTINGS.cutin !== false ? 'checked' : ''}></label>
+      <div class="set-row"><span>過場動畫工坊<br><small class="g-dim">自己打字做切入動畫，預覽並下載成 APNG</small></span><button class="g-btn sm" id="set-cutstudio">工坊…</button></div>
       <div class="set-h">指揮官視角（艦橋，${keyLabel(keyOf('bridge'))}）</div>
       <label class="set-row set-chk"><span>低頭看戰術台時自動暫停<br><small class="g-dim">只限單人模式；預設不暫停，邊看戰場邊下令</small></span><input type="checkbox" id="set-brpause" ${SETTINGS.bridgePause ? 'checked' : ''}></label>
       <label class="set-row set-chk"><span>「戰況」視窗固定在畫面上<br><small class="g-dim">不勾＝放在艦橋左側，轉頭才看得到</small></span><input type="checkbox" id="set-pin-stat" ${SETTINGS.brPins.stat ? 'checked' : ''}></label>
@@ -10540,6 +10933,8 @@ function renderSettings() {
   qa('.set-key').forEach((b) => (b.onclick = () => { SET.capture = b.dataset.k; SET.msg = ''; renderSettings(); }));
   if (q('#set-qmod')) q('#set-qmod').onchange = (e) => { SETTINGS.queueMod = e.target.value; saveSettings(); };
   if (q('#set-kreset')) q('#set-kreset').onclick = () => { for (const a of KEY_ACTIONS) SETTINGS.keys[a[0]] = a[3]; SETTINGS.queueMod = 'Shift'; SET.msg = '已恢復預設按鍵。'; saveSettings(); renderSettings(); };
+  if (q('#set-cutin')) q('#set-cutin').onchange = (e) => { SETTINGS.cutin = e.target.checked; saveSettings(); if (!e.target.checked) cutStop(); };
+  if (q('#set-cutstudio')) q('#set-cutstudio').onclick = openCutStudio;
   if (q('#set-speed')) q('#set-speed').onchange = (e) => { SETTINGS.speedIdx = +e.target.value; saveSettings(); };
   qa('[data-sp]').forEach((b) => (b.onclick = () => { setSpeed(+b.dataset.sp); renderSettings(); }));
   if (q('#set-cmdslow')) q('#set-cmdslow').onchange = (e) => { SETTINGS.cmdSlow = +e.target.value; saveSettings(); };
@@ -10590,7 +10985,8 @@ document.getElementById('tb-attack').onclick = armAttack;
 document.getElementById('tb-queue').onclick = () => { queueToggle = !queueToggle; document.getElementById('tb-queue').classList.toggle('on', queueToggle); };
 document.getElementById('set-btn').onclick = () => openSettings();
 applyUISettings();
-Object.assign(window.__demo, { rocks: () => ROCKS, shipWorld3(i) { shipWorldCPU(i, _a); return [_a.x, _a.y, _a.z]; }, fleetMods, U: () => U.uTime.value, gunStats: () => gunStats, pending: () => pending, wInfo: () => ({ dmg: wDmg.map((a) => a.map(Math.round)), w: wStats.map((s) => Object.fromEntries(Object.entries(s).map(([k, v]) => [k, Math.round(v)]))), air: [aliveF[0].length, aliveF[1].length], alive: [sideAlive(0), sideAlive(1)] }), SETTINGS, openSettings, closeSettings, keyOf, BR, enterBridge, exitBridge, ships: () => ships, bridgeLook, bridgeConsoleK, camera: () => camera });
+Object.assign(window.__demo, { cStats, C_SRC, rocks: () => ROCKS, shipWorld3(i) { shipWorldCPU(i, _a); return [_a.x, _a.y, _a.z]; }, fleetMods, U: () => U.uTime.value, gunStats: () => gunStats, pending: () => pending, wInfo: () => ({ dmg: wDmg.map((a) => a.map(Math.round)), w: wStats.map((s) => Object.fromEntries(Object.entries(s).map(([k, v]) => [k, Math.round(v)]))), air: [aliveF[0].length, aliveF[1].length], alive: [sideAlive(0), sideAlive(1)] }), SETTINGS, openSettings, closeSettings, keyOf, BR, enterBridge, exitBridge, ships: () => ships, bridgeLook, bridgeConsoleK, camera: () => camera });
+Object.assign(window.__demo, { CUT, CUT_STYLES, cutPlay, cutPrepare, cutEncode, cutLayout, cutDraw, openCutStudio });
 Object.assign(window.__demo, { MOUNTS: () => MOUNTS, mountsOf, openWeaponEditor, closeWeaponEditor, WE, WA, buildWeaponAtlas, shipMat, getModel, MODEL_SRC, MODEL_LOAD, STORE: () => STORE, showRecords, showCampaign, showCampBriefing, campLoad, campStage, campEnemy, showTavern, roster: () => ROSTER, sideFac: () => SIDE_FAC, COMMANDERS });
 // 載入伺服器模型資料夾裡的模型（啟動畫面顯示進度），完成後才進選單
 (async () => {

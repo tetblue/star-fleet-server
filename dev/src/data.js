@@ -6,7 +6,7 @@
 //   aa：艦種的防空係數（防空砲、副砲打飛彈與艦載機的命中率 × aa / AA_TYPE_REF）
 // 自動武器（不用按鍵，敵人進入射程就自己用，各艦各自冷卻）：
 //   missile：飛彈（巡洋、驅逐）。dmg 每發傷害、cd 冷卻秒數、range 射程、n 攜彈量（打完要回補給艦隊補充）。
-//            射程比光束遠、不衰減，但會被防空攔截
+//            射程比副砲遠、比主砲短，不衰減，但會被防空攔截
 //   fighters：攻擊型艦載機（航母專屬）。n 機庫容量、wave 每次放出幾架、cd 出擊間隔（續航見 CRAFT）、
 //             build 機庫補一架新機的秒數（被打下的會慢慢補回來，機庫＋在外的不超過 n）
 //   supply：補給艦專屬。stock 每艘（圖示）帶的飛彈存量（被擊沉就跟著沒了）
@@ -20,32 +20,32 @@
 const SHIP_TYPES = [
   { key: 'carrier', name: '航母', cost: 5, hp: 140, sh: 70, speed: 0.85, aa: 0.2,
     guns: { main: null,
-      sec: { dmg: 4, cd: 3, near: 160, far: 400, arc: 120, acc: 0.8 },
+      sec: { dmg: 4, cd: 3, near: 160, far: 400, arc: 90, acc: 0.8 },
       aa: { dmg: 1.6, cd: 0.9, near: 100, far: 200, arc: 180, acc: 0.7 } },
     missile: null,
     fighters: { n: 6, wave: 3, cd: 20, range: 1000, build: 14 }, repair: { n: 4, amount: 24, cd: 18 },
     note: '自身火力弱，靠艦載機（自動出擊、返航補給）。也帶最多維修機。' },
   { key: 'battleship', name: '戰列艦', cost: 4, hp: 220, sh: 130, speed: 0.8, aa: 0.15,
-    guns: { main: { dmg: 27, cd: 5, near: 350, far: 900, arc: 30, acc: 0.85 },
-      sec: { dmg: 8, cd: 2.5, near: 220, far: 520, arc: 120, acc: 0.8 },
+    guns: { main: { dmg: 27, cd: 7.5, near: 350, far: 900, arc: 20, acc: 0.85 },
+      sec: { dmg: 8, cd: 2.5, near: 220, far: 520, arc: 90, acc: 0.8 },
       aa: { dmg: 1.5, cd: 1, near: 90, far: 180, arc: 180, acc: 0.7 } },
     missile: null, fighters: null, repair: { n: 3, amount: 24, cd: 18 },
     note: '主砲射程最遠、單發最重，護盾最厚；最慢。主砲只能打正前方。' },
   { key: 'cruiser', name: '巡洋艦', cost: 2.5, hp: 120, sh: 75, speed: 1.0, aa: 0.25,
-    guns: { main: { dmg: 15, cd: 4.5, near: 280, far: 700, arc: 30, acc: 0.85 },
-      sec: { dmg: 7, cd: 2.5, near: 200, far: 480, arc: 120, acc: 0.8 },
+    guns: { main: { dmg: 15, cd: 7, near: 280, far: 700, arc: 20, acc: 0.85 },
+      sec: { dmg: 7, cd: 2.5, near: 200, far: 480, arc: 90, acc: 0.8 },
       aa: { dmg: 1.2, cd: 1, near: 90, far: 170, arc: 180, acc: 0.7 } },
-    missile: { dmg: 40, cd: 60, range: 800, n: 3 }, fighters: null, repair: { n: 2, amount: 24, cd: 18 },
+    missile: { dmg: 40, cd: 60, range: 600, n: 3 }, fighters: null, repair: { n: 2, amount: 24, cd: 18 },
     note: '均衡；遠距離自動發射飛彈（攜彈 3 發）。' },
   { key: 'destroyer', name: '驅逐艦', cost: 1.5, hp: 70, sh: 35, speed: 1.25, aa: 0.2,
-    guns: { main: { dmg: 10, cd: 4, near: 220, far: 520, arc: 25, acc: 0.85 },
-      sec: { dmg: 5, cd: 2, near: 160, far: 400, arc: 120, acc: 0.8 },
+    guns: { main: { dmg: 10, cd: 6, near: 220, far: 520, arc: 20, acc: 0.85 },
+      sec: { dmg: 5, cd: 2, near: 160, far: 400, arc: 90, acc: 0.8 },
       aa: { dmg: 1, cd: 1, near: 80, far: 160, arc: 180, acc: 0.7 } },
-    missile: { dmg: 40, cd: 45, range: 650, n: 4 }, fighters: null, repair: { n: 1, amount: 24, cd: 18 },
+    missile: { dmg: 40, cd: 45, range: 490, n: 4 }, fighters: null, repair: { n: 1, amount: 24, cd: 18 },
     note: '快、飛彈發射最頻繁（攜彈 4 發）；適合包抄與追擊。' },
   { key: 'escort', name: '護衛艦', cost: 1, hp: 50, sh: 25, speed: 1.3, aa: 0.45,
     guns: { main: null,
-      sec: { dmg: 5, cd: 2, near: 160, far: 420, arc: 135, acc: 0.8 },
+      sec: { dmg: 5, cd: 2, near: 160, far: 420, arc: 100, acc: 0.8 },
       aa: { dmg: 1.8, cd: 0.8, near: 100, far: 200, arc: 180, acc: 0.75 } },
     missile: null, fighters: null, repair: null,
     note: '便宜、小而快（難被打中）；防空最好。太小，沒有維修機與主砲。' },
@@ -64,11 +64,11 @@ const AI_SUPPLY = { minLv: 3, escort: 0.04, supply: 0.06 };
 function aiSupplyComp(total) { return SHIP_TYPES.map((_, t) => (t === 4 ? Math.max(10, Math.round(total * AI_SUPPLY.escort / 10) * 10) : t === SUPPLY_T ? Math.max(10, Math.round(total * AI_SUPPLY.supply / SHIP_TYPES[SUPPLY_T].cost / 10) * 10) : 0)); }
 // 潰走：一方剩下的船（艘數）低於開戰時的這個比例就判定潰走（戰敗）
 const ROUT_AT = 0.1;
-// 戰地維修：船體低於 below、且 quiet 秒沒被打中，就開始一次維修，在 dur 秒內逐步補上（開始後不會被打斷）
+// 戰地維修：船體低於 below 就開始一次維修（交戰中也會修），在 dur 秒內逐步補上（開始後不會被打斷）
 //   補給艦 SUPPLY_RULE.range 內：第 1 次回復最大耐久的 first，之後每次減半；每艘船基本可修 n 次
 //   不在補給艦範圍內：只有還沒修過的船能修這 1 次，回復 alone（算掉一次次數）
 //   天賦「損害管制」每階：次數 +1、單次上限 +step（first 與 alone 都加）
-const FIELD_REPAIR = { below: 0.6, quiet: 5, dur: 10, first: 0.4, alone: 0.3, n: 1, step: 0.05 };
+const FIELD_REPAIR = { below: 0.6, dur: 10, first: 0.4, alone: 0.3, n: 1, step: 0.05 };
 // 前排輪替：分艦隊裡受損的船，跟後方（至少深 gap）同艦種、狀態好的船（護盾 ≥ fresh.sh、船體 ≥ fresh.hp）交換位置
 //   換位 dur 秒，期間兩艘都停火；換完 cd 秒內不再換；每 0.5 秒檢查一次，每次每支分艦隊最多換 max＋存活數 × per 對
 //   什麼時候換（看指揮官特性）：一般＝護盾打光；防禦型＝護盾剩 shEarly 以下就換，護盾回充 +shRegen；

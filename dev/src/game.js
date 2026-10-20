@@ -866,6 +866,7 @@ function startDeploy() {
   applyOp(); overlay(null); setPhase('deploy'); GAME.deploySel = 0; force3D();
   setCmdSide(GAME.playerSide, false);
   rebuildDeploy();
+  cutPrepare(cutSpecStart(GAME.sc));   // 部署時先把開戰切入編成 APNG
   camAnim = null; view.target.x = 0; view.target.z = GAME.playerSide ? -300 : 300; view.height = 1250; view.yaw = mode3D && GAME.playerSide ? Math.PI : 0; view.pitch = ELEV; updateCamera();   // 多人的第二方：3D 轉 180°，自己在下方
 }
 // 部署中選的那一支（序號＝lo.fleets，最後一個是補給艦隊）
@@ -960,6 +961,7 @@ function startBattle() {
   paused = false; setSpeed(SETTINGS.speedIdx);
   force3D(); if (GAME.op === 2) enterBridge();   // 擬真：開戰直接上艦橋
   if (opts.fow && SETTINGS.autoScan === false) issue('autoscan', { on: false });   // 戰爭迷霧：玩家關掉了自動掃描（記在命令裡）
+  cutPlay(cutSpecStart(GAME.sc));
   toast(`${GAME.sc.name}　開戰！${GAME.op ? `（${OP_LEVELS[GAME.op].name}難度）` : ''}（${keyLabel(keyOf('pause'))} 暫停、${keyLabel(keyOf('speed_up'))}／${keyLabel(keyOf('speed_down'))} 調速度、${keyLabel(keyOf('attack'))}＋左鍵點敵軍＝指定攻擊）`);
 }
 const _fmtT = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -996,7 +998,10 @@ function gameFrame(dt) {
   if (GAME.result && !GAME.reportShown) {
     paused = true; updateTimeUI();
     GAME.reportShown = true;
-    setTimeout(() => (GAME.replaying ? endReplay() : showReport()), 1100);
+    // 結算切入（回放、觀戰不播）；玩家在第 1 邊（多人）時換成自己這一方的角度
+    const R = GAME.result, kind = GAME.playerSide === 1 ? { win: 'lose', lose: 'win' }[R.kind] || R.kind : R.kind;
+    const ms = GAME.replaying || (NET.on && NET.spec) || (GAME.sc && GAME.sc.sim) ? 0 : cutPlay(cutSpecResult(kind, R.why));
+    setTimeout(() => (GAME.replaying ? endReplay() : showReport()), Math.max(1100, ms - 300));
   }
   if (_hudAcc < 0.15) return;
   _hudAcc = 0;
@@ -1120,6 +1125,7 @@ function startReplay(rec) {
   drawField(false);
   setPhase('replay');
   paused = false; updateTimeUI();
+  cutPlay(cutSpecReplay(GAME.sc));
   toast('回放：同一個開局，照紀錄的命令重演（不能下令；左鍵拖曳＝移動畫面、右鍵拖曳＝調整視角）');
 }
 function endReplay() {
