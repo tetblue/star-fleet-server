@@ -630,7 +630,8 @@ function showMenu() {
       ${item('m-rec', '03', '戰鬥回放', '每場戰鬥都存在伺服器，隨時可以重看')}
       ${item('m-wed', '04', '武器配置', '調整、新增各艦種的武器位置（2D／3D 共用）')}
       ${item('m-set', '05', '設定', '按鍵綁定、遊戲速度、介面資訊')}
-      ${item('m-test', '06', '遊戲測試', '大軍畫面、效能與戰鬥數值（射程、側背受擊倍率等）的測試場')}
+      ${item('m-save', '06', '存檔管理', '3 個雲端存檔欄位：儲存、讀取進度，也可以匯出成檔案或從檔案匯入')}
+      ${item('m-test', '07', '遊戲測試', '大軍畫面、效能與戰鬥數值（射程、側背受擊倍率等）的測試場')}
     </div>
     <div class="mm-note" id="mm-note"></div>
     <div class="g-row mm-view" style="justify-content:center"><span class="g-dim">畫面</span><button class="g-btn sm ${mode3D ? '' : 'pri'}" id="m-2d">2D 像素</button><button class="g-btn sm ${mode3D ? 'pri' : ''}" id="m-3d">3D 模型</button><span class="g-dim" style="font-size:calc(12px * var(--ui))">（作戰中也可按 M 或畫面上方按鈕切換）</span></div>
@@ -643,6 +644,7 @@ function showMenu() {
   gEl('m-rec').onclick = () => showRecords();
   if (window.API) { gEl('m-out').onclick = () => API.logout(); gEl('m-acct').onclick = () => showAccount(); }
   gEl('m-set').onclick = () => openSettings();
+  gEl('m-save').onclick = () => (window.API ? showSaves() : (gEl('mm-note').textContent = '存檔管理要連上伺服器才能用。'));
   gEl('m-test').onclick = () => { overlay(null); setPhase('sandbox'); newBattle(12345); setCmdSide(0); };   // 原本的測試場（數值、畫面）
 }
 // 單人戰鬥：四種模式＋指揮官、星際酒館
@@ -1196,6 +1198,86 @@ async function playRecord(id) {
   GAME.xp = [];   // 回放不再給經驗、也不再存一筆
   GAME.merit = 0; GAME.recView = true;
   startReplay(rec);
+}
+// ── 存檔管理：伺服器上 3 個欄位，可匯出／匯入成 JSON 檔 ──
+const SAVE_FMT = 'starfleet-save';
+function saveSummary(d) {
+  const j = (k) => { try { return JSON.parse(d[k] || 'null'); } catch (e) { return null; } };
+  const st = j(STORY_STORE), tu = j(TUT_STORE), ca = j(CAMP_STORE), out = [];
+  if (st && st.done) out.push(`雙星記 ${storySeq(st.route || 'e').filter((id) => st.done[id]).length}／${storySeq('e').length}`);
+  if (tu && tu.done) out.push(`教學 ${TUT_LESSONS.filter((L) => tu.done[L.id]).length}／${TUT_LESSONS.length}`);
+  if (ca && ca.seed) out.push(`隨機戰役 第 ${ca.stage || 1} 關`);
+  return out.join('・') || '（沒有進度）';
+}
+function saveDownload(name, summary, data) {
+  const d = new Date(), p2 = (n) => String(n).padStart(2, '0');
+  const t = `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}`;
+  const body = JSON.stringify({ format: SAVE_FMT, v: 1, build: window.__BUILD || '', player: API.name(), name, summary, time: Date.now(), data }, null, 1);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([body], { type: 'application/json' }));
+  a.download = `星海艦隊戰-${API.name()}-${name}-${t}.json`.replace(/[\\/:*?"<>|\s]+/g, '_');
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+// 匯入的檔案：本遊戲匯出的格式，或直接是 { 'fleet.xxx': '...' } 的存檔內容
+function saveParse(text) {
+  let o; try { o = JSON.parse(text); } catch (e) { throw new Error('檔案不是 JSON'); }
+  const data = o && o.format === SAVE_FMT ? o.data : o;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('看不懂這個檔案（不是星海艦隊戰的存檔）');
+  const keys = Object.keys(data);
+  if (!keys.length || keys.some((k) => !/^fleet\.[\w.-]+$/.test(k) || typeof data[k] !== 'string')) throw new Error('看不懂這個檔案（不是星海艦隊戰的存檔）');
+  return { data, name: (o.format === SAVE_FMT && o.name) || '匯入的存檔' };
+}
+async function showSaves() {
+  overlay(`<div class="g-wrap" style="max-width:760px"><div class="g-head"><h2>存檔管理</h2><span class="crumb">存在伺服器上，換電腦登入也讀得到</span><span class="g-sp"></span><button class="g-btn" id="sv-back">返回</button></div>
+    <div class="g-card" style="margin-bottom:12px"><h3>目前進度</h3>
+      <p class="g-dim">${escH(saveSummary(STORE.dump()))}（一直都會自動存到伺服器；欄位是另外留的存檔）</p>
+      <div class="g-row"><input class="g-in" id="sv-name" maxlength="40" placeholder="存檔名稱（可留空）"><button class="g-btn sm" id="sv-exp">匯出目前進度</button></div></div>
+    <div class="g-card"><h3>存檔欄位</h3><div id="sv-slots" class="sv-slots">讀取中…</div>
+      <p class="g-dim" style="margin-top:10px">讀取欄位會取代目前進度（伺服器會先備份，可在「帳號」還原）。按鍵、畫面等設定不會跟著存檔走。</p></div>
+    <input type="file" id="sv-file" accept=".json,application/json" hidden></div>`);
+  gEl('sv-back').onclick = showMenu;
+  const nm = () => gEl('sv-name').value.trim();
+  gEl('sv-exp').onclick = () => { const d = STORE.dump(); saveDownload(nm() || '目前進度', saveSummary(d), d); };
+  let slots;
+  try { await STORE.sync(); slots = await API.get('api/slots'); } catch (e) { const el = gEl('sv-slots'); if (el) el.innerHTML = `<p class="g-warn">讀不到存檔欄位：${escH(e.message)}</p>`; return; }
+  const el = gEl('sv-slots'); if (!el) return;
+  const when = (t) => new Date(t).toLocaleString('zh-TW', { hour12: false });
+  el.innerHTML = slots.map((s, i) => `<div class="sv-slot${s ? '' : ' empty'}"><span class="sv-no">${i + 1}</span>
+    <span class="sv-info">${s ? `<b>${escH(s.name)}</b><small>${escH(s.summary || '')}</small><small class="g-dim">${when(s.time)}</small>` : '<span class="g-dim">（空）</span>'}</span>
+    <span class="sv-act"><button class="g-btn sm" data-a="save" data-i="${i}">儲存到這裡</button>${s ? `<button class="g-btn sm pri" data-a="load" data-i="${i}">讀取</button><button class="g-btn sm" data-a="exp" data-i="${i}">匯出</button>` : ''}<button class="g-btn sm" data-a="imp" data-i="${i}">匯入檔案</button>${s ? `<button class="g-btn sm" data-a="del" data-i="${i}" title="刪除">✕</button>` : ''}</span></div>`).join('');
+  const sure = (b, txt) => { if (b.dataset.sure === '1') return true; b.dataset.sure = '1'; b.textContent = txt; return false; };
+  let impSlot = -1;
+  gEl('sv-file').onchange = async (ev) => {
+    const f = ev.target.files[0]; ev.target.value = ''; if (!f || impSlot < 0) return;
+    try {
+      const r = saveParse(await f.text());
+      await API.put('api/slots/' + impSlot, { name: nm() || r.name, summary: saveSummary(r.data), data: r.data });
+      toast(`已匯入到欄位 ${impSlot + 1}，按「讀取」就能接著玩`, 'hint'); showSaves();
+    } catch (e) { toast('匯入失敗：' + e.message); }
+  };
+  el.querySelectorAll('[data-a]').forEach((b) => (b.onclick = async () => {
+    const i = +b.dataset.i, s = slots[i], a = b.dataset.a;
+    try {
+      if (a === 'save') {
+        if (s && !sure(b, '確定覆蓋？')) return;
+        await STORE.sync(); const d = STORE.dump();
+        await API.put('api/slots/' + i, { name: nm() || `存檔 ${i + 1}`, summary: saveSummary(d), data: d });
+        toast(`已存到欄位 ${i + 1}`, 'hint'); showSaves();
+      } else if (a === 'load') {
+        if (!sure(b, '確定讀取？（會重新載入）')) return;
+        await STORE.sync(); await API.post(`api/slots/${i}/load`); STORE.freeze(); location.reload();
+      } else if (a === 'exp') {
+        const full = await API.get('api/slots/' + i); saveDownload(full.name, full.summary, full.data);
+      } else if (a === 'imp') {
+        if (s && !sure(b, '覆蓋這格？再按一次選檔')) return;
+        impSlot = i; gEl('sv-file').click();
+      } else if (a === 'del') {
+        if (!sure(b, '確定刪除？')) return;
+        await API.del('api/slots/' + i); showSaves();
+      }
+    } catch (e) { toast('失敗：' + e.message); }
+  }));
 }
 function showAccount() {
   overlay(`<div class="g-wrap" style="max-width:640px"><div class="g-head"><h2>帳號</h2><span class="crumb">${escH(API.name())}</span><span class="g-sp"></span><button class="g-btn" id="ac-back">返回</button></div>

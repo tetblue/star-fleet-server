@@ -44,6 +44,7 @@
     removeItem: (k) => { if (own(k)) { delete DATA[k]; schedule(); } },
     sync: async () => { S.dirty = S.dirty || false; clearTimeout(S.timer); await flush(); },
     state: () => S.state, freeze: () => { frozen = true; },
+    dump: () => ({ ...DATA }),   // 整份存檔的複本（存檔欄位、匯出用）
   };
 
   // ── 啟動畫面 ──

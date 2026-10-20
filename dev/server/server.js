@@ -95,6 +95,11 @@ function pruneBackups(dir) {   // 保留最近 N 份；更舊的每天留一份�
   });
 }
 
+// ───── 存檔欄位 ─────
+const SLOTS = 3;
+const PREF_KEYS = ['fleet.settings', 'fleet.render', 'fleet.svaxis'];   // 按鍵、畫面等介面偏好：不跟著存檔欄位走
+function slotFile(id, i) { return path.join(pdir(id), 'slots', `slot${i}.json`); }
+
 // ───── 戰績紀錄 ─────
 function recDir(id) { return path.join(pdir(id), 'records'); }
 function listRecords(id) {
@@ -213,6 +218,38 @@ async function api(req, res, url) {
     writeAtomic(saveFile(me.id), JSON.stringify({ rev: cur.rev + 1, updated: Date.now(), data: old.data || {} }));
     log(`還原存檔：${me.name} ← ${name}`);
     return json(res, 200, { ok: true });
+  }
+  // 存檔欄位（每位玩家 3 個）：把整份進度另存一份，之後可以讀回來；也用來放匯入的存檔
+  if (p === '/api/slots' && m === 'GET') {
+    return json(res, 200, Array.from({ length: SLOTS }, (_, i) => { const s = readJSON(slotFile(me.id, i), null); return s ? { slot: i, name: s.name, summary: s.summary, time: s.time, keys: Object.keys(s.data || {}).length } : null; }));
+  }
+  const sm = p.match(/^\/api\/slots\/(\d+)(\/load)?$/);
+  if (sm) {
+    const i = +sm[1]; if (i >= SLOTS) return json(res, 404, { error: '沒有這個存檔欄位' });
+    const f = slotFile(me.id, i);
+    if (sm[2]) {   // 讀取欄位：目前的進度先備份，再換成欄位裡的（介面偏好保留目前的）
+      if (m !== 'POST') return json(res, 405, { error: '方法不對' });
+      const s = readJSON(f, null); if (!s) return json(res, 404, { error: '這個欄位是空的' });
+      backupSave(me.id, 'before-load');
+      const cur = readJSON(saveFile(me.id), { rev: 0, data: {} }), data = { ...s.data };
+      for (const k of PREF_KEYS) { if (cur.data && k in cur.data) data[k] = cur.data[k]; else delete data[k]; }
+      writeAtomic(saveFile(me.id), JSON.stringify({ rev: cur.rev + 1, updated: Date.now(), data }));
+      log(`讀取存檔欄位：${me.name} ← ${i + 1}（${s.name}）`);
+      return json(res, 200, { ok: true });
+    }
+    if (m === 'GET') { const s = readJSON(f, null); return s ? json(res, 200, s) : json(res, 404, { error: '這個欄位是空的' }); }
+    if (m === 'PUT') {
+      const b = await readBody(req), bad = () => json(res, 400, { error: '存檔格式錯誤' });
+      if (!b.data || typeof b.data !== 'object' || Array.isArray(b.data)) return bad();
+      for (const k in b.data) if (typeof b.data[k] !== 'string' || !/^fleet\.[\w.-]+$/.test(k)) return bad();
+      const data = { ...b.data }; for (const k of PREF_KEYS) delete data[k];
+      const name = String(b.name || '').trim().slice(0, 40) || `存檔 ${i + 1}`, summary = String(b.summary || '').slice(0, 200);
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      writeAtomic(f, JSON.stringify({ name, summary, time: Date.now(), data }));
+      log(`存檔欄位：${me.name} → ${i + 1}（${name}）`);
+      return json(res, 200, { ok: true });
+    }
+    if (m === 'DELETE') { try { fs.unlinkSync(f); } catch (e) { /* 本來就空 */ } return json(res, 200, { ok: true }); }
   }
   // 多人戰鬥：串流收訊息、POST 送動作
   if (p === '/api/mp/stream' && m === 'GET') return MULTI.stream(req, res, me);
