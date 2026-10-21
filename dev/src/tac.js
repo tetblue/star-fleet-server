@@ -234,7 +234,7 @@ function drawTac() {
     const sel = selected.has(q0);
     c.save(); c.translate(tx(q.x), tz(q.z)); c.rotate(-q.h + Math.PI);   // 世界的 h：前方＝(sin h, cos h)；畫布 y 向下
     if (q !== q0) { c.globalAlpha = 0.45; c.setLineDash([4, 3]); }
-    c.strokeStyle = sel ? '#ffffff' : ['rgba(242,179,90,.55)', 'rgba(124,196,255,.55)', 'rgba(226,115,90,.55)'][sqFac(q)]; c.lineWidth = sel ? 1.6 : 1;
+    c.strokeStyle = sel ? '#ffffff' : facRGBA(sqFac(q), 0.55); c.lineWidth = sel ? 1.6 : 1;
     c.strokeRect(-q0.W * k / 2, -q0.D * k / 2, q0.W * k, q0.D * k);
     c.beginPath(); c.moveTo(-5, -q0.D * k / 2 - 2); c.lineTo(0, -q0.D * k / 2 - 8); c.lineTo(5, -q0.D * k / 2 - 2); c.stroke();
     c.restore(); c.globalAlpha = 1; c.setLineDash([]);
@@ -618,7 +618,7 @@ function drawSideView() {
   squadrons.forEach((q, qi) => {
     const e = SV.ext[qi]; if (q.bg || q.alive <= 0 || e[0] > e[1]) return;
     const sel = selected.has(q);
-    c.strokeStyle = sel ? '#ffffff' : ['rgba(242,179,90,.45)', 'rgba(124,196,255,.45)', 'rgba(226,115,90,.45)'][sqFac(q)]; c.lineWidth = sel ? 1.6 : 1;
+    c.strokeStyle = sel ? '#ffffff' : facRGBA(sqFac(q), 0.45); c.lineWidth = sel ? 1.6 : 1;
     c.strokeRect(e[0] - 3, e[2] - 3, e[1] - e[0] + 6, e[3] - e[2] + 6);
   });
   c.lineWidth = 1;

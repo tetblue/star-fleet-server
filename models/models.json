@@ -1,5 +1,5 @@
 {
-  "說明": "鍵名固定：e0～e4／a0～a4／m0～m4＝帝國／聯盟／傭兵的 航母、戰列、巡洋、驅逐、護衛；ew0～ew5／aw0～aw5／mw0～mw5＝武器（三聯裝、雙聯裝、舷砲或垂直飛彈、防空、魚雷、衝角或貫穿主砲）；ef／af／mf＝艦載機。file＝相對於這個資料夾的路徑；forward＝模型的船頭（砲口）朝向，+z、-z、+x、-x 其中之一；kind＝hull／weapon／fighter。換模型：把新的 GLB 放進來、改 file，重開伺服器就會重算遠景細節。",
+  "說明": "鍵名固定：e0～e4／a0～a4／m0～m4＝帝國／聯盟／傭兵的 航母、戰列、巡洋、驅逐、護衛；ew0～ew5／aw0～aw5／mw0～mw5＝武器（三聯裝、雙聯裝、舷砲或垂直飛彈、防空、魚雷、衝角或貫穿主砲）；ef／af／mf＝艦載機；es0～es2 等＝各風格太空站（小、中、大），c／r／i／b＝機械改造人類／機械智慧族／蟲族感染人類／蟲族（只在武器配置用到，用到才下載）。file＝相對於這個資料夾的路徑；forward＝模型的船頭（砲口）朝向，+z、-z、+x、-x 其中之一；kind＝hull／weapon／fighter。換模型：把新的 GLB 放進來、改 file，重開伺服器就會重算遠景細節。",
   "version": 1,
   "models": {
     "e0": {
@@ -167,7 +167,7 @@
     "m3": {
       "file": "傭兵/船體/04_驅逐艦.glb",
       "kind": "hull",
-      "forward": "-z",
+      "forward": "+z",
       "name": "傭兵 驅逐艦"
     },
     "m4": {
@@ -217,6 +217,420 @@
       "kind": "fighter",
       "forward": "+z",
       "name": "傭兵 艦載機"
+    },
+    "es0": {
+      "file": "帝國/太空站/01_小型.glb",
+      "kind": "station",
+      "forward": "+z",
+      "name": "帝國 太空站（小型）"
+    },
+    "es1": {
+      "file": "帝國/太空站/02_中型.glb",
+      "kind": "station",
+      "forward": "+z",
+      "name": "帝國 太空站（中型）"
+    },
+    "es2": {
+      "file": "帝國/太空站/03_大型.glb",
+      "kind": "station",
+      "forward": "+z",
+      "name": "帝國 太空站（大型）"
+    },
+    "as0": {
+      "file": "聯盟/太空站/01_小型.glb",
+      "kind": "station",
+      "forward": "+z",
+      "name": "聯盟 太空站（小型）"
+    },
+    "as1": {
+      "file": "聯盟/太空站/02_中型.glb",
+      "kind": "station",
+      "forward": "+z",
+      "name": "聯盟 太空站（中型）"
+    },
+    "as2": {
+      "file": "聯盟/太空站/03_大型.glb",
+      "kind": "station",
+      "forward": "+z",
+      "name": "聯盟 太空站（大型）"
+    },
+    "ms0": {
+      "file": "傭兵/太空站/01_小型.glb",
+      "kind": "station",
+      "forward": "+z",
+      "name": "傭兵 太空站（小型）"
+    },
+    "ms1": {
+      "file": "傭兵/太空站/02_中型.glb",
+      "kind": "station",
+      "forward": "+z",
+      "name": "傭兵 太空站（中型）"
+    },
+    "ms2": {
+      "file": "傭兵/太空站/03_大型.glb",
+      "kind": "station",
+      "forward": "+z",
+      "name": "傭兵 太空站（大型）"
+    },
+    "cw0": {
+      "file": "機械改造/武器/01_液壓三聯裝主砲塔.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "機械改造 液壓三聯裝主砲塔"
+    },
+    "cw1": {
+      "file": "機械改造/武器/02_機械頭顱雙聯裝砲塔.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "機械改造 機械頭顱雙聯裝砲塔"
+    },
+    "cw2": {
+      "file": "機械改造/武器/03_機械臂飛彈發射架.glb",
+      "kind": "weapon",
+      "forward": "-x",
+      "name": "機械改造 機械臂飛彈發射架"
+    },
+    "cw3": {
+      "file": "機械改造/武器/04_液壓驅動長管主砲.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "機械改造 液壓驅動長管主砲"
+    },
+    "cw4": {
+      "file": "機械改造/武器/05_魚雷發射管組.glb",
+      "kind": "weapon",
+      "forward": "-x",
+      "name": "機械改造 魚雷發射管組"
+    },
+    "cw5": {
+      "file": "機械改造/武器/06_防空雙管砲塔.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "機械改造 防空雙管砲塔"
+    },
+    "cs0": {
+      "file": "機械改造/太空站/01_小型.glb",
+      "kind": "station",
+      "forward": "+z",
+      "name": "機械改造 太空站（小型）"
+    },
+    "cs1": {
+      "file": "機械改造/太空站/02_中型.glb",
+      "kind": "station",
+      "forward": "+z",
+      "name": "機械改造 太空站（中型）"
+    },
+    "cs2": {
+      "file": "機械改造/太空站/03_大型.glb",
+      "kind": "station",
+      "forward": "+z",
+      "name": "機械改造 太空站（大型）"
+    },
+    "rw0": {
+      "file": "機械智慧/武器/01_懸浮稜形激光砲塔.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "機械智慧 懸浮稜形激光砲塔"
+    },
+    "rw1": {
+      "file": "機械智慧/武器/02_裂頭式能量主砲.glb",
+      "kind": "weapon",
+      "forward": "-x",
+      "name": "機械智慧 裂頭式能量主砲"
+    },
+    "rw2": {
+      "file": "機械智慧/武器/03_能量矛主砲.glb",
+      "kind": "weapon",
+      "forward": "-x",
+      "name": "機械智慧 能量矛主砲"
+    },
+    "rw3": {
+      "file": "機械智慧/武器/04_翼掛魚雷發射器.glb",
+      "kind": "weapon",
+      "forward": "-x",
+      "name": "機械智慧 翼掛魚雷發射器"
+    },
+    "rw4": {
+      "file": "機械智慧/武器/05_防空激光節點.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "機械智慧 防空激光節點"
+    },
+    "rw5": {
+      "file": "機械智慧/武器/06_三角攻擊無人機.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "機械智慧 三角攻擊無人機"
+    },
+    "rs0": {
+      "file": "機械智慧/太空站/01_小型.glb",
+      "kind": "station",
+      "forward": "+z",
+      "name": "機械智慧 太空站（小型）"
+    },
+    "rs1": {
+      "file": "機械智慧/太空站/02_中型.glb",
+      "kind": "station",
+      "forward": "+z",
+      "name": "機械智慧 太空站（中型）"
+    },
+    "rs2": {
+      "file": "機械智慧/太空站/03_大型.glb",
+      "kind": "station",
+      "forward": "+z",
+      "name": "機械智慧 太空站（大型）"
+    },
+    "iw0": {
+      "file": "蟲族感染/武器/01_感染主砲塔.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "蟲族感染 感染主砲塔"
+    },
+    "iw1": {
+      "file": "蟲族感染/武器/02_甲殼包覆雙聯裝砲塔.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "蟲族感染 甲殼包覆雙聯裝砲塔"
+    },
+    "iw2": {
+      "file": "蟲族感染/武器/03_骨顎寄生主砲.glb",
+      "kind": "weapon",
+      "forward": "-x",
+      "name": "蟲族感染 骨顎寄生主砲"
+    },
+    "iw3": {
+      "file": "蟲族感染/武器/04_感染飛彈發射區.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "蟲族感染 感染飛彈發射區"
+    },
+    "iw4": {
+      "file": "蟲族感染/武器/05_膿囊魚雷管.glb",
+      "kind": "weapon",
+      "forward": "-x",
+      "name": "蟲族感染 膿囊魚雷管"
+    },
+    "iw5": {
+      "file": "蟲族感染/武器/06_骨翼飛彈掛架.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "蟲族感染 骨翼飛彈掛架"
+    },
+    "is0": {
+      "file": "蟲族感染/太空站/01_小型.glb",
+      "kind": "station",
+      "forward": "+z",
+      "name": "蟲族感染 太空站（小型）"
+    },
+    "is1": {
+      "file": "蟲族感染/太空站/02_中型.glb",
+      "kind": "station",
+      "forward": "+z",
+      "name": "蟲族感染 太空站（中型）"
+    },
+    "is2": {
+      "file": "蟲族感染/太空站/03_大型.glb",
+      "kind": "station",
+      "forward": "+z",
+      "name": "蟲族感染 太空站（大型）"
+    },
+    "bw0": {
+      "file": "蟲族/武器/01_生物砲囊.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "蟲族 生物砲囊"
+    },
+    "bw1": {
+      "file": "蟲族/武器/02_毒刺尾砲.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "蟲族 毒刺尾砲"
+    },
+    "bw2": {
+      "file": "蟲族/武器/03_生物刺槍口器.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "蟲族 生物刺槍口器"
+    },
+    "bw3": {
+      "file": "蟲族/武器/04_酸液噴射孔群.glb",
+      "kind": "weapon",
+      "forward": "-x",
+      "name": "蟲族 酸液噴射孔群"
+    },
+    "bw4": {
+      "file": "蟲族/武器/05_巨顎衝角.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "蟲族 巨顎衝角"
+    },
+    "bw5": {
+      "file": "蟲族/武器/06_生物戰機.glb",
+      "kind": "weapon",
+      "forward": "+z",
+      "name": "蟲族 生物戰機"
+    },
+    "bs0": {
+      "file": "蟲族/太空站/01_小型.glb",
+      "kind": "station",
+      "forward": "+z",
+      "name": "蟲族 太空站（小型）"
+    },
+    "bs1": {
+      "file": "蟲族/太空站/02_中型.glb",
+      "kind": "station",
+      "forward": "+z",
+      "name": "蟲族 太空站（中型）"
+    },
+    "bs2": {
+      "file": "蟲族/太空站/03_大型.glb",
+      "kind": "station",
+      "forward": "+z",
+      "name": "蟲族 太空站（大型）"
+    },
+    "c0": {
+      "file": "機械改造/船體/01_航空母艦.glb",
+      "kind": "hull",
+      "forward": "+x",
+      "name": "機械改造人類 航空母艦"
+    },
+    "c1": {
+      "file": "機械改造/船體/02_戰列艦.glb",
+      "kind": "hull",
+      "forward": "-x",
+      "name": "機械改造人類 戰列艦"
+    },
+    "c2": {
+      "file": "機械改造/船體/03_巡洋艦.glb",
+      "kind": "hull",
+      "forward": "-x",
+      "name": "機械改造人類 巡洋艦"
+    },
+    "c3": {
+      "file": "機械改造/船體/04_驅逐艦.glb",
+      "kind": "hull",
+      "forward": "+x",
+      "name": "機械改造人類 驅逐艦"
+    },
+    "c4": {
+      "file": "機械改造/船體/05_護衛艦.glb",
+      "kind": "hull",
+      "forward": "-x",
+      "name": "機械改造人類 護衛艦"
+    },
+    "cf": {
+      "file": "機械改造/艦載機/01_能量炮.glb",
+      "kind": "fighter",
+      "forward": "+x",
+      "name": "機械改造人類 艦載機"
+    },
+    "r0": {
+      "file": "機械智慧/船體/01_航空母艦.glb",
+      "kind": "hull",
+      "forward": "+z",
+      "name": "機械智慧族 航空母艦"
+    },
+    "r1": {
+      "file": "機械智慧/船體/02_戰列艦.glb",
+      "kind": "hull",
+      "forward": "+x",
+      "name": "機械智慧族 戰列艦"
+    },
+    "r2": {
+      "file": "機械智慧/船體/03_巡洋艦.glb",
+      "kind": "hull",
+      "forward": "+z",
+      "name": "機械智慧族 巡洋艦"
+    },
+    "r3": {
+      "file": "機械智慧/船體/04_驅逐艦.glb",
+      "kind": "hull",
+      "forward": "+x",
+      "name": "機械智慧族 驅逐艦"
+    },
+    "r4": {
+      "file": "機械智慧/船體/05_護衛艦.glb",
+      "kind": "hull",
+      "forward": "+z",
+      "name": "機械智慧族 護衛艦"
+    },
+    "rf": {
+      "file": "機械智慧/艦載機/01_能量炮.glb",
+      "kind": "fighter",
+      "forward": "+z",
+      "name": "機械智慧族 艦載機"
+    },
+    "i0": {
+      "file": "蟲族感染/船體/01_航空母艦.glb",
+      "kind": "hull",
+      "forward": "+x",
+      "name": "蟲族感染人類 航空母艦"
+    },
+    "i1": {
+      "file": "蟲族感染/船體/02_戰列艦.glb",
+      "kind": "hull",
+      "forward": "+x",
+      "name": "蟲族感染人類 戰列艦"
+    },
+    "i2": {
+      "file": "蟲族感染/船體/03_巡洋艦.glb",
+      "kind": "hull",
+      "forward": "-x",
+      "name": "蟲族感染人類 巡洋艦"
+    },
+    "i3": {
+      "file": "蟲族感染/船體/04_驅逐艦.glb",
+      "kind": "hull",
+      "forward": "+z",
+      "name": "蟲族感染人類 驅逐艦"
+    },
+    "i4": {
+      "file": "蟲族感染/船體/05_護衛艦.glb",
+      "kind": "hull",
+      "forward": "+x",
+      "name": "蟲族感染人類 護衛艦"
+    },
+    "if": {
+      "file": "蟲族感染/艦載機/01_能量炮.glb",
+      "kind": "fighter",
+      "forward": "+x",
+      "name": "蟲族感染人類 艦載機"
+    },
+    "b0": {
+      "file": "蟲族/船體/01_航空母艦.glb",
+      "kind": "hull",
+      "forward": "+z",
+      "name": "蟲族 航空母艦"
+    },
+    "b1": {
+      "file": "蟲族/船體/02_戰列艦.glb",
+      "kind": "hull",
+      "forward": "-x",
+      "name": "蟲族 戰列艦"
+    },
+    "b2": {
+      "file": "蟲族/船體/03_巡洋艦.glb",
+      "kind": "hull",
+      "forward": "+z",
+      "name": "蟲族 巡洋艦"
+    },
+    "b3": {
+      "file": "蟲族/船體/04_驅逐艦.glb",
+      "kind": "hull",
+      "forward": "+z",
+      "name": "蟲族 驅逐艦"
+    },
+    "b4": {
+      "file": "蟲族/船體/05_護衛艦.glb",
+      "kind": "hull",
+      "forward": "+z",
+      "name": "蟲族 護衛艦"
+    },
+    "bf": {
+      "file": "蟲族/艦載機/01_能量炮.glb",
+      "kind": "fighter",
+      "forward": "+z",
+      "name": "蟲族 艦載機"
     }
   }
 }

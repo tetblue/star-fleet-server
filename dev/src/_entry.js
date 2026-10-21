@@ -7,25 +7,29 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 // ───────────────────────── 常數 ─────────────────────────
-const SHIP_ATLAS = window.__ASSETS.ships;   // 4096×2048, 每格 256×192：上半 16 cols (帝國、聯盟 × 8 方向) × 5 rows (艦種)；下半（y≥1024）傭兵 8 cols × 5 rows
+const SHIP_ATLAS = window.__ASSETS.ships;   // 4096×4096, 每格 256×192：每 1024 px 一段、每段左右各放一個陣營（8 方向 × 5 艦種）；陣營 f 在 x＝(f%2)×2048、y＝⌊f/2⌋×1024（見 atlasXY）
 const FX_ATLAS = window.__ASSETS.fx;        // 2048×2304, 16 frames × 18 rows (0-1 爆炸, 2-9 帝國護盾, 10-17 聯盟護盾)
-const FTR_ATLAS = window.__ASSETS.fighters; // 2048×256, 每格 128×128：上排 16 cols (帝國、聯盟 × 8 方向)；下排傭兵 8 cols
+const FTR_ATLAS = window.__ASSETS.fighters; // 2048×512, 每格 128×128：每排左右各放一個陣營（8 方向）；陣營 f 在第 ⌊f/2⌋ 排、x＝(f%2)×1024
 let VW = innerWidth, VH = innerHeight;   // 戰場畫面大小（戰術面板會讓出空間）
 function tacDockSize() { if (typeof TAC === 'undefined' || !TAC.open || BR.on) return { w: 0, h: 0 }; return { w: 0, h: Math.round(Math.min(760, Math.max(300, innerHeight * (innerWidth >= 760 ? 0.58 : 0.6)))) }; }   // 戰術面板固定在下方
 const ELEV = 30 * Math.PI / 180;
 const BR = { on: false };
-// 陣營（外觀）與模擬的「邊」分開：邊 0＝玩家（畫面下方）、邊 1＝對手；SIDE_FAC[邊]＝那一邊用哪個陣營（0 帝國、1 聯盟、2 傭兵）
+// 陣營（外觀）與模擬的「邊」分開：邊 0＝玩家（畫面下方）、邊 1＝對手；SIDE_FAC[邊]＝那一邊用哪個陣營（0 帝國、1 聯盟、2 傭兵、3 機械改造人類、4 機械智慧族、5 蟲族感染人類、6 蟲族；玩家只能是 0、1）
 // 單一艦隊也可以有自己的外觀（fleet.fac，例如友軍傭兵、傭兵支援）；畫船、光束、飛彈、艦載機都用 sqFac／shipFac
 let SIDE_FAC = [0, 1];
 // 作戰介面跟著玩家的陣營換主題（顏色、紋飾）
-function applyPlayerTheme() { const sd = typeof cmdSide === 'number' ? cmdSide : 0, f = SIDE_FAC[sd] || 0; document.body.classList.toggle('pf-0', f !== 1); document.body.classList.toggle('pf-1', f === 1); document.body.classList.toggle('ef-2', SIDE_FAC[1 - sd] === 2); }   // 傭兵不是玩家陣營：對手是傭兵時敵方顏色（--ec）改成傭兵色
-const FAC_KEY = ['e', 'a', 'm'];   // 模型鍵的字首
+function applyPlayerTheme() {   // 傭兵等不是玩家陣營：對手是這些陣營時，敵方顏色（--ec）改成那個陣營的顏色
+  const sd = typeof cmdSide === 'number' ? cmdSide : 0, f = SIDE_FAC[sd] || 0, ef = SIDE_FAC[1 - sd];
+  document.body.classList.toggle('pf-0', f !== 1); document.body.classList.toggle('pf-1', f === 1);
+  if (ef >= 2 && FACTION[ef]) document.body.style.setProperty('--ec', FACTION[ef].ui); else document.body.style.removeProperty('--ec');
+}
+const FAC_KEY = ['e', 'a', 'm', 'c', 'r', 'i', 'b'];   // 模型鍵的字首（依陣營編號）
 const sqFac = (sq) => (sq.fleet && sq.fleet.fac != null ? sq.fleet.fac : SIDE_FAC[sq.side]);
 const shipFac = (i) => sqFac(squadrons[ships.sq[i]]);
 const fxFac = (side) => (SIDE_FAC[side] === 1 ? 1 : 0);   // 爆炸、護盾特效只有帝國、聯盟兩套：傭兵用帝國的
 function applySideNames() {
   document.querySelectorAll('[data-fn]').forEach((el) => { const f = SIDE_FAC[+el.dataset.fn]; el.textContent = el.dataset.short ? FACTION[f].name[0] : FACTION[f].name; });
-  document.querySelectorAll('[data-fs]').forEach((el) => { el.classList.toggle('e', SIDE_FAC[+el.dataset.fs] === 0); el.classList.toggle('a', SIDE_FAC[+el.dataset.fs] === 1); el.classList.toggle('m', SIDE_FAC[+el.dataset.fs] === 2); });
+  document.querySelectorAll('[data-fs]').forEach((el) => { const f = SIDE_FAC[+el.dataset.fs]; FAC_KEY.forEach((k, i) => el.classList.toggle(k, f === i)); });
 }   // 指揮官視角狀態（內容在 bridge.js）
 const CAM_DIR = new THREE.Vector3(0, Math.sin(ELEV), Math.cos(ELEV)); // 目標點 → 相機
 const TYPE_W = [6.0, 5.6, 4.6, 3.8, 3.2, 5.0];     // 航母 戰列 巡洋 驅逐 護衛 補給（貼圖寬，世界單位）
@@ -36,7 +40,13 @@ const FACTION = [
   { name: '帝國軍', beam: new THREE.Color(1.0, 0.62, 0.22), glow: new THREE.Color(1.0, 0.45, 0.18), ui: '#f2b35a' },
   { name: '聯盟軍', beam: new THREE.Color(0.45, 0.80, 1.0), glow: new THREE.Color(0.35, 0.65, 1.0), ui: '#7cc4ff' },
   { name: '灰鴉傭兵團', beam: new THREE.Color(1.0, 0.36, 0.28), glow: new THREE.Color(1.0, 0.3, 0.22), ui: '#e2735a' },
+  { name: '機械改造人類', beam: new THREE.Color(1.0, 0.30, 0.42), glow: new THREE.Color(1.0, 0.22, 0.35), ui: '#ff6a7e' },
+  { name: '機械智慧族', beam: new THREE.Color(0.30, 1.0, 0.86), glow: new THREE.Color(0.2, 0.95, 0.8), ui: '#4ff0d8' },
+  { name: '蟲族感染人類', beam: new THREE.Color(0.80, 0.42, 1.0), glow: new THREE.Color(0.72, 0.3, 1.0), ui: '#c47cff' },
+  { name: '蟲族', beam: new THREE.Color(0.62, 1.0, 0.30), glow: new THREE.Color(0.55, 0.95, 0.2), ui: '#9be35a' },
 ];
+const FAC_N = FACTION.length;
+const facRGBA = (f, al) => { const h = (FACTION[f] || FACTION[0]).ui; return 'rgba(' + [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)).join(',') + ',' + al + ')'; };   // 陣營顏色＋透明度（畫布用）
 
 let simAlt = 1;
 const opts = {
@@ -191,12 +201,12 @@ const shipMat = new THREE.ShaderMaterial({
       clip.xy += position.xy * sizePx * 2. / uRes * clip.w;
       gl_Position = clip;
       float dir = dirIndex(hShip);
-      bool merc = aInfo.z > 1.5;   // 傭兵在貼圖的下半（y≥1024）
-      float col = merc ? dir : aInfo.z * 8. + dir;
+      float fac = floor(aInfo.z + 0.5);   // 陣營 f：x＝(f%2)×8 格、y＝⌊f/2⌋×1024 px（見 atlasXY）
+      float col = mod(fac, 2.) * 8. + dir;
       float row = floor(aInfo.y);
       vAlt = fract(aInfo.y);
       vec2 uv = position.xy + 0.5;
-      vUv = vec2((col + uv.x) / 16., 1. - ((merc ? 1024. : 0.) + (row + 1. - uv.y) * 192.) / 2048.);
+      vUv = vec2((col + uv.x) / 16., 1. - (floor(fac / 2.) * 1024. + (row + 1. - uv.y) * 192.) / 4096.);
       // 景深霧：越遠（畫面越上方、高度越低）越暗越藍
       float depth = dot(p, -uCamDir);
       vFog = uFog * smoothstep(-260., 620., depth) * 0.75;
@@ -225,7 +235,7 @@ const shipMat = new THREE.ShaderMaterial({
 });
 
 const glowMat = new THREE.ShaderMaterial({
-  uniforms: { ...U, u3D: { value: 0 }, uColA: { value: FACTION[0].glow }, uColB: { value: FACTION[1].glow }, uColC: { value: FACTION[2].glow } },
+  uniforms: { ...U, u3D: { value: 0 }, uFac: { value: FACTION.map((f) => f.glow) } },
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   vertexShader: COMMON_GLSL + /* glsl */`
     uniform float uGlowOn; uniform float u3D;
@@ -254,13 +264,13 @@ const glowMat = new THREE.ShaderMaterial({
       vFac = aInfo.z;
     }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uColA; uniform vec3 uColB; uniform vec3 uColC;
+    uniform vec3 uFac[7]; vec3 facCol(float f){ return uFac[int(clamp(floor(f + 0.5), 0., 6.))]; }
     varying vec2 vUv; varying float vI; varying float vFac;
     void main(){
       float d = length(vUv);
       float g = exp(-d * d * 7.) ;
       float core = exp(-d * d * 40.);
-      vec3 c = ((vFac < 0.5 ? uColA : vFac < 1.5 ? uColB : uColC));
+      vec3 c = facCol(vFac);
       gl_FragColor = vec4((c * g * 0.75 + vec3(1.) * core * 0.6) * vI, 1.);
     }`,
 });
@@ -279,7 +289,7 @@ const beamGeo = new THREE.InstancedBufferGeometry();
   beamGeo.instanceCount = BEAM_MAX;
 }
 const beamMat = new THREE.ShaderMaterial({
-  uniforms: { ...U, uColA: { value: FACTION[0].beam }, uColB: { value: FACTION[1].beam }, uColC: { value: FACTION[2].beam } },
+  uniforms: { ...U, uFac: { value: FACTION.map((f) => f.beam) } },
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   vertexShader: /* glsl */`
     uniform float uTime; uniform vec2 uRes;
@@ -309,14 +319,14 @@ const beamMat = new THREE.ShaderMaterial({
       vFac = floor(aT.z); vFade *= fract(aT.z);
     }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uColA; uniform vec3 uColB; uniform vec3 uColC;
+    uniform vec3 uFac[7]; vec3 facCol(float f){ return uFac[int(clamp(floor(f + 0.5), 0., 6.))]; }
     varying vec2 vUv; varying float vFade; varying float vFac;
     void main(){
       float y = abs(vUv.y);
       float glow = exp(-y * y * 9.);
       float core = exp(-y * y * 90.);
       float along = pow(vUv.x, 1.6);
-      vec3 c = (vFac < 0.5 ? uColA : vFac < 1.5 ? uColB : uColC);
+      vec3 c = facCol(vFac);
       vec3 col = (c * glow * 0.55 + vec3(1.0) * core * 1.05) * along * vFade;
       gl_FragColor = vec4(col, 1.);
     }`,
@@ -2446,9 +2456,9 @@ const MIS_GLSL = /* glsl */`
   attribute vec3 aM0; attribute vec3 aM1; attribute vec3 aM2; attribute vec4 aMT;
   vec3 bez(float u){ float a = 1. - u; return a * a * aM0 + 2. * a * u * aM1 + u * u * aM2; }
 `;
-const MIS_COL = [new THREE.Color(1.0, 0.42, 0.14), new THREE.Color(0.55, 0.85, 1.0), new THREE.Color(1.0, 0.3, 0.3)];
+const MIS_COL = [new THREE.Color(1.0, 0.42, 0.14), new THREE.Color(0.55, 0.85, 1.0), new THREE.Color(1.0, 0.3, 0.3), new THREE.Color(1.0, 0.32, 0.45), new THREE.Color(0.35, 1.0, 0.88), new THREE.Color(0.78, 0.45, 1.0), new THREE.Color(0.6, 1.0, 0.3)];
 const misTrailMat = new THREE.ShaderMaterial({
-  uniforms: { uTime: U.uTime, uRes: U.uRes, uColA: { value: MIS_COL[0] }, uColB: { value: MIS_COL[1] }, uColC: { value: MIS_COL[2] } },
+  uniforms: { uTime: U.uTime, uRes: U.uRes, uFac: { value: MIS_COL } },
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   vertexShader: MIS_GLSL + /* glsl */`
     varying float vS; varying float vY; varying float vI; varying float vFac;
@@ -2473,17 +2483,17 @@ const misTrailMat = new THREE.ShaderMaterial({
       vS = s; vY = position.y * 2.; vI = 1. - k; vFac = floor(aMT.z);
     }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uColA; uniform vec3 uColB; uniform vec3 uColC;
+    uniform vec3 uFac[7]; vec3 facCol(float f){ return uFac[int(clamp(floor(f + 0.5), 0., 6.))]; }
     varying float vS; varying float vY; varying float vI; varying float vFac;
     void main(){
       float y = abs(vY);
       float glow = exp(-y * y * 6.), core = exp(-y * y * 50.);
-      vec3 c = (vFac < 0.5 ? uColA : vFac < 1.5 ? uColB : uColC);
+      vec3 c = facCol(vFac);
       gl_FragColor = vec4((c * glow * 0.55 + vec3(1.) * core * 0.45 * vS) * pow(vS, 1.8) * vI, 1.);
     }`,
 });
 const misHeadMat = new THREE.ShaderMaterial({
-  uniforms: { uTime: U.uTime, uRes: U.uRes, uColA: { value: MIS_COL[0] }, uColB: { value: MIS_COL[1] }, uColC: { value: MIS_COL[2] } },
+  uniforms: { uTime: U.uTime, uRes: U.uRes, uFac: { value: MIS_COL } },
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   vertexShader: MIS_GLSL + /* glsl */`
     varying vec2 vUv; varying float vFac; varying float vI;
@@ -2500,11 +2510,11 @@ const misHeadMat = new THREE.ShaderMaterial({
       vI = 0.8 + 0.2 * sin(uTime * 40. + aMT.x * 97.);
     }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uColA; uniform vec3 uColB; uniform vec3 uColC;
+    uniform vec3 uFac[7]; vec3 facCol(float f){ return uFac[int(clamp(floor(f + 0.5), 0., 6.))]; }
     varying vec2 vUv; varying float vFac; varying float vI;
     void main(){
       float d = length(vUv);
-      vec3 c = (vFac < 0.5 ? uColA : vFac < 1.5 ? uColB : uColC);
+      vec3 c = facCol(vFac);
       gl_FragColor = vec4((c * exp(-d * d * 6.) * 0.7 + vec3(1.) * exp(-d * d * 30.) * 0.9) * vI, 1.);
     }`,
 });
@@ -2690,7 +2700,7 @@ const ftrSpriteMat = new THREE.ShaderMaterial({
       float h = atan(aFV.x, aFV.z);
       float dir = mod(floor(-h / (PI / 4.) + 0.5) + 16., 8.);
       vec2 uv = position.xy + 0.5;
-      vUv = aFI.x > 1.5 ? vec2((dir + uv.x) / 16., uv.y * 0.5) : vec2((aFI.x * 8. + dir + uv.x) / 16., 0.5 + uv.y * 0.5);   // 傭兵在下排
+      float fac = floor(aFI.x + 0.5); vUv = vec2((mod(fac, 2.) * 8. + dir + uv.x) / 16., 1. - (floor(fac / 2.) + 1. - uv.y) * 0.25);   // 陣營 f：第 ⌊f/2⌋ 排（共 4 排）、左右各一個陣營
       vDie = die;
       vFog = uFog * smoothstep(-260., 620., dot(aFP, -uCamDir)) * 0.6;
     }`,
@@ -2704,9 +2714,9 @@ const ftrSpriteMat = new THREE.ShaderMaterial({
       gl_FragColor = vec4(col, 1.);
     }`,
 });
-const FTR_COL = [new THREE.Color(1.0, 0.55, 0.25), new THREE.Color(0.5, 0.8, 1.0), new THREE.Color(1.0, 0.4, 0.3)];
+const FTR_COL = [new THREE.Color(1.0, 0.55, 0.25), new THREE.Color(0.5, 0.8, 1.0), new THREE.Color(1.0, 0.4, 0.3), new THREE.Color(1.0, 0.4, 0.5), new THREE.Color(0.4, 1.0, 0.9), new THREE.Color(0.8, 0.5, 1.0), new THREE.Color(0.65, 1.0, 0.35)];
 const ftrTrailMat = new THREE.ShaderMaterial({
-  uniforms: { uTime: U.uTime, uRes: U.uRes, uCamDir: U.uCamDir, uFog: U.uFog, uColA: { value: FTR_COL[0] }, uColB: { value: FTR_COL[1] }, uColC: { value: FTR_COL[2] } },
+  uniforms: { uTime: U.uTime, uRes: U.uRes, uCamDir: U.uCamDir, uFog: U.uFog, uFac: { value: FTR_COL } },
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   vertexShader: FTR_GLSL + /* glsl */`
     varying vec2 vUv; varying float vFac;
@@ -2724,13 +2734,13 @@ const ftrTrailMat = new THREE.ShaderMaterial({
       vec2 s = mix(st, sh, t) + vec2(-dn.y, dn.x) * position.y * w + dn * position.x * w * 0.6;
       c.xy = s / (uRes * 0.5) * c.w;
       gl_Position = c;
-      vUv = vec2(t, position.y * 2.); vFac = kind > 0.5 ? 3. : aFI.x;   // 3＝維修機（綠色尾焰）；0～2＝陣營
+      vUv = vec2(t, position.y * 2.); vFac = kind > 0.5 ? 9. : aFI.x;   // 9＝維修機（綠色尾焰）；0～6＝陣營
     }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uColA; uniform vec3 uColB; uniform vec3 uColC; varying vec2 vUv; varying float vFac;
+    uniform vec3 uFac[7]; vec3 facCol(float f){ return uFac[int(clamp(floor(f + 0.5), 0., 6.))]; } varying vec2 vUv; varying float vFac;
     void main(){
       float y = abs(vUv.y);
-      vec3 c = vFac > 2.5 ? vec3(0.45, 1.0, 0.6) : (vFac < 0.5 ? uColA : vFac < 1.5 ? uColB : uColC);
+      vec3 c = vFac > 8.5 ? vec3(0.45, 1.0, 0.6) : facCol(vFac);
       gl_FragColor = vec4((c * exp(-y * y * 6.) * 0.6 + vec3(1.) * exp(-y * y * 40.) * 0.5 * vUv.x) * pow(vUv.x, 1.3), 1.);
     }`,
 });
@@ -3614,20 +3624,39 @@ function b64ToBuf(b64) { const s = atob(b64); const u = new Uint8Array(s.length)
 const MODEL_CACHE = {};
 // 模型由伺服器的模型資料夾提供：近距離（第 0 級）直接用 GLB 原檔（含原始貼圖），遠景各級用伺服器算好的簡化網格
 const MODEL_SRC = {};   // key → { kind, geo0, tex, lods: [BufferGeometry…] }
-const MODEL_LOAD = { done: false, err: [] };
+const MODEL_LOAD = { done: false, err: [], man: null, pending: {}, loader: null };
+// 太空站、遊戲裡還沒有的風格（只有武器配置會用到）：開場不下載，用到才用 ensureModels 載入
+const modelLazy = (key, m) => m.kind === 'station' || !FAC_KEY.includes(key[0]);
 async function loadAllModels(onProgress = () => {}) {
-  const man = await (await fetch('api/models', { cache: 'no-cache' })).json();
-  const keys = Object.keys(man.models), total = keys.reduce((a, k) => a + man.models[k].bytes + man.models[k].lodBytes, 0);
+  const man = MODEL_LOAD.man = await (await fetch('api/models', { cache: 'no-cache' })).json();
+  const keys = Object.keys(man.models).filter((k) => !modelLazy(k, man.models[k])), total = keys.reduce((a, k) => a + man.models[k].bytes + man.models[k].lodBytes, 0);
   let got = 0, n = 0;
-  const loader = new GLTFLoader();
+  const loader = MODEL_LOAD.loader = new GLTFLoader();
+  const one = async (key) => {
+    await loadOneModel(key, man.models[key], loader, (b) => { got += b; onProgress(got / total, n, keys.length); });
+    n++; onProgress(got / total, n, keys.length);
+  };
+  const queue = keys.slice(), workers = Array.from({ length: 4 }, async () => { while (queue.length) await one(queue.shift()); });
+  await Promise.all(workers);
+  MODEL_LOAD.done = true;
+  return MODEL_LOAD;
+}
+function ensureModels(keys) {   // 晚載入的模型；已經有、或伺服器沒有的鍵直接略過
+  const man = MODEL_LOAD.man; if (!man) return Promise.resolve();
+  if (!MODEL_LOAD.loader) MODEL_LOAD.loader = new GLTFLoader();
+  return Promise.all(keys.map((k) => {
+    if (MODEL_SRC[k] || !man.models[k]) return null;
+    return MODEL_LOAD.pending[k] || (MODEL_LOAD.pending[k] = loadOneModel(k, man.models[k], MODEL_LOAD.loader, () => {}).finally(() => { delete MODEL_LOAD.pending[k]; }));
+  }));
+}
+async function loadOneModel(key, m, loader, onBytes) {
   const fetchBytes = async (url) => {   // 邊下載邊回報進度
     const r = await fetch(url, { cache: 'no-cache' }); if (!r.ok) throw new Error(`${url}：HTTP ${r.status}`);
     const rd = r.body.getReader(), parts = []; let len = 0;
-    for (;;) { const { done, value } = await rd.read(); if (done) break; parts.push(value); len += value.length; got += value.length; onProgress(got / total, n, keys.length); }
+    for (;;) { const { done, value } = await rd.read(); if (done) break; parts.push(value); len += value.length; onBytes(value.length); }
     const out = new Uint8Array(len); let o = 0; for (const p of parts) { out.set(p, o); o += p.length; } return out.buffer;
   };
-  const one = async (key) => {
-    const m = man.models[key];
+  {
     try {
       const [glb, lodBin] = await Promise.all([fetchBytes(m.glb), fetchBytes(m.lod)]);
       const gltf = await loader.parseAsync(glb, '');
@@ -3653,12 +3682,7 @@ async function loadAllModels(onProgress = () => {}) {
       for (const g of lods) R3.geomBytes += g.attributes.position.count * 32 + (g.index ? g.index.count * 4 : 0);
       MODEL_SRC[key] = { kind: m.kind, tex, lods, min: m.min, max: m.max, name: m.name };
     } catch (e) { MODEL_LOAD.err.push(`${key}：${e.message}`); console.warn('模型載入失敗', key, e); }
-    n++; onProgress(got / total, n, keys.length);
-  };
-  const queue = keys.slice(), workers = Array.from({ length: 4 }, async () => { while (queue.length) await one(queue.shift()); });
-  await Promise.all(workers);
-  MODEL_LOAD.done = true;
-  return MODEL_LOAD;
+  }
 }
 const NO_MODEL_TEX = (() => { const t = new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1); t.needsUpdate = true; return t; })();
 function getModel(key) {
@@ -5156,8 +5180,8 @@ const COMMANDERS = [
   { id: 'aaron', name: '亞倫・楊森', title: '少將', trait: 'shield', skills: ['wall', 'jam'], faction: 1, base: true, bio: '守勢型。擅長以干擾打亂敵軍節奏。' },
   { id: 'grace', name: '葛瑞絲・卡特萊', title: '准將', trait: 'dmg', skills: ['focus', 'rapid'], faction: 1, base: true, bio: '攻勢型。相信火力集中就是一切。' },
 ];
-const FACTION_NAME = ['帝國軍', '聯盟軍', '灰鴉傭兵團'];   // 2＝傭兵：不能當玩家的陣營，傭兵指揮官可以替兩個陣營出擊
-const FACTION_CLS = ['emp', 'all', 'mer'];
+const FACTION_NAME = ['帝國軍', '聯盟軍', '灰鴉傭兵團', '機械改造人類', '機械智慧族', '蟲族感染人類', '蟲族'];   // 2＝傭兵：不能當玩家的陣營，傭兵指揮官可以替兩個陣營出擊；3～6 目前只當敵軍外觀
+const FACTION_CLS = ['emp', 'all', 'mer', 'cyb', 'mai', 'inf', 'bug'];
 // 指揮官能不能替這個陣營出擊（傭兵兩邊都行）
 const canLead = (c, faction) => (c.faction || 0) === faction || (c.faction === 2 && faction < 2);
 const TRAIT_NAME = { dmg: '攻擊', shield: '防禦', speed: '機動' };
@@ -5282,7 +5306,7 @@ const ENEMY_ZONE = { x0: -560, x1: 560, z0: -460 - ZONE_SHIFT, z1: -200 - ZONE_S
 const MAP_BOUNDS = { x0: -1000, x1: 1000, z0: -1000, z1: 1000 };
 
 // 預設武器掛點（船體模型座標：船長＝1，船頭＋z、上＋y）；w＝武器編號，r＝轉向（度），t＝側傾（度），s＝尺寸
-const MOUNTS_DEFAULT = {"e0":[{"w":3,"p":[-0.2333,0.0083,0.4],"r":0,"s":0.06},{"w":3,"p":[-0.0444,0.0088,0.4],"r":0,"s":0.06},{"w":3,"p":[-0.2667,0.0061,-0.3778],"r":0,"s":0.06},{"w":3,"p":[-0.0111,-0.0015,-0.3778],"r":0,"s":0.06},{"w":1,"p":[0.1156,-0.0227,0.0267],"r":90,"s":0.1},{"w":1,"p":[-0.3,0.0035,0.1556],"r":0,"s":0.09},{"w":2,"p":[0.0267,0.008,-0.1556],"r":90,"s":0.08},{"w":2,"p":[0.0267,0,0.2],"r":90,"s":0.08}],"e1":[{"w":0,"p":[0,-0.0331,0.112],"r":0,"s":0.21},{"w":0,"p":[0,-0.0015,-0.0498],"r":0,"s":0.23},{"w":0,"p":[0,-0.0015,-0.4231],"r":180,"s":0.22},{"w":1,"p":[0,-0.0352,0.3484],"r":0,"s":0.11},{"w":1,"p":[-0.0996,-0.033,-0.112],"r":-90,"s":0.12},{"w":1,"p":[0.0996,-0.0336,-0.112],"r":90,"s":0.12},{"w":3,"p":[-0.1095,-0.0419,0.0311],"r":0,"s":0.07},{"w":3,"p":[0.1095,-0.0426,0.0311],"r":0,"s":0.07},{"w":3,"p":[-0.0871,-0.0189,-0.2987],"r":0,"s":0.06},{"w":3,"p":[0.0871,-0.0188,-0.2987],"r":0,"s":0.06},{"w":2,"p":[-0.1195,-0.0498,0.1493],"r":-90,"s":0.09},{"w":2,"p":[0.1195,-0.0505,0.1493],"r":90,"s":0.09}],"e2":[{"w":1,"p":[0,0.0385,0.112],"r":0,"s":0.2},{"w":1,"p":[0,0.0508,-0.2987],"r":180,"s":0.2},{"w":5,"p":[0,0.0251,0.3484],"r":0,"s":0.14},{"w":4,"p":[-0.0722,0.0174,0.0373],"r":0,"s":0.1},{"w":4,"p":[0.0722,0.0171,0.0373],"r":0,"s":0.1},{"w":3,"p":[-0.0871,0.0242,-0.0871],"r":0,"s":0.06},{"w":3,"p":[0.0871,0.0241,-0.0871],"r":0,"s":0.06},{"w":3,"p":[-0.0996,-0.0197,-0.3111],"r":0,"s":0.06},{"w":3,"p":[0.0996,-0.0191,-0.3111],"r":0,"s":0.06}],"e3":[{"w":1,"p":[0,0.0065,0.0373],"r":0,"s":0.17},{"w":5,"p":[0,-0.0145,0.2738],"r":0,"s":0.16},{"w":3,"p":[-0.0498,-0.0163,0.1182],"r":0,"s":0.06},{"w":3,"p":[0.0498,-0.0162,0.1182],"r":0,"s":0.06},{"w":4,"p":[-0.1145,-0.09,-0.0747],"r":0,"s":0.1},{"w":4,"p":[0.1145,-0.0899,-0.0747],"r":0,"s":0.1}],"e4":[{"w":3,"p":[0,0.1175,-0.1493],"r":0,"s":0.1},{"w":3,"p":[-0.0062,0.0507,0],"r":0,"s":0.09},{"w":3,"p":[-0.168,-0.0631,-0.1307],"r":0,"s":0.06},{"w":3,"p":[0.168,-0.0627,-0.1307],"r":0,"s":0.06},{"w":1,"p":[0,0.0479,0.1867],"r":0,"s":0.1}],"a0":[{"w":3,"p":[-0.1083,-0.003,0.2091],"r":0,"s":0.07},{"w":3,"p":[0.1095,-0.0025,0.2091],"r":0,"s":0.07},{"w":3,"p":[0.1207,0.0258,-0.1493],"r":0,"s":0.06},{"w":1,"p":[-0.0933,0.12,-0.1929],"r":0,"s":0.09},{"w":2,"p":[0.112,0.021,-0.336],"r":0,"s":0.06},{"w":2,"p":[0.112,0.0202,-0.0249],"r":0,"s":0.06}],"a1":[{"w":0,"p":[0,-0.002,0.1717],"r":0,"s":0.2},{"w":0,"p":[0,0.007,0.0436],"r":0,"s":0.21},{"w":0,"p":[0,0.017,-0.0871],"r":0,"s":0.22},{"w":5,"p":[0,0.0014,0.3422],"r":0,"s":0.2},{"w":3,"p":[-0.0933,-0.0346,-0.3858],"r":0,"s":0.06},{"w":3,"p":[0.0933,-0.0338,-0.3858],"r":0,"s":0.06},{"w":2,"p":[-0.1058,-0.0074,-0.0809],"r":0,"s":0.06},{"w":2,"p":[-0.1058,-0.0073,-0.1556],"r":0,"s":0.06},{"w":2,"p":[0.102,-0.0074,-0.0809],"r":0,"s":0.06},{"w":2,"p":[0.102,-0.0074,-0.1556],"r":0,"s":0.06},{"w":3,"p":[-0.0684,-0.0034,0.0249],"r":0,"s":0.05},{"w":3,"p":[0.0684,-0.0041,0.0249],"r":0,"s":0.05}],"a2":[{"w":1,"p":[-0.0062,0.0079,-0.3298],"r":180,"s":0.19},{"w":1,"p":[0,0.0019,0.1618],"r":0,"s":0.15},{"w":2,"p":[0,0.027,0.0498],"r":0,"s":0.06},{"w":2,"p":[0,0.0277,-0.0187],"r":0,"s":0.06},{"w":3,"p":[-0.056,0.0045,0.0249],"r":0,"s":0.06},{"w":3,"p":[-0.056,0.0047,-0.056],"r":0,"s":0.06},{"w":3,"p":[0.0498,0.0046,0.0249],"r":0,"s":0.06},{"w":3,"p":[0.0498,0.0049,-0.056],"r":0,"s":0.06},{"w":4,"p":[-0.112,-0.0142,-0.0373],"r":0,"s":0.08},{"w":4,"p":[0.1058,-0.0105,-0.0373],"r":0,"s":0.08}],"a3":[{"w":5,"p":[0,0.0416,0.1493],"r":0,"s":0.28},{"w":1,"p":[0.0025,0.0671,-0.0622],"r":0,"s":0.12},{"w":3,"p":[-0.0772,0.0565,-0.1867],"r":0,"s":0.07},{"w":3,"p":[0.0747,0.0566,-0.1867],"r":0,"s":0.07},{"w":2,"p":[-0.0871,0.0375,0],"r":0,"s":0.06},{"w":2,"p":[0.0871,0.038,0],"r":0,"s":0.06},{"w":4,"p":[-0.1556,0.023,-0.1742],"r":0,"s":0.09},{"w":4,"p":[0.1556,0.023,-0.1742],"r":0,"s":0.09}],"a4":[{"w":3,"p":[0,0.134,-0.1333],"r":0,"s":0.1},{"w":3,"p":[0.3111,0.0228,-0.1333],"r":0,"s":0.07},{"w":3,"p":[-0.3111,0.0327,-0.1333],"r":0,"s":0.07},{"w":1,"p":[0,0.1264,0.3333],"r":0,"s":0.1},{"w":2,"p":[0,0.122,0.0444],"r":0,"s":0.06}]};
+const MOUNTS_DEFAULT = {"e0":[{"w":3,"p":[-0.2228,0.0067,0.4183],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0537,0.0061,0.4124],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.2754,0.0084,-0.399],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0413,0.0077,-0.3914],"r":0,"t":0,"s":0.06},{"w":1,"p":[0.2806,-0.0199,0.026],"r":90,"t":0,"s":0.1},{"w":1,"p":[-0.2735,0.0042,0.1191],"r":0,"t":0,"s":0.09},{"w":2,"p":[0.0267,0.008,-0.1556],"r":90,"t":0,"s":0.08},{"w":2,"p":[-0.0268,0.0058,0.2526],"r":90,"t":0,"s":0.08}],"e1":[{"w":0,"p":[0.0013,-0.0331,0.1198],"r":0,"t":0,"s":0.21},{"w":0,"p":[0,-0.0015,-0.0498],"r":0,"t":0,"s":0.23},{"w":0,"p":[0.0028,-0.0015,-0.425],"r":180,"t":0,"s":0.22},{"w":1,"p":[0,-0.0352,0.3484],"r":0,"t":0,"s":0.11},{"w":1,"p":[-0.1082,-0.0339,-0.1025],"r":-90,"t":0,"s":0.12},{"w":1,"p":[0.1082,-0.0339,-0.1025],"r":90,"t":0,"s":0.12},{"w":3,"p":[-0.0957,-0.0347,-0.0325],"r":0,"t":0,"s":0.07},{"w":3,"p":[0.0957,-0.0347,-0.0325],"r":0,"t":0,"s":0.07},{"w":3,"p":[-0.0871,-0.0189,-0.2987],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0871,-0.0188,-0.2987],"r":0,"t":0,"s":0.06},{"w":2,"p":[-0.136,-0.0725,-0.0272],"r":0,"t":90,"s":0.09},{"w":2,"p":[0.136,-0.0725,-0.0272],"r":0,"t":-90,"s":0.09}],"e2":[{"w":1,"p":[0.0021,0.0383,0.1152],"r":0,"t":0,"s":0.2},{"w":1,"p":[0,0.0508,-0.2987],"r":180,"t":0,"s":0.2},{"w":5,"p":[0,0.0251,0.3484],"r":0,"t":0,"s":0.14},{"w":4,"p":[-0.0732,-0.023,0.1998],"r":0,"t":90,"s":0.1},{"w":4,"p":[0.0732,-0.023,0.1998],"r":0,"t":-90,"s":0.1},{"w":3,"p":[-0.0763,0.024,-0.112],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0763,0.024,-0.112],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0951,-0.0202,-0.2966],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0951,-0.0202,-0.2966],"r":0,"t":0,"s":0.06}],"e3":[{"w":1,"p":[0,0.0065,0.0373],"r":0,"t":0,"s":0.17},{"w":5,"p":[0,-0.0145,0.2738],"r":0,"t":0,"s":0.16},{"w":3,"p":[-0.0498,-0.0163,0.1182],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0498,-0.0162,0.1182],"r":0,"t":0,"s":0.06},{"w":4,"p":[-0.0918,-0.0663,0.0552],"r":0,"t":90,"s":0.1},{"w":4,"p":[0.0918,-0.0663,0.0552],"r":0,"t":-90,"s":0.1}],"e4":[{"w":3,"p":[0,0.1175,-0.1493],"r":0,"t":0,"s":0.1},{"w":3,"p":[-0.0062,0.0507,0],"r":0,"t":0,"s":0.09},{"w":3,"p":[-0.1536,-0.0602,-0.1293],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.1536,-0.0602,-0.1293],"r":0,"t":0,"s":0.06},{"w":1,"p":[0,0.0479,0.1867],"r":0,"t":0,"s":0.1},{"w":3,"p":[0.0013,0.0424,-0.2941],"r":0,"t":0,"s":0.0775}],"a0":[{"w":3,"p":[-0.1099,-0.0025,0.2318],"r":0,"t":0,"s":0.04},{"w":3,"p":[0.1099,-0.0025,0.2318],"r":0,"t":0,"s":0.04},{"w":3,"p":[0.1207,0.0258,-0.1493],"r":0,"t":0,"s":0.06},{"w":1,"p":[-0.1019,0.0246,-0.0185],"r":0,"t":0,"s":0.09},{"w":2,"p":[0.1167,0.0212,-0.3088],"r":0,"t":0,"s":0.06},{"w":2,"p":[0.1453,0.0202,0.0053],"r":0,"t":0,"s":0.06}],"a1":[{"w":0,"p":[0,-0.002,0.1717],"r":0,"t":0,"s":0.125},{"w":0,"p":[0,0.007,0.0436],"r":0,"t":0,"s":0.16},{"w":0,"p":[0,0.017,-0.0871],"r":0,"t":0,"s":0.24},{"w":5,"p":[-0.0025,-0.0096,0.3843],"r":0,"t":0,"s":0.14},{"w":3,"p":[-0.0933,-0.0346,-0.3858],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0933,-0.0338,-0.3858],"r":0,"t":0,"s":0.06},{"w":2,"p":[-0.1058,-0.0074,-0.0809],"r":0,"t":0,"s":0.06},{"w":2,"p":[-0.1058,-0.0073,-0.1556],"r":0,"t":0,"s":0.06},{"w":2,"p":[0.102,-0.0074,-0.0809],"r":0,"t":0,"s":0.06},{"w":2,"p":[0.102,-0.0074,-0.1556],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0684,-0.0034,0.0249],"r":0,"t":0,"s":0.05},{"w":3,"p":[0.0684,-0.0041,0.0249],"r":0,"t":0,"s":0.05}],"a2":[{"w":1,"p":[-0.0015,0.0052,-0.3467],"r":180,"t":0,"s":0.125},{"w":1,"p":[0,0.0019,0.1618],"r":0,"t":0,"s":0.15},{"w":2,"p":[0,0.027,0.0498],"r":0,"t":0,"s":0.06},{"w":2,"p":[0,0.0277,-0.0187],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.056,0.0045,0.0249],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.056,0.0047,-0.056],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0498,0.0046,0.0249],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0498,0.0049,-0.056],"r":0,"t":0,"s":0.06},{"w":4,"p":[-0.1156,-0.0434,-0.0384],"r":0,"t":90,"s":0.08},{"w":4,"p":[0.1156,-0.0434,-0.0384],"r":0,"t":-90,"s":0.08}],"a3":[{"w":5,"p":[-0.0037,0.0668,-0.3181],"r":0,"t":0,"s":0.28},{"w":1,"p":[0.0003,0.0501,0.0171],"r":0,"t":0,"s":0.12},{"w":3,"p":[-0.0732,0.0566,-0.1825],"r":0,"t":0,"s":0.055},{"w":3,"p":[0.0732,0.0566,-0.1825],"r":0,"t":0,"s":0.055},{"w":2,"p":[-0.0871,0.0375,0],"r":0,"t":0,"s":0.06},{"w":2,"p":[0.0871,0.038,0],"r":0,"t":0,"s":0.06},{"w":4,"p":[-0.1556,0.023,-0.1742],"r":0,"t":0,"s":0.09},{"w":4,"p":[0.1556,0.023,-0.1742],"r":0,"t":0,"s":0.09}],"a4":[{"w":3,"p":[0,0.134,-0.1333],"r":0,"t":0,"s":0.1},{"w":3,"p":[0.3149,0.0227,-0.1327],"r":0,"t":0,"s":0.07},{"w":3,"p":[-0.3149,0.0227,-0.1327],"r":0,"t":0,"s":0.07},{"w":1,"p":[0,0.1264,0.3333],"r":0,"t":0,"s":0.1},{"w":2,"p":[0.0035,0.1214,-0.2862],"r":0,"t":0,"s":0.08}],"m0":[{"w":3,"p":[-0.1049,0.021,-0.4217],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.1067,0.0216,-0.4165],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.1024,0.0352,-0.3182],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0965,0.021,0.1577],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.082,0.0316,0.1698],"r":0,"t":0,"s":0.06},{"w":5,"p":[-0.1206,0.0382,-0.0535],"r":-275,"t":0,"s":0.18}],"m1":[{"w":0,"p":[0.0034,0,0.1781],"r":0,"t":0,"s":0.2},{"w":2,"p":[0.0427,0.0316,-0.346],"r":0,"t":0,"s":0.08},{"w":2,"p":[-0.0427,0.0316,-0.346],"r":0,"t":0,"s":0.08},{"w":5,"p":[-0.0062,0.031,-0.255],"r":0,"t":0,"s":0.18},{"w":3,"p":[-0.1066,0.0148,-0.0612],"r":0,"t":0,"s":0.06},{"w":0,"p":[0.0057,0.0349,0.0185],"r":0,"t":0,"s":0.2}],"m2":[{"w":0,"p":[-0.017,0.0309,0.2219],"r":0,"t":0,"s":0.2},{"w":1,"p":[-0.0052,0.0204,0.3871],"r":0,"t":0,"s":0.12},{"w":4,"p":[-0.0968,-0.0613,0.1992],"r":0,"t":90,"s":0.09},{"w":4,"p":[0.0983,-0.0623,0.2003],"r":0,"t":-90,"s":0.09},{"w":2,"p":[0.0254,0.0974,-0.0315],"r":0,"t":0,"s":0.08},{"w":2,"p":[-0.0254,0.0974,-0.0315],"r":0,"t":0,"s":0.08},{"w":0,"p":[0.0064,0.0295,-0.3086],"r":185,"t":0,"s":0.2},{"w":3,"p":[0.1253,-0.03,-0.129],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.1253,-0.03,-0.129],"r":0,"t":0,"s":0.06}],"m3":[{"w":3,"p":[0.0299,0.1161,-0.0697],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0331,0.1158,-0.0636],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0363,0.1143,0.0196],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0423,0.1172,0.0157],"r":0,"t":0,"s":0.06},{"w":5,"p":[-0.0024,0.0674,0.4236],"r":0,"t":0,"s":0.18},{"w":2,"p":[0.1616,0.0886,-0.0341],"r":0,"t":0,"s":0.08},{"w":2,"p":[-0.1663,0.0836,-0.0368],"r":0,"t":0,"s":0.08},{"w":1,"p":[0.0024,0.1113,0.1617],"r":0,"t":0,"s":0.12}],"m4":[{"w":1,"p":[0.0006,0.1228,0.3613],"r":0,"t":0,"s":0.12},{"w":5,"p":[-0.0029,0.1375,0.0774],"r":0,"t":0,"s":0.18},{"w":2,"p":[-0.0044,0.1343,-0.1106],"r":0,"t":0,"s":0.08},{"w":2,"p":[0.0051,0.1147,-0.2566],"r":0,"t":0,"s":0.08},{"w":3,"p":[-0.3829,0.0012,-0.1212],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.3878,0.0009,-0.1302],"r":0,"t":0,"s":0.06},{"w":4,"p":[0.3658,-0.0688,-0.1092],"r":0,"t":-180,"s":0.09},{"w":4,"p":[0.267,-0.0686,-0.0987],"r":0,"t":165,"s":0.09},{"w":4,"p":[-0.2676,-0.0683,-0.1066],"r":0,"t":-180,"s":0.09},{"w":4,"p":[-0.3664,-0.068,-0.1096],"r":0,"t":-165,"s":0.09}],"c0":[{"w":5,"p":[0.099,0.0355,-0.066],"r":0,"t":0,"s":0.09},{"w":5,"p":[0.099,0.0358,-0.23],"r":0,"t":0,"s":0.09},{"w":5,"p":[0.099,0.0343,-0.3],"r":0,"t":0,"s":0.09}],"c1":[{"w":0,"p":[0,0.0334,0.12],"r":0,"t":0,"s":0.14},{"w":0,"p":[0,0.0455,0],"r":0,"t":0,"s":0.14}],"c2":[{"w":1,"p":[0,0.0349,0.198],"r":0,"t":0,"s":0.13},{"w":1,"p":[0,0.0243,-0.32],"r":0,"t":0,"s":0.12},{"w":2,"p":[0.18,0.0031,-0.06],"r":0,"t":0,"s":0.13},{"w":2,"p":[-0.18,0.0023,-0.06],"r":0,"t":0,"s":0.13}],"c3":[{"w":3,"p":[0,0.0515,0.289],"r":0,"t":0,"s":0.26},{"w":4,"p":[0.08,0.0634,-0.07],"r":0,"t":0,"s":0.15},{"w":4,"p":[-0.08,0.0614,-0.07],"r":0,"t":0,"s":0.15}],"c4":[{"w":1,"p":[0,0.1659,-0.1],"r":0,"t":0,"s":0.11},{"w":2,"p":[0.2,0.0502,-0.08],"r":0,"t":0,"s":0.1},{"w":2,"p":[-0.2,0.0467,-0.08],"r":0,"t":0,"s":0.1}],"r0":[{"w":4,"p":[-0.135,0.0069,-0.008],"r":0,"t":0,"s":0.06},{"w":4,"p":[0.135,0.0069,-0.008],"r":0,"t":0,"s":0.06},{"w":4,"p":[-0.135,0.007,-0.231],"r":0,"t":0,"s":0.06},{"w":4,"p":[0.135,0.0071,-0.231],"r":0,"t":0,"s":0.06}],"r1":[{"w":0,"p":[0,0.0819,-0.008],"r":0,"t":0,"s":0.14},{"w":0,"p":[0,0.0822,-0.165],"r":0,"t":0,"s":0.14},{"w":0,"p":[0,0.0825,-0.293],"r":0,"t":0,"s":0.14}],"r2":[{"w":0,"p":[0,0.0879,0.099],"r":0,"t":0,"s":0.12},{"w":0,"p":[0,0.1013,-0.289],"r":0,"t":0,"s":0.12}],"r3":[{"w":2,"p":[0,0.0073,0.3],"r":0,"t":0,"s":0.4},{"w":3,"p":[-0.2,0.0043,0],"r":0,"t":0,"s":0.16},{"w":3,"p":[0.2,0.0042,0],"r":0,"t":0,"s":0.16}],"r4":[{"w":0,"p":[0,0.1539,-0.107],"r":0,"t":0,"s":0.11},{"w":3,"p":[-0.21,0.0973,-0.08],"r":0,"t":0,"s":0.17},{"w":3,"p":[0.21,0.0994,-0.08],"r":0,"t":0,"s":0.17}],"i0":[{"w":1,"p":[-0.083,-0.0038,0.046],"r":0,"t":0,"s":0.07},{"w":1,"p":[-0.073,0.0038,-0.223],"r":0,"t":0,"s":0.07},{"w":1,"p":[-0.094,0.0045,-0.28],"r":0,"t":0,"s":0.07},{"w":1,"p":[0.063,0.0034,-0.223],"r":0,"t":0,"s":0.07},{"w":1,"p":[0.088,0.0045,-0.28],"r":0,"t":0,"s":0.07}],"i1":[{"w":0,"p":[0,0.024,0.157],"r":0,"t":0,"s":0.13},{"w":0,"p":[0,0.0486,0.025],"r":0,"t":0,"s":0.13},{"w":1,"p":[-0.078,0.0253,-0.066],"r":0,"t":0,"s":0.07},{"w":1,"p":[-0.078,0.0241,-0.149],"r":0,"t":0,"s":0.07},{"w":1,"p":[0.079,0.0247,-0.066],"r":0,"t":0,"s":0.07},{"w":1,"p":[0.079,0.0234,-0.149],"r":0,"t":0,"s":0.07},{"w":0,"p":[0,0.0404,-0.256],"r":180,"t":0,"s":0.13}],"i2":[{"w":1,"p":[0,0.0718,0.284],"r":0,"t":0,"s":0.09}],"i3":[{"w":2,"p":[0,0.0216,0.355],"r":0,"t":0,"s":0.22},{"w":1,"p":[0,0.038,0.1],"r":0,"t":0,"s":0.08},{"w":4,"p":[0.12,0.0329,-0.05],"r":0,"t":0,"s":0.13},{"w":4,"p":[-0.12,0.0308,-0.05],"r":0,"t":0,"s":0.13}],"i4":[{"w":1,"p":[0,0.1045,-0.098],"r":0,"t":0,"s":0.09},{"w":5,"p":[-0.15,0.0181,0.11],"r":0,"t":0,"s":0.15},{"w":5,"p":[0.15,0.0163,0.11],"r":0,"t":0,"s":0.15}],"b0":[],"b1":[{"w":0,"p":[0,0.1582,-0.074],"r":0,"t":0,"s":0.18},{"w":0,"p":[0,0.1577,-0.245],"r":0,"t":0,"s":0.18}],"b2":[{"w":0,"p":[-0.078,0.0704,-0.017],"r":0,"t":0,"s":0.13},{"w":0,"p":[0.078,0.0691,-0.017],"r":0,"t":0,"s":0.13}],"b3":[{"w":2,"p":[0,0.0007,0.34],"r":0,"t":0,"s":0.3}],"b4":[{"w":3,"p":[0,0.1569,-0.066],"r":0,"t":0,"s":0.14}]};
 
 // ═══════════════════════ 武器：掛點資料、2D 疊圖、配置編輯器 ═══════════════════════
 // 掛點用船體模型座標（船長＝1，船頭＋z、上＋y、右＋x）。3D 直接當實例畫在船上；
@@ -5291,16 +5315,28 @@ const WEAPON_NAMES = [
   ['三聯裝巨砲塔', '雙聯裝砲塔', '舷砲砲座模組', '防空砲塔', '魚雷發射管組', '金色衝角砲'],
   ['三聯裝主砲塔', '雙聯裝副砲塔', '垂直飛彈發射模組', '防空砲塔', '魚雷發射管組', '貫穿式主砲'],
   ['拼裝三聯裝主砲塔', '臨時加裝軌道砲', '外掛飛彈箱', '雙管機砲塔', '纜帶綁掛魚雷管', '機械抓臂'],
+  ['液壓三聯裝主砲塔', '機械頭顱雙聯裝砲塔', '機械臂飛彈發射架', '液壓驅動長管主砲', '魚雷發射管組', '防空雙管砲塔'],
+  ['懸浮稜形激光砲塔', '裂頭式能量主砲', '能量矛主砲', '翼掛魚雷發射器', '防空激光節點', '三角攻擊無人機'],
+  ['感染主砲塔', '甲殼包覆雙聯裝砲塔', '骨顎寄生主砲', '感染飛彈發射區', '膿囊魚雷管', '骨翼飛彈掛架'],
+  ['生物砲囊', '毒刺尾砲', '生物刺槍口器', '酸液噴射孔群', '巨顎衝角', '生物戰機'],
 ];
+// 武器配置可選的風格（模型鍵字首，順序＝陣營編號）：帝國、聯盟、傭兵，以及只當敵軍外觀的四個風格
+const STYLES = [['e', '帝國軍'], ['a', '聯盟軍'], ['m', '傭兵'], ['c', '機械改造人類'], ['r', '機械智慧族'], ['i', '蟲族感染人類'], ['b', '蟲族']];
+const STATION_NAMES = ['太空站・小', '太空站・中', '太空站・大'];   // 鍵＝風格＋s＋0～2（例如 es1）
 const WEAPON_DEF_S = [0.2, 0.12, 0.08, 0.06, 0.09, 0.18];   // 新放上去的預設尺寸（船長的比例）
 const HULL_NAMES = ['航空母艦', '戰列艦', '巡洋艦', '驅逐艦', '護衛艦'];
 // 2D 貼圖的鏡頭校正（用船體輪廓對齊原圖求得，30° 俯角、正交）：每單位幾 px、垂直位移 px
 const ATLAS_CAL = { e0: [244, -5.0], e1: [252, -12.3], e2: [248, -10.7], e3: [248, -14.5], e4: [248, -12.6], a0: [248, -6.6], a1: [248, -6.4], a2: [248, -10.0], a3: [248, -1.0], a4: [252, 4.3],
-  m0: [248, -8.0], m1: [248, -8.0], m2: [248, -8.0], m3: [248, -8.0], m4: [248, -8.0] };   // 傭兵：還沒對齊原圖，先用平均值（2D 武器可能略有偏移）
-const HULL_KEYS = ['e0', 'e1', 'e2', 'e3', 'e4', 'a0', 'a1', 'a2', 'a3', 'a4', 'm0', 'm1', 'm2', 'm3', 'm4'];
-const facOfKey = (hk) => Math.max(0, 'eam'.indexOf(hk[0]));   // 模型鍵 → 陣營（0 帝國、1 聯盟、2 傭兵）
-// 貼圖裡的格子（左上角，影像座標）：帝國、聯盟在上半（陣營 × 8 方向），傭兵在下半（y≥1024）
-const atlasXY = (fac, t, d) => (fac < 2 ? [(fac * 8 + d) * 256, t * 192] : [d * 256, 1024 + t * 192]);
+  m0: [250, -9.2], m1: [252, -13.2], m2: [248, -13.5], m3: [248, 0], m4: [249, 0.8],   // m3 的貼圖用修正船頭方向後的模型重畫過
+  // 機械改造人類、機械智慧族、蟲族感染人類、蟲族：貼圖就是用這組校正從模型畫出來的
+  c0: [248, 0], c1: [248, 0], c2: [248, 0], c3: [248, 0], c4: [248, 0], r0: [248, 0], r1: [248, 0], r2: [248, 0], r3: [248, 0], r4: [248, 0],
+  i0: [248, 0], i1: [248, 0], i2: [248, -1.1], i3: [248, 0], i4: [248, 0], b0: [248, 0], b1: [248, 0], b2: [248, 0], b3: [248, 0], b4: [248, 0] };
+const HULL_KEYS = 'eamcrib'.split('').flatMap((f) => [0, 1, 2, 3, 4].map((t) => f + t));
+const STATION_KEYS = STYLES.flatMap(([f]) => [0, 1, 2].map((i) => f + 's' + i));
+const MOUNT_KEYS = [...HULL_KEYS, ...STATION_KEYS];
+const facOfKey = (hk) => Math.max(0, 'eamcrib'.indexOf(hk[0]));   // 模型鍵 → 陣營（0 帝國、1 聯盟、2 傭兵、3 機械改造人類、4 機械智慧族、5 蟲族感染人類、6 蟲族）
+// 貼圖裡的格子（左上角，影像座標）：每 1024 px 一段，每段左右各一個陣營（8 方向 × 5 艦種）
+const atlasXY = (fac, t, d) => [((fac % 2) * 8 + d) * 256, Math.floor(fac / 2) * 1024 + t * 192];
 const D2R = Math.PI / 180;
 const MOUNT_STORE = 'fleet.mounts';
 
@@ -5309,11 +5345,13 @@ function validMount(m) { return !!m && Number.isInteger(m.w) && m.w >= 0 && m.w 
 function cleanMount(m) { return { w: m.w, p: m.p.map((v) => Math.round(v * 10000) / 10000), r: Math.round((+m.r || 0) * 10) / 10, t: Math.round((+m.t || 0) * 10) / 10, s: Math.round(m.s * 10000) / 10000 }; }
 function readMounts(obj) {   // 不認得的鍵、壞掉的項目都略過；沒有的艦種用預設
   const d = cloneMounts(MOUNTS_DEFAULT), src = obj && (obj.m || obj);
-  if (src && typeof src === 'object') for (const k of HULL_KEYS) if (Array.isArray(src[k])) d[k] = src[k].filter(validMount).map(cleanMount);
+  if (src && typeof src === 'object') for (const k of MOUNT_KEYS) if (Array.isArray(src[k])) d[k] = src[k].filter(validMount).map(cleanMount);
+  // 第 1 版的傭兵驅逐艦（m3）模型船頭方向放反了：舊存檔的掛點換到船身上同一個位置（前後、左右對調；朝向不變，仍然朝船頭）
+  if (src && typeof src === 'object' && obj.v === 1 && Array.isArray(src.m3)) d.m3 = d.m3.map((m) => ({ ...m, p: [-m.p[0] || 0, m.p[1], -m.p[2] || 0] }));
   return d;
 }
 let MOUNTS = (() => { try { return readMounts(JSON.parse(STORE.getItem(MOUNT_STORE) || 'null')); } catch (e) { return readMounts(null); } })();
-function saveMounts() { try { STORE.setItem(MOUNT_STORE, JSON.stringify({ v: 1, m: MOUNTS })); } catch (e) { /* 只在本次有效 */ } }
+function saveMounts() { try { STORE.setItem(MOUNT_STORE, JSON.stringify({ v: 2, m: MOUNTS })); } catch (e) { /* 只在本次有效 */ } }
 function mountsOf(hk) { return (MOUNTS[hk] || []).map((m) => ({ ...m, hk })); }
 function mountsChanged(hk) { saveMounts(); R3.version = -1; scheduleWeaponAtlas(hk); }
 
@@ -5372,13 +5410,13 @@ function renderWeaponCells(rdr, rt, cells, list) {
   if (mips) { rt.texture.generateMipmaps = true; rdr.setRenderTarget(rt); rdr.render(new THREE.Scene(), WCOPY.cam); }   // 最後一次才產生 mipmap
   rdr.setRenderTarget(prevRT); rdr.autoClear = prevAuto; rdr.setClearColor(cc, ca);
 }
-function atlasCells(hk) { const fac = facOfKey(hk), t = +hk[1]; return Array.from({ length: 8 }, (_, d) => { const [x, y] = atlasXY(fac, t, d); return { hk, d, x, y: 2048 - y - 192 }; }); }   // rt 的 y 從下往上
+function atlasCells(hk) { const fac = facOfKey(hk), t = +hk[1]; return Array.from({ length: 8 }, (_, d) => { const [x, y] = atlasXY(fac, t, d); return { hk, d, x, y: 4096 - y - 192 }; }); }   // rt 的 y 從下往上
 async function buildWeaponAtlas(only) {
   const keys = (only && only.length ? only : HULL_KEYS).filter((k) => getModel(k));   // 沒有模型的船體（素材還沒放）就不畫
   const need = new Set(); for (const hk of keys) { need.add(hk); for (const m of MOUNTS[hk] || []) need.add(hk[0] + 'w' + m.w); }
   await Promise.all([...need].map((k) => getModel(k) && getModel(k).ready));
   if (!WA.rt) {
-    WA.rt = new THREE.WebGLRenderTarget(4096, 2048, { depthBuffer: false, colorSpace: THREE.SRGBColorSpace, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter });
+    WA.rt = new THREE.WebGLRenderTarget(4096, 4096, { depthBuffer: false, colorSpace: THREE.SRGBColorSpace, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter });
     WA.rt.texture.anisotropy = 4;
     renderWeaponCells(renderer, WA.rt, keys.flatMap(atlasCells));
   } else renderWeaponCells(renderer, WA.rt, keys.flatMap(atlasCells));
@@ -5386,6 +5424,7 @@ async function buildWeaponAtlas(only) {
 }
 function applyWeapon2D() { shipMat.uniforms.uWTex.value = WA.rt && SETTINGS.weapons2D !== false ? WA.rt.texture : NO_WTEX; }
 function scheduleWeaponAtlas(hk) {
+  if (hk && !ATLAS_CAL[hk]) return;   // 太空站沒有 2D 貼圖：不用畫疊圖
   if (hk) WA.dirty.add(hk); else HULL_KEYS.forEach((k) => WA.dirty.add(k));
   clearTimeout(WA.timer);
   WA.timer = setTimeout(async () => {
@@ -5414,8 +5453,9 @@ function closeWeaponEditor() {
 function buildWeaponEditor() {
   const el = WE.el = document.createElement('div'); el.id = 'wed'; el.hidden = true;
   el.innerHTML = `<div class="wed-top"><h2>武器配置</h2>
-      <div class="wed-seg" id="wed-fac"><button data-f="e">帝國軍</button><button data-f="a">聯盟軍</button><button data-f="m">傭兵</button></div>
+      <div class="wed-seg" id="wed-fac">${STYLES.map(([f, n]) => `<button data-f="${f}">${n}</button>`).join('')}</div>
       <div class="wed-seg" id="wed-type">${HULL_NAMES.map((n, i) => `<button data-t="${i}">${n}</button>`).join('')}</div>
+      <div class="wed-seg" id="wed-st">${STATION_NAMES.map((n, i) => `<button data-t="s${i}">${n}</button>`).join('')}</div>
       <span class="g-sp"></span>
       <button class="g-btn sm" id="wed-undo" title="復原（Ctrl＋Z）">↶</button><button class="g-btn sm" id="wed-redo" title="重做（Ctrl＋Y）">↷</button>
       <button class="g-btn sm" id="wed-io">匯出／匯入</button><label class="wed-chk" title="編輯有對稱夥伴的武器時，另一側跟著動"><input type="checkbox" id="wed-sym" checked>左右對稱</label><button class="g-btn sm" id="wed-reset">此艦預設</button><button class="g-btn sm" id="wed-resetall">全部預設</button>
@@ -5454,13 +5494,14 @@ function buildWeaponEditor() {
   WE.orb = { yaw: 0.8, pitch: 0.5, dist: 1.9, tx: 0, ty: 0, tz: 0 };
   WE.ray = new THREE.Raycaster(); WE.rt2 = new THREE.WebGLRenderTarget(2048, 192, { depthBuffer: false, colorSpace: THREE.SRGBColorSpace });
   WE.shipImg = new Image(); WE.shipImg.src = SHIP_ATLAS; WE.shipImg.onload = () => weDraw2D();
-  $('wed-fac').onclick = (e) => { const f = e.target.dataset.f; if (f) { WE.hk = f + WE.hk[1]; weLoadHull(); } };
-  $('wed-type').onclick = (e) => { const t = e.target.dataset.t; if (t != null) { WE.hk = WE.hk[0] + t; weLoadHull(); } };
+  $('wed-fac').onclick = (e) => { const f = e.target.dataset.f; if (f) { const it = WE.hk.slice(1); WE.hk = f + (weHas(f + it) ? it : 's0'); weLoadHull(); } };   // 這個風格沒有這種船：改看小型太空站
+  const pickType = (e) => { const t = e.target.dataset.t; if (t != null && !e.target.disabled) { WE.hk = WE.hk[0] + t; weLoadHull(); } };
+  $('wed-type').onclick = pickType; $('wed-st').onclick = pickType;
   $('wed-done').onclick = closeWeaponEditor;
   $('wed-undo').onclick = weUndo; $('wed-redo').onclick = weRedo;
-  $('wed-reset').onclick = () => { weSnap(); MOUNTS[WE.hk] = cloneMounts(MOUNTS_DEFAULT[WE.hk]); WE.sel = -1; weChanged(); };
+  $('wed-reset').onclick = () => { weSnap(); MOUNTS[WE.hk] = cloneMounts(MOUNTS_DEFAULT[WE.hk] || []); WE.sel = -1; weChanged(); };
   $('wed-resetall').onclick = () => { weSnap(); MOUNTS = readMounts(null); WE.sel = -1; weChanged(true); };
-  $('wed-io').onclick = () => { $('wed-json').value = JSON.stringify({ v: 1, m: MOUNTS }); $('wed-iomsg').textContent = ''; $('wed-modal').hidden = false; };
+  $('wed-io').onclick = () => { $('wed-json').value = JSON.stringify({ v: 2, m: MOUNTS }); $('wed-iomsg').textContent = ''; $('wed-modal').hidden = false; };
   $('wed-ioclose').onclick = () => { $('wed-modal').hidden = true; };
   $('wed-copy').onclick = () => { const t = $('wed-json'); t.select(); let ok = false; try { ok = document.execCommand('copy'); } catch (e) { /* 無法複製 */ } if (navigator.clipboard) navigator.clipboard.writeText(t.value).then(() => ($('wed-iomsg').textContent = '已複製'), () => {}); $('wed-iomsg').textContent = ok ? '已複製' : '已選取，請按 Ctrl＋C'; };
   $('wed-apply').onclick = () => {
@@ -5494,13 +5535,24 @@ function weCamPreset(c) {
   else { o.yaw = 0.75; o.pitch = 0.5; o.dist = 1.6; }
   if (!WE.raf) weLoop();
 }
+// 伺服器有沒有這個模型（太空站等晚載入的模型，還沒下載也算有）
+function weHas(k) { return !!(MODEL_SRC[k] || (MODEL_LOAD.man && MODEL_LOAD.man.models[k])); }
 function weLoadHull() {
-  const M = getModel(WE.hk);
-  if (!M) { WE.hk = 'e1'; weLoadHull(); return; }   // 這個陣營的模型還沒放進 models/：退回帝國戰列艦
+  const hk = WE.hk, need = [hk, ...[0, 1, 2, 3, 4, 5].map((w) => hk[0] + 'w' + w)];
+  WE.sel = -1; WE.place = -1; WE.ghost.visible = false;
+  const has2D = !!ATLAS_CAL[hk], p2 = WE.el.querySelector('.wed-2d');
+  if (p2.hidden === has2D) { p2.hidden = !has2D; weResize(); }   // 太空站沒有 2D 貼圖：收起 2D 預覽
+  if (need.some((k) => !getModel(k) && weHas(k))) {   // 還沒下載：先清空畫面，載完再顯示
+    WE.loading = true; WE.hullMesh.geometry = new THREE.BufferGeometry();
+    weSync(); weUI(); if (!WE.raf) weLoop();
+    ensureModels(need).then(() => { if (WE.open && WE.hk === hk) { WE.loading = false; weLoadHull(); } });
+    return;
+  }
+  WE.loading = false;
+  const M = getModel(hk);
+  if (!M) { if (hk !== 'e1') { WE.hk = 'e1'; weLoadHull(); } return; }   // 這個模型沒放進 models/：退回帝國戰列艦
   WE.hullMesh.geometry = M.lods[0]; WE.hullMesh.material = M.mat;
-  WE.sel = -1; WE.place = -1;
-  const need = [WE.hk, ...[0, 1, 2, 3, 4, 5].map((w) => WE.hk[0] + 'w' + w)];
-  Promise.all(need.map((k) => getModel(k) && getModel(k).ready)).then(() => weDraw2D());
+  if (has2D) Promise.all(need.map((k) => getModel(k) && getModel(k).ready)).then(() => weDraw2D());
   weSync(); weUI(); if (!WE.raf) weLoop();
 }
 function weMounts() { return MOUNTS[WE.hk] || (MOUNTS[WE.hk] = []); }
@@ -5510,7 +5562,8 @@ function weSync() {
   while (g.children.length > list.length) g.remove(g.children[g.children.length - 1]);
   list.forEach((m, i) => {
     let o = g.children[i]; if (!o) { o = new THREE.Mesh(); g.add(o); }
-    const W = getModel(WE.hk[0] + 'w' + m.w); o.geometry = W.lods[0]; o.material = W.mat; o.userData.i = i; setMountObj(o, m);
+    const W = !WE.loading && getModel(WE.hk[0] + 'w' + m.w); o.visible = !!W; o.userData.i = i;
+    if (W) { o.geometry = W.lods[0]; o.material = W.mat; setMountObj(o, m); }
   });
   const s = g.children[WE.sel];
   WE.box.visible = !!s; if (s) { s.updateMatrixWorld(true); WE.box.setFromObject(s); }
@@ -5523,15 +5576,15 @@ function weSnap() { WE.undo.push(JSON.stringify(MOUNTS)); if (WE.undo.length > 8
 function weUndo() { if (!WE.undo.length) return; WE.redo.push(JSON.stringify(MOUNTS)); MOUNTS = readMounts(JSON.parse(WE.undo.pop())); WE.sel = Math.min(WE.sel, weMounts().length - 1); weChanged(true); }
 function weRedo() { if (!WE.redo.length) return; WE.undo.push(JSON.stringify(MOUNTS)); MOUNTS = readMounts(JSON.parse(WE.redo.pop())); WE.sel = Math.min(WE.sel, weMounts().length - 1); weChanged(true); }
 function weUI() {
-  const el = WE.el, fac = facOfKey(WE.hk), list = weMounts(), names = WEAPON_NAMES[fac], cls = FACTION_CLS[fac];
+  const el = WE.el, fac = facOfKey(WE.hk), list = weMounts(), names = WEAPON_NAMES[fac], cls = FACTION_CLS[fac] || '';
   el.querySelectorAll('#wed-fac button').forEach((b) => b.className = b.dataset.f === WE.hk[0] ? 'on ' + cls : '');
-  el.querySelectorAll('#wed-type button').forEach((b) => b.className = +b.dataset.t === +WE.hk[1] ? 'on ' + cls : '');
+  el.querySelectorAll('#wed-type button, #wed-st button').forEach((b) => { b.className = b.dataset.t === WE.hk.slice(1) ? 'on ' + cls : ''; b.disabled = !weHas(WE.hk[0] + b.dataset.t); });
   el.querySelector('#wed-pal').innerHTML = names.map((n, w) => `<button class="g-btn sm ${WE.place === w ? 'pri' : ''}" data-w="${w}">${n}</button>`).join('');
   el.querySelector('#wed-n').textContent = `（${list.length}）`;
   el.querySelector('#wed-list').innerHTML = list.length ? list.map((m, i) => `<button class="wed-it ${i === WE.sel ? 'on' : ''}" data-i="${i}"><b>${i + 1}</b>${names[m.w]}<span>${m.p[0] < -0.01 ? '左' : m.p[0] > 0.01 ? '右' : '中'}・${m.p[2] > 0.15 ? '前' : m.p[2] < -0.15 ? '後' : '中段'}</span></button>`).join('') : '<p class="g-dim">還沒有武器，從上面挑一個放上去。</p>';
   el.querySelector('#wed-undo').disabled = !WE.undo.length; el.querySelector('#wed-redo').disabled = !WE.redo.length;
   const m = list[WE.sel], prop = el.querySelector('#wed-prop');
-  WE.el.querySelector('#wed-hint').textContent = WE.place >= 0 ? `放置「${names[WE.place]}」：在船身上點一下（Esc 取消）` : '左鍵拖曳旋轉・右鍵拖曳平移・滾輪縮放・點武器選取、拖曳沿船身移動・Delete 刪除・M 鏡像複製・R 轉 15°';
+  WE.el.querySelector('#wed-hint').textContent = WE.loading ? '模型載入中…' : WE.place >= 0 ? `放置「${names[WE.place]}」：在船身上點一下（Esc 取消）` : '左鍵拖曳旋轉・右鍵拖曳平移・滾輪縮放・點武器選取、拖曳沿船身移動・Delete 刪除・M 鏡像複製・R 轉 15°';
   if (!m) { prop.innerHTML = '<p class="g-dim">點選 3D 畫面或上面清單裡的武器來調整。</p>'; return; }
   const num = (id, label, v, step, unit = '') => `<label class="wed-num"><span>${label}</span><input type="number" id="${id}" value="${v}" step="${step}"><i>${unit}</i></label>`;
   prop.innerHTML = `<label class="wed-num"><span>種類</span><select class="g-sel" id="wp-w">${names.map((n, w) => `<option value="${w}" ${w === m.w ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
@@ -5609,7 +5662,7 @@ function wePointerMove(e) {
   const d = WE.drag;
   if (!d) {   // 放置模式：游標下顯示預覽
     if (WE.place >= 0) {
-      const h = weRayAt(e, [WE.hullMesh]); WE.ghost.visible = !!h;
+      const h = !WE.loading && weRayAt(e, [WE.hullMesh]); WE.ghost.visible = !!h;
       if (h) { const W = getModel(WE.hk[0] + 'w' + WE.place); WE.ghost.geometry = W.lods[1]; WE.ghost.material = W.mat; const same = weMounts().filter((m) => m.w === WE.place); setMountObj(WE.ghost, { p: [h.point.x, h.point.y, h.point.z], r: 0, t: tiltOf(h), s: same.length ? same[0].s : WEAPON_DEF_S[WE.place] }); }
     } else WE.cv.style.cursor = weRayAt(e, WE.wGroup.children) ? 'pointer' : 'grab';
     return;
@@ -5674,7 +5727,7 @@ function weLoop() {
 // 2D 預覽：原本的船體貼圖＋這裡算出的武器疊圖
 function weDraw2DSoon() { clearTimeout(WE.t2); WE.t2 = setTimeout(weDraw2D, 60); }
 function weDraw2D() {
-  if (!WE.open || !WE.shipImg.complete) return;
+  if (!WE.open || !WE.shipImg.complete || !ATLAS_CAL[WE.hk]) return;
   const hk = WE.hk, fac = facOfKey(hk), t = +hk[1], [sx, sy] = atlasXY(fac, t, 0);
   renderWeaponCells(WE.r, WE.rt2, Array.from({ length: 8 }, (_, d) => ({ hk, d, x: d * 256, y: 0 })));
   const px = new Uint8Array(2048 * 192 * 4); WE.r.readRenderTargetPixels(WE.rt2, 0, 0, 2048, 192, px);
@@ -7187,11 +7240,13 @@ const RAND_SIZES = [
 ];
 const RAND_DIFF = [{ name: '較弱', off: -2 }, { name: '相當', off: 0 }, { name: '較強', off: 2 }, { name: '隨機', off: null }];
 const RAND_TERR = [{ name: '無', st: -1 }, { name: '少', st: 0 }, { name: '多', st: 14 }, { name: '隨機', st: null }];
+// 敵軍外觀：fac＝陣營編號（null＝對立的帝國／聯盟，'rand'＝從非人類正規軍的五個陣營隨機挑）；只換外觀，戰力規則不變
+const RAND_LOOK = [{ name: '對立陣營', fac: null }, { name: '傭兵', fac: 2 }, { name: '機械改造人類', fac: 3 }, { name: '機械智慧族', fac: 4 }, { name: '蟲族感染人類', fac: 5 }, { name: '蟲族', fac: 6 }, { name: '隨機', fac: 'rand' }];
 const randSeed = () => ((Math.random() * 1e9) >>> 0) || 1;
 function randOpts() {
   let o = null; try { o = JSON.parse(STORE.getItem(RAND_STORE) || 'null'); } catch (e) { o = null; }
-  o = Object.assign({ size: 1, diff: 1, terr: 3, seed: 0 }, o || {});
-  if (!RAND_SIZES[o.size]) o.size = 1; if (!RAND_DIFF[o.diff]) o.diff = 1; if (!RAND_TERR[o.terr]) o.terr = 3;
+  o = Object.assign({ size: 1, diff: 1, terr: 3, look: 0, seed: 0 }, o || {});
+  if (!RAND_SIZES[o.size]) o.size = 1; if (!RAND_DIFF[o.diff]) o.diff = 1; if (!RAND_TERR[o.terr]) o.terr = 3; if (!RAND_LOOK[o.look]) o.look = 0;
   if (!o.seed) o.seed = randSeed();
   return o;
 }
@@ -7204,6 +7259,8 @@ function randStage(o) {
     timeLimit: S.time, budget: S.budget, maxFleets: S.maxFleets, level: 1, seed: campHash(o.seed, o.size, o.diff, o.terr, 9) % 100000,
     terrain: st < 0 ? [] : campTerrain(R, st), enemy: [], events: [], intel: { accuracy: 0.8, hide: [] },
   };
+  const lk = RAND_LOOK[o.look].fac, L = mulberry32(campHash(o.seed, 7));
+  if (lk === 'rand') sc.enemyFac = 2 + Math.floor(L() * 5); else if (lk != null) sc.enemyFac = lk;
   return sc;
 }
 // 編成沿用上一場（指揮官、陣型、機庫）；預算不同時兵力等比例縮放
@@ -7236,6 +7293,7 @@ function showRandom() {
         <dl class="kv rd-opts"><dt>規模</dt><dd>${seg('size', RAND_SIZES)}<div class="g-dim">預算 ${fmtN(S.budget)} 點・最多 ${S.maxFleets} 支艦隊・${Math.round(S.time / 60)} 分鐘</div></dd>
         <dt>敵軍強度</dt><dd>${seg('diff', RAND_DIFF)}<div class="g-dim">依出擊指揮官的平均等級（目前 Lv ${avg}）：敵軍 ${D.off == null ? `Lv ${Math.max(1, avg - 3)}～${avg + 3} 隨機` : `Lv ${Math.max(1, avg + D.off)}`}。等級越高，敵方技能越多、AI 越會打、兵力越多</div></dd>
         <dt>地形</dt><dd>${seg('terr', RAND_TERR)}<div class="g-dim">星雲、小行星帶、巨大小行星隨機放在戰場中段</div></dd>
+        <dt>敵軍外觀</dt><dd>${seg('look', RAND_LOOK)}<div class="g-dim">只換敵軍艦船的外觀與顏色，戰力規則不變${sc.enemyFac != null ? `・這一場：<b class="g-${FACTION_CLS[sc.enemyFac]}">${FACTION_NAME[sc.enemyFac]}</b>` : ''}</div></dd>
         <dt>勝利條件</dt><dd>殲滅敵軍，或使敵軍損失超過 ${Math.round((1 - ROUT_AT) * 100)}%（潰走）</dd><dt>敗北條件</dt><dd>我軍損失超過 ${Math.round((1 - ROUT_AT) * 100)}%</dd>
         <dt>敵軍編成</dt><dd><span class="unk">不明：部署時才會偵測到</span></dd>
         <dt>獎勵</dt><dd>指揮官經驗、功勳（規模越大、敵軍等級越高越多）</dd></dl></div>
@@ -10565,7 +10623,7 @@ function drawTac() {
     const sel = selected.has(q0);
     c.save(); c.translate(tx(q.x), tz(q.z)); c.rotate(-q.h + Math.PI);   // 世界的 h：前方＝(sin h, cos h)；畫布 y 向下
     if (q !== q0) { c.globalAlpha = 0.45; c.setLineDash([4, 3]); }
-    c.strokeStyle = sel ? '#ffffff' : ['rgba(242,179,90,.55)', 'rgba(124,196,255,.55)', 'rgba(226,115,90,.55)'][sqFac(q)]; c.lineWidth = sel ? 1.6 : 1;
+    c.strokeStyle = sel ? '#ffffff' : facRGBA(sqFac(q), 0.55); c.lineWidth = sel ? 1.6 : 1;
     c.strokeRect(-q0.W * k / 2, -q0.D * k / 2, q0.W * k, q0.D * k);
     c.beginPath(); c.moveTo(-5, -q0.D * k / 2 - 2); c.lineTo(0, -q0.D * k / 2 - 8); c.lineTo(5, -q0.D * k / 2 - 2); c.stroke();
     c.restore(); c.globalAlpha = 1; c.setLineDash([]);
@@ -10949,7 +11007,7 @@ function drawSideView() {
   squadrons.forEach((q, qi) => {
     const e = SV.ext[qi]; if (q.bg || q.alive <= 0 || e[0] > e[1]) return;
     const sel = selected.has(q);
-    c.strokeStyle = sel ? '#ffffff' : ['rgba(242,179,90,.45)', 'rgba(124,196,255,.45)', 'rgba(226,115,90,.45)'][sqFac(q)]; c.lineWidth = sel ? 1.6 : 1;
+    c.strokeStyle = sel ? '#ffffff' : facRGBA(sqFac(q), 0.45); c.lineWidth = sel ? 1.6 : 1;
     c.strokeRect(e[0] - 3, e[2] - 3, e[1] - e[0] + 6, e[3] - e[2] + 6);
   });
   c.lineWidth = 1;

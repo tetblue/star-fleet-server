@@ -5,16 +5,28 @@ const WEAPON_NAMES = [
   ['三聯裝巨砲塔', '雙聯裝砲塔', '舷砲砲座模組', '防空砲塔', '魚雷發射管組', '金色衝角砲'],
   ['三聯裝主砲塔', '雙聯裝副砲塔', '垂直飛彈發射模組', '防空砲塔', '魚雷發射管組', '貫穿式主砲'],
   ['拼裝三聯裝主砲塔', '臨時加裝軌道砲', '外掛飛彈箱', '雙管機砲塔', '纜帶綁掛魚雷管', '機械抓臂'],
+  ['液壓三聯裝主砲塔', '機械頭顱雙聯裝砲塔', '機械臂飛彈發射架', '液壓驅動長管主砲', '魚雷發射管組', '防空雙管砲塔'],
+  ['懸浮稜形激光砲塔', '裂頭式能量主砲', '能量矛主砲', '翼掛魚雷發射器', '防空激光節點', '三角攻擊無人機'],
+  ['感染主砲塔', '甲殼包覆雙聯裝砲塔', '骨顎寄生主砲', '感染飛彈發射區', '膿囊魚雷管', '骨翼飛彈掛架'],
+  ['生物砲囊', '毒刺尾砲', '生物刺槍口器', '酸液噴射孔群', '巨顎衝角', '生物戰機'],
 ];
+// 武器配置可選的風格（模型鍵字首，順序＝陣營編號）：帝國、聯盟、傭兵，以及只當敵軍外觀的四個風格
+const STYLES = [['e', '帝國軍'], ['a', '聯盟軍'], ['m', '傭兵'], ['c', '機械改造人類'], ['r', '機械智慧族'], ['i', '蟲族感染人類'], ['b', '蟲族']];
+const STATION_NAMES = ['太空站・小', '太空站・中', '太空站・大'];   // 鍵＝風格＋s＋0～2（例如 es1）
 const WEAPON_DEF_S = [0.2, 0.12, 0.08, 0.06, 0.09, 0.18];   // 新放上去的預設尺寸（船長的比例）
 const HULL_NAMES = ['航空母艦', '戰列艦', '巡洋艦', '驅逐艦', '護衛艦'];
 // 2D 貼圖的鏡頭校正（用船體輪廓對齊原圖求得，30° 俯角、正交）：每單位幾 px、垂直位移 px
 const ATLAS_CAL = { e0: [244, -5.0], e1: [252, -12.3], e2: [248, -10.7], e3: [248, -14.5], e4: [248, -12.6], a0: [248, -6.6], a1: [248, -6.4], a2: [248, -10.0], a3: [248, -1.0], a4: [252, 4.3],
-  m0: [250, -9.2], m1: [252, -13.2], m2: [248, -13.5], m3: [253, -0.2], m4: [249, 0.8] };
-const HULL_KEYS = ['e0', 'e1', 'e2', 'e3', 'e4', 'a0', 'a1', 'a2', 'a3', 'a4', 'm0', 'm1', 'm2', 'm3', 'm4'];
-const facOfKey = (hk) => Math.max(0, 'eam'.indexOf(hk[0]));   // 模型鍵 → 陣營（0 帝國、1 聯盟、2 傭兵）
-// 貼圖裡的格子（左上角，影像座標）：帝國、聯盟在上半（陣營 × 8 方向），傭兵在下半（y≥1024）
-const atlasXY = (fac, t, d) => (fac < 2 ? [(fac * 8 + d) * 256, t * 192] : [d * 256, 1024 + t * 192]);
+  m0: [250, -9.2], m1: [252, -13.2], m2: [248, -13.5], m3: [248, 0], m4: [249, 0.8],   // m3 的貼圖用修正船頭方向後的模型重畫過
+  // 機械改造人類、機械智慧族、蟲族感染人類、蟲族：貼圖就是用這組校正從模型畫出來的
+  c0: [248, 0], c1: [248, 0], c2: [248, 0], c3: [248, 0], c4: [248, 0], r0: [248, 0], r1: [248, 0], r2: [248, 0], r3: [248, 0], r4: [248, 0],
+  i0: [248, 0], i1: [248, 0], i2: [248, -1.1], i3: [248, 0], i4: [248, 0], b0: [248, 0], b1: [248, 0], b2: [248, 0], b3: [248, 0], b4: [248, 0] };
+const HULL_KEYS = 'eamcrib'.split('').flatMap((f) => [0, 1, 2, 3, 4].map((t) => f + t));
+const STATION_KEYS = STYLES.flatMap(([f]) => [0, 1, 2].map((i) => f + 's' + i));
+const MOUNT_KEYS = [...HULL_KEYS, ...STATION_KEYS];
+const facOfKey = (hk) => Math.max(0, 'eamcrib'.indexOf(hk[0]));   // 模型鍵 → 陣營（0 帝國、1 聯盟、2 傭兵、3 機械改造人類、4 機械智慧族、5 蟲族感染人類、6 蟲族）
+// 貼圖裡的格子（左上角，影像座標）：每 1024 px 一段，每段左右各一個陣營（8 方向 × 5 艦種）
+const atlasXY = (fac, t, d) => [((fac % 2) * 8 + d) * 256, Math.floor(fac / 2) * 1024 + t * 192];
 const D2R = Math.PI / 180;
 const MOUNT_STORE = 'fleet.mounts';
 
@@ -23,11 +35,13 @@ function validMount(m) { return !!m && Number.isInteger(m.w) && m.w >= 0 && m.w 
 function cleanMount(m) { return { w: m.w, p: m.p.map((v) => Math.round(v * 10000) / 10000), r: Math.round((+m.r || 0) * 10) / 10, t: Math.round((+m.t || 0) * 10) / 10, s: Math.round(m.s * 10000) / 10000 }; }
 function readMounts(obj) {   // 不認得的鍵、壞掉的項目都略過；沒有的艦種用預設
   const d = cloneMounts(MOUNTS_DEFAULT), src = obj && (obj.m || obj);
-  if (src && typeof src === 'object') for (const k of HULL_KEYS) if (Array.isArray(src[k])) d[k] = src[k].filter(validMount).map(cleanMount);
+  if (src && typeof src === 'object') for (const k of MOUNT_KEYS) if (Array.isArray(src[k])) d[k] = src[k].filter(validMount).map(cleanMount);
+  // 第 1 版的傭兵驅逐艦（m3）模型船頭方向放反了：舊存檔的掛點換到船身上同一個位置（前後、左右對調；朝向不變，仍然朝船頭）
+  if (src && typeof src === 'object' && obj.v === 1 && Array.isArray(src.m3)) d.m3 = d.m3.map((m) => ({ ...m, p: [-m.p[0] || 0, m.p[1], -m.p[2] || 0] }));
   return d;
 }
 let MOUNTS = (() => { try { return readMounts(JSON.parse(STORE.getItem(MOUNT_STORE) || 'null')); } catch (e) { return readMounts(null); } })();
-function saveMounts() { try { STORE.setItem(MOUNT_STORE, JSON.stringify({ v: 1, m: MOUNTS })); } catch (e) { /* 只在本次有效 */ } }
+function saveMounts() { try { STORE.setItem(MOUNT_STORE, JSON.stringify({ v: 2, m: MOUNTS })); } catch (e) { /* 只在本次有效 */ } }
 function mountsOf(hk) { return (MOUNTS[hk] || []).map((m) => ({ ...m, hk })); }
 function mountsChanged(hk) { saveMounts(); R3.version = -1; scheduleWeaponAtlas(hk); }
 
@@ -86,13 +100,13 @@ function renderWeaponCells(rdr, rt, cells, list) {
   if (mips) { rt.texture.generateMipmaps = true; rdr.setRenderTarget(rt); rdr.render(new THREE.Scene(), WCOPY.cam); }   // 最後一次才產生 mipmap
   rdr.setRenderTarget(prevRT); rdr.autoClear = prevAuto; rdr.setClearColor(cc, ca);
 }
-function atlasCells(hk) { const fac = facOfKey(hk), t = +hk[1]; return Array.from({ length: 8 }, (_, d) => { const [x, y] = atlasXY(fac, t, d); return { hk, d, x, y: 2048 - y - 192 }; }); }   // rt 的 y 從下往上
+function atlasCells(hk) { const fac = facOfKey(hk), t = +hk[1]; return Array.from({ length: 8 }, (_, d) => { const [x, y] = atlasXY(fac, t, d); return { hk, d, x, y: 4096 - y - 192 }; }); }   // rt 的 y 從下往上
 async function buildWeaponAtlas(only) {
   const keys = (only && only.length ? only : HULL_KEYS).filter((k) => getModel(k));   // 沒有模型的船體（素材還沒放）就不畫
   const need = new Set(); for (const hk of keys) { need.add(hk); for (const m of MOUNTS[hk] || []) need.add(hk[0] + 'w' + m.w); }
   await Promise.all([...need].map((k) => getModel(k) && getModel(k).ready));
   if (!WA.rt) {
-    WA.rt = new THREE.WebGLRenderTarget(4096, 2048, { depthBuffer: false, colorSpace: THREE.SRGBColorSpace, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter });
+    WA.rt = new THREE.WebGLRenderTarget(4096, 4096, { depthBuffer: false, colorSpace: THREE.SRGBColorSpace, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter });
     WA.rt.texture.anisotropy = 4;
     renderWeaponCells(renderer, WA.rt, keys.flatMap(atlasCells));
   } else renderWeaponCells(renderer, WA.rt, keys.flatMap(atlasCells));
@@ -100,6 +114,7 @@ async function buildWeaponAtlas(only) {
 }
 function applyWeapon2D() { shipMat.uniforms.uWTex.value = WA.rt && SETTINGS.weapons2D !== false ? WA.rt.texture : NO_WTEX; }
 function scheduleWeaponAtlas(hk) {
+  if (hk && !ATLAS_CAL[hk]) return;   // 太空站沒有 2D 貼圖：不用畫疊圖
   if (hk) WA.dirty.add(hk); else HULL_KEYS.forEach((k) => WA.dirty.add(k));
   clearTimeout(WA.timer);
   WA.timer = setTimeout(async () => {
@@ -128,8 +143,9 @@ function closeWeaponEditor() {
 function buildWeaponEditor() {
   const el = WE.el = document.createElement('div'); el.id = 'wed'; el.hidden = true;
   el.innerHTML = `<div class="wed-top"><h2>武器配置</h2>
-      <div class="wed-seg" id="wed-fac"><button data-f="e">帝國軍</button><button data-f="a">聯盟軍</button><button data-f="m">傭兵</button></div>
+      <div class="wed-seg" id="wed-fac">${STYLES.map(([f, n]) => `<button data-f="${f}">${n}</button>`).join('')}</div>
       <div class="wed-seg" id="wed-type">${HULL_NAMES.map((n, i) => `<button data-t="${i}">${n}</button>`).join('')}</div>
+      <div class="wed-seg" id="wed-st">${STATION_NAMES.map((n, i) => `<button data-t="s${i}">${n}</button>`).join('')}</div>
       <span class="g-sp"></span>
       <button class="g-btn sm" id="wed-undo" title="復原（Ctrl＋Z）">↶</button><button class="g-btn sm" id="wed-redo" title="重做（Ctrl＋Y）">↷</button>
       <button class="g-btn sm" id="wed-io">匯出／匯入</button><label class="wed-chk" title="編輯有對稱夥伴的武器時，另一側跟著動"><input type="checkbox" id="wed-sym" checked>左右對稱</label><button class="g-btn sm" id="wed-reset">此艦預設</button><button class="g-btn sm" id="wed-resetall">全部預設</button>
@@ -168,13 +184,14 @@ function buildWeaponEditor() {
   WE.orb = { yaw: 0.8, pitch: 0.5, dist: 1.9, tx: 0, ty: 0, tz: 0 };
   WE.ray = new THREE.Raycaster(); WE.rt2 = new THREE.WebGLRenderTarget(2048, 192, { depthBuffer: false, colorSpace: THREE.SRGBColorSpace });
   WE.shipImg = new Image(); WE.shipImg.src = SHIP_ATLAS; WE.shipImg.onload = () => weDraw2D();
-  $('wed-fac').onclick = (e) => { const f = e.target.dataset.f; if (f) { WE.hk = f + WE.hk[1]; weLoadHull(); } };
-  $('wed-type').onclick = (e) => { const t = e.target.dataset.t; if (t != null) { WE.hk = WE.hk[0] + t; weLoadHull(); } };
+  $('wed-fac').onclick = (e) => { const f = e.target.dataset.f; if (f) { const it = WE.hk.slice(1); WE.hk = f + (weHas(f + it) ? it : 's0'); weLoadHull(); } };   // 這個風格沒有這種船：改看小型太空站
+  const pickType = (e) => { const t = e.target.dataset.t; if (t != null && !e.target.disabled) { WE.hk = WE.hk[0] + t; weLoadHull(); } };
+  $('wed-type').onclick = pickType; $('wed-st').onclick = pickType;
   $('wed-done').onclick = closeWeaponEditor;
   $('wed-undo').onclick = weUndo; $('wed-redo').onclick = weRedo;
-  $('wed-reset').onclick = () => { weSnap(); MOUNTS[WE.hk] = cloneMounts(MOUNTS_DEFAULT[WE.hk]); WE.sel = -1; weChanged(); };
+  $('wed-reset').onclick = () => { weSnap(); MOUNTS[WE.hk] = cloneMounts(MOUNTS_DEFAULT[WE.hk] || []); WE.sel = -1; weChanged(); };
   $('wed-resetall').onclick = () => { weSnap(); MOUNTS = readMounts(null); WE.sel = -1; weChanged(true); };
-  $('wed-io').onclick = () => { $('wed-json').value = JSON.stringify({ v: 1, m: MOUNTS }); $('wed-iomsg').textContent = ''; $('wed-modal').hidden = false; };
+  $('wed-io').onclick = () => { $('wed-json').value = JSON.stringify({ v: 2, m: MOUNTS }); $('wed-iomsg').textContent = ''; $('wed-modal').hidden = false; };
   $('wed-ioclose').onclick = () => { $('wed-modal').hidden = true; };
   $('wed-copy').onclick = () => { const t = $('wed-json'); t.select(); let ok = false; try { ok = document.execCommand('copy'); } catch (e) { /* 無法複製 */ } if (navigator.clipboard) navigator.clipboard.writeText(t.value).then(() => ($('wed-iomsg').textContent = '已複製'), () => {}); $('wed-iomsg').textContent = ok ? '已複製' : '已選取，請按 Ctrl＋C'; };
   $('wed-apply').onclick = () => {
@@ -208,13 +225,24 @@ function weCamPreset(c) {
   else { o.yaw = 0.75; o.pitch = 0.5; o.dist = 1.6; }
   if (!WE.raf) weLoop();
 }
+// 伺服器有沒有這個模型（太空站等晚載入的模型，還沒下載也算有）
+function weHas(k) { return !!(MODEL_SRC[k] || (MODEL_LOAD.man && MODEL_LOAD.man.models[k])); }
 function weLoadHull() {
-  const M = getModel(WE.hk);
-  if (!M) { WE.hk = 'e1'; weLoadHull(); return; }   // 這個陣營的模型還沒放進 models/：退回帝國戰列艦
+  const hk = WE.hk, need = [hk, ...[0, 1, 2, 3, 4, 5].map((w) => hk[0] + 'w' + w)];
+  WE.sel = -1; WE.place = -1; WE.ghost.visible = false;
+  const has2D = !!ATLAS_CAL[hk], p2 = WE.el.querySelector('.wed-2d');
+  if (p2.hidden === has2D) { p2.hidden = !has2D; weResize(); }   // 太空站沒有 2D 貼圖：收起 2D 預覽
+  if (need.some((k) => !getModel(k) && weHas(k))) {   // 還沒下載：先清空畫面，載完再顯示
+    WE.loading = true; WE.hullMesh.geometry = new THREE.BufferGeometry();
+    weSync(); weUI(); if (!WE.raf) weLoop();
+    ensureModels(need).then(() => { if (WE.open && WE.hk === hk) { WE.loading = false; weLoadHull(); } });
+    return;
+  }
+  WE.loading = false;
+  const M = getModel(hk);
+  if (!M) { if (hk !== 'e1') { WE.hk = 'e1'; weLoadHull(); } return; }   // 這個模型沒放進 models/：退回帝國戰列艦
   WE.hullMesh.geometry = M.lods[0]; WE.hullMesh.material = M.mat;
-  WE.sel = -1; WE.place = -1;
-  const need = [WE.hk, ...[0, 1, 2, 3, 4, 5].map((w) => WE.hk[0] + 'w' + w)];
-  Promise.all(need.map((k) => getModel(k) && getModel(k).ready)).then(() => weDraw2D());
+  if (has2D) Promise.all(need.map((k) => getModel(k) && getModel(k).ready)).then(() => weDraw2D());
   weSync(); weUI(); if (!WE.raf) weLoop();
 }
 function weMounts() { return MOUNTS[WE.hk] || (MOUNTS[WE.hk] = []); }
@@ -224,7 +252,8 @@ function weSync() {
   while (g.children.length > list.length) g.remove(g.children[g.children.length - 1]);
   list.forEach((m, i) => {
     let o = g.children[i]; if (!o) { o = new THREE.Mesh(); g.add(o); }
-    const W = getModel(WE.hk[0] + 'w' + m.w); o.geometry = W.lods[0]; o.material = W.mat; o.userData.i = i; setMountObj(o, m);
+    const W = !WE.loading && getModel(WE.hk[0] + 'w' + m.w); o.visible = !!W; o.userData.i = i;
+    if (W) { o.geometry = W.lods[0]; o.material = W.mat; setMountObj(o, m); }
   });
   const s = g.children[WE.sel];
   WE.box.visible = !!s; if (s) { s.updateMatrixWorld(true); WE.box.setFromObject(s); }
@@ -237,15 +266,15 @@ function weSnap() { WE.undo.push(JSON.stringify(MOUNTS)); if (WE.undo.length > 8
 function weUndo() { if (!WE.undo.length) return; WE.redo.push(JSON.stringify(MOUNTS)); MOUNTS = readMounts(JSON.parse(WE.undo.pop())); WE.sel = Math.min(WE.sel, weMounts().length - 1); weChanged(true); }
 function weRedo() { if (!WE.redo.length) return; WE.undo.push(JSON.stringify(MOUNTS)); MOUNTS = readMounts(JSON.parse(WE.redo.pop())); WE.sel = Math.min(WE.sel, weMounts().length - 1); weChanged(true); }
 function weUI() {
-  const el = WE.el, fac = facOfKey(WE.hk), list = weMounts(), names = WEAPON_NAMES[fac], cls = FACTION_CLS[fac];
+  const el = WE.el, fac = facOfKey(WE.hk), list = weMounts(), names = WEAPON_NAMES[fac], cls = FACTION_CLS[fac] || '';
   el.querySelectorAll('#wed-fac button').forEach((b) => b.className = b.dataset.f === WE.hk[0] ? 'on ' + cls : '');
-  el.querySelectorAll('#wed-type button').forEach((b) => b.className = +b.dataset.t === +WE.hk[1] ? 'on ' + cls : '');
+  el.querySelectorAll('#wed-type button, #wed-st button').forEach((b) => { b.className = b.dataset.t === WE.hk.slice(1) ? 'on ' + cls : ''; b.disabled = !weHas(WE.hk[0] + b.dataset.t); });
   el.querySelector('#wed-pal').innerHTML = names.map((n, w) => `<button class="g-btn sm ${WE.place === w ? 'pri' : ''}" data-w="${w}">${n}</button>`).join('');
   el.querySelector('#wed-n').textContent = `（${list.length}）`;
   el.querySelector('#wed-list').innerHTML = list.length ? list.map((m, i) => `<button class="wed-it ${i === WE.sel ? 'on' : ''}" data-i="${i}"><b>${i + 1}</b>${names[m.w]}<span>${m.p[0] < -0.01 ? '左' : m.p[0] > 0.01 ? '右' : '中'}・${m.p[2] > 0.15 ? '前' : m.p[2] < -0.15 ? '後' : '中段'}</span></button>`).join('') : '<p class="g-dim">還沒有武器，從上面挑一個放上去。</p>';
   el.querySelector('#wed-undo').disabled = !WE.undo.length; el.querySelector('#wed-redo').disabled = !WE.redo.length;
   const m = list[WE.sel], prop = el.querySelector('#wed-prop');
-  WE.el.querySelector('#wed-hint').textContent = WE.place >= 0 ? `放置「${names[WE.place]}」：在船身上點一下（Esc 取消）` : '左鍵拖曳旋轉・右鍵拖曳平移・滾輪縮放・點武器選取、拖曳沿船身移動・Delete 刪除・M 鏡像複製・R 轉 15°';
+  WE.el.querySelector('#wed-hint').textContent = WE.loading ? '模型載入中…' : WE.place >= 0 ? `放置「${names[WE.place]}」：在船身上點一下（Esc 取消）` : '左鍵拖曳旋轉・右鍵拖曳平移・滾輪縮放・點武器選取、拖曳沿船身移動・Delete 刪除・M 鏡像複製・R 轉 15°';
   if (!m) { prop.innerHTML = '<p class="g-dim">點選 3D 畫面或上面清單裡的武器來調整。</p>'; return; }
   const num = (id, label, v, step, unit = '') => `<label class="wed-num"><span>${label}</span><input type="number" id="${id}" value="${v}" step="${step}"><i>${unit}</i></label>`;
   prop.innerHTML = `<label class="wed-num"><span>種類</span><select class="g-sel" id="wp-w">${names.map((n, w) => `<option value="${w}" ${w === m.w ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
@@ -323,7 +352,7 @@ function wePointerMove(e) {
   const d = WE.drag;
   if (!d) {   // 放置模式：游標下顯示預覽
     if (WE.place >= 0) {
-      const h = weRayAt(e, [WE.hullMesh]); WE.ghost.visible = !!h;
+      const h = !WE.loading && weRayAt(e, [WE.hullMesh]); WE.ghost.visible = !!h;
       if (h) { const W = getModel(WE.hk[0] + 'w' + WE.place); WE.ghost.geometry = W.lods[1]; WE.ghost.material = W.mat; const same = weMounts().filter((m) => m.w === WE.place); setMountObj(WE.ghost, { p: [h.point.x, h.point.y, h.point.z], r: 0, t: tiltOf(h), s: same.length ? same[0].s : WEAPON_DEF_S[WE.place] }); }
     } else WE.cv.style.cursor = weRayAt(e, WE.wGroup.children) ? 'pointer' : 'grab';
     return;
@@ -388,7 +417,7 @@ function weLoop() {
 // 2D 預覽：原本的船體貼圖＋這裡算出的武器疊圖
 function weDraw2DSoon() { clearTimeout(WE.t2); WE.t2 = setTimeout(weDraw2D, 60); }
 function weDraw2D() {
-  if (!WE.open || !WE.shipImg.complete) return;
+  if (!WE.open || !WE.shipImg.complete || !ATLAS_CAL[WE.hk]) return;
   const hk = WE.hk, fac = facOfKey(hk), t = +hk[1], [sx, sy] = atlasXY(fac, t, 0);
   renderWeaponCells(WE.r, WE.rt2, Array.from({ length: 8 }, (_, d) => ({ hk, d, x: d * 256, y: 0 })));
   const px = new Uint8Array(2048 * 192 * 4); WE.r.readRenderTargetPixels(WE.rt2, 0, 0, 2048, 192, px);

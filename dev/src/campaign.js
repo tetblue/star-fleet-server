@@ -156,11 +156,13 @@ const RAND_SIZES = [
 ];
 const RAND_DIFF = [{ name: '較弱', off: -2 }, { name: '相當', off: 0 }, { name: '較強', off: 2 }, { name: '隨機', off: null }];
 const RAND_TERR = [{ name: '無', st: -1 }, { name: '少', st: 0 }, { name: '多', st: 14 }, { name: '隨機', st: null }];
+// 敵軍外觀：fac＝陣營編號（null＝對立的帝國／聯盟，'rand'＝從非人類正規軍的五個陣營隨機挑）；只換外觀，戰力規則不變
+const RAND_LOOK = [{ name: '對立陣營', fac: null }, { name: '傭兵', fac: 2 }, { name: '機械改造人類', fac: 3 }, { name: '機械智慧族', fac: 4 }, { name: '蟲族感染人類', fac: 5 }, { name: '蟲族', fac: 6 }, { name: '隨機', fac: 'rand' }];
 const randSeed = () => ((Math.random() * 1e9) >>> 0) || 1;
 function randOpts() {
   let o = null; try { o = JSON.parse(STORE.getItem(RAND_STORE) || 'null'); } catch (e) { o = null; }
-  o = Object.assign({ size: 1, diff: 1, terr: 3, seed: 0 }, o || {});
-  if (!RAND_SIZES[o.size]) o.size = 1; if (!RAND_DIFF[o.diff]) o.diff = 1; if (!RAND_TERR[o.terr]) o.terr = 3;
+  o = Object.assign({ size: 1, diff: 1, terr: 3, look: 0, seed: 0 }, o || {});
+  if (!RAND_SIZES[o.size]) o.size = 1; if (!RAND_DIFF[o.diff]) o.diff = 1; if (!RAND_TERR[o.terr]) o.terr = 3; if (!RAND_LOOK[o.look]) o.look = 0;
   if (!o.seed) o.seed = randSeed();
   return o;
 }
@@ -173,6 +175,8 @@ function randStage(o) {
     timeLimit: S.time, budget: S.budget, maxFleets: S.maxFleets, level: 1, seed: campHash(o.seed, o.size, o.diff, o.terr, 9) % 100000,
     terrain: st < 0 ? [] : campTerrain(R, st), enemy: [], events: [], intel: { accuracy: 0.8, hide: [] },
   };
+  const lk = RAND_LOOK[o.look].fac, L = mulberry32(campHash(o.seed, 7));
+  if (lk === 'rand') sc.enemyFac = 2 + Math.floor(L() * 5); else if (lk != null) sc.enemyFac = lk;
   return sc;
 }
 // 編成沿用上一場（指揮官、陣型、機庫）；預算不同時兵力等比例縮放
@@ -205,6 +209,7 @@ function showRandom() {
         <dl class="kv rd-opts"><dt>規模</dt><dd>${seg('size', RAND_SIZES)}<div class="g-dim">預算 ${fmtN(S.budget)} 點・最多 ${S.maxFleets} 支艦隊・${Math.round(S.time / 60)} 分鐘</div></dd>
         <dt>敵軍強度</dt><dd>${seg('diff', RAND_DIFF)}<div class="g-dim">依出擊指揮官的平均等級（目前 Lv ${avg}）：敵軍 ${D.off == null ? `Lv ${Math.max(1, avg - 3)}～${avg + 3} 隨機` : `Lv ${Math.max(1, avg + D.off)}`}。等級越高，敵方技能越多、AI 越會打、兵力越多</div></dd>
         <dt>地形</dt><dd>${seg('terr', RAND_TERR)}<div class="g-dim">星雲、小行星帶、巨大小行星隨機放在戰場中段</div></dd>
+        <dt>敵軍外觀</dt><dd>${seg('look', RAND_LOOK)}<div class="g-dim">只換敵軍艦船的外觀與顏色，戰力規則不變${sc.enemyFac != null ? `・這一場：<b class="g-${FACTION_CLS[sc.enemyFac]}">${FACTION_NAME[sc.enemyFac]}</b>` : ''}</div></dd>
         <dt>勝利條件</dt><dd>殲滅敵軍，或使敵軍損失超過 ${Math.round((1 - ROUT_AT) * 100)}%（潰走）</dd><dt>敗北條件</dt><dd>我軍損失超過 ${Math.round((1 - ROUT_AT) * 100)}%</dd>
         <dt>敵軍編成</dt><dd><span class="unk">不明：部署時才會偵測到</span></dd>
         <dt>獎勵</dt><dd>指揮官經驗、功勳（規模越大、敵軍等級越高越多）</dd></dl></div>

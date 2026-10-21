@@ -7,25 +7,29 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 // ───────────────────────── 常數 ─────────────────────────
-const SHIP_ATLAS = window.__ASSETS.ships;   // 4096×2048, 每格 256×192：上半 16 cols (帝國、聯盟 × 8 方向) × 5 rows (艦種)；下半（y≥1024）傭兵 8 cols × 5 rows
+const SHIP_ATLAS = window.__ASSETS.ships;   // 4096×4096, 每格 256×192：每 1024 px 一段、每段左右各放一個陣營（8 方向 × 5 艦種）；陣營 f 在 x＝(f%2)×2048、y＝⌊f/2⌋×1024（見 atlasXY）
 const FX_ATLAS = window.__ASSETS.fx;        // 2048×2304, 16 frames × 18 rows (0-1 爆炸, 2-9 帝國護盾, 10-17 聯盟護盾)
-const FTR_ATLAS = window.__ASSETS.fighters; // 2048×256, 每格 128×128：上排 16 cols (帝國、聯盟 × 8 方向)；下排傭兵 8 cols
+const FTR_ATLAS = window.__ASSETS.fighters; // 2048×512, 每格 128×128：每排左右各放一個陣營（8 方向）；陣營 f 在第 ⌊f/2⌋ 排、x＝(f%2)×1024
 let VW = innerWidth, VH = innerHeight;   // 戰場畫面大小（戰術面板會讓出空間）
 function tacDockSize() { if (typeof TAC === 'undefined' || !TAC.open || BR.on) return { w: 0, h: 0 }; return { w: 0, h: Math.round(Math.min(760, Math.max(300, innerHeight * (innerWidth >= 760 ? 0.58 : 0.6)))) }; }   // 戰術面板固定在下方
 const ELEV = 30 * Math.PI / 180;
 const BR = { on: false };
-// 陣營（外觀）與模擬的「邊」分開：邊 0＝玩家（畫面下方）、邊 1＝對手；SIDE_FAC[邊]＝那一邊用哪個陣營（0 帝國、1 聯盟、2 傭兵）
+// 陣營（外觀）與模擬的「邊」分開：邊 0＝玩家（畫面下方）、邊 1＝對手；SIDE_FAC[邊]＝那一邊用哪個陣營（0 帝國、1 聯盟、2 傭兵、3 機械改造人類、4 機械智慧族、5 蟲族感染人類、6 蟲族；玩家只能是 0、1）
 // 單一艦隊也可以有自己的外觀（fleet.fac，例如友軍傭兵、傭兵支援）；畫船、光束、飛彈、艦載機都用 sqFac／shipFac
 let SIDE_FAC = [0, 1];
 // 作戰介面跟著玩家的陣營換主題（顏色、紋飾）
-function applyPlayerTheme() { const sd = typeof cmdSide === 'number' ? cmdSide : 0, f = SIDE_FAC[sd] || 0; document.body.classList.toggle('pf-0', f !== 1); document.body.classList.toggle('pf-1', f === 1); document.body.classList.toggle('ef-2', SIDE_FAC[1 - sd] === 2); }   // 傭兵不是玩家陣營：對手是傭兵時敵方顏色（--ec）改成傭兵色
-const FAC_KEY = ['e', 'a', 'm'];   // 模型鍵的字首
+function applyPlayerTheme() {   // 傭兵等不是玩家陣營：對手是這些陣營時，敵方顏色（--ec）改成那個陣營的顏色
+  const sd = typeof cmdSide === 'number' ? cmdSide : 0, f = SIDE_FAC[sd] || 0, ef = SIDE_FAC[1 - sd];
+  document.body.classList.toggle('pf-0', f !== 1); document.body.classList.toggle('pf-1', f === 1);
+  if (ef >= 2 && FACTION[ef]) document.body.style.setProperty('--ec', FACTION[ef].ui); else document.body.style.removeProperty('--ec');
+}
+const FAC_KEY = ['e', 'a', 'm', 'c', 'r', 'i', 'b'];   // 模型鍵的字首（依陣營編號）
 const sqFac = (sq) => (sq.fleet && sq.fleet.fac != null ? sq.fleet.fac : SIDE_FAC[sq.side]);
 const shipFac = (i) => sqFac(squadrons[ships.sq[i]]);
 const fxFac = (side) => (SIDE_FAC[side] === 1 ? 1 : 0);   // 爆炸、護盾特效只有帝國、聯盟兩套：傭兵用帝國的
 function applySideNames() {
   document.querySelectorAll('[data-fn]').forEach((el) => { const f = SIDE_FAC[+el.dataset.fn]; el.textContent = el.dataset.short ? FACTION[f].name[0] : FACTION[f].name; });
-  document.querySelectorAll('[data-fs]').forEach((el) => { el.classList.toggle('e', SIDE_FAC[+el.dataset.fs] === 0); el.classList.toggle('a', SIDE_FAC[+el.dataset.fs] === 1); el.classList.toggle('m', SIDE_FAC[+el.dataset.fs] === 2); });
+  document.querySelectorAll('[data-fs]').forEach((el) => { const f = SIDE_FAC[+el.dataset.fs]; FAC_KEY.forEach((k, i) => el.classList.toggle(k, f === i)); });
 }   // 指揮官視角狀態（內容在 bridge.js）
 const CAM_DIR = new THREE.Vector3(0, Math.sin(ELEV), Math.cos(ELEV)); // 目標點 → 相機
 const TYPE_W = [6.0, 5.6, 4.6, 3.8, 3.2, 5.0];     // 航母 戰列 巡洋 驅逐 護衛 補給（貼圖寬，世界單位）
@@ -36,7 +40,13 @@ const FACTION = [
   { name: '帝國軍', beam: new THREE.Color(1.0, 0.62, 0.22), glow: new THREE.Color(1.0, 0.45, 0.18), ui: '#f2b35a' },
   { name: '聯盟軍', beam: new THREE.Color(0.45, 0.80, 1.0), glow: new THREE.Color(0.35, 0.65, 1.0), ui: '#7cc4ff' },
   { name: '灰鴉傭兵團', beam: new THREE.Color(1.0, 0.36, 0.28), glow: new THREE.Color(1.0, 0.3, 0.22), ui: '#e2735a' },
+  { name: '機械改造人類', beam: new THREE.Color(1.0, 0.30, 0.42), glow: new THREE.Color(1.0, 0.22, 0.35), ui: '#ff6a7e' },
+  { name: '機械智慧族', beam: new THREE.Color(0.30, 1.0, 0.86), glow: new THREE.Color(0.2, 0.95, 0.8), ui: '#4ff0d8' },
+  { name: '蟲族感染人類', beam: new THREE.Color(0.80, 0.42, 1.0), glow: new THREE.Color(0.72, 0.3, 1.0), ui: '#c47cff' },
+  { name: '蟲族', beam: new THREE.Color(0.62, 1.0, 0.30), glow: new THREE.Color(0.55, 0.95, 0.2), ui: '#9be35a' },
 ];
+const FAC_N = FACTION.length;
+const facRGBA = (f, al) => { const h = (FACTION[f] || FACTION[0]).ui; return 'rgba(' + [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)).join(',') + ',' + al + ')'; };   // 陣營顏色＋透明度（畫布用）
 
 let simAlt = 1;
 const opts = {
@@ -191,12 +201,12 @@ const shipMat = new THREE.ShaderMaterial({
       clip.xy += position.xy * sizePx * 2. / uRes * clip.w;
       gl_Position = clip;
       float dir = dirIndex(hShip);
-      bool merc = aInfo.z > 1.5;   // 傭兵在貼圖的下半（y≥1024）
-      float col = merc ? dir : aInfo.z * 8. + dir;
+      float fac = floor(aInfo.z + 0.5);   // 陣營 f：x＝(f%2)×8 格、y＝⌊f/2⌋×1024 px（見 atlasXY）
+      float col = mod(fac, 2.) * 8. + dir;
       float row = floor(aInfo.y);
       vAlt = fract(aInfo.y);
       vec2 uv = position.xy + 0.5;
-      vUv = vec2((col + uv.x) / 16., 1. - ((merc ? 1024. : 0.) + (row + 1. - uv.y) * 192.) / 2048.);
+      vUv = vec2((col + uv.x) / 16., 1. - (floor(fac / 2.) * 1024. + (row + 1. - uv.y) * 192.) / 4096.);
       // 景深霧：越遠（畫面越上方、高度越低）越暗越藍
       float depth = dot(p, -uCamDir);
       vFog = uFog * smoothstep(-260., 620., depth) * 0.75;
@@ -225,7 +235,7 @@ const shipMat = new THREE.ShaderMaterial({
 });
 
 const glowMat = new THREE.ShaderMaterial({
-  uniforms: { ...U, u3D: { value: 0 }, uColA: { value: FACTION[0].glow }, uColB: { value: FACTION[1].glow }, uColC: { value: FACTION[2].glow } },
+  uniforms: { ...U, u3D: { value: 0 }, uFac: { value: FACTION.map((f) => f.glow) } },
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   vertexShader: COMMON_GLSL + /* glsl */`
     uniform float uGlowOn; uniform float u3D;
@@ -254,13 +264,13 @@ const glowMat = new THREE.ShaderMaterial({
       vFac = aInfo.z;
     }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uColA; uniform vec3 uColB; uniform vec3 uColC;
+    uniform vec3 uFac[7]; vec3 facCol(float f){ return uFac[int(clamp(floor(f + 0.5), 0., 6.))]; }
     varying vec2 vUv; varying float vI; varying float vFac;
     void main(){
       float d = length(vUv);
       float g = exp(-d * d * 7.) ;
       float core = exp(-d * d * 40.);
-      vec3 c = ((vFac < 0.5 ? uColA : vFac < 1.5 ? uColB : uColC));
+      vec3 c = facCol(vFac);
       gl_FragColor = vec4((c * g * 0.75 + vec3(1.) * core * 0.6) * vI, 1.);
     }`,
 });
@@ -279,7 +289,7 @@ const beamGeo = new THREE.InstancedBufferGeometry();
   beamGeo.instanceCount = BEAM_MAX;
 }
 const beamMat = new THREE.ShaderMaterial({
-  uniforms: { ...U, uColA: { value: FACTION[0].beam }, uColB: { value: FACTION[1].beam }, uColC: { value: FACTION[2].beam } },
+  uniforms: { ...U, uFac: { value: FACTION.map((f) => f.beam) } },
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   vertexShader: /* glsl */`
     uniform float uTime; uniform vec2 uRes;
@@ -309,14 +319,14 @@ const beamMat = new THREE.ShaderMaterial({
       vFac = floor(aT.z); vFade *= fract(aT.z);
     }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uColA; uniform vec3 uColB; uniform vec3 uColC;
+    uniform vec3 uFac[7]; vec3 facCol(float f){ return uFac[int(clamp(floor(f + 0.5), 0., 6.))]; }
     varying vec2 vUv; varying float vFade; varying float vFac;
     void main(){
       float y = abs(vUv.y);
       float glow = exp(-y * y * 9.);
       float core = exp(-y * y * 90.);
       float along = pow(vUv.x, 1.6);
-      vec3 c = (vFac < 0.5 ? uColA : vFac < 1.5 ? uColB : uColC);
+      vec3 c = facCol(vFac);
       vec3 col = (c * glow * 0.55 + vec3(1.0) * core * 1.05) * along * vFade;
       gl_FragColor = vec4(col, 1.);
     }`,
@@ -2446,9 +2456,9 @@ const MIS_GLSL = /* glsl */`
   attribute vec3 aM0; attribute vec3 aM1; attribute vec3 aM2; attribute vec4 aMT;
   vec3 bez(float u){ float a = 1. - u; return a * a * aM0 + 2. * a * u * aM1 + u * u * aM2; }
 `;
-const MIS_COL = [new THREE.Color(1.0, 0.42, 0.14), new THREE.Color(0.55, 0.85, 1.0), new THREE.Color(1.0, 0.3, 0.3)];
+const MIS_COL = [new THREE.Color(1.0, 0.42, 0.14), new THREE.Color(0.55, 0.85, 1.0), new THREE.Color(1.0, 0.3, 0.3), new THREE.Color(1.0, 0.32, 0.45), new THREE.Color(0.35, 1.0, 0.88), new THREE.Color(0.78, 0.45, 1.0), new THREE.Color(0.6, 1.0, 0.3)];
 const misTrailMat = new THREE.ShaderMaterial({
-  uniforms: { uTime: U.uTime, uRes: U.uRes, uColA: { value: MIS_COL[0] }, uColB: { value: MIS_COL[1] }, uColC: { value: MIS_COL[2] } },
+  uniforms: { uTime: U.uTime, uRes: U.uRes, uFac: { value: MIS_COL } },
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   vertexShader: MIS_GLSL + /* glsl */`
     varying float vS; varying float vY; varying float vI; varying float vFac;
@@ -2473,17 +2483,17 @@ const misTrailMat = new THREE.ShaderMaterial({
       vS = s; vY = position.y * 2.; vI = 1. - k; vFac = floor(aMT.z);
     }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uColA; uniform vec3 uColB; uniform vec3 uColC;
+    uniform vec3 uFac[7]; vec3 facCol(float f){ return uFac[int(clamp(floor(f + 0.5), 0., 6.))]; }
     varying float vS; varying float vY; varying float vI; varying float vFac;
     void main(){
       float y = abs(vY);
       float glow = exp(-y * y * 6.), core = exp(-y * y * 50.);
-      vec3 c = (vFac < 0.5 ? uColA : vFac < 1.5 ? uColB : uColC);
+      vec3 c = facCol(vFac);
       gl_FragColor = vec4((c * glow * 0.55 + vec3(1.) * core * 0.45 * vS) * pow(vS, 1.8) * vI, 1.);
     }`,
 });
 const misHeadMat = new THREE.ShaderMaterial({
-  uniforms: { uTime: U.uTime, uRes: U.uRes, uColA: { value: MIS_COL[0] }, uColB: { value: MIS_COL[1] }, uColC: { value: MIS_COL[2] } },
+  uniforms: { uTime: U.uTime, uRes: U.uRes, uFac: { value: MIS_COL } },
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   vertexShader: MIS_GLSL + /* glsl */`
     varying vec2 vUv; varying float vFac; varying float vI;
@@ -2500,11 +2510,11 @@ const misHeadMat = new THREE.ShaderMaterial({
       vI = 0.8 + 0.2 * sin(uTime * 40. + aMT.x * 97.);
     }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uColA; uniform vec3 uColB; uniform vec3 uColC;
+    uniform vec3 uFac[7]; vec3 facCol(float f){ return uFac[int(clamp(floor(f + 0.5), 0., 6.))]; }
     varying vec2 vUv; varying float vFac; varying float vI;
     void main(){
       float d = length(vUv);
-      vec3 c = (vFac < 0.5 ? uColA : vFac < 1.5 ? uColB : uColC);
+      vec3 c = facCol(vFac);
       gl_FragColor = vec4((c * exp(-d * d * 6.) * 0.7 + vec3(1.) * exp(-d * d * 30.) * 0.9) * vI, 1.);
     }`,
 });
@@ -2690,7 +2700,7 @@ const ftrSpriteMat = new THREE.ShaderMaterial({
       float h = atan(aFV.x, aFV.z);
       float dir = mod(floor(-h / (PI / 4.) + 0.5) + 16., 8.);
       vec2 uv = position.xy + 0.5;
-      vUv = aFI.x > 1.5 ? vec2((dir + uv.x) / 16., uv.y * 0.5) : vec2((aFI.x * 8. + dir + uv.x) / 16., 0.5 + uv.y * 0.5);   // 傭兵在下排
+      float fac = floor(aFI.x + 0.5); vUv = vec2((mod(fac, 2.) * 8. + dir + uv.x) / 16., 1. - (floor(fac / 2.) + 1. - uv.y) * 0.25);   // 陣營 f：第 ⌊f/2⌋ 排（共 4 排）、左右各一個陣營
       vDie = die;
       vFog = uFog * smoothstep(-260., 620., dot(aFP, -uCamDir)) * 0.6;
     }`,
@@ -2704,9 +2714,9 @@ const ftrSpriteMat = new THREE.ShaderMaterial({
       gl_FragColor = vec4(col, 1.);
     }`,
 });
-const FTR_COL = [new THREE.Color(1.0, 0.55, 0.25), new THREE.Color(0.5, 0.8, 1.0), new THREE.Color(1.0, 0.4, 0.3)];
+const FTR_COL = [new THREE.Color(1.0, 0.55, 0.25), new THREE.Color(0.5, 0.8, 1.0), new THREE.Color(1.0, 0.4, 0.3), new THREE.Color(1.0, 0.4, 0.5), new THREE.Color(0.4, 1.0, 0.9), new THREE.Color(0.8, 0.5, 1.0), new THREE.Color(0.65, 1.0, 0.35)];
 const ftrTrailMat = new THREE.ShaderMaterial({
-  uniforms: { uTime: U.uTime, uRes: U.uRes, uCamDir: U.uCamDir, uFog: U.uFog, uColA: { value: FTR_COL[0] }, uColB: { value: FTR_COL[1] }, uColC: { value: FTR_COL[2] } },
+  uniforms: { uTime: U.uTime, uRes: U.uRes, uCamDir: U.uCamDir, uFog: U.uFog, uFac: { value: FTR_COL } },
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   vertexShader: FTR_GLSL + /* glsl */`
     varying vec2 vUv; varying float vFac;
@@ -2724,13 +2734,13 @@ const ftrTrailMat = new THREE.ShaderMaterial({
       vec2 s = mix(st, sh, t) + vec2(-dn.y, dn.x) * position.y * w + dn * position.x * w * 0.6;
       c.xy = s / (uRes * 0.5) * c.w;
       gl_Position = c;
-      vUv = vec2(t, position.y * 2.); vFac = kind > 0.5 ? 3. : aFI.x;   // 3＝維修機（綠色尾焰）；0～2＝陣營
+      vUv = vec2(t, position.y * 2.); vFac = kind > 0.5 ? 9. : aFI.x;   // 9＝維修機（綠色尾焰）；0～6＝陣營
     }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uColA; uniform vec3 uColB; uniform vec3 uColC; varying vec2 vUv; varying float vFac;
+    uniform vec3 uFac[7]; vec3 facCol(float f){ return uFac[int(clamp(floor(f + 0.5), 0., 6.))]; } varying vec2 vUv; varying float vFac;
     void main(){
       float y = abs(vUv.y);
-      vec3 c = vFac > 2.5 ? vec3(0.45, 1.0, 0.6) : (vFac < 0.5 ? uColA : vFac < 1.5 ? uColB : uColC);
+      vec3 c = vFac > 8.5 ? vec3(0.45, 1.0, 0.6) : facCol(vFac);
       gl_FragColor = vec4((c * exp(-y * y * 6.) * 0.6 + vec3(1.) * exp(-y * y * 40.) * 0.5 * vUv.x) * pow(vUv.x, 1.3), 1.);
     }`,
 });
@@ -3614,20 +3624,39 @@ function b64ToBuf(b64) { const s = atob(b64); const u = new Uint8Array(s.length)
 const MODEL_CACHE = {};
 // 模型由伺服器的模型資料夾提供：近距離（第 0 級）直接用 GLB 原檔（含原始貼圖），遠景各級用伺服器算好的簡化網格
 const MODEL_SRC = {};   // key → { kind, geo0, tex, lods: [BufferGeometry…] }
-const MODEL_LOAD = { done: false, err: [] };
+const MODEL_LOAD = { done: false, err: [], man: null, pending: {}, loader: null };
+// 太空站、遊戲裡還沒有的風格（只有武器配置會用到）：開場不下載，用到才用 ensureModels 載入
+const modelLazy = (key, m) => m.kind === 'station' || !FAC_KEY.includes(key[0]);
 async function loadAllModels(onProgress = () => {}) {
-  const man = await (await fetch('api/models', { cache: 'no-cache' })).json();
-  const keys = Object.keys(man.models), total = keys.reduce((a, k) => a + man.models[k].bytes + man.models[k].lodBytes, 0);
+  const man = MODEL_LOAD.man = await (await fetch('api/models', { cache: 'no-cache' })).json();
+  const keys = Object.keys(man.models).filter((k) => !modelLazy(k, man.models[k])), total = keys.reduce((a, k) => a + man.models[k].bytes + man.models[k].lodBytes, 0);
   let got = 0, n = 0;
-  const loader = new GLTFLoader();
+  const loader = MODEL_LOAD.loader = new GLTFLoader();
+  const one = async (key) => {
+    await loadOneModel(key, man.models[key], loader, (b) => { got += b; onProgress(got / total, n, keys.length); });
+    n++; onProgress(got / total, n, keys.length);
+  };
+  const queue = keys.slice(), workers = Array.from({ length: 4 }, async () => { while (queue.length) await one(queue.shift()); });
+  await Promise.all(workers);
+  MODEL_LOAD.done = true;
+  return MODEL_LOAD;
+}
+function ensureModels(keys) {   // 晚載入的模型；已經有、或伺服器沒有的鍵直接略過
+  const man = MODEL_LOAD.man; if (!man) return Promise.resolve();
+  if (!MODEL_LOAD.loader) MODEL_LOAD.loader = new GLTFLoader();
+  return Promise.all(keys.map((k) => {
+    if (MODEL_SRC[k] || !man.models[k]) return null;
+    return MODEL_LOAD.pending[k] || (MODEL_LOAD.pending[k] = loadOneModel(k, man.models[k], MODEL_LOAD.loader, () => {}).finally(() => { delete MODEL_LOAD.pending[k]; }));
+  }));
+}
+async function loadOneModel(key, m, loader, onBytes) {
   const fetchBytes = async (url) => {   // 邊下載邊回報進度
     const r = await fetch(url, { cache: 'no-cache' }); if (!r.ok) throw new Error(`${url}：HTTP ${r.status}`);
     const rd = r.body.getReader(), parts = []; let len = 0;
-    for (;;) { const { done, value } = await rd.read(); if (done) break; parts.push(value); len += value.length; got += value.length; onProgress(got / total, n, keys.length); }
+    for (;;) { const { done, value } = await rd.read(); if (done) break; parts.push(value); len += value.length; onBytes(value.length); }
     const out = new Uint8Array(len); let o = 0; for (const p of parts) { out.set(p, o); o += p.length; } return out.buffer;
   };
-  const one = async (key) => {
-    const m = man.models[key];
+  {
     try {
       const [glb, lodBin] = await Promise.all([fetchBytes(m.glb), fetchBytes(m.lod)]);
       const gltf = await loader.parseAsync(glb, '');
@@ -3653,12 +3682,7 @@ async function loadAllModels(onProgress = () => {}) {
       for (const g of lods) R3.geomBytes += g.attributes.position.count * 32 + (g.index ? g.index.count * 4 : 0);
       MODEL_SRC[key] = { kind: m.kind, tex, lods, min: m.min, max: m.max, name: m.name };
     } catch (e) { MODEL_LOAD.err.push(`${key}：${e.message}`); console.warn('模型載入失敗', key, e); }
-    n++; onProgress(got / total, n, keys.length);
-  };
-  const queue = keys.slice(), workers = Array.from({ length: 4 }, async () => { while (queue.length) await one(queue.shift()); });
-  await Promise.all(workers);
-  MODEL_LOAD.done = true;
-  return MODEL_LOAD;
+  }
 }
 const NO_MODEL_TEX = (() => { const t = new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1); t.needsUpdate = true; return t; })();
 function getModel(key) {
