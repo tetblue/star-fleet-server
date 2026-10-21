@@ -181,6 +181,8 @@ const FACTION_NAME = ['帝國軍', '聯盟軍', '灰鴉傭兵團', '機械改造
 const FACTION_CLS = ['emp', 'all', 'mer', 'cyb', 'mai', 'inf', 'bug'];
 // 指揮官能不能替這個陣營出擊（傭兵兩邊都行）
 const canLead = (c, faction) => (c.faction || 0) === faction || (c.faction === 2 && faction < 2);
+// 指揮官只帶自己風格的艦隊：傭兵指揮官替帝國／聯盟出擊時，艦隊是灰鴉的船、用傭兵的種族特性（setup 的 fleet.fac）
+const ownFac = (c, sideFac) => (c && c.faction != null && c.faction !== sideFac ? { fac: c.faction } : {});
 const TRAIT_NAME = { dmg: '攻擊', shield: '防禦', speed: '機動' };
 // 特性對前排輪替的影響（見 ROTATE_RULE）
 const TRAIT_ROT = {
@@ -224,7 +226,45 @@ const TALENTS = [
   { id: 's_focus', br: 'cmd', name: '集中火力', kind: 'skill', skill: 'focus', cost: 2, req: 2 },
   { id: 's_jam', br: 'cmd', name: '干擾', kind: 'skill', skill: 'jam', cost: 2, req: 4 },
   { id: 's_reinf', br: 'cmd', name: '呼叫增援', kind: 'skill', skill: 'reinforce', cost: 2, req: 5 },
+  { id: 'fac', br: 'fac', name: '種族專屬', max: 2, cost: 1, desc: () => '依指揮官的陣營而不同（見 FAC_TALENT）' },   // 每個陣營各一格專屬天賦；名稱、效果用 talFor 取
 ];
+// ── 種族特性：跟著指揮官的陣營走（指揮官只帶自己風格的艦隊：fleet.fac＝指揮官的陣營）──
+//   name／desc：特性說明（手冊、指揮官畫面）；brief／counter：戰前簡報（不寫數字，只寫特色與建議的剋制方式）
+//   還沒做的陣營是 null：簡報、畫面都略過
+const FAC_TRAIT = [
+  { name: '重砲齊射', desc: '同一艘敵艦在短時間內連續被主砲打中時，後面的主砲不會被護盾偏折，而且傷害提高。配合齊射命令最有效。',
+    brief: '帝國艦隊擅長正面集中砲擊，接連命中的主砲能撕開護盾。', counter: '分散陣型、從側翼切入，避免正面長時間對射；受損的前排要及早輪替。' },
+  { name: '資料鏈', desc: '友軍剛打中的敵分艦隊，其他分艦隊打它更準；被干擾時命中率下降只有一半；飛彈的目標在命中前被擊沉，會轉向附近的敵艦。',
+    brief: '聯盟艦隊情報共享、集火精準，飛彈會自動轉向新目標，干擾對它效果有限。', counter: '強化防空攔截飛彈，利用星雲、小行星遮蔽，從多個方向進攻讓它難以集火。' },
+  { name: '戰場回收', desc: '附近有船被擊沉時（敵我都算），範圍內的傭兵艦會用殘骸修補船體並累積零件；零件夠了就把艦隊裡沉沒的船重新造出來（新造的船最大耐久只有一半）。',
+    brief: '傭兵擅長消耗戰，會從殘骸回收零件修補，甚至把沉沒的戰艦重新造出來。', counter: '速戰速決，集中火力一口氣擊潰整支分艦隊；避免在它附近長時間纏鬥。' },
+  null, null, null, null,
+];
+// 各陣營的專屬天賦（天賦樹「種族」那一格，id 'fac'）
+const FAC_TALENT = [
+  { name: '齊射指揮', max: 2, desc: (r) => `重砲齊射的判定時間 +${r * 25}%、額外傷害 +${r * 5}%` },
+  { name: '智慧導引', max: 2, desc: (r) => `飛彈命中率 +${r * 5}%；飛彈轉向的搜尋範圍 +${r * 30}%` },
+  { name: '拆解專家', max: 2, desc: (r) => `戰場回收的範圍 +${r * 20}%、修補量與零件 +${r * 20}%` },
+  null, null, null, null,
+];
+// 陣營讓某些天賦沒有作用時，同一格換成別的天賦（名稱、說明、效果都換；點數、階數不變）：FAC_TAL_SWAP[陣營][天賦 id]＝{ name, desc }
+const FAC_TAL_SWAP = [{}, {}, {}, {}, {}, {}, {}];
+// 依陣營取天賦的實際名稱與說明
+function talFor(t, fac) {
+  const f = fac || 0;
+  if (t.id === 'fac') { const x = FAC_TALENT[f]; return x ? { ...t, ...x } : { ...t, name: '種族專屬（未開放）', max: 0, desc: () => '這個陣營的專屬天賦還沒開放' }; }
+  const s = FAC_TAL_SWAP[f] && FAC_TAL_SWAP[f][t.id];
+  return s ? { ...t, ...s } : t;
+}
+// 種族特性的數值（戰鬥規則）
+//   VOLLEY（帝國・重砲齊射）：同一艘敵艦上次被帝國主砲打中後 win 秒內再被打中＝齊射命中：不吃護盾偏折、傷害 ×(1＋bonus)；天賦每階 win ×(1＋winTal)、bonus ＋bonusTal
+//   LINK（聯盟・資料鏈）：敵分艦隊 win 秒內被別支聯盟分艦隊打中過 → 命中率 ×acc；被干擾時命中率的懲罰 ×jam；飛彈目標沉了 → 在落點 r 內找新目標（天賦每階 r ×(1＋rTal)、飛彈命中率 ＋mslTal）
+//   SALVAGE（傭兵・戰場回收）：船沉在傭兵分艦隊中心 r 內 → 那支分艦隊每艘船回復最大耐久的 heal（每支分艦隊 cd 秒最多一次）；
+//     艦隊累積零件＝沉船造價 × parts；每 every 秒檢查一次：零件夠就把艦隊裡沉沒的船（還有存活艦的分艦隊、旗艦除外）重新造出來，最大耐久 ×cap；
+//     每場最多造開戰艘數 × maxBuild 艘；天賦每階 r、heal、parts ×(1＋tal)
+const VOLLEY_RULE = { win: 1.3, bonus: 0.12, winTal: 0.25, bonusTal: 0.05 };
+const LINK_RULE = { win: 3, acc: 1.2, jam: 0.5, r: 80, rTal: 0.3, mslTal: 0.05 };
+const SALVAGE_RULE = { r: 200, heal: 0.015, cd: 8, parts: 0.3, every: 6, cap: 0.5, maxBuild: 0.04, tal: 0.2 };
 const TALENT_BY_ID = Object.fromEntries(TALENTS.map((t) => [t.id, t]));
 function talentRank(c, id) { return (c && c.tal && c.tal[id]) || 0; }
 // 指揮官能用的技能＝固有技能＋天賦學會的

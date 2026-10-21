@@ -142,11 +142,11 @@ function mpSideFleets(lo, side, sc, preview) {
   lo.fleets.forEach((f, k) => {
     const c = COMMANDERS.find((o) => o.id === f.cmdr) || cmdrsOf(lo.faction || 0)[0] || COMMANDERS[0], P = M(f);
     const skills = commanderSkills(c.skills, cmdrTal(c.id)); if (!skills.includes('reinforce')) skills.push('reinforce');
-    out.push({ side, name: `第${'一二三四'[k]}艦隊`, ax: P.x, az: P.z, ay: f.y || 0, h: P.h, formation: f.formation, orderly: !!f.orderly, layers: f.layers || 1, comp: f.comp.slice(), hangar: (f.hangar || HANGAR_DEFAULT).slice(),
+    out.push({ side, ...ownFac(c, lo.faction || 0), name: `第${'一二三四'[k]}艦隊`, ax: P.x, az: P.z, ay: f.y || 0, h: P.h, formation: f.formation, orderly: !!f.orderly, layers: f.layers || 1, comp: f.comp.slice(), hangar: (f.hangar || HANGAR_DEFAULT).slice(),
       commander: { id: c.id, name: c.name, title: c.title, trait: c.trait, level: cmdrLevel(c.id), tal: { ...cmdrTal(c.id) }, skills } });
   });
   supplyList(lo).forEach((S, i) => { if (sumA(S.comp) > 0) { const P = M(S); out.push(supplySetup(side, { ...S, x: P.x, z: P.z, h: P.h }, S.follow >= 0 && S.follow < lo.fleets.length ? S.follow : -1, supplyName(i))); } });
-  if (!preview) lo.fleets.forEach((f, k) => out.push({ side, name: `${out[k].name}增援`, ax: 0, az: side ? MAP_BOUNDS.z0 - 900 : MAP_BOUNDS.z1 + 900, ay: 0, h: side ? 0 : Math.PI,
+  if (!preview) lo.fleets.forEach((f, k) => out.push({ side, ...(out[k].fac != null ? { fac: out[k].fac } : {}), name: `${out[k].name}增援`, ax: 0, az: side ? MAP_BOUNDS.z0 - 900 : MAP_BOUNDS.z1 + 900, ay: 0, h: side ? 0 : Math.PI,
     formation: f.formation, comp: reinforceComp(f.comp, sc.budget), commander: null, reserve: true, activateAt: null, reinfOf: k }));
   return out;
 }

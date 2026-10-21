@@ -794,7 +794,7 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
     const lay = fd.orderly ? genOrderly(fd.formation, counts, order, fd.layers || 1) : genFormation(fd.formation, counts, order, R);
     const fleet = { id: fi, side: fd.side, name: fd.name, commander: fd.commander || null, hangar: fd.hangar || null, sqs: [], reserve: !!fd.reserve, entry: fd.entry || null,
       supply: !!fd.supply, vip: !!fd.vip, fac: fd.fac != null ? fd.fac : SIDE_FAC[fd.side], ally: !!fd.ally, defectAt: fd.defectAt != null ? fd.defectAt : null, follow: fd.follow != null ? fd.follow : -1, reinfOf: fd.reinfOf != null ? fd.reinfOf : null, mercOf: fd.mercOf != null ? fd.mercOf : null, keep: fd.keep || null,
-      skills: {}, initial: total + (fd.supply ? 0 : 1), ai: fd.ai || null, activateAt: fd.activateAt != null ? fd.activateAt : null, aiS: {} };
+      skills: {}, initial: total + (fd.supply ? 0 : 1), parts: 0, built: 0, ai: fd.ai || null, activateAt: fd.activateAt != null ? fd.activateAt : null, aiS: {} };
     for (const sk of (fd.commander && fd.commander.skills) || []) {
       // 戰術熟練：每階 +1 次（fixed 的技能除外）；呼叫增援：這場有準備增援艦隊才能用
       const left = (sk === 'reinforce' && !setup.fleets.some((o) => o.reinfOf === fi)) || (sk === 'merc' && !setup.fleets.some((o) => o.mercOf === fi)) ? 0 : SKILLS[sk].uses + (SKILLS[sk].fixed ? 0 : talentRank(fd.commander, 'veteran'));
@@ -851,6 +851,8 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
     swS: new Float32Array(total), swD: new Float32Array(total), swE: new Float32Array(total), sox: new Float32Array(total), soy: new Float32Array(total), soz: new Float32Array(total),
     // 戰地維修：已經修過幾次、這次還要補多少、每秒補多少
     rpN: new Uint8Array(total), rpLeft: new Float32Array(total), rpRate: new Float32Array(total),
+    // 種族特性：最大耐久倍率（傭兵重造的船）、上次被帝國主砲打中的時間（重砲齊射）
+    hpCap: new Float32Array(total).fill(1), vT: new Float32Array(total).fill(-99),
   };
   const aLocal = new Float32Array(total * 3), aLocal2 = new Float32Array(total * 3), aInfo = new Float32Array(total * 4), aState = new Float32Array(total * 2), aScale = new Float32Array(total), aPath = new Float32Array(total * 4), aSwap = new Float32Array(total * 4), aSwapD = new Float32Array(total);
 
@@ -1971,8 +1973,9 @@ function skillActive(fleet, id) { const s = fleet && fleet.skills[id]; return !!
 //    shield 護盾容量與回充加成、shTaken 護盾受到的傷害倍率
 function fleetMods(fleet) {
   const m = { dmg: 1, shield: 0, shTaken: 1, taken: 1, speed: 1, fwd: 1, mcd: 1, aa: 0, repair: 1, ftrRegen: 1, ftrDmg: 1, morph: 1, fireCd: 1, acc: 1, ffP: 1, defl: 0,
-    rot: 'shield', rotDur: ROTATE_RULE.dur, shRegen: 1, repN: FIELD_REPAIR.n, repCap: 0 };
+    rot: 'shield', rotDur: ROTATE_RULE.dur, shRegen: 1, repN: FIELD_REPAIR.n, repCap: 0, fac: 0, facR: 0 };   // fac＝種族特性用的陣營、facR＝專屬天賦的階數
   if (!fleet) return m;
+  m.fac = fleet.fac != null ? fleet.fac : SIDE_FAC[fleet.side] || 0;
   const c = fleet.commander;
   if (c) {
     const b = c.tal ? 0.08 : traitBonus(c.trait, c.level || 1);   // 玩家：固有特性固定 +8%，其餘靠天賦；敵方：照等級
@@ -1986,6 +1989,7 @@ function fleetMods(fleet) {
       m.dmg += 0.05 * r('gunnery'); m.mcd *= 1 - 0.1 * r('missile'); m.ftrRegen *= 1 + 0.3 * r('hangar'); m.ftrDmg *= 1 + 0.1 * r('hangar');
       m.shield += 0.04 * r('shield'); m.repair *= 1 + 0.2 * r('damage'); m.aa += 0.08 * r('aa'); m.speed += 0.05 * r('engine'); m.morph *= 1 - 0.12 * r('drill');
       m.acc *= 1 + 0.05 * r('aim'); m.ffP *= 1 - 0.15 * r('aim'); m.defl = r('energy');
+      m.facR = Math.min(r('fac'), (FAC_TALENT[m.fac] || { max: 0 }).max);
     }
   }
   if (skillActive(fleet, 'wall')) { m.shTaken *= 0.6; m.taken *= 0.7; }
@@ -2032,8 +2036,10 @@ function hitChance(gk, gun, dist, target, attackerSq, ax, ay, az, bx, by, bz) {
   const vf = 1 - HIT_RULE.speedMax * Math.min(1, (tq.vel || 0) / HIT_RULE.speedRef);
   let ef = 1;
   if (inTerrain('nebula', ax, az, ay) || inTerrain('nebula', bx, bz, by)) ef *= HIT_RULE.nebula;
-  if (jam[attackerSq.side].until > U.uTime.value) ef *= HIT_RULE.jammed;
-  ef *= fleetMods(attackerSq.fleet).acc;   // 天賦：精準射擊
+  const am = attackerSq.mods || fleetMods(attackerSq.fleet), link = am.fac === 1;   // 聯盟：資料鏈
+  if (jam[attackerSq.side].until > U.uTime.value) ef *= link ? 1 - (1 - HIT_RULE.jammed) * LINK_RULE.jam : HIT_RULE.jammed;
+  if (link && tq.lkQ && tq.lkQ !== attackerSq && U.uTime.value - tq.lkT <= LINK_RULE.win) ef *= LINK_RULE.acc;   // 別支聯盟分艦隊剛打中它
+  ef *= am.acc;   // 天賦：精準射擊
   return Math.min(HIT_RULE.max, Math.max(HIT_RULE.min, gun.acc * rf * sf * vf * ef));
 }
 const GUN_FX = { main: { inten: 1.0, len: 0.45, fxP: 0.4, spd: 560 }, sec: { inten: 0.75, len: 0.3, fxP: 0.25, spd: 620 }, aa: { inten: 0.45, len: 0.16, fxP: 0.08, spd: 760 } };
@@ -2374,11 +2380,12 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
   spawnBeam(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z, t0, dur, sq.side, inten, Math.min(fxs.len, 60 / L), sqFac(sq));
   if (blk >= 0) { if (rnd() < 0.25) pending.push({ kind: 'sp', t: t0 + dur * (ray ? 1 : blk), side: sq.side, x: _b.x, y: _b.y, z: _b.z }); return true; }
   if (!hit) return true;
-  const asp = hitAspect(target, _a.x, _a.z, _b.x, _b.z, _a.y, _b.y);
-  let dmg = gun.dmg * dmgMul * fm * fleetMods(sq.fleet).dmg;
+  const asp = hitAspect(target, _a.x, _a.z, _b.x, _b.z, _a.y, _b.y), am = fleetMods(sq.fleet);
+  let dmg = gun.dmg * dmgMul * fm * am.dmg;
   if (sideFocus(sq.side) === tq) dmg *= 1.2;
   if (ff) dmg *= ffMul;
-  pending.push({ gk, dr: Math.min(1, dist / far), gr: graze, t: t0 + dur, target, side: sq.side, ff, dirIdx: dirIndexOf(_b.x - _a.x, _b.z - _a.z), asp, fm, dmg, hm: hitMul(asp, sq, tq), fx: rnd() < fxs.fxP * (0.3 + 0.7 * fm) * (volleyShot ? 0.4 : 1), x: _b.x, y: _b.y, z: _b.z });
+  if (am.fac === 1 && !ff) { tq.lkT = t0; tq.lkQ = sq; }   // 聯盟資料鏈：標記這支敵分艦隊
+  pending.push({ vr: am.fac === 0 && gk === 'main' && !ff ? 1 + am.facR : 0, gk, dr: Math.min(1, dist / far), gr: graze, t: t0 + dur, target, side: sq.side, ff, dirIdx: dirIndexOf(_b.x - _a.x, _b.z - _a.z), asp, fm, dmg, hm: hitMul(asp, sq, tq), fx: rnd() < fxs.fxP * (0.3 + 0.7 * fm) * (volleyShot ? 0.4 : 1), x: _b.x, y: _b.y, z: _b.z });
   return true;
 }
 // 齊射：分艦隊每 VOLLEY_CD 秒只能齊射一次；只有裝填過半（剩餘冷卻 ≤ VOLLEY_READY×冷卻）的砲會跟著開火
@@ -2429,6 +2436,81 @@ function killShip(i, t, x, y, z, mul = 1) {
   if (i === q.flagship) q.flagLost = true;
   const sc = TYPE_W[ships.type[i]] * 1.6 * (ships.type[i] <= 1 ? 1.4 : 1) * mul;
   spawnFx(x, y, z, ships.side[i], sc, 18 + rnd() * 6);
+  salvageKill(i, t, x, z);
+}
+
+// ───────────────────────── 種族特性（規則數值見 data.js 的 VOLLEY_RULE、LINK_RULE、SALVAGE_RULE） ─────────────────────────
+const facStats = [0, 1].map(() => ({ volley: 0, retarget: 0, salvHeal: 0, built: 0 }));   // 統計（除錯、平衡用）
+function facStatReset() { for (const s of facStats) s.volley = s.retarget = s.salvHeal = s.built = 0; }
+// 聯盟飛彈：目標在命中前沉了 → 在原本的落點附近找最近的敵艦，重新擲命中；轉向成功＝改打它
+function misRetarget(e) {
+  const R = LINK_RULE.r * (1 + LINK_RULE.rTal * (e.rt - 1));
+  let best = -1, bd = R * R;
+  for (const q of squadrons) {
+    if (q.side === e.side || q.bg || q.alive <= 0 || (q.x - e.x) ** 2 + (q.z - e.z) ** 2 > (R + 200) ** 2) continue;
+    for (const j of q.list) {
+      if (!ships.alive[j]) continue;
+      shipWorldCPU(j, _c); const d = (_c.x - e.x) ** 2 + (_c.y - e.y) ** 2 + (_c.z - e.z) ** 2;
+      if (d < bd) { bd = d; best = j; }
+    }
+  }
+  if (best < 0) return false;
+  shipWorldCPU(best, _c);
+  if (rnd() >= strikeChance(STRIKE_RULE.missile, best, e.side, _c) * (1 + LINK_RULE.mslTal * (e.rt - 1))) { spawnFx(e.x, e.y, e.z, e.side, 3.2, 26); return false; }
+  e.target = best; e.x = _c.x; e.y = _c.y; e.z = _c.z; e.asp = null;
+  facStats[e.side].retarget++;
+  return true;
+}
+// 傭兵・戰場回收：船沉在傭兵分艦隊附近 → 那支分艦隊修補船體（每支分艦隊 cd 秒一次）、艦隊累積零件
+function salvageKill(i, t, x, z) {
+  const S = SALVAGE_RULE, cost = SHIP_TYPES[ships.type[i]].cost;
+  for (const f of fleets) {
+    if (f.fac !== 2 || f.reserve) continue;
+    const k = 1 + S.tal * ((f.mods || fleetMods(f)).facR), R = S.r * k;
+    let got = false;
+    for (const q of f.sqs) {
+      if (q.alive <= 0 || q.hidden || (q.x - x) ** 2 + (q.z - z) ** 2 > R * R) continue;
+      got = true;
+      if (t < (q.salvT ?? -99)) continue;
+      q.salvT = t + S.cd;
+      for (const j of q.list) {
+        if (!ships.alive[j]) continue;
+        const mh = maxHp(j), a = Math.min(mh - ships.hp[j], mh * S.heal * k);
+        if (a > 0) { ships.hp[j] += a; facStats[q.side].salvHeal += a; }
+      }
+    }
+    if (got) f.parts += cost * S.parts * k;
+  }
+}
+// 每 SALVAGE_RULE.every 秒：零件夠就把沉沒的船重新造出來（造價最高、付得起的那一艘；旗艦、全滅的分艦隊不算）
+function salvageBuild(t) {
+  const S = SALVAGE_RULE;
+  for (const f of fleets) {
+    if (f.fac !== 2 || f.reserve || f.parts <= 0 || f.built >= Math.ceil(f.initial * S.maxBuild)) continue;
+    let best = -1, bc = 0;
+    for (const q of f.sqs) {
+      if (q.alive <= 0 || q.hidden) continue;
+      for (const j of q.list) {
+        if (ships.alive[j] || j === q.flagship) continue;
+        const c = SHIP_TYPES[ships.type[j]].cost;
+        if (c <= f.parts && c > bc) { bc = c; best = j; }
+      }
+    }
+    if (best < 0) continue;
+    f.parts -= bc; f.built++;
+    reviveShip(best, t, S.cap);
+    facStats[f.side].built++;
+  }
+}
+// 讓沉沒的船回到陣型裡原本的位置（最大耐久 × cap，護盾從零開始回充，飛彈要靠補給）
+function reviveShip(i, t, cap) {
+  const q = squadrons[ships.sq[i]], st = SHIP_TYPES[ships.type[i]];
+  ships.alive[i] = 1; ships.hpCap[i] = cap; ships.hp[i] = maxHp(i);
+  ships.sh[i] = 0; ships.shT[i] = t; ships.ammo[i] = 0; ships.rpN[i] = 0; ships.rpLeft[i] = 0; ships.vT[i] = -99;
+  ships.cd[i] = st.guns.main ? st.guns.main.cd : 0; ships.cd1[i] = 2; ships.cd2[i] = 1; ships.swD[i] = 0;
+  q.alive++; q.typeAlive[ships.type[i]]++;
+  shipGeo.getAttribute('aState').array[i * 2] = 0; stateDirty = true;
+  shipWorldCPU(i, _c); spawnFx(_c.x, _c.y, _c.z, q.side, TYPE_W[ships.type[i]] * 0.8, 20);
 }
 
 // ───────────────────────── 飛彈 ─────────────────────────
@@ -2564,7 +2646,7 @@ function launchMissileAt(x, y, z, side, msq, target, dmg, t0, src, accM = 1) {
   const tHit = t0 + dur;
   if (blk >= 0) { bezCPU(i, cut, _c); pending.push({ kind: 'mi', t: t0 + dur * cut, side, x: _c.x, y: _c.y, z: _c.z }); }
   else if (!hit) { wStats[side].mMiss++; pending.push({ kind: 'mi', mi: i, g: misGen[i], t: tHit, side, x: misC[i * 3], y: misC[i * 3 + 1], z: misC[i * 3 + 2] }); }
-  else { const asp = hitAspect(target, x, z, _b.x, _b.z, y, _b.y); pending.push({ kind: 'mh', src, mi: i, g: misGen[i], t: tHit, target, side, asp, dmg, hm: hitMul(asp, msq, tg), dirIdx: dirIndexOf(dx, dz), x: _b.x, y: _b.y, z: _b.z }); }
+  else { const asp = hitAspect(target, x, z, _b.x, _b.z, y, _b.y), lm = msq && fleetMods(msq.fleet); pending.push({ kind: 'mh', rt: lm && lm.fac === 1 ? 1 + lm.facR : 0, src, mi: i, g: misGen[i], t: tHit, target, side, asp, dmg, hm: hitMul(asp, msq, tg), dirIdx: dirIndexOf(dx, dz), x: _b.x, y: _b.y, z: _b.z }); }
   wStats[side].mFired++;
   return true;
 }
@@ -2589,7 +2671,8 @@ function launchMissile(launcher, t0, maxRange = 0) {
   misA.set([_a.x, _a.y + 1.5, _a.z], i * 3);
   misB.set([(_a.x + _b.x) / 2 + lx * lat, (_a.y + _b.y) / 2 + up, (_a.z + _b.z) / 2 + lz * lat], i * 3);
   // 命中與否在發射時決定：沒中＝從目標旁邊掠過、在後方自爆（途中仍可能被攔截）
-  const hit = rnd() < strikeChance(STRIKE_RULE.missile, target, sq.side, _b);
+  const lm = fleetMods(sq.fleet), rt = lm.fac === 1 ? 1 + lm.facR : 0;   // 聯盟：飛彈會轉向（rt－1＝智慧導引的階數）
+  const hit = rnd() < strikeChance(STRIKE_RULE.missile, target, sq.side, _b) * (rt ? 1 + LINK_RULE.mslTal * (rt - 1) : 1);
   if (hit) misC.set([_b.x, _b.y, _b.z], i * 3);
   else {
     const off = TYPE_W[ships.type[target]] * (1.2 + rnd() * 1.5) * (rnd() < 0.5 ? -1 : 1);
@@ -2613,7 +2696,7 @@ function launchMissile(launcher, t0, maxRange = 0) {
   } else {
     const asp = hitAspect(target, _a.x, _a.z, _b.x, _b.z, _a.y, _b.y);
     const md = SHIP_TYPES[ships.type[launcher]].missile;
-    pending.push({ kind: 'mh', src: 1, mi: i, g: misGen[i], t: tHit, target, side: sq.side, asp, dmg: (md ? md.dmg : 30) * fleetMods(sq.fleet).dmg, hm: hitMul(asp, sq, tg), dirIdx: dirIndexOf(dx, dz), x: _b.x, y: _b.y, z: _b.z });
+    pending.push({ kind: 'mh', rt, src: 1, mi: i, g: misGen[i], t: tHit, target, side: sq.side, asp, dmg: (md ? md.dmg : 30) * lm.dmg, hm: hitMul(asp, sq, tg), dirIdx: dirIndexOf(dx, dz), x: _b.x, y: _b.y, z: _b.z });
   }
   wStats[sq.side].mFired++;
   return true;
@@ -2792,7 +2875,7 @@ function launchFighters(side, perCarrier = 8, set = null) {
 function ftrDmgMul(home) { const q = home >= 0 && home < shipCount ? squadrons[ships.sq[home]] : null, m = q && (q.mods || fleetMods(q.fleet)); return m ? m.dmg * m.ftrDmg : 1; }
 // ───── 自動武器：飛彈、艦載機、維修機（各艦各自冷卻；敵人進入射程才用） ─────
 const wStats = [{ mFired: 0, mInt: 0, mMiss: 0, healed: 0, fLaunch: 0, rLaunch: 0, fLand: 0, fLost: 0, fBuilt: 0, rot: 0, fRep: 0, fHeal: 0 }, { mFired: 0, mInt: 0, mMiss: 0, healed: 0, fLaunch: 0, rLaunch: 0, fLand: 0, fLost: 0, fBuilt: 0, rot: 0, fRep: 0, fHeal: 0 }];
-function maxHp(i) { return SHIP_TYPES[ships.type[i]].hp * (squadrons[ships.sq[i]].flagship === i ? 3 : 1); }
+function maxHp(i) { return SHIP_TYPES[ships.type[i]].hp * (squadrons[ships.sq[i]].flagship === i ? 3 : 1) * ships.hpCap[i]; }   // hpCap：傭兵重新造出來的船只有一半
 function updateEnemyDist() {   // 每支分艦隊離最近敵方分艦隊（邊緣）的距離，每 0.5 秒更新
   for (const q of squadrons) {
     if (q.bg || q.alive <= 0) { q.enemyD = 1e9; continue; }
@@ -3215,7 +3298,7 @@ function processHits() {
     }
     if (e.kind === 'mh' && e.mi != null) { if (!misLive[e.mi] || misGen[e.mi] !== e.g) continue; misLive[e.mi] = 0; }   // 半路被打下了
     if (e.kind === 'sp') { spawnFx(e.x, e.y, e.z, e.side, 1.4, 20); continue; }   // 光束打在岩石上的火花
-    if (!ships.alive[e.target]) continue;
+    if (!ships.alive[e.target] && !(e.kind === 'mh' && e.rt && misRetarget(e))) continue;   // 聯盟飛彈：目標沉了就轉向附近的敵艦
     const tSide = ships.side[e.target];
     const tq = squadrons[ships.sq[e.target]];
     // 傷害：能量（光束、艦載機）先打護盾，打穿才傷船體；飛彈打在護盾上也有爆炸傷到船體，護盾沒了直擊更痛
@@ -3233,8 +3316,13 @@ function processHits() {
       // 護盾偏折（opts.deflect）：光束打到護盾還在的船，有機率無傷或減半（天賦「能量調度」提高機率）
       //   距離越近機率越低：dr＝開火距離 ÷ 最大射程，機率 × (closeMul + (1 − closeMul) × dr)
       //   擦邊越容易彈開：gr＝擦邊程度（0＝正中、1＝邊緣），再 × (grazeLo + grazeK × gr²)
-      let dm = 1;
-      if (opts.deflect && !e.src && sh0 > 0.5) {
+      let dm = 1, salvo = false;
+      if (e.vr) {   // 帝國・重砲齊射：上一發帝國主砲打中這艘船還沒過 win 秒
+        const V = VOLLEY_RULE, rk = e.vr - 1;
+        salvo = t - ships.vT[ti] <= V.win * (1 + V.winTal * rk); ships.vT[ti] = t;
+        if (salvo) { dm = 1 + V.bonus + V.bonusTal * rk; facStats[e.side].volley++; }
+      }
+      if (opts.deflect && !e.src && sh0 > 0.5 && !salvo) {
         const D = DEFLECT_RULE, u = rnd(), dk = (D.closeMul + (1 - D.closeMul) * (e.dr != null ? e.dr : 1)) * (e.gr != null ? D.grazeLo + D.grazeK * e.gr * e.gr : 1);
         const pn = (D.none + D.stepNone * mods.defl) * dk, ph = (D.half + D.stepHalf * mods.defl) * dk;
         if (u < pn) { dm = 0; deflStats[tSide][0]++; deflStats[tSide][2] += raw; }
@@ -3350,7 +3438,9 @@ function resetCombat() {
   fP.fill(0); fV.fill(0); fI.fill(0); ftrAttrs.aFI.needsUpdate = true;
   aliveF[0].length = 0; aliveF[1].length = 0; misHead = 0; ftrHead = 0;
   for (const w of wStats) { w.mFired = w.mInt = w.mMiss = w.healed = w.fLaunch = w.rLaunch = w.fLand = w.fLost = w.fBuilt = w.rot = w.fRep = w.fHeal = 0; } for (const a of wDmg) a.fill(0);
-  for (const q of squadrons) { q.enemyD = null; q.drones = 0; q.disorderUntil = 0; q.volleyT = -1e9; }
+  for (const q of squadrons) { q.enemyD = null; q.drones = 0; q.disorderUntil = 0; q.volleyT = -1e9; q.lkQ = null; q.lkT = -99; q.salvT = -99; }
+  for (const f of fleets) { f.parts = 0; f.built = 0; }
+  facStatReset();
   for (let i = 0; i < MIS_MAX; i++) misT[i * 4] = -999;
   misLive.fill(0); AIR.tick = -1;
   misAttrs.aMT.needsUpdate = true;
@@ -4861,6 +4951,7 @@ function simulate(dt) {
   continuousFire(dt);
   autoWeapons(dt);
   if (opts.fire && opts.rotate) { rotateLines(U.uTime.value); fieldRepair(dt, U.uTime.value); }
+  if (opts.fire && simTick % (SALVAGE_RULE.every * SIM_HZ) === 11) salvageBuild(U.uTime.value);   // 傭兵：用零件重造沉沒的船
   updateFighters(dt);
   processHits();
   decayHits(dt);

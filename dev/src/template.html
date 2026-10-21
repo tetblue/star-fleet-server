@@ -309,6 +309,12 @@
   .tal-lv { width: calc(160px * var(--ui)); font-size: calc(12px * var(--ui)); } .tal-lv b { font-size: calc(18px * var(--ui)); color: var(--emp); }
   .tal-pt { display: flex; align-items: baseline; gap: calc(6px * var(--sp)); } .tal-pt b { font-size: calc(26px * var(--ui)); font-weight: 600; }
   .tal-tree { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: calc(10px * var(--sp)); margin-top: calc(12px * var(--sp)); }
+  .tal-fac { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 1fr); gap: calc(10px * var(--sp)); align-items: start; margin-top: calc(12px * var(--sp)); padding-top: calc(10px * var(--sp)); border-top: 1px solid var(--line); font-size: calc(12.5px * var(--ui)); }
+  .tal-fac h4 { margin: 0 0 calc(4px * var(--sp)); font-size: calc(12.5px * var(--ui)); color: var(--dim); font-weight: 600; }
+  @media (max-width: 900px) { .tal-fac { grid-template-columns: 1fr; } }
+  .brief-fac { font-size: calc(12.5px * var(--ui)); line-height: 1.6; margin-top: calc(12px * var(--sp)); }
+  .brief-fac b.tn { font-size: calc(13.5px * var(--ui)); }
+  .brief-fac .ctr { margin-top: calc(4px * var(--sp)); padding-left: calc(8px * var(--sp)); border-left: 2px solid var(--line); }
   .tal-col h4 { margin: 0 0 calc(6px * var(--sp)); font-size: calc(12.5px * var(--ui)); color: var(--dim); font-weight: 600; border-bottom: 1px solid var(--line); padding-bottom: calc(4px * var(--sp)); }
   .tal-node { border: 1px solid var(--line); border-radius: 5px; padding: calc(7px * var(--sp)) calc(9px * var(--sp)); margin-bottom: calc(7px * var(--sp)); background: rgba(6,10,20,.6); font-size: calc(12px * var(--ui)); }
   .tal-node.got { border-color: rgba(242,179,90,.55); } .tal-node.sk { border-style: dashed; } .tal-node.sk.got { border-style: solid; background: rgba(242,179,90,.06); }

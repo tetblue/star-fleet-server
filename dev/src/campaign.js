@@ -209,12 +209,12 @@ function showRandom() {
         <dl class="kv rd-opts"><dt>規模</dt><dd>${seg('size', RAND_SIZES)}<div class="g-dim">預算 ${fmtN(S.budget)} 點・最多 ${S.maxFleets} 支艦隊・${Math.round(S.time / 60)} 分鐘</div></dd>
         <dt>敵軍強度</dt><dd>${seg('diff', RAND_DIFF)}<div class="g-dim">依出擊指揮官的平均等級（目前 Lv ${avg}）：敵軍 ${D.off == null ? `Lv ${Math.max(1, avg - 3)}～${avg + 3} 隨機` : `Lv ${Math.max(1, avg + D.off)}`}。等級越高，敵方技能越多、AI 越會打、兵力越多</div></dd>
         <dt>地形</dt><dd>${seg('terr', RAND_TERR)}<div class="g-dim">星雲、小行星帶、巨大小行星隨機放在戰場中段</div></dd>
-        <dt>敵軍外觀</dt><dd>${seg('look', RAND_LOOK)}<div class="g-dim">只換敵軍艦船的外觀與顏色，戰力規則不變${sc.enemyFac != null ? `・這一場：<b class="g-${FACTION_CLS[sc.enemyFac]}">${FACTION_NAME[sc.enemyFac]}</b>` : ''}</div></dd>
+        <dt>敵軍外觀</dt><dd>${seg('look', RAND_LOOK)}<div class="g-dim">決定敵軍艦船的外觀、顏色與種族特性${sc.enemyFac != null ? `・這一場：<b class="g-${FACTION_CLS[sc.enemyFac]}">${FACTION_NAME[sc.enemyFac]}</b>` : ''}</div></dd>
         <dt>勝利條件</dt><dd>殲滅敵軍，或使敵軍損失超過 ${Math.round((1 - ROUT_AT) * 100)}%（潰走）</dd><dt>敗北條件</dt><dd>我軍損失超過 ${Math.round((1 - ROUT_AT) * 100)}%</dd>
         <dt>敵軍編成</dt><dd><span class="unk">不明：部署時才會偵測到</span></dd>
         <dt>獎勵</dt><dd>指揮官經驗、功勳（規模越大、敵軍等級越高越多）</dd></dl></div>
       <div class="g-card"><h3>戰場環境</h3>${minimapSVG(sc, GAME.intel, GAME.loadout)}<div style="margin-top:8px;font-size:calc(12.5px * var(--ui))">${terr}</div></div>
-    </div>
+    </div>${briefFaction(briefEnemyFac(sc))}
     <div class="g-row" style="margin-top:12px"><button class="g-btn" id="rd-roll">⟳ 換一個戰場</button><span class="g-dim" style="font-size:calc(12px * var(--ui))">同樣的設定重新生成地形與敵軍</span><span class="g-sp"></span><button class="g-btn pri" id="rd-next">進入編成 →</button></div></div>`);
   gEl('rd-back').onclick = showSingle;
   gEl('rd-roll').onclick = randReroll;

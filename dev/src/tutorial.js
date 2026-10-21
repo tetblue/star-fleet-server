@@ -596,6 +596,8 @@ function manBody(id) {
       return tutSkillTable() +
         P(`<b>指揮官</b>：每位有固有特性（攻擊／防禦／機動 +8%）與固有技能。每 ${XP_PER_LEVEL} 經驗升一級、得 1 點天賦（Lv 1 就有 1 點），可以隨時退回重新分配。指揮官不夠可以到<b>星際酒館</b>用功勳招募（兩個陣營）。`) +
         TALENT_BRANCHES.map(([br, name]) => `<h4 class="man-h4">${name}</h4><table class="tut-tbl">${TALENTS.filter((t) => t.br === br).map((t) => `<tr><td class="tl"><b>${t.name}</b>${t.req ? `<small>（Lv ${t.req}）</small>` : ''}</td><td>${t.kind === 'skill' ? `${t.cost} 點` : `${t.max} 階`}</td><td class="tl">${t.kind === 'skill' ? '學會技能：' + SKILLS[t.skill].desc : t.desc(1) + (t.max > 1 ? '（每階）' : '')}</td></tr>`).join('')}</table>`).join('') +
+        `<h4 class="man-h4">種族特性與專屬天賦</h4>` + P('每個陣營的艦隊有自己的種族特性；指揮官只帶自己陣營風格的艦隊（傭兵指揮官替帝國或聯盟出擊時，開的是灰鴉的船）。天賦樹下方的「種族」格是這個陣營的專屬天賦。') +
+        `<table class="tut-tbl">${FAC_TRAIT.map((T, f) => T && `<tr><td class="tl"><b class="g-${FACTION_CLS[f]}">${FACTION_NAME[f]}</b></td><td class="tl"><b>${T.name}</b>：${T.desc}</td><td class="tl">${FAC_TALENT[f] ? `<b>${FAC_TALENT[f].name}</b>（${FAC_TALENT[f].max} 階）：${FAC_TALENT[f].desc(1)}（每階）` : ''}</td></tr>`).filter(Boolean).join('')}</table>` +
         P('<b>時機</b>：突進用在拉近距離（倒退、側移不加速）；集中火力在全軍都在射程內時用；鐵壁、機動迴避在接觸或被包抄時用；極速射擊和集中火力疊在一起爆發；干擾在接敵前用，讓敵人變陣延遲、命中下降。');
     case 'terrain':
       return `<table class="tut-tbl">${Object.values(TERRAIN_TYPES).map((d) => `<tr><td class="tl"><b>${d.name}</b></td><td class="tl">${d.desc}</td></tr>`).join('')}</table>` +

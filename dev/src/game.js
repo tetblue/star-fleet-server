@@ -26,7 +26,9 @@ function talSpent(tal) { let n = 0; for (const k in tal) if (TALENT_BY_ID[k]) n 
 function cmdrPoints(id) { return cmdrLevel(id) - talSpent(cmdrTal(id)); }
 // 可以加點嗎？（點數夠、等級夠、沒到上限、固有技能不用再學）
 function talentCan(c, t) {
+  t = talFor(t, c.faction);   // 種族：專屬天賦、被替換的天賦
   const tal = cmdrTal(c.id), r = tal[t.id] || 0;
+  if (!t.max && t.kind !== 'skill') return '未開放';
   if (t.kind === 'skill') { if (r || c.skills.includes(t.skill)) return ''; if (cmdrLevel(c.id) < (t.req || 1)) return `需要 Lv ${t.req}`; }
   else if (r >= t.max) return '';
   return cmdrPoints(c.id) >= t.cost ? 'ok' : '點數不足';
@@ -124,7 +126,7 @@ function makeSetup(sc, lo, attempt) {
   const fleetsS = [];
   lo.fleets.forEach((f, k) => {
     const c = COMMANDERS.find((o) => o.id === f.cmdr) || cmdrsOf(lo.faction || 0)[0] || COMMANDERS[0];
-    fleetsS.push({ side: 0, name: `第${'一二三四'[k]}艦隊`, ax: f.x, az: f.z, ay: f.y || 0, h: f.h, formation: f.formation, orderly: !!f.orderly, layers: f.layers || 1, comp: f.comp.slice(), hangar: (f.hangar || HANGAR_DEFAULT).slice(),
+    fleetsS.push({ side: 0, ...ownFac(c, lo.faction || 0), name: `第${'一二三四'[k]}艦隊`, ax: f.x, az: f.z, ay: f.y || 0, h: f.h, formation: f.formation, orderly: !!f.orderly, layers: f.layers || 1, comp: f.comp.slice(), hangar: (f.hangar || HANGAR_DEFAULT).slice(),
       commander: { id: c.id, name: c.name, title: c.title, trait: c.trait, level: cmdrLevel(c.id), tal: { ...cmdrTal(c.id) }, skills: commanderSkills(c.skills, cmdrTal(c.id)) } });
   });
   // 補給艦隊：不佔艦隊欄位、沒有指揮官；follow＝跟隨的艦隊（setup 裡的 index）
@@ -136,7 +138,7 @@ function makeSetup(sc, lo, attempt) {
     const cm = fleetsS[k].commander;
     if (nR >= stock || !cm.skills.includes('reinforce')) return;
     nR++;
-    fleetsS.push({ side: 0, name: `${fleetsS[k].name}增援`, ax: 0, az: MAP_BOUNDS.z1 + 900, ay: 0, h: Math.PI, formation: f.formation, comp: reinforceComp(f.comp, sc.budget),
+    fleetsS.push({ side: 0, ...(fleetsS[k].fac != null ? { fac: fleetsS[k].fac } : {}), name: `${fleetsS[k].name}增援`, ax: 0, az: MAP_BOUNDS.z1 + 900, ay: 0, h: Math.PI, formation: f.formation, comp: reinforceComp(f.comp, sc.budget),
       commander: null, reserve: true, activateAt: null, reinfOf: k });
   });
   // 傭兵支援：打下灰鴉的基地、功勳夠才準備（第一艦隊的指揮官多一個技能）；對手就是灰鴉的關卡不能叫
@@ -725,8 +727,8 @@ function showCommanders(back) {
   const sel = COMMANDERS.find((c) => c.id === GAME.talSel) || COMMANDERS[0]; GAME.talSel = sel.id;
   const lv = cmdrLevel(sel.id), xp = cmdrXP(sel.id), tal = cmdrTal(sel.id), pts = cmdrPoints(sel.id);
   const list = COMMANDERS.map((c) => `<button class="tal-who ${c === sel ? 'on' : ''}" data-c="${c.id}"><b>${c.title} ${c.name}</b><span><span class="g-${FACTION_CLS[c.faction || 0]}">${FACTION_NAME[c.faction || 0].slice(0, 2)}</span>・Lv ${cmdrLevel(c.id)}・${TRAIT_NAME[c.trait]}</span>${cmdrPoints(c.id) > 0 ? `<i>${cmdrPoints(c.id)}</i>` : ''}</button>`).join('');
-  const node = (t) => {
-    const r = tal[t.id] || 0, can = talentCan(sel, t), innate = t.kind === 'skill' && sel.skills.includes(t.skill);
+  const node = (t0) => {
+    const t = talFor(t0, sel.faction), r = tal[t.id] || 0, can = talentCan(sel, t0), innate = t.kind === 'skill' && sel.skills.includes(t.skill);
     const pips = t.kind === 'skill' ? '' : `<span class="tal-pips">${Array.from({ length: t.max }, (_, k) => `<i class="${k < r ? 'on' : ''}"></i>`).join('')}</span>`;
     const desc = t.kind === 'skill' ? SKILLS[t.skill].desc : (r ? `目前：${t.desc(r)}` : t.desc(1)) + (r && r < t.max ? `<br><span class="nx">下一階：${t.desc(r + 1)}</span>` : '');
     const state = innate ? '固有技能' : t.kind === 'skill' ? (r ? '已學會' : can === 'ok' ? `學習（${t.cost} 點）` : can) : r >= t.max ? '已滿' : can === 'ok' ? `+1（${t.cost} 點）` : can;
@@ -736,6 +738,8 @@ function showCommanders(back) {
   };
   const keepScroll = GAME.talOpen ? gEl('game').scrollTop : 0;   // 加點後畫面不要跳回頂端
   const tree = TALENT_BRANCHES.map(([br, name]) => `<div class="tal-col"><h4>${name}</h4>${TALENTS.filter((t) => t.br === br).map(node).join('')}</div>`).join('');
+  const FT_ = FAC_TRAIT[sel.faction || 0];   // 種族特性＋專屬天賦
+  const facRow = FT_ ? `<div class="tal-fac"><div><h4>種族特性・<span class="g-${FACTION_CLS[sel.faction || 0]}">${FACTION_NAME[sel.faction || 0]}</span></h4><b>${FT_.name}</b><div class="g-dim">${FT_.desc}</div></div>${node(TALENT_BY_ID.fac)}</div>` : '';
   const skills = commanderSkills(sel.skills, tal).map((id) => `<span class="tal-sk ${sel.skills.includes(id) ? '' : 'new'}" title="${SKILLS[id].desc}">${SKILLS[id].name}</span>`).join('');
   overlay(`<div class="g-wrap tal-wrap"><div class="g-head"><h2>指揮官</h2><span class="crumb">每升一級得 1 點天賦，用來強化能力或學習技能；可以隨時退回重新分配</span><span class="g-sp"></span><button class="g-btn" id="c-back">返回</button></div>
     <div class="tal-layout"><div class="tal-list">${list}</div>
@@ -744,7 +748,7 @@ function showCommanders(back) {
           <div class="tal-lv"><b>Lv ${lv}</b><div class="xpbar"><i style="width:${(xp % XP_PER_LEVEL) / XP_PER_LEVEL * 100}%"></i></div><span class="g-dim">${xp % XP_PER_LEVEL} / ${XP_PER_LEVEL} 經驗</span></div>
           <div class="tal-pt"><span class="g-dim">天賦點數</span><b class="${pts > 0 ? 'g-emp' : ''}">${pts}</b><span class="g-dim">／${lv}</span><button class="g-btn sm" id="c-reset" ${talSpent(tal) ? '' : 'disabled'}>全部退回</button></div></div>
         <dl class="kv"><dt>固有特性</dt><dd>${TRAIT_NAME[sel.trait]} +8%<br><small class="g-dim">${TRAIT_ROT[sel.trait]}</small></dd><dt>可用技能</dt><dd>${skills}</dd></dl>
-        <div class="tal-tree">${tree}</div></div></div></div>`);
+        <div class="tal-tree">${tree}</div>${facRow}</div></div></div>`);
   const root = gEl('game'); root.scrollTop = keepScroll; GAME.talOpen = true;
   root.querySelectorAll('[data-c]').forEach((b) => (b.onclick = () => { GAME.talSel = b.dataset.c; showCommanders(); }));
   root.querySelectorAll('[data-add]').forEach((b) => (b.onclick = () => { if (talentAdd(sel, TALENT_BY_ID[b.dataset.add])) showCommanders(); }));
@@ -767,6 +771,13 @@ function minimapSVG(sc, intel, lo) {
   return s;
 }
 function stars(n) { return '★'.repeat(n) + '☆'.repeat(3 - n); }
+// 簡報：敵軍的陣營＝關卡指定的外觀，沒指定就是玩家陣營的對手
+function briefEnemyFac(sc) { return sc.enemyFac != null ? sc.enemyFac : ((GAME.loadout && GAME.loadout.faction) ?? GAME.faction ?? 0) === 1 ? 0 : 1; }
+// 簡報的種族特性卡：只寫特色與建議的剋制方式（不寫數字）；還沒開放特性的陣營不顯示
+function briefFaction(fac, title = '敵軍特性') {
+  const T = FAC_TRAIT[fac]; if (!T) return '';
+  return `<div class="g-card brief-fac"><h3>${title}・<span class="g-${FACTION_CLS[fac]}">${FACTION_NAME[fac]}</span></h3><b class="tn">${T.name}</b><div>${T.brief}</div><div class="ctr"><b>建議對策</b>：${T.counter}</div></div>`;
+}
 // 簡報的敵方配置與戰場環境（訓練作戰、劇情戰役共用）
 function briefIntel(sc, I) {
   const compStr = (c) => c ? c.map((n, t) => n ? `${SHIP_TYPES[t].name} ~${ships5(n)}` : '').filter(Boolean).join('、') : '<span class="unk">不明</span>';
@@ -780,7 +791,7 @@ function briefIntel(sc, I) {
             <dl class="kv"><dt>其他</dt><dd>${I.events ? (I.events.length ? I.events.join('<br>') : '未發現其他部隊') : '<span class="unk">不明（無法排除伏兵或增援）</span>'}</dd></dl></div>
           <div class="g-card"><h3>戰場環境</h3>${minimapSVG(sc, I, GAME.loadout)}
             <div style="margin-top:8px;font-size:calc(12.5px * var(--ui))">${sc.terrain.length ? [...new Set(sc.terrain.map((t) => t.type))].map((k) => `<div><b>${TERRAIN_TYPES[k].name}</b>：<span class="g-dim">${TERRAIN_TYPES[k].desc}</span></div>`).join('') : '<span class="g-dim">開闊宙域，沒有地形影響。</span>'}</div></div>
-        </div>`;
+        </div>${briefFaction(briefEnemyFac(sc))}`;
 }
 function showBriefing(sc) {
   GAME.sc = sc; GAME.intel = makeIntel(sc);
