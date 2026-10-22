@@ -2111,7 +2111,7 @@ function fireAir(attacker, gk, gun, sq, o, delay) {
   const k = opts.rangeMul || 1, n = gun.near * k, f = Math.max(n + 1, gun.far * k), dist = o.d;
   const rf = dist <= n ? 1 : 1 - (1 - HIT_RULE.farMul) * Math.min(1, (dist - n) / (f - n));
   const sf = o.a ? o.sz : AIR_RULE.missileSize;
-  const vf = 1 - HIT_RULE.speedMax * Math.min(1, o.v / HIT_RULE.speedRef);
+  const vf = 1 - HIT_RULE.speedMax * Math.min(1, (o.a && PL.on ? o.v / PILOT_SPEED : o.v) / HIT_RULE.speedRef);   // 駕駛模式飛得慢，命中率照原本的速度算
   let ef = 1;
   if (inTerrain('nebula', _a.x, _a.z, _a.y) || inTerrain('nebula', o.x, o.z, o.y)) ef *= HIT_RULE.nebula;
   if (jam[sq.side].until > U.uTime.value) ef *= HIT_RULE.jammed;
@@ -2257,7 +2257,7 @@ function rayAir(side, x0, y0, z0, ux, uy, uz, tmax) {
   for (const { o, t } of A) {
     if (o.a === 0) { if (!misLive[o.i] || misGen[o.i] !== o.g) continue; }
     else {
-      const vf = 1 - HIT_RULE.speedMax * Math.min(1, o.v / HIT_RULE.speedRef);
+      const vf = 1 - HIT_RULE.speedMax * Math.min(1, (o.a && PL.on ? o.v / PILOT_SPEED : o.v) / HIT_RULE.speedRef);
       const raw = o.sz * vf * (inTerrain('nebula', o.x, o.z, o.y) ? HIT_RULE.nebula : 1);
       const p = FT.kind[o.i] === 2 ? Math.max(RC.min, raw * RC.acc) : Math.min(HIT_RULE.max, Math.max(HIT_RULE.min, raw));
       if (rnd() >= p) continue;   // 閃過了，光束繼續往前
@@ -3128,7 +3128,7 @@ function updateFighters(dt) {
       FT.launch[i] -= dt;
     } else if (kind === 2 && !FT.ret[i]) {
       // 偵察機：飛到指定的點（tk 0），到了在上空盤旋 loiter 秒（tk 1，區域掃描見 fowUpdate），然後返航
-      FT.fuel[i] -= dt; if (FT.fuel[i] <= 0) FT.ret[i] = 1;
+      FT.fuel[i] -= dt * fsp; if (FT.fuel[i] <= 0) FT.ret[i] = 1;
       tx = FT.ax[i]; ty = FT.ay[i]; tz = FT.az[i];
       dx = tx - px; dy = ty - py; dz = tz - pz; d = Math.hypot(dx, dy, dz) || 1; dx /= d; dy /= d; dz /= d;
       if (FT.tk[i] === 0 && d < 40) { FT.tk[i] = 1; FT.cd[i] = RC.loiter; }
@@ -3141,10 +3141,11 @@ function updateFighters(dt) {
       vx += (ex / el * speed - vx) * k; vy += (ey / el * speed - vy) * k; vz += (ez / el * speed - vz) * k;
     } else if (FT.ret[i] || kind === 1) {
       // 返航（續航用完／維修完）或維修機飛往受傷的船
-      FT.fuel[i] -= dt;
+      FT.fuel[i] -= dt * fsp;
       if (!FT.ret[i]) { const g = FT.tgt[i]; if (g < 0 || !ships.alive[g] || ships.hp[g] >= maxHp(g) * 0.995 || FT.heal[i] <= 0 || FT.fuel[i] <= 0) FT.ret[i] = 1; }
       const goal = FT.ret[i] ? home : FT.tgt[i];
       if (goal < 0 || !ships.alive[goal]) { FT.state[i] = 3; FT.t0[i] = t; continue; }   // 母艦沉了：找不到地方降落
+    const fsp = PL.on ? PILOT_SPEED : 1; speed *= fsp;   // 駕駛模式：艦載機都飛慢一點（船才顯得大），續航時間照比例拉長
       shipWorldCPU(goal, _a); tx = _a.x; ty = _a.y + 1; tz = _a.z;
       dx = tx - px; dy = ty - py; dz = tz - pz; d = Math.hypot(dx, dy, dz) || 1; dx /= d; dy /= d; dz /= d;
       if (FT.ret[i] && d < 10) {   // 降落：回到機庫／機上
@@ -3163,7 +3164,7 @@ function updateFighters(dt) {
       vx += (ex / el * speed - vx) * k; vy += (ey / el * speed - vy) * k; vz += (ez / el * speed - vz) * k;
     } else {
       const role = FT.role[i], C = CRAFT[role];
-      FT.fuel[i] -= dt;
+      FT.fuel[i] -= dt * fsp;
       if (FT.fuel[i] <= 0) FT.ret[i] = 1;   // 續航用完：下一幀開始返航
       FT.rt[i] -= dt;
       const hq = home >= 0 && home < shipCount ? squadrons[ships.sq[home]] : null;
@@ -4724,7 +4725,7 @@ const KEY_ACTIONS = [
   ['cam_up', '鏡頭往前', '鏡頭', 'ArrowUp'], ['cam_down', '鏡頭往後', '鏡頭', 'ArrowDown'], ['cam_left', '鏡頭往左', '鏡頭', 'ArrowLeft'], ['cam_right', '鏡頭往右', '鏡頭', 'ArrowRight'],
   ['cam_yaw_l', '3D：向左轉', '鏡頭', 'KeyQ'], ['cam_yaw_r', '3D：向右轉', '鏡頭', 'KeyE'], ['cam_pitch_up', '3D：仰角升高', '鏡頭', 'KeyR'], ['cam_pitch_dn', '3D：仰角降低', '鏡頭', 'KeyT'],
   // 王牌飛行員（駕駛中才有效，可以和上面的鍵重複；滑鼠左右鍵固定是武裝一、二，這裡可以另外綁鍵盤）
-  ['pilot_thr_up', '油門加', '駕駛', 'KeyW'], ['pilot_thr_dn', '油門減', '駕駛', 'KeyS'], ['pilot_roll_l', '向左翻滾', '駕駛', 'KeyA'], ['pilot_roll_r', '向右翻滾', '駕駛', 'KeyD'],
+  ['pilot_thr_up', '油門加', '駕駛', 'KeyW'], ['pilot_thr_dn', '油門減（減到 0 以下＝逆向噴射）', '駕駛', 'KeyS'], ['pilot_stop', '油門歸零（停住）', '駕駛', 'KeyX'], ['pilot_roll_l', '向左翻滾', '駕駛', 'KeyA'], ['pilot_roll_r', '向右翻滾', '駕駛', 'KeyD'],
   ['pilot_boost', '加速', '駕駛', 'ShiftLeft'], ['pilot_w1', '武裝一（滑鼠左鍵之外）', '駕駛', ''], ['pilot_w2', '武裝二（滑鼠右鍵之外）', '駕駛', ''], ['pilot_w3', '武裝三', '駕駛', 'KeyQ'], ['pilot_w4', '武裝四', '駕駛', 'KeyE'],
   ['pilot_target', '鎖定準心附近的敵人', '駕駛', 'KeyT'], ['pilot_view', '背後／座艙視角', '駕駛', 'KeyV'], ['pilot_land', '降落航母整補（靠近己方航母時）', '駕駛', 'KeyR'],
 ];
