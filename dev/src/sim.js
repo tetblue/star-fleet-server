@@ -52,7 +52,7 @@ function simFromScenario(sc) {
 // 布局 → 戰鬥設定（與正式作戰相同的格式）；edit＝編輯中（增援也先顯示出來，方便擺放）
 function simSetup(m, edit) {
   const S = {
-    bg: false, scenario: 'sim', level: 1, factions: m.fac ? [1, 0] : [0, 1], timeLimit: SIM_INF, noVictory: !m.victory,
+    bg: false, scenario: 'sim', level: 1, factions: m.fac ? [1, 0] : [0, 1], timeLimit: m.timeLimit || SIM_INF, noVictory: !m.victory,
     terrain: m.terrain.map((t) => ({ ...t })),
     fleets: m.fleets.map((f) => {
       const c = f.cmdr, tal = c.mode === 'tal' ? { ...c.tal } : null;
@@ -342,13 +342,14 @@ function simGo() { if (SIM.mid && SIM.live && !SIM.dirty) simResumeLive(); else 
 function simStart() {
   const m = SIM.m, cont = SIM.mid;
   if (![0, 1].every((s) => m.fleets.some((f) => f.side === s && !f.reserve && simComp(f) > 0))) { toast('雙方都至少要有一支（非增援的）艦隊'); return; }
-  if (cont) SIM.t0 += SIM.snapT; else { SIM.base = JSON.parse(JSON.stringify(m)); SIM.t0 = 0; if (!m.watch) simSave(); }   // 觀摩不覆蓋模擬室「上次的布局」
+  if (cont) SIM.t0 += SIM.snapT; else { SIM.base = JSON.parse(JSON.stringify(m)); SIM.t0 = 0; if (!m.watch && !m.pilot) simSave(); }   // 觀摩不覆蓋模擬室「上次的布局」
   SIM.mid = SIM.live = SIM.dirty = false;
   GAME.attempt = (GAME.attempt || 0) + 1;
   GAME.watch = !!m.watch;   // AI 對戰觀摩：雙方都是 AI，玩家只看
-  GAME.sc = { id: 'sim', name: GAME.watch ? `AI 對戰觀摩・${m.name}` : `模擬室・${m.name}`, sim: true, seed: m.seed, timeLimit: SIM_INF };
+  GAME.pilot = m.pilot || null;   // 王牌飛行員：雙方艦隊都由 AI 指揮，玩家駕駛一架艦載機
+  GAME.sc = { id: 'sim', name: GAME.watch ? `AI 對戰觀摩・${m.name}` : GAME.pilot ? `王牌飛行員・${m.name}` : `模擬室・${m.name}`, sim: true, seed: m.seed, timeLimit: m.timeLimit || SIM_INF };
   fieldGroup.clear();
-  applyOp(opLevel(), m.fow !== false); const setup = simSetup(m, false); setup.op = GAME.op;   // 擬真：戰爭迷霧可以在模擬室關掉
+  applyOp(GAME.pilot ? 1 : opLevel(), !GAME.pilot && m.fow !== false); const setup = simSetup(m, false); setup.op = GAME.op;   // 擬真：戰爭迷霧可以在模擬室關掉；駕駛：可以上下移動、沒有戰爭迷霧
   if (GAME.watch) GAME.op = Math.min(GAME.op, 1);   // 觀摩：規則照操作難度（含擬真的誤射），但畫面不鎖在艦橋
   newBattle(m.seed >>> 0, setup);
   setRule('fire', true); setRule('advance', false);
@@ -362,10 +363,10 @@ function simStart() {
   gEl('battlehud').innerHTML = '';
   drawField(false);
   setPhase('battle');
-  if (GAME.watch) { GAME.playerSide = 0; setCmdSide(0, false); clearSelection(); }   // 觀摩：沒有 simctl 命令＝雙方 AI 都在動
+  if (GAME.watch || GAME.pilot) { GAME.playerSide = 0; setCmdSide(0, false); clearSelection(); }   // 觀摩、駕駛：沒有 simctl 命令＝雙方 AI 都在動
   else { GAME.playerSide = m.ctl; setCmdSide(m.ctl, false); clearSelection(); issue('simctl', { ctl: m.ctl }); }   // 誰被玩家接管（該方 AI 暫停）也記在命令裡，回放一致
-  paused = false; setSpeed(SETTINGS.speedIdx);
-  force3D(); if (GAME.op === 2) enterBridge();   // 與正式作戰相同：進階以上強制 3D，擬真直接上艦橋
+  paused = false; setSpeed(GAME.pilot ? SPEEDS.indexOf(1) : SETTINGS.speedIdx);   // 駕駛：固定 ×1
+  force3D(); if (GAME.pilot) { pilotBegin(m.pilot); return; } if (GAME.op === 2) enterBridge();   // 與正式作戰相同：進階以上強制 3D，擬真直接上艦橋
   if (opts.fow && SETTINGS.autoScan === false && !GAME.watch) issue('autoscan', { on: false });   // 戰爭迷霧：玩家關掉了自動掃描
   if (GAME.watch) { toast(`觀摩開始：${simSideName(m, 0)} vs ${simSideName(m, 1)}（左側面板是 AI 的即時判斷，點艦隊名稱可以跳過去看；左鍵拖曳＝移動畫面、右鍵拖曳＝調整視角；空白鍵暫停、＋／－ 調速度）`); return; }
   toast(cont ? `以目前戰況接續（指揮${simSideName(m, m.ctl)}）` : `模擬開始：指揮${simSideName(m, m.ctl)}（畫面上方「切換指揮」可以接管另一方、「編輯配置」可以隨時調整）`);
@@ -468,6 +469,7 @@ function simSwitch() {
   toast(`改為指揮${simSideName(SIM.m, side)}（這一方的 AI 暫停）`);
 }
 function showSimReport() {
+  if (SIM.m && SIM.m.pilot) { pilotReport(); return; }   // 王牌飛行員：個人戰績
   const R = GAME.result, m = SIM.m, st = battleStats();
   setPhase('report');
   const n0 = simSideName(m, 0), n1 = simSideName(m, 1);

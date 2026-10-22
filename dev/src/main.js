@@ -14,6 +14,7 @@ let VW = innerWidth, VH = innerHeight;   // 戰場畫面大小（戰術面板會
 function tacDockSize() { if (typeof TAC === 'undefined' || !TAC.open || BR.on) return { w: 0, h: 0 }; return { w: 0, h: Math.round(Math.min(760, Math.max(300, innerHeight * (innerWidth >= 760 ? 0.58 : 0.6)))) }; }   // 戰術面板固定在下方
 const ELEV = 30 * Math.PI / 180;
 const BR = { on: false };
+const PL = { on: false, spec: false, j: -1 };   // 王牌飛行員：玩家駕駛的艦載機（內容在 pilot.js）；spec＝母艦全滅後改為觀戰
 // 陣營（外觀）與模擬的「邊」分開：邊 0＝玩家（畫面下方）、邊 1＝對手；SIDE_FAC[邊]＝那一邊用哪個陣營（0 帝國、1 聯盟、2 傭兵、3 機械改造人類、4 機械智慧族、5 蟲族感染人類、6 蟲族；玩家只能是 0、1）
 // 單一艦隊也可以有自己的外觀（fleet.fac，例如友軍傭兵、傭兵支援）；畫船、光束、飛彈、艦載機都用 sqFac／shipFac
 let SIDE_FAC = [0, 1];
@@ -80,6 +81,7 @@ const view = { target: new THREE.Vector3(0, 0, 0), height: 620, minH: 40, maxH: 
 let camera = camPersp;
 
 function updateCamera() {
+  if (PL.on && !PL.spec) { pilotCamera(); return; }   // 王牌飛行員：背後／座艙視角
   if (BR.on) { bridgeCamera(); return; }   // 指揮官視角：鏡頭跟著旗艦
   const w = VW, h = VH, aspect = w / h;
   // 2D 像素圖只能從固定的 30° 俯角看；3D 可以自由轉
@@ -2062,7 +2064,7 @@ function airIndex() {
   for (let j = 0; j < FTR_MAX; j++) {
     if (FT.state[j] !== 2) continue;
     const j3 = j * 3, vx = fV[j3], vy = fV[j3 + 1], vz = fV[j3 + 2];
-    put(FT.side[j], { a: 1, i: j, sz: FT.kind[j] === 2 ? FOW_RULE.recon.size : FT.kind[j] ? AIR_RULE.droneSize : CRAFT[FT.role[j]].size, x: fP[j3], y: fP[j3 + 1], z: fP[j3 + 2], v: Math.hypot(vx, vy, vz), vx, vy, vz });
+    put(FT.side[j], { a: 1, i: j, sz: FT.kind[j] === 2 ? FOW_RULE.recon.size : FT.kind[j] === 1 ? AIR_RULE.droneSize : CRAFT[FT.role[j]].size, x: fP[j3], y: fP[j3 + 1], z: fP[j3 + 2], v: Math.hypot(vx, vy, vz), vx, vy, vz });
   }
 }
 // 還能不能再對它開火：每顆飛彈最多被打 missileShots 次；每架艦載機每 fighterGap 秒最多被一門砲瞄準
@@ -2847,7 +2849,7 @@ function launchCraft(i, n, kind, tgt = -1, t0 = U.uTime.value, role = 1, area = 
   let got = 0;
   for (let k = 0; k < n; k++) {
     let j = -1;
-    for (let s = 0; s < FTR_MAX; s++) { const c = (ftrHead + s) % FTR_MAX; if (FT.state[c] === 0) { j = c; break; } }
+    for (let s = 0; s < FTR_MAX; s++) { const c = (ftrHead + s) % FTR_MAX; if (FT.state[c] === 0 && !(PL.on && c === PL.j)) { j = c; break; } }
     if (j < 0) break;
     ftrHead = (j + 1) % FTR_MAX;
     FT.state[j] = 1; FT.side[j] = ships.side[i]; FT.t0[j] = t0 + k * 0.22; FT.carrier[j] = i; FT.seed[j] = rnd();
@@ -3114,6 +3116,7 @@ function updateFighters(dt) {
     if (st === 3 && t - FT.t0[i] > 0.7) { FT.state[i] = 0; st = 0; }
     fI[i * 4] = shipFac(FT.carrier[i]); fI[i * 4 + 1] = st; fI[i * 4 + 2] = FT.t0[i]; fI[i * 4 + 3] = FT.seed[i] + (FT.kind[i] === 1 ? 2 : 0);   // w：整數部分＝種類（畫維修機用；偵察機畫成一般艦載機）
     if (st !== 2) continue;
+    if (PL.on && i === PL.j) { pilotFly(i, dt, t); continue; }   // 玩家駕駛的機
     const i3 = i * 3, s = FT.side[i], seed = FT.seed[i];
     let px = fP[i3], py = fP[i3 + 1], pz = fP[i3 + 2], vx = fV[i3], vy = fV[i3 + 1], vz = fV[i3 + 2];
     const kind = FT.kind[i], home = FT.carrier[i];
@@ -3289,9 +3292,11 @@ function processHits() {
         }
       } else {
         const j = e.i;
+        if (PL.on && j === PL.j) { if (FT.state[j] === 2) pilotHurt(e.dmg, e); continue; }   // 打中玩家的機：先扣護盾
         if (FT.state[j] === 2) {
           FT.hp[j] -= e.dmg;
-          if (FT.hp[j] <= 0) { FT.state[j] = 3; FT.t0[j] = t; if (!FT.kind[j]) wStats[FT.side[j]].fLost++; spawnFx(fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2], FT.side[j], 2.6, 26); }
+          if (FT.hp[j] <= 0) { FT.state[j] = 3; FT.t0[j] = t; if (!FT.kind[j]) wStats[FT.side[j]].fLost++; spawnFx(fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2], FT.side[j], 2.6, 26); if (e.pl) pilotCredit('ftr', j, 0, true, e.pl); }
+          else if (e.pl) pilotCredit('hitF', j, 0, false, e.pl);
         }
       }
       continue;
@@ -3339,6 +3344,7 @@ function processHits() {
     const eff = shD + hullD;
     e.kill = ships.hp[ti] <= 0;
     e.hull = hullD > 0;
+    if (e.pl) pilotCredit('ship', ti, shD + hullD, e.kill, e.pl);   // 玩家打出的傷害、擊沉
     if (e.asp != null) {
       tq.hitW[e.asp] += 1;
       if (e.kill) dmgStats[tSide][e.asp]++;
@@ -3461,6 +3467,7 @@ function issue(type, args = {}) {
   if (type === 'qedit' && args.uturn == null) args = { ...args, uturn: opts.uturn };   // 迴轉方式記進命令（不同玩家的設定不同）
   if (NET.on && GAME.phase === 'battle') { if (!NET.spec && type !== 'rule' && !GAME.result) netCmd({ type, ...args }); return null; }   // 多人：送到伺服器，由回合帶回來才執行
   if (GAME.replaying && type !== 'rule') return null;   // 回放中不接受新命令
+  if (PL.on && type !== 'rule') return null;   // 王牌飛行員：玩家是士兵，不能指揮艦隊
   if (GAME.watch && type !== 'rule') { if (GAME.phase === 'battle' && performance.now() - (GAME.watchWarn || 0) > 4000) { GAME.watchWarn = performance.now(); toast('AI 對戰觀摩：雙方都由 AI 指揮，不能下令（可以點選艦隊查看、移動鏡頭、調速度）', 'hint'); } return null; }
   if (BR.on && type !== 'rule' && bridgeConsoleK() < 0.9) { bridgeNoCmd(); return null; }   // 艦橋：只有看著戰術台時才能下令（戰場畫面的右鍵移動等一律無效）
   const c = { tick: simTick + INPUT_DELAY, side: cmdSide, type, ...args };
@@ -3931,11 +3938,12 @@ function update3D(cam = camera, vh = VH) {   // cam／vh：子畫面（其他旗
   // 艦載機：機首沿速度方向
   for (let j = 0; j < FTR_MAX; j++) {
     if (FT.state[j] !== 2 || (fowFtrOn && fowFtrHide[j])) continue;
-    const j3 = j * 3, x = fP[j3], y = fP[j3 + 1], z = fP[j3 + 2];
-    const lod = pick(FTR_LEN3, x, y, z);
+    const j3 = j * 3, x = fP[j3], y = fP[j3 + 1], z = fP[j3 + 2], FL = PL.on ? PILOT_FTR_LEN : FTR_LEN3;   // 駕駛中：艦載機畫小一點，船才顯得大
+    if (PL.on && j === PL.j) { pilotDrawSelf(pick(FL, x, y, z), x, y, z, FL); continue; }   // 自己的機：機身會側傾；座艙視角不畫
+    const lod = pick(FL, x, y, z);
     if (lod < 0 || lod > 3) continue;
     let vx = fV[j3], vy = fV[j3 + 1], vz = fV[j3 + 2]; const vl = Math.hypot(vx, vy, vz) || 1;
-    writeMatrix((R3.meshByKey[FAC_KEY[shipFac(FT.carrier[j])] + 'f'] || R3.meshByKey.ef)[lod], x, y, z, vx / vl, vy / vl, vz / vl, FTR_LEN3 * (FT.kind[j] ? 0.6 : 1));   // 維修機小一點
+    writeMatrix((R3.meshByKey[FAC_KEY[shipFac(FT.carrier[j])] + 'f'] || R3.meshByKey.ef)[lod], x, y, z, vx / vl, vy / vl, vz / vl, FL * (FT.kind[j] ? 0.6 : 1));   // 維修機小一點
   }
   for (const it of R3.list) if (it.mesh.count) { const a = it.mesh.instanceMatrix; a.clearUpdateRanges && a.clearUpdateRanges(); a.addUpdateRange(0, it.mesh.count * 16); a.needsUpdate = true; }
 }
@@ -4359,6 +4367,7 @@ function orbitBy(dYaw, dPitch) {
 }
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
+  if (PL.on && !PL.spec) { pilotWheel(e.deltaY); return; }   // 王牌飛行員：滾輪＝鏡頭距離
   if (ms && (ms.mode === 'rpress' || ms.mode === 'raim') && !BR.on) { altWheel(ms, e.deltaY, pitchHeld()); return; }
   if (GAME.phase === 'deploy' && GAME.drag && !GAME.drag.touch) { deployWheel(e.deltaY); return; }   // 部署：右鍵按住轉滾輪＝起始高度   // 右鍵按住：滾輪＝目的地高度，Shift＝俯仰
   zoomAt(Math.exp(e.deltaY * 0.0012), e.clientX, e.clientY);
@@ -4690,9 +4699,9 @@ function touchUp(e) {
   }
 }
 let multiTap = false;   // 觸控工具列「多選」
-canvas.addEventListener('pointerdown', (e) => { if (BR.on) { bridgePointer('down', e); return; } canvas.setPointerCapture(e.pointerId); if (gamePointer('down', e)) return; if (e.pointerType === 'touch') touchDown(e); else mouseDown(e); });
-canvas.addEventListener('pointermove', (e) => { if (BR.on) { bridgePointer('move', e); return; } if (gamePointer('move', e)) return; if (e.pointerType === 'touch') touchMove(e); else mouseMove(e); });
-canvas.addEventListener('pointerup', (e) => { if (BR.on) { bridgePointer('up', e); return; } if (gamePointer('up', e)) return; if (e.pointerType === 'touch') touchUp(e); else mouseUp(e); });
+canvas.addEventListener('pointerdown', (e) => { if (PL.on && !PL.spec) return; if (BR.on) { bridgePointer('down', e); return; } canvas.setPointerCapture(e.pointerId); if (gamePointer('down', e)) return; if (e.pointerType === 'touch') touchDown(e); else mouseDown(e); });
+canvas.addEventListener('pointermove', (e) => { if (PL.on && !PL.spec) return; if (BR.on) { bridgePointer('move', e); return; } if (gamePointer('move', e)) return; if (e.pointerType === 'touch') touchMove(e); else mouseMove(e); });
+canvas.addEventListener('pointerup', (e) => { if (PL.on && !PL.spec) return; if (BR.on) { bridgePointer('up', e); return; } if (gamePointer('up', e)) return; if (e.pointerType === 'touch') touchUp(e); else mouseUp(e); });
 canvas.addEventListener('pointercancel', (e) => { touches.delete(e.pointerId); closeRadial(); cancelDrag(); if (aim) updateAim(null, false); });
 
 // ── 鍵盤 ──
@@ -4711,8 +4720,12 @@ const KEY_ACTIONS = [
   ['radial_prev', '輪盤：上一頁', '輪盤', 'KeyQ'], ['radial_next', '輪盤：下一頁', '輪盤', 'KeyE'],
   ['cam_up', '鏡頭往前', '鏡頭', 'ArrowUp'], ['cam_down', '鏡頭往後', '鏡頭', 'ArrowDown'], ['cam_left', '鏡頭往左', '鏡頭', 'ArrowLeft'], ['cam_right', '鏡頭往右', '鏡頭', 'ArrowRight'],
   ['cam_yaw_l', '3D：向左轉', '鏡頭', 'KeyQ'], ['cam_yaw_r', '3D：向右轉', '鏡頭', 'KeyE'], ['cam_pitch_up', '3D：仰角升高', '鏡頭', 'KeyR'], ['cam_pitch_dn', '3D：仰角降低', '鏡頭', 'KeyT'],
+  // 王牌飛行員（駕駛中才有效，可以和上面的鍵重複；滑鼠左右鍵固定是武裝一、二，這裡可以另外綁鍵盤）
+  ['pilot_thr_up', '油門加', '駕駛', 'KeyW'], ['pilot_thr_dn', '油門減', '駕駛', 'KeyS'], ['pilot_roll_l', '向左翻滾', '駕駛', 'KeyA'], ['pilot_roll_r', '向右翻滾', '駕駛', 'KeyD'],
+  ['pilot_boost', '加速', '駕駛', 'ShiftLeft'], ['pilot_w1', '武裝一（滑鼠左鍵之外）', '駕駛', ''], ['pilot_w2', '武裝二（滑鼠右鍵之外）', '駕駛', ''], ['pilot_w3', '武裝三', '駕駛', 'KeyQ'], ['pilot_w4', '武裝四', '駕駛', 'KeyE'],
+  ['pilot_target', '鎖定準心附近的敵人', '駕駛', 'KeyT'], ['pilot_view', '背後／座艙視角', '駕駛', 'KeyV'], ['pilot_land', '降落航母整補（靠近己方航母時）', '駕駛', 'KeyR'],
 ];
-const KEY_CTX = (id) => (id.startsWith('radial_') ? 'radial' : id === 'pitch_mod' ? 'drag' : 'main');   // 不同情境的鍵可以重複（例如 Z＝齊射，右鍵按住時＝仰角）
+const KEY_CTX = (id) => (id.startsWith('radial_') ? 'radial' : id.startsWith('pilot_') ? 'pilot' : id === 'pitch_mod' ? 'drag' : 'main');   // 不同情境的鍵可以重複（例如 Z＝齊射，右鍵按住時＝仰角）
 // 介面資訊預設都顯示
 const UI_OPTS = [
   ['labels', '分艦隊標籤', '戰場上每支分艦隊的名稱與艦數'], ['outlines', '戰術符號外框', '拉遠時的分艦隊外框'],
@@ -4731,7 +4744,7 @@ function saveSettings() { try { STORE.setItem('fleet.settings', JSON.stringify(S
 function keyOf(id) { return SETTINGS.keys[id] || ''; }
 function uiOn(k) { return SETTINGS.ui[k] !== false; }
 const KEY_NAMES = { Space: '空白鍵', Tab: 'Tab', Equal: '=', Minus: '-', Slash: '/', Backslash: '\\', Backquote: '`', Comma: ',', Period: '.', Semicolon: ';', Quote: "'", BracketLeft: '[', BracketRight: ']',
-  ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Enter: 'Enter', Backspace: 'Backspace', Delete: 'Del', Insert: 'Ins', Home: 'Home', End: 'End', PageUp: 'PgUp', PageDown: 'PgDn' };
+  ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', ShiftLeft: 'Shift', ShiftRight: '右 Shift', ControlLeft: 'Ctrl', ControlRight: '右 Ctrl', AltLeft: 'Alt', AltRight: '右 Alt', CapsLock: 'Caps Lock', Enter: 'Enter', Backspace: 'Backspace', Delete: 'Del', Insert: 'Ins', Home: 'Home', End: 'End', PageUp: 'PgUp', PageDown: 'PgDn' };
 function keyLabel(code) {
   if (!code) return '—';
   if (KEY_NAMES[code]) return KEY_NAMES[code];
@@ -4768,6 +4781,7 @@ addEventListener('keydown', (e) => {
   if (settingsCapturing()) return;
   if (typeof weaponEditorOpen === 'function' && weaponEditorOpen()) return;   // 武器配置畫面自己處理按鍵
   const k = e.code;
+  if (PL.on && !PL.spec && pilotKey(e)) return;   // 王牌飛行員：飛行按鍵（不能下令）
   if (radialOpen()) {   // 輪盤開著：切換頁
     if (k === keyOf('radial_prev') || k === keyOf('radial_next')) { e.preventDefault(); radialFlip(k === keyOf('radial_prev') ? -1 : 1); return; }
   }
@@ -4791,6 +4805,7 @@ addEventListener('keydown', (e) => {
 addEventListener('keyup', (e) => keysDown.delete(e.code));
 addEventListener('blur', () => keysDown.clear());
 function keyPan(dt) {
+  if (PL.on && !PL.spec) return;
   if (BR.on) { bridgeKeys(dt); return; }
   if (keyHeld('cam_yaw_l')) orbitBy(1.4 * dt, 0);
   if (keyHeld('cam_yaw_r')) orbitBy(-1.4 * dt, 0);
@@ -4973,6 +4988,7 @@ function frame() {
   fowFxFrame();      // 戰爭迷霧：掃描波紋、被掃描的方向（3D 場景）
   keyPan(dt);
   bridgeFrame(dt);   // 指揮官視角：鏡頭、懸浮視窗、戰術台
+  pilotFrame(dt);    // 王牌飛行員：鏡頭、儀表
   updateMarkers();
   updateStalks();
   gameFrame(dt);
@@ -5020,6 +5036,7 @@ function frame() {
     if (battleSetup && !battleSetup.bg && symAlpha > 0.4 && sq.fleet && sq.flagship < 0 && sq.fleet.sqs.some((o) => o.flagship >= 0 && o.group === sq.group)) la = 0;   // 獨立行動的分艦隊保留標籤
     if (sel || sq.relayUntil > t || flankState(sq) || sq.disorderUntil > t) la = Math.max(la, 0.95);   // 選取中、傳令中、側背受擊的標籤一律顯示
     if (BR.on) la = vis && !sq.bg && (sq.flagship >= 0 || sel || flankState(sq)) ? 0.9 : 0;   // 艦橋：只標旗艦分艦隊與選取中的
+    if (PL.on && !PL.spec) la = 0;   // 駕駛中：目標標示畫在儀表上
     if (!uiOn('labels')) la = 0;
     if (!vis) la = 0; else if (gh) la *= 0.6;
     if (la < 0.02) { sq.label.style.opacity = 0; continue; }

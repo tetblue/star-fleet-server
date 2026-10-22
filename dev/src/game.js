@@ -557,6 +557,7 @@ function gameTick() {
 function toast(msg, cls = '') {
   if ((GAME.phase === 'battle' || GAME.phase === 'replay') && cls !== 'hint') { (GAME.log || (GAME.log = [])).push({ t: U.uTime.value, msg, cls }); if (GAME.log.length > 40) GAME.log.shift(); }   // 艦橋的通訊紀錄
   if (!uiOn('toasts')) return;
+  if (PL.on && !PL.spec && cls !== 'pilot' && cls !== 'bad') return;   // 駕駛中：AI 指揮官的通知只記在紀錄裡，不擋畫面
   const el = document.createElement('div'); el.className = 'toast ' + cls; el.textContent = msg;
   const box = gEl('toasts'); box.appendChild(el);
   while (box.children.length > 4) box.firstChild.remove();
@@ -634,6 +635,7 @@ function force3D() { if (opNow() >= 1 && !mode3D) { setRenderMode('3d', false); 
 
 // ═════ 畫面 ═════
 function setPhase(ph) {
+  if (PL.on && ph !== 'battle') pilotEnd();   // 離開作戰＝結束駕駛
   if (BR.on && ph !== 'battle' && ph !== 'replay') exitBridge();   // 離開作戰＝離開艦橋
   GAME.phase = ph;
   if (GAME.forced3D && ph !== 'battle' && ph !== 'deploy' && ph !== 'simedit') { GAME.forced3D = false; if (mode3D) setRenderMode('2d', false); }   // 離開作戰：回到原本的 2D
@@ -654,7 +656,7 @@ function setPhase(ph) {
 function overlay(html) { const g = gEl('game'); g.hidden = !html; gEl('g-screen').innerHTML = html || ''; g.scrollTop = 0; }
 
 function menuBg() {
-  GAME.recView = false; GAME.watch = false; opts.flat = opts.ff = opts.fow = false; GAME.op = 0;
+  GAME.recView = false; GAME.watch = false; GAME.pilot = null; opts.flat = opts.ff = opts.fow = false; GAME.op = 0;
   if (!battleSetup || !battleSetup.bg) { newBattle(12345); setRule('fire', true); }
   paused = false; updateTimeUI();
 }
@@ -704,6 +706,7 @@ function showSingle() {
       ${mode('sp-rand', 'SKIRMISH', '隨機戰役', '自選規模與敵軍強度，敵軍和地形每次隨機生成', `${RAND_SIZES[ro.size].name}・敵軍${RAND_DIFF[ro.diff].name}・地形${RAND_TERR[ro.terr].name}`)}
       ${mode('sp-camp', 'ENDLESS', '無限戰場', '無限關卡：敵軍依你的指揮官等級生成，一關比一關大', `目前第 ${c.stage} 關・最高第 ${c.best} 關`)}
       ${mode('sp-sand', 'SIMULATOR', '模擬室', '自由布置雙方艦隊、指揮官與地形，用正式規則測試戰術（可接管任一方）', '不計戰績、不給經驗')}
+      <button class="sp-mode wide" id="sp-pilot"><span class="sp-en">ACE PILOT</span><b>王牌飛行員</b><span class="sp-desc">不指揮艦隊：以一名飛行員的身分駕駛特殊改裝的艦載機加入隨機戰場。背後視角或座艙視角，滑鼠瞄準、雙武裝，累積戰功解鎖新武裝</span><span class="sp-st">${pilotSummary()}</span></button>
       <button class="sp-mode wide" id="sp-watch"><span class="sp-en">SPECTATE</span><b>AI 對戰觀摩</b><span class="sp-desc">選擇雙方 AI 的難度與打法，看 AI 互打：即時解說每支艦隊在做什麼，參考推進、消耗、包抄、突破與反制的時機</span><span class="sp-st">${watchSummary()}</span></button>
     </div>
     <div class="sp-row">
@@ -718,6 +721,7 @@ function showSingle() {
   gEl('sp-camp').onclick = showCampaign;
   gEl('sp-sand').onclick = () => showSim();
   gEl('sp-watch').onclick = () => showWatch();
+  gEl('sp-pilot').onclick = () => showPilot();
   gEl('sp-cmdr').onclick = () => showCommanders(showSingle);
   gEl('sp-tav').onclick = () => showTavern();
 }
@@ -1016,7 +1020,7 @@ function gamePointer(type, e) {
 
 // ───── 戰鬥 ─────
 function startBattle() {
-  GAME.attempt++; GAME.recView = false; GAME.watch = false;
+  GAME.attempt++; GAME.recView = false; GAME.watch = false; GAME.pilot = null;
   const setup = makeSetup(GAME.sc, GAME.loadout, GAME.attempt);
   applyOp(); setup.op = GAME.op;
   newBattle(GAME.sc.seed + GAME.attempt, setup);
@@ -1054,7 +1058,7 @@ function buildBattleHud() {
     quitBattle();
   };
   watchHud();   // 觀摩：雙方 AI 的解說面板
-  const mine = GAME.watch || NET.spec ? [] : fleets.filter((f) => f.side === GAME.playerSide && f.commander && !f.ally);   // 觀摩：不能放技能；友軍傭兵的技能由 AI 自己用
+  const mine = GAME.watch || NET.spec || GAME.pilot ? [] : fleets.filter((f) => f.side === GAME.playerSide && f.commander && !f.ally);   // 觀摩：不能放技能；友軍傭兵的技能由 AI 自己用
   gEl('skillbar').innerHTML = mine.map((f) => `<div class="sk-fleet"><div class="nm"><b>${f.name}</b>　${f.commander.name} Lv ${f.commander.level}</div>${Object.keys(f.skills).map((id) =>
     `<button class="g-btn sk-btn" data-f="${f.id}" data-s="${id}" title="${SKILLS[id].desc}">${SKILLS[id].name}<small></small><i class="cdv"></i></button>`).join('')}</div>`).join('');
   document.querySelectorAll('#skillbar .sk-btn').forEach((b) => (b.onclick = () => armSkill(fleets[+b.dataset.f], b.dataset.s)));
@@ -1076,7 +1080,7 @@ function gameFrame(dt) {
   const t = U.uTime.value, tl = battleSetup.timeLimit;
   const a0 = sideAlive(0), a1 = sideAlive(1), p = a0 / Math.max(1, GAME.init[0]), e = a1 / Math.max(1, GAME.init[1]);
   if (!gEl('bh-tm')) buildBattleHud();
-  const sim = GAME.sc && GAME.sc.sim, nm = (s) => (NET.on ? mpSideName(s) : sim ? simSideName(SIM.m, s) + (s === GAME.playerSide && !GAME.watch ? '（指揮中）' : '') : s === GAME.playerSide ? '我軍' : '敵軍');
+  const sim = GAME.sc && GAME.sc.sim, nm = (s) => (NET.on ? mpSideName(s) : sim ? simSideName(SIM.m, s) + (s === GAME.playerSide && !GAME.watch ? (GAME.pilot ? '（我軍）' : '（指揮中）') : '') : s === GAME.playerSide ? '我軍' : '敵軍');
   if (GAME.watch) watchFrame();
   gEl('bh-t0').textContent = `${nm(0)} ${Math.round(p * 100)}%　${ships5(a0)} 艘`; gEl('bh-b0').style.width = p * 100 + '%';
   const fogE = playerFogged() ? 1 - GAME.playerSide : -1;   // 雷達受干擾：敵方兵力不明（長條停在原處）
@@ -1088,7 +1092,7 @@ function gameFrame(dt) {
   }
   gEl('bh-tm').textContent = tl >= SIM_INF ? _fmtT(t + SIM.t0) : _fmtT(Math.max(0, tl - t)); gEl('bh-tl').textContent = GAME.replaying ? '回放中' : tl >= SIM_INF ? '經過時間' : '剩餘時間';
   gEl('bh-pause').textContent = NET.on ? '不能暫停' : paused ? '▶ 繼續' : '❚❚ 暫停'; gEl('bh-speed').textContent = NET.on ? `×${NET.speed}${NET.lag ? ' 等待連線…' : ''}` : cmdSlowOn ? `×${effSpeed()} 下令中` : '×' + SPEEDS[speedIdx]; gEl('bh-speed').classList.toggle('slow', cmdSlowOn);
-  if (!gEl('bh-quit').dataset.sure) gEl('bh-quit').textContent = GAME.replaying ? '結束回放' : NET.on ? (NET.spec ? '離開觀戰' : '投降') : GAME.watch ? '結束觀摩' : sim ? '結束模擬' : GAME.sc && GAME.sc.tut ? '結束教學' : '撤退';
+  if (!gEl('bh-quit').dataset.sure) gEl('bh-quit').textContent = GAME.replaying ? '結束回放' : NET.on ? (NET.spec ? '離開觀戰' : '投降') : GAME.watch ? '結束觀摩' : GAME.pilot ? '結束出擊' : sim ? '結束模擬' : GAME.sc && GAME.sc.tut ? '結束教學' : '撤退';
   if (gEl('bh-ctl')) gEl('bh-ctl').textContent = `切換指揮 → ${simSideName(SIM.m, 1 - GAME.playerSide)}`;
   gEl('bh-3d').textContent = mode3D ? '2D 畫面' : '3D 畫面';
   gEl('bh-br').textContent = BR.on ? '離開艦橋' : '艦橋視角'; gEl('bh-br').title = `指揮官視角（${keyLabel(keyOf('bridge'))}）`;

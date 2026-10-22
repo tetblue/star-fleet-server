@@ -141,7 +141,8 @@ function groupNodes(g) {
 // 路線上的點加上高度（從 y0 平均過渡到 y1）
 function withY(pts, y0, y1) { const n = pts.length; return pts.map(([x, z], k) => [x, z, y0 + (y1 - y0) * (n > 1 ? k / (n - 1) : 1)]); }
 function blinkK(main) { if (main && !uiOn('blink')) return 1; return 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(performance.now() * 0.009)); }
-function overlayGroups() { return groups.filter((g) => g.side === cmdSide && !g.inactive && g.sqs.some((q) => q.alive > 0 && !q.bg)); }
+function overlayGroups() { if (PL.on && !PL.spec) return [];   // 駕駛中：不畫命令標示
+  return groups.filter((g) => g.side === cmdSide && !g.inactive && g.sqs.some((q) => q.alive > 0 && !q.bg)); }
 
 // ── 主畫面 ──
 const ovGroup = new THREE.Group(); ovGroup.renderOrder = 6; scene.add(ovGroup);

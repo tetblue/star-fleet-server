@@ -87,6 +87,7 @@ function bridgeCamera(recompute = true) {
 
 // ── 進入／離開／切換 ──
 function toggleBridge() {
+  if (PL.on) return;   // 駕駛中沒有艦橋
   if (BR.on) { if (opNow() === 2) { toast('擬真難度：作戰中只能使用指揮官模式'); return; } exitBridge(); }   // 擬真：不能離開艦橋
   else enterBridge();
 }
