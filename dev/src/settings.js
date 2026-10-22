@@ -66,6 +66,9 @@ function renderSettings() {
     body = `<div class="set-row"><span>介面大小<br><small class="g-dim">文字、按鈕與面板間距一起放大縮小</small></span>
         <select class="g-sel" id="set-uiscale">${UI_SCALES.map(([v, n]) => `<option value="${v}" ${(SETTINGS.uiScale || 1.2) === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
       <p class="g-dim set-note" style="margin-top:12px">關掉的項目不會顯示在戰鬥畫面上（戰術面板裡的隊列與預覽一律顯示）。</p>
+      <div class="set-h">王牌飛行員</div>
+      <div class="set-row"><span>雷達小地圖的位置（背後視角）<br><small class="g-dim">另一側的儀表會移到雷達上方；座艙視角固定在中央儀表板</small></span>
+        <select class="g-sel" id="set-pradar">${[['right', '右下角（預設）'], ['left', '左下角']].map(([v, n]) => `<option value="${v}" ${(SETTINGS.pilotRadar || 'right') === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
       ${UI_OPTS.map(([k, name, desc]) => `<label class="set-row set-chk"><span>${name}<br><small class="g-dim">${desc}</small></span><input type="checkbox" data-ui="${k}" ${uiOn(k) ? 'checked' : ''}></label>`).join('')}
       <div class="g-row" style="margin-top:12px"><span class="g-sp"></span><button class="g-btn sm" id="set-ureset">全部顯示</button></div>`;
   }
@@ -76,6 +79,7 @@ function renderSettings() {
   q('#set-close').onclick = closeSettings;
   qa('[data-tab]').forEach((b) => (b.onclick = () => { SET.tab = b.dataset.tab; SET.capture = null; SET.msg = ''; renderSettings(); }));
   qa('.set-key').forEach((b) => (b.onclick = () => { SET.capture = b.dataset.k; SET.msg = ''; renderSettings(); }));
+  if (q('#set-pradar')) q('#set-pradar').onchange = (e) => { SETTINGS.pilotRadar = e.target.value; saveSettings(); };
   if (q('#set-qmod')) q('#set-qmod').onchange = (e) => { SETTINGS.queueMod = e.target.value; saveSettings(); };
   if (q('#set-kreset')) q('#set-kreset').onclick = () => { for (const a of KEY_ACTIONS) SETTINGS.keys[a[0]] = a[3]; SETTINGS.queueMod = 'Shift'; SET.msg = '已恢復預設按鍵。'; saveSettings(); renderSettings(); };
   if (q('#set-cutin')) q('#set-cutin').onchange = (e) => { SETTINGS.cutin = e.target.checked; saveSettings(); if (!e.target.checked) cutStop(); };

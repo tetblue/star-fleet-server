@@ -7,7 +7,8 @@ const PILOT_STORE = 'fleet.pilot';
 const PILOT_FTR_LEN = 0.9;     // 駕駛中所有艦載機的 3D 長度（原本 1.8；畫小一點，船才顯得大）
 const PILOT_RESPAWN = 5;       // 被擊墜後幾秒重新出擊
 const PILOT_HITR_F = 1.3;      // 機砲對艦載機的命中半徑（比機身大一點，好打一點）
-const PILOT_ZONE = 1500;       // 戰區半徑：超出會被拉回
+const PILOT_ZONE = 1500;
+const PILOT_DODGE = 3.5;      // 打向玩家的子彈：到達時機體離預測點超過這個距離＝閃過       // 戰區半徑：超出會被拉回
 // 機體：role＝CRAFT 的索引（防空砲依它的大小算命中）；min／cruise／max＝最低／巡航／加速速度；turn＝每秒最大轉向（弧度）
 const PILOT_FRAMES = [
   { role: 0, name: '攔截機・改', en: 'INTERCEPTOR', hp: 30, sh: 24, shR: 7, min: 22, cruise: 58, max: 96, acc: 46, turn: 2.3, roll: 4.4, boostT: 4,
@@ -243,7 +244,7 @@ function pilotGo() {
 // ───── 戰鬥中 ─────
 Object.assign(PL, { side: 0, F: [0, 0, 1], U: [0, 1, 0], yaw: 0, pitch: 0, speed: 0, thr: 0.6, boost: 1, hp: 0, sh: 0, shT: -9, inv: 0, dead: false, deadT: 0,
   home: -1, frame: null, slots: [], fire: [false, false, false, false], press: [false, false, false, false], keys: new Set(), tgt: null, cock: false, camD: 1, msl: [], feed: [], hitT: -9, hurtT: -9,
-  rearm: 0, out: 0, rng: 1, stats: null, el: null, ctx: null, pauseEl: null, locked: false, manualT: 0, seed: 0, banner: '' });
+  rearm: 0, out: 0, rng: 1, hits: [], flash: null, stats: null, el: null, ctx: null, pauseEl: null, locked: false, manualT: 0, seed: 0, banner: '' });
 const _pa = new THREE.Vector3(), _pb = new THREE.Vector3(), _pp = new THREE.Vector3();
 function plRnd() { PL.rng = (Math.imul(PL.rng ^ (PL.rng >>> 15), 2246822519) + 0x9e3779b9) >>> 0; return PL.rng / 4294967296; }   // 不動到模擬的亂數
 const v3 = { dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
@@ -255,7 +256,7 @@ function pilotBegin(cfg) {
   PL.on = true; PL.spec = false; PL.side = 0; PL.j = FTR_MAX - 1; FT.state[PL.j] = 0;
   PL.B = pilotBuild(cfg); PL.frame = PL.B.fr; PL.taken = PL.B.taken; PL.respawn = PL.B.respawn; PL.prof = cfg.prof || {}; PL.slotIds = cfg.slots.slice();
   PL.stats = { kf: 0, ks: 0, dmg: 0, deaths: 0, shots: 0, hits: 0, merit: 0, msl: 0, heal: 0, wxp: {} };
-  PL.feed = []; PL.msl = []; PL.tgt = null; PL.cock = false; PL.camD = 1; PL.rng = (battleSeed ^ 0x5bd1e995) >>> 0 || 1; PL.thr = 0.6; PL.saved = false; PL.savedBefore = PL.lv0 = PL.wx0 = null;
+  PL.feed = []; PL.msl = []; PL.hits = []; PL.flash = null; PL.dodge = 0; PL.tgt = null; PL.cock = false; PL.camD = 1; PL.rng = (battleSeed ^ 0x5bd1e995) >>> 0 || 1; PL.thr = 0.6; PL.saved = false; PL.savedBefore = PL.lv0 = PL.wx0 = null;
   PL.keys.clear(); PL.fire = [false, false, false, false]; PL.press = [false, false, false, false];
   const fl = fleets.find((f) => f.side === PL.side && !f.supply && f.sqs.some((q) => q.list.some((i) => ships.alive[i] && ships.type[i] === 0)));
   PL.home = -1; if (fl) for (const q of fl.sqs) for (const i of q.list) if (PL.home < 0 && ships.alive[i] && ships.type[i] === 0) PL.home = i;
@@ -267,7 +268,7 @@ function pilotBegin(cfg) {
 }
 function pilotEnd() {
   if (!PL.on) return;
-  PL.beam = null; PL.dock = null; pilotBeamFrame();
+  PL.beam = null; PL.dock = null; PL.flash = null; pilotBeamFrame(); pilotHitFrame();
   PL.on = false; PL.spec = false;
   if (PL.j >= 0) FT.state[PL.j] = 0;
   if (document.pointerLockElement) document.exitPointerLock();
@@ -619,8 +620,10 @@ function pilotRetarget(m) {
 // 被打中：先扣護盾，打穿扣耐久；歸零＝被擊墜
 function pilotHurt(dmg, e, self) {
   const t = U.uTime.value; if (PL.dead || t < PL.inv) return;
+  if (e && e.px != null) { const j = PL.j; if (Math.hypot(fP[j * 3] - e.px, fP[j * 3 + 1] - e.py, fP[j * 3 + 2] - e.pz) > PILOT_DODGE) { PL.dodge = (PL.dodge || 0) + 1; return; } }   // 閃過了
   PL.shT = t; PL.hurtT = t; dmg *= PL.taken || 1;
   if (PL.sh > 0) { const a = Math.min(PL.sh, dmg); PL.sh -= a; dmg -= a; }
+  pilotHitFx(e, dmg > 0);
   PL.hp -= dmg;
   if (PL.hp > 0) return;
   PL.hp = 0; PL.dead = true; PL.deadT = t; PL.stats.deaths++;
@@ -628,6 +631,16 @@ function pilotHurt(dmg, e, self) {
   PL.fire.fill(false); PL.msl.length = 0; PL.dock = null; PL.beam = null; PL.rearm = 0;
   pilotFeed(self ? '機體撞毀！' : '被擊墜！', 'bad');
   if (PL.mis && !PL.mis.done && PL.stats.deaths > PL.mis.deaths) pilotMisFail(`被擊墜 ${PL.stats.deaths} 次，超過上限 ${PL.mis.deaths} 次`);
+}
+// 被打中：機體上的閃光（護盾藍、機體橘）＋火花；記下來源方向給儀表畫受擊方向
+function pilotHitFx(e, hull) {
+  const j = PL.j, x = fP[j * 3], y = fP[j * 3 + 1], z = fP[j * 3 + 2], now = performance.now();
+  PL.hurtSh = !hull;
+  const src = e && e.sx != null ? [e.sx, e.sy, e.sz] : null;
+  PL.flash = { t: now, hull, src };
+  if (src) { PL.hits.push({ t: now, x: src[0], y: src[1], z: src[2], hull }); if (PL.hits.length > 10) PL.hits.shift(); }
+  if (hull) spawnFx(x, y, z, PL.side, 0.9, 30);
+  else spawnFx(x, y, z, 2 + fxFac(PL.side) * 8 + (src ? dirIndexOf(x - src[0], z - src[2]) : 0), 1.1, 26);
 }
 function pilotCredit(kind, i, dmg, kill, wid) {
   const S = PL.stats; if (!S) return;
@@ -840,6 +853,7 @@ function pilotFrame(dt) {
   if (!PL.spec) updateCamera();
   pilotMisTick();
   pilotBeamFrame();
+  pilotHitFrame();
   pilotHud();
 }
 function pilotHud() {
@@ -907,8 +921,9 @@ function pilotHud() {
     if (done) { g.fillStyle = '#ff4040'; g.fillText('鎖定', s[0] + 20, s[1] + 18); }
   });
   pilotMisHud(g, W, H, sw, px, py, pz);
-  pilotRadar(g, W, H, px, py, pz, col, red);
-  pilotGauges(g, W, H, col);
+  const LY = pilotHudLayout(W, H);
+  pilotRadar(g, LY, px, py, pz, col, red);
+  pilotGauges(g, W, H, col, LY);
   // 訊息
   PL.feed = PL.feed.filter((m) => now - m.t < 4000);
   PL.feed.forEach((m, k) => { g.globalAlpha = Math.min(1, (4000 - (now - m.t)) / 600); pilotText(g, W / 2, H * 0.24 + k * 20, m.msg, m.cls === 'bad' ? red : m.cls === 'kill' ? '#ffd36a' : m.cls === 'ok' ? '#8fe39a' : 'rgba(230,235,245,.85)', 14); });
@@ -918,7 +933,16 @@ function pilotHud() {
   if (PL.dock) pilotText(g, W / 2, H * 0.62, PL.dock.ph === 'in' ? '自動降落中…' : PL.dock.ph === 'deck' ? `整補中… ${Math.round(PL.rearm * 100)}%` : '彈射起飛！', '#8fe39a', 15);
   else if (!PL.dead && (simTick % 20 === 0 || PL.nearC == null)) PL.nearC = pilotNearCarrier(px, py, pz, PILOT_DOCK.range) >= 0;
   if (!PL.dock && !PL.dead && PL.nearC) pilotText(g, W / 2, H * 0.62, `按 ${plKey('pilot_land')} 降落整補`, 'rgba(143,227,154,.85)', 13);
-  if (t - PL.hurtT < 0.35) { const k = 1 - (t - PL.hurtT) / 0.35, gr = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.7); gr.addColorStop(0, 'rgba(255,40,30,0)'); gr.addColorStop(1, `rgba(255,40,30,${0.45 * k})`); g.fillStyle = gr; g.fillRect(0, 0, W, H); }
+  if (t - PL.hurtT < 0.35) { const k = 1 - (t - PL.hurtT) / 0.35, c = PL.hurtSh ? '80,160,255' : '255,40,30', gr = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.7); gr.addColorStop(0, `rgba(${c},0)`); gr.addColorStop(1, `rgba(${c},${(PL.hurtSh ? 0.25 : 0.45) * k})`); g.fillStyle = gr; g.fillRect(0, 0, W, H); }
+  // 受擊方向：準心外圍的弧，指向打來的方向（紅＝打到機體、藍＝護盾擋下），1.2 秒淡出
+  PL.hits = PL.hits.filter((h) => now - h.t < 1200);
+  for (const h of PL.hits) {
+    _pp.set(h.x, h.y, h.z).applyMatrix4(camera.matrixWorldInverse);
+    const a = Math.atan2(-_pp.y, _pp.x), al = 1 - (now - h.t) / 1200, r = Math.min(W, H) * 0.16;
+    g.strokeStyle = h.hull ? `rgba(255,74,58,${al})` : `rgba(124,196,255,${al * 0.85})`; g.lineWidth = h.hull ? 6 : 4;
+    g.beginPath(); g.arc(W / 2, H / 2, r, a - 0.32, a + 0.32); g.stroke();
+  }
+  g.lineWidth = 1.5;
   if (PL.dead) { pilotText(g, W / 2, H * 0.42, '被擊墜', red, 26); pilotText(g, W / 2, H * 0.42 + 32, `${Math.max(0, Math.ceil(PL.respawn - (t - PL.deadT)))} 秒後從母艦重新出擊`, 'rgba(230,235,245,.9)', 14); }
   if (!PL.locked && !paused && !GAME.result) pilotText(g, W / 2, H * 0.55, '點一下畫面開始駕駛（滑鼠游標會被鎖定・Esc 暫停）', '#fff', 15);
 }
@@ -937,6 +961,20 @@ const PL_BEAM = (() => {
   return { g, core, glow, halo };
 })();
 const _bmY = new THREE.Vector3(0, 1, 0), _bmD = new THREE.Vector3(), _healCol = new THREE.Color(0.35, 1.0, 0.55);
+const PL_HIT = (() => {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false }));
+  m.visible = false; m.renderOrder = 8; m.frustumCulled = false; scene.add(m); return m;
+})();
+const _hitHull = new THREE.Color(1.0, 0.55, 0.2), _hitSh = new THREE.Color(0.45, 0.75, 1.0);
+function pilotHitFrame() {
+  const f = PL.flash, age = f ? (performance.now() - f.t) / 1000 : 9, on = PL.on && !PL.spec && !PL.dead && !PL.cock && age < 0.22;
+  PL_HIT.visible = on; if (!on) return;
+  const j = PL.j, FL = PILOT_FTR_LEN; let ox = 0, oy = 0, oz = 0;
+  if (f.src) { const dx = f.src[0] - fP[j * 3], dy = f.src[1] - fP[j * 3 + 1], dz = f.src[2] - fP[j * 3 + 2], d = Math.hypot(dx, dy, dz) || 1; ox = dx / d * FL * 0.3; oy = dy / d * FL * 0.3; oz = dz / d * FL * 0.3; }   // 偏向打來的那一側
+  PL_HIT.position.set(fP[j * 3] + ox, fP[j * 3 + 1] + oy, fP[j * 3 + 2] + oz);
+  const k = age / 0.22; PL_HIT.scale.setScalar(FL * (f.hull ? 0.22 + k * 0.4 : 0.75 + k * 0.25));
+  PL_HIT.material.color.copy(f.hull ? _hitHull : _hitSh); PL_HIT.material.opacity = (1 - k) * (f.hull ? 0.85 : 0.5);
+}
 function pilotBeamFrame() {
   const B = PL.beam, on = PL.on && !PL.spec && !PL.dead && !PL.dock && B && B.b && U.uTime.value - B.t < 0.06;
   PL_BEAM.g.visible = !!on; if (!on) return;
@@ -976,8 +1014,16 @@ function pilotEdgeArrow(g, T, c) {
   g.fillStyle = c; g.save(); g.translate(x, y); g.rotate(a); g.beginPath(); g.moveTo(12, 0); g.lineTo(-6, -8); g.lineTo(-6, 8); g.closePath(); g.fill(); g.restore();
 }
 // 雷達：以機首方向為上，半徑 600
-function pilotRadar(g, W, H, px, py, pz, col, red) {
-  const R = 74, cx = W / 2, cy = H - R - 18, S = R / 600, h = Math.atan2(PL.F[0], PL.F[2]), ch = Math.cos(h), sh = Math.sin(h);
+// 儀表的位置：背後視角＝雷達在右下（設定可改左下），那一側的儀表往上移；座艙視角＝雷達在中央儀表板
+function pilotHudLayout(W, H) {
+  const R = 74;
+  if (PL.cock && !PL.dead) return { R, cx: W / 2, cy: H - R - 18, cock: true, wBase: H - 104, gBase: H - 112 };
+  const left = SETTINGS.pilotRadar === 'left', cy = H - R - 34;
+  return { R, cx: left ? 22 + R : W - 22 - R, cy, wBase: left ? H - 104 : cy - R - 34, gBase: left ? cy - R - 100 : H - 112 };
+}
+function pilotRadar(g, LY, px, py, pz, col, red) {
+  const R = LY.R, cx = LY.cx, cy = LY.cy, S = R / 600, h = Math.atan2(PL.F[0], PL.F[2]), ch = Math.cos(h), sh = Math.sin(h);
+  if (LY.cock) { g.fillStyle = 'rgba(20,26,36,.95)'; g.strokeStyle = facRGBA(SIDE_FAC[PL.side], 0.5); g.lineWidth = 3; g.beginPath(); g.arc(cx, cy, R + 7, 0, Math.PI * 2); g.fill(); g.stroke(); g.lineWidth = 1.5; }   // 儀表板上的框
   g.fillStyle = 'rgba(6,12,22,.55)'; g.strokeStyle = 'rgba(160,190,220,.35)'; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill(); g.stroke();
   g.beginPath(); g.arc(cx, cy, R / 2, 0, Math.PI * 2); g.stroke();
   const pt = (x, z) => { const dx = x - px, dz = z - pz, u = -(dx * ch - dz * sh), v = dx * sh + dz * ch; const k = Math.hypot(u, v) * S; if (k > R - 2) return null; return [cx + u * S, cy - v * S]; };
@@ -992,8 +1038,8 @@ function pilotRadar(g, W, H, px, py, pz, col, red) {
   g.fillStyle = col; g.beginPath(); g.moveTo(cx, cy - 6); g.lineTo(cx + 4, cy + 4); g.lineTo(cx - 4, cy + 4); g.closePath(); g.fill();
 }
 // 耐久、護盾、速度、加速、武裝
-function pilotGauges(g, W, H, col) {
-  const Fr = PL.frame, x0 = 22, y0 = H - 112;
+function pilotGauges(g, W, H, col, LY) {
+  const Fr = PL.frame, x0 = 22, y0 = LY.gBase;
   const bar = (x, y, w, k, c, label, val) => { g.fillStyle = 'rgba(6,12,22,.6)'; g.fillRect(x, y, w, 8); g.fillStyle = c; g.fillRect(x, y, w * Math.max(0, Math.min(1, k)), 8); g.fillStyle = 'rgba(220,228,240,.85)'; g.fillText(label, x, y - 8); if (val != null) { g.textAlign = 'right'; g.fillText(val, x + w, y - 8); g.textAlign = 'left'; } };
   bar(x0, y0, 190, PL.sh / Fr.sh, '#7cc4ff', '護盾', Math.ceil(PL.sh));
   bar(x0, y0 + 26, 190, PL.hp / Fr.hp, PL.hp / Fr.hp < 0.35 ? '#ff6a5a' : '#8fe39a', '機體', Math.ceil(PL.hp));
@@ -1003,7 +1049,7 @@ function pilotGauges(g, W, H, col) {
   // 武裝
   const xr = W - 232;
   PL.slots.forEach((S, k) => {
-    const Wd = PILOT_WEAPONS[S.id], y = H - 104 - (PL.slots.length - 1 - k) * 46;
+    const Wd = PILOT_WEAPONS[S.id], y = LY.wBase - (PL.slots.length - 1 - k) * 46;
     g.fillStyle = 'rgba(6,12,22,.6)'; g.fillRect(xr, y - 14, 212, 40);
     g.fillStyle = PL.fire[k] ? '#fff' : col; g.font = '600 13px "Noto Sans TC", sans-serif'; g.fillText(`${plSlotKey(k)}　${Wd.name}`, xr + 8, y); g.font = '12px "Noto Sans TC", sans-serif';
     let k2 = 1, txt = '', c2 = col;

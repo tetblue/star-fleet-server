@@ -2123,12 +2123,13 @@ function fireAir(attacker, gk, gun, sq, o, delay) {
   const gs = gunStats[sq.side][gk]; gs[0]++; if (hit) gs[1]++;
   const as = airStats[sq.side]; as.shots++; if (hit) as.hits++;
   // 畫面：瞄準提前量；沒中就偏一點
-  const lead = dist / 900;
+  const me = PL.on && o.a === 1 && o.i === PL.j, spd = me ? 320 : 900;   // 打向玩家的機：彈速慢、曳光亮又長，看得到飛過來（照提前量瞄準，轉向就閃得掉）
+  const lead = dist / spd;
   let tx = o.x + o.vx * lead, ty = o.y + o.vy * lead, tz = o.z + o.vz * lead;
   if (!hit) { tx += (rnd() - 0.5) * 10; ty += (rnd() - 0.5) * 6; tz += (rnd() - 0.5) * 10; }
-  const fxs = GUN_FX[gk], t0 = U.uTime.value + delay, dur = Math.hypot(tx - _a.x, ty - _a.y, tz - _a.z) / 900;
-  spawnBeam(_a.x, _a.y, _a.z, tx, ty, tz, t0, dur, sq.side, fxs.inten * 0.8, Math.min(0.5, 30 / Math.max(1, dist)), sqFac(sq));
-  if (hit) pending.push({ kind: 'ak', t: t0 + dur, a: o.a, i: o.i, g: o.g, dmg: gun.dmg, side: sq.side });
+  const fxs = GUN_FX[gk], t0 = U.uTime.value + delay, dur = Math.hypot(tx - _a.x, ty - _a.y, tz - _a.z) / spd;
+  spawnBeam(_a.x, _a.y, _a.z, tx, ty, tz, t0, dur, sq.side, fxs.inten * (me ? 1.6 : 0.8), me ? Math.min(0.7, 14 / Math.max(1, dist)) : Math.min(0.5, 30 / Math.max(1, dist)), sqFac(sq));
+  if (hit) pending.push({ kind: 'ak', t: t0 + dur, a: o.a, i: o.i, g: o.g, dmg: gun.dmg, side: sq.side, ...(me ? { sx: _a.x, sy: _a.y, sz: _a.z, px: tx, py: ty, pz: tz } : {}) });
   return true;
 }
 // 擬真難度：友軍誤射。射線（射擊艦 → 目標）先穿過友軍分艦隊時，依穿過的位置與密度有機率打中它。
@@ -2345,7 +2346,7 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
       beamPow[sq.side] += (fA - beamPow[sq.side]) * (beamShots[sq.side] ? 0.01 : 1); beamShots[sq.side]++; beamLastT[sq.side] = U.uTime.value;
       const t0 = U.uTime.value + delay, dur = tA / (fxs.spd + rnd() * 120);
       spawnBeam(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z, t0, dur, sq.side, (volleyShot ? 0.6 : 1) * fxs.inten * (0.4 + 0.6 * fA), Math.min(fxs.len, 60 / tA), sqFac(sq));
-      pending.push({ kind: 'ak', t: t0 + dur, a: o.a, i: o.i, g: o.g, dmg: gun.dmg * dmgMul * fA, side: sq.side });
+      pending.push({ kind: 'ak', t: t0 + dur, a: o.a, i: o.i, g: o.g, dmg: gun.dmg * dmgMul * fA, side: sq.side, ...(PL.on && o.a === 1 && o.i === PL.j ? { sx: _a.x, sy: _a.y, sz: _a.z } : {}) });
       return true;
     }
     hit = blk < 0 && i >= 0;
@@ -3250,12 +3251,14 @@ function updateFighters(dt) {
       // 命中率：攔截機打艦載機／飛彈，攻擊機打船；沒中就偏開
       const fh = FT.tk[i] === 3 ? rnd() < IR.acc.missile : FT.tk[i] === 0 ? rnd() < IR.acc.fighter * (FT.kind[g] === 2 ? FOW_RULE.recon.acc : 1) : rnd() < strikeChance(STRIKE_RULE.fighter, g, s, { x: tx, y: ty, z: tz }) && !(ROCKS.length && rockBlock(px, py, pz, tx, ty, tz) >= 0);   // 掃射船：被巨大小行星擋住就打不到
       const miss = fh ? 1.5 : 7 + rnd() * 6;
-      const jx = (rnd() - 0.5) * miss, jy = fh ? 0 : (rnd() - 0.5) * miss * 0.6, jz = (rnd() - 0.5) * miss, bd = d / 450;
-      spawnBeam(px, py, pz, tx + jx, ty + jy, tz + jz, t, bd, s, 0.35, 0.55);
+      const me = PL.on && FT.tk[i] === 0 && FT.tgt[i] === PL.j, bd = d / (me ? 300 : 450);   // 打向玩家的機：慢一點、亮一點，照提前量瞄準（轉向就閃得掉）
+      const lx = me ? fV[PL.j * 3] * bd : 0, ly = me ? fV[PL.j * 3 + 1] * bd : 0, lz = me ? fV[PL.j * 3 + 2] * bd : 0;
+      const jx = (rnd() - 0.5) * miss, jy = fh ? 0 : (rnd() - 0.5) * miss * 0.6, jz = (rnd() - 0.5) * miss;
+      spawnBeam(px, py, pz, tx + jx + lx, ty + jy + ly, tz + jz + lz, t, bd, s, me ? 1.1 : 0.35, me ? Math.min(0.7, 10 / Math.max(1, d)) : 0.55);
       const fs = ftrStats[s]; fs[0]++; if (fh) fs[1]++;
       if (!fh) { /* 沒打中 */ }
       else if (FT.tk[i] === 3) pending.push({ kind: 'ak', a: 0, t: t + bd, i: g, g: FT.tg2[i], dmg: IR.dmg, side: s });
-      else if (FT.tk[i] === 0) pending.push({ kind: 'ak', a: 1, t: t + bd, i: g, dmg: IR.dmg, side: s });
+      else if (FT.tk[i] === 0) pending.push({ kind: 'ak', a: 1, t: t + bd, i: g, dmg: IR.dmg, side: s, ...(me ? { sx: px, sy: py, sz: pz, px: tx + lx, py: ty + ly, pz: tz + lz } : {}) });
       else { const asp = hitAspect(g, px, pz, tx, tz, py, ty); pending.push({ src: 2, t: t + bd, target: g, side: s, asp, dmg: CRAFT[1].dmg * ftrDmgMul(home), hm: hitMul(asp, home >= 0 && home < shipCount ? squadrons[ships.sq[home]] : null, squadrons[ships.sq[g]]), fx: rnd() < 0.35, dirIdx: dirIndexOf(tx - px, tz - pz), x: tx + jx, y: ty, z: tz + jz }); }
     }
   }
@@ -4736,8 +4739,8 @@ const UI_OPTS = [
   ['compass', '艦橋方位儀', '指揮官視角上方的方位刻度與各艦隊方位'],
 ];
 const SETTINGS = (() => {
-  const d = { keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
-  try { const s = JSON.parse(STORE.getItem('fleet.settings') || 'null'); if (s) { Object.assign(d.keys, s.keys || {}); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin']) if (s[k] != null) d[k] = s[k]; } } catch (e) { /* 用預設值 */ }
+  const d = { keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, pilotRadar: 'right', ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
+  try { const s = JSON.parse(STORE.getItem('fleet.settings') || 'null'); if (s) { Object.assign(d.keys, s.keys || {}); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin', 'pilotRadar']) if (s[k] != null) d[k] = s[k]; } } catch (e) { /* 用預設值 */ }
   return d;
 })();
 function saveSettings() { try { STORE.setItem('fleet.settings', JSON.stringify(SETTINGS)); } catch (e) { /* 只在本次有效 */ } }
