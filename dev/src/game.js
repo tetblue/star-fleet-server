@@ -324,7 +324,7 @@ function aiTarget(f, S, C, far, lv) {
   for (const q of squadrons) {
     const v = seenSq(f.side, q);   // 被干擾：位置與兵力是干擾開始時的
     if (q.side === f.side || !v || v.bg || v.alive <= 0 || q.alive <= 0 || Math.hypot(v.x - C.x, v.z - C.z) > far || (fowOn() && v.stale)) continue;   // 戰爭迷霧：只選看得到的
-    let s = q.typeAlive[0] * 4 + (1 - v.alive / Math.max(1, q.list.length)) * 30 - v.alive * 0.05;
+    let s = q.typeAlive[0] * 4 + (1 - v.alive / Math.max(1, q.list.length - (q.nDorm || 0))) * 30 - v.alive * 0.05;   // 預留的空位（寄生、孵化）不算損失
     for (const [A, r] of allies) if (Math.hypot(v.x - A.x, v.z - A.z) < r) s += 12;
     if (s > bs) { bs = s; best = q; }
   }
@@ -508,6 +508,8 @@ function aiResupply(f, S, H) {
 
 // ───── 勝負 ─────
 function sideAlive(side) { let n = 0; for (const f of fleets) if (f.side === side && !f.reserve && !f.ally) for (const q of f.sqs) n += q.alive; return n; }   // 友軍（還沒倒戈的傭兵）不算進勝負
+// 蟲族・群體意志：還活著的艦隊全是蟲族的一方不會潰走（要全滅才算輸）
+function noRout(side) { let any = false; for (const f of fleets) if (f.side === side && !f.reserve && !f.ally && f.sqs.some((q) => q.alive > 0)) { if (fleetMods(f).fac !== 6) return false; any = true; } return any; }
 // 劇情戰役的護送目標：剩不到 VIP_KEEP 就算護送失敗
 const VIP_KEEP = 0.4;
 function vipLost() { const f = fleets.find((o) => o.vip); if (!f) return false; let n = 0; for (const q of f.sqs) n += q.alive; return n < f.initial * VIP_KEEP; }
@@ -516,9 +518,9 @@ function checkVictory() {
   const a0 = sideAlive(0), a1 = sideAlive(1), p = a0 / Math.max(1, GAME.init[0]), e = a1 / Math.max(1, GAME.init[1]);
   let r = null;
   if (a1 === 0) r = ['win', '殲滅敵軍'];
-  else if (e < ROUT_AT) r = ['win', '敵軍潰走'];
+  else if (e < ROUT_AT && !noRout(1)) r = ['win', '敵軍潰走'];
   else if (a0 === 0) r = ['lose', '我軍全滅'];
-  else if (p < ROUT_AT) r = ['lose', '我軍潰走'];
+  else if (p < ROUT_AT && !noRout(0)) r = ['lose', '我軍潰走'];
   else if (G && G.type === 'escort' && vipLost()) r = ['lose', `${G.name}損失過重`];
   else if (G && G.type === 'cut' && !fleets.some((f) => f.side === 1 && f.supply && !f.reserve && fleetAlive(f).length)) r = ['win', '敵軍補給艦全滅・補給線切斷'];
   else if (t >= tl && G && (G.type === 'survive' || G.type === 'escort')) r = ['win', G.type === 'escort' ? `時間到・${G.name}撐到了最後` : '時間到・撐過了敵軍的攻勢'];

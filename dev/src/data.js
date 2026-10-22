@@ -242,7 +242,10 @@ const FAC_TRAIT = [
     brief: '機械改造艦裝甲厚重，小口徑火力很難打穿，被衝進陣中也很快恢復陣形；但護盾比較薄。', counter: '多帶巡洋艦、驅逐艦，用飛彈與主砲的重火力打它；副砲、防空砲、艦載機掃射的消耗戰對它有利。突破陣型的效果也比較差。' },
   { name: '網路連結', desc: '附近每多一支連線中的友軍分艦隊，射擊就更準（有上限）；護盾受擊後比較快開始回充。被干擾時網路斷線：失去連線加成，命中率下降也比一般更重。',
     brief: '機械智慧族的艦隊彼此連線，聚在一起時射擊精準、護盾回充快；但非常依賴網路。', counter: '用干擾切斷網路（效果特別大），或把它的艦隊分割開來各個擊破。' },
-  null, null,
+  { name: '感染', desc: '光束打中時留下腐蝕，接下來幾秒持續侵蝕船體（不經過護盾）。附近被擊沉的敵方驅逐艦、護衛艦有機率被寄生、倒戈加入感染方（數量有上限；寄生艦只剩四成耐久，而且會慢慢死去）。護盾比較薄。',
+    brief: '感染艦的攻擊會持續腐蝕船體，在它附近被擊沉的小船可能被寄生倒戈。', counter: '保持距離作戰，別讓驅逐艦、護衛艦在它附近沉沒；受損的船及早撤回補給艦旁維修。' },
+  { name: '群體意志', desc: '沒有護盾，但船體比較厚，一段時間沒被打就會再生（孵化囊附近更快）。巡洋艦、驅逐艦用短程的酸液孢子代替飛彈，持續腐蝕船體。航母、戰列艦、巡洋艦都會孵化艦載機。不會潰走，被突破也不會亂了陣形；但航母（母巢）被擊沉時，附近的分艦隊會陷入混亂。',
+    brief: '蟲族艦載機成群、近距離火力兇猛，受傷會再生，而且不會潰逃。', counter: '拉開距離用主砲放風箏、強化防空；優先擊沉航母（母巢）讓周圍陷入混亂。不要用突破陣型衝進蟲群。' },
 ];
 // 各陣營的專屬天賦（天賦樹「種族」那一格，id 'fac'）
 const FAC_TALENT = [
@@ -251,14 +254,20 @@ const FAC_TALENT = [
   { name: '拆解專家', max: 2, desc: (r) => `戰場回收的範圍 +${r * 20}%、修補量與零件 +${r * 20}%` },
   { name: '過載', max: 2, desc: (r) => `船體低於 ${Math.round(ARMOR_RULE.over * 100)}% 的船，主砲、副砲射速 +${r * 15}%` },
   { name: '冗餘節點', max: 2, desc: (r) => `被干擾時保留 ${r * 35}% 的連線加成，干擾額外造成的命中率下降減少 ${r * 35}%` },
-  null, null,
+  { name: '腐蝕爆發', max: 2, desc: (r) => `寄生艦被擊沉時，原地留下 ${INFECT_RULE.zone.dur} 秒的腐蝕區域（半徑 ${INFECT_RULE.zone.r + (r - 1) * INFECT_RULE.zone.rTal}）：感染族、蟲族以外的船在裡面傷害、移動速度 −${Math.round((1 - INFECT_RULE.zone.mul) * 100)}%（不疊加）` },
+  { name: '屍體孵化', max: 2, desc: (r) => `附近被擊沉的敵方戰艦孵出 ${r * SWARM_RULE.corpse.ftr} 架攻擊機；${r * SWARM_RULE.corpse.ship * 100}% 機率孵出一艘驅逐艦或護衛艦` },
 ];
 // 陣營讓某些天賦沒有作用時，同一格換成別的天賦（點數、階數不變）：FAC_TAL_SWAP[陣營][天賦 id]＝{ name, desc }
 //   只給 name＝同樣效果、換成符合世界觀的名字；效果真的換掉的要在 fleetMods 裡照陣營處理
 const FAC_TAL_SWAP = [{}, {}, {},
   { energy: { name: '裝甲強化', desc: (r) => `液壓裝甲的厚度 +${r * 25}%（取代能量調度：機械改造艦的護盾薄，偏折用處不大）` } },
   { survey: { name: '偵察無人機' }, hangar: { name: '無人機整備' } },
-  {}, {}];
+  {},
+  // 蟲族：沒有飛彈、沒有護盾（效果換掉的在 fleetMods 處理；酸液孢子沿用飛彈的冷卻，所以「酸腺強化」效果同「飛彈裝填」）
+  { missile: { name: '酸腺強化', desc: (r) => `酸液孢子冷卻 −${r * 10}%` },
+    shield: { name: '甲殼增生', desc: (r) => `船體再生速度 +${r * 20}%（取代護盾強化：蟲族沒有護盾）` },
+    energy: { name: '甲殼硬化', desc: (r) => `被光束打中時 ${Math.round(r * SWARM_RULE.harden * 100)}% 機率傷害減半（取代能量調度：蟲族沒有護盾）` },
+    damage: { name: '快速癒合' }, s_jam: { name: '費洛蒙干擾' }, survey: { name: '偵察孢子' }, hangar: { name: '孵化加速' } }];
 // 依陣營取天賦的實際名稱與說明
 function talFor(t, fac) {
   const f = fac || 0;
@@ -280,6 +289,37 @@ const LINK_RULE = { win: 3, acc: 1.2, jam: 0.5, r: 80, rTal: 0.3, mslTal: 0.05 }
 //     被干擾：連線加成歸零、干擾的命中率懲罰 ×jam；天賦「冗餘節點」每階保留 tal 的加成、懲罰的額外部分減少 tal
 const ARMOR_RULE = { a: [3.4, 3.8, 3.1, 2.5, 2.0, 3.1], mainMul: 0.35, min: 0.25, tal: 0.25, sh: 0.9, disorder: 0.5, over: 0.3, overRate: 0.15 };
 const NET_RULE = { r: 520, per: 0.05, max: 3, delay: 0.8, jam: 2.5, tal: 0.35 };
+//   INFECT（蟲族感染人類・感染）：光束打中（不論打在護盾或船體）→ 目標在 dur 秒內船體再受到 dot × 這一發傷害（不經過護盾，同一艘疊加）；護盾容量 ×sh
+//     寄生：敵方驅逐艦、護衛艦沉在感染分艦隊中心 r 內，chance 機率倒戈：感染艦隊開戰時預留的空位（dorm[艦種] 個）啟用，最大耐久 ×cap，每秒損失最大耐久的 decay
+//     每支艦隊同時最多 live 艘、每場最多 max 艘（＝預留的空位）
+//     zone（專屬天賦「腐蝕爆發」）：寄生艦沉了 → 原地 dur 秒的腐蝕區域，半徑 r（每多一階 ＋rTal）；感染族、蟲族以外的分艦隊中心在裡面：傷害、速度 ×mul（不疊加）
+//   SWARM（蟲族・群體意志）：沒有護盾、船體 ×hp；最後一次被打 regenDelay 秒後每秒再生最大耐久的 regen（孵化囊 SUPPLY_RULE.range 內 ×hiveMul；天賦「甲殼增生」每階 ×(1＋0.2)）
+//     spore：巡洋、驅逐的飛彈換成酸液孢子：射程 ×range，命中後 dur 秒內對船體造成 dmg × 飛彈傷害（不經過護盾）
+//     brood：各艦種的艦載機（航母機庫 ×、補機時間 ×；戰列、巡洋另外有小機庫）；harden＝天賦「甲殼硬化」每階的減半機率
+//     hive：航母（母巢）沉了 → r 內的蟲族分艦隊陣形混亂 dur 秒；corpse（專屬天賦「屍體孵化」）：敵方戰艦（航母～驅逐）沉在蟲族分艦隊 r 內
+//       → 孵出 ftr × 階數 架攻擊機（從最近的蟲族船起飛）；ship × 階數 機率孵出一艘（用預留空位 dorm）
+const INFECT_RULE = { dot: 0.1, dur: 8, sh: 0.9, r: 520, chance: 0.3, cap: 0.4, decay: 0.006, live: 3, dorm: [0, 0, 0, 3, 3, 0],
+  zone: { dur: 60, r: 110, rTal: 40, mul: 0.85 } };
+const SWARM_RULE = { hp: 1.5, regenDelay: 8, regen: 0.005, hiveMul: 2, harden: 0.06,
+  spore: { range: 0.6, dmg: 0.85, dur: 6 },
+  brood: { carrier: { n: 1.5, build: 0.6 }, 1: { n: 2, wave: 2, cd: 24, range: 800, build: 20 }, 2: { n: 1, wave: 1, cd: 28, range: 700, build: 24 } },
+  hive: { r: 300, dur: 6 }, corpse: { r: 520, ftr: 2, ship: 0.05, dorm: [0, 0, 0, 2, 2, 0] } };
+// 依陣營取艦種資料：蟲族的艦載機（機庫）與酸液孢子射程不一樣，其他陣營照 SHIP_TYPES
+let BUG_TYPES = null;
+function facShipType(fac, t) {
+  if (fac !== 6) return SHIP_TYPES[t];
+  if (!BUG_TYPES) {
+    const B = SWARM_RULE.brood;
+    BUG_TYPES = SHIP_TYPES.map((s, k) => {
+      const o = { ...s };
+      if (k === 0) o.fighters = { ...s.fighters, n: s.fighters.n * B.carrier.n, build: s.fighters.build * B.carrier.build };
+      else if (B[k]) o.fighters = { ...B[k] };
+      if (s.missile) o.missile = { ...s.missile, range: s.missile.range * SWARM_RULE.spore.range };
+      return o;
+    });
+  }
+  return BUG_TYPES[t];
+}
 const SALVAGE_RULE = { r: 200, heal: 0.015, cd: 8, parts: 0.3, every: 6, cap: 0.5, maxBuild: 0.04, tal: 0.2 };
 const TALENT_BY_ID = Object.fromEntries(TALENTS.map((t) => [t.id, t]));
 function talentRank(c, id) { return (c && c.tal && c.tal[id]) || 0; }

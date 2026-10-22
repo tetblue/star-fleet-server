@@ -195,7 +195,7 @@ const shipMat = new THREE.ShaderMaterial({
       float hShip, vis;
       vec3 p = shipWorld(hShip, vis);
       float dead = aState.x > 0. ? (uTime - aState.x) : -1.;
-      if (vis < 0.5 || dead > 0.9) { gl_Position = vec4(2.,2.,2.,1.); return; }
+      if (vis < 0.5 || dead > 0.9 || aState.x < -0.5) { gl_Position = vec4(2.,2.,2.,1.); return; }   // aState.x＜0＝預留的空位（寄生、孵化用，還沒啟用）
       vec4 clip = projectionMatrix * viewMatrix * vec4(p, 1.);
       float w = aScale;
       float ppu = pxPerUnit(clip);
@@ -245,7 +245,7 @@ const glowMat = new THREE.ShaderMaterial({
     void main(){
       float hShip, vis;
       vec3 p = shipWorld(hShip, vis);
-      if (uGlowOn < 0.5 || vis < 0.5 || aState.x > 0.) { gl_Position = vec4(2.,2.,2.,1.); return; }
+      if (uGlowOn < 0.5 || vis < 0.5 || aState.x > 0. || aState.x < -0.5) { gl_Position = vec4(2.,2.,2.,1.); return; }
       float dir = dirIndex(hShip);
       float hq = u3D > 0.5 ? hShip : -dir * PI / 4.;   // 2D：與貼圖一致的量化航向；3D：連續
       vec2 fq = vec2(sin(hq), cos(hq));
@@ -785,8 +785,10 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
   const plans = [];
   setup.fleets.forEach((fd, fi) => {
     const fcomp = SHIP_TYPES.map((_, t) => fd.comp[t] || 0);   // 舊資料只有 5 種艦
-    const total = fcomp.reduce((a, b) => a + b, 0);
-    if (total <= 0) return;
+    if (fcomp.reduce((a, b) => a + b, 0) <= 0) return;
+    const dorm = fleetDorm(fd, fd.fac != null ? fd.fac : SIDE_FAC[fd.side], setup);   // 種族：預留的空位（寄生、孵化用，開戰時是空的）
+    dorm.forEach((n, t) => (fcomp[t] += n));
+    const total = fcomp.reduce((a, b) => a + b, 0), nDorm = dorm.reduce((a, b) => a + b, 0);
     const K = fd.names ? fd.names.length : Math.max(fd.supply ? 1 : 2, Math.min(6, Math.round(total / 380)));
     const comps = splitComp(fcomp, K);
     const counts = comps.map((c) => c.reduce((a, b) => a + b, 0));
@@ -796,7 +798,7 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
     const lay = fd.orderly ? genOrderly(fd.formation, counts, order, fd.layers || 1) : genFormation(fd.formation, counts, order, R);
     const fleet = { id: fi, side: fd.side, name: fd.name, commander: fd.commander || null, hangar: fd.hangar || null, sqs: [], reserve: !!fd.reserve, entry: fd.entry || null,
       supply: !!fd.supply, vip: !!fd.vip, fac: fd.fac != null ? fd.fac : SIDE_FAC[fd.side], ally: !!fd.ally, defectAt: fd.defectAt != null ? fd.defectAt : null, follow: fd.follow != null ? fd.follow : -1, reinfOf: fd.reinfOf != null ? fd.reinfOf : null, mercOf: fd.mercOf != null ? fd.mercOf : null, keep: fd.keep || null,
-      skills: {}, initial: total + (fd.supply ? 0 : 1), parts: 0, built: 0, ai: fd.ai || null, activateAt: fd.activateAt != null ? fd.activateAt : null, aiS: {} };
+      skills: {}, initial: total - nDorm + (fd.supply ? 0 : 1), dorm, paraLive: 0, parts: 0, built: 0, ai: fd.ai || null, activateAt: fd.activateAt != null ? fd.activateAt : null, aiS: {} };
     for (const sk of (fd.commander && fd.commander.skills) || []) {
       // 戰術熟練：每階 +1 次（fixed 的技能除外）；呼叫增援：這場有準備增援艦隊才能用
       const left = (sk === 'reinforce' && !setup.fleets.some((o) => o.reinfOf === fi)) || (sk === 'merc' && !setup.fleets.some((o) => o.mercOf === fi)) ? 0 : SKILLS[sk].uses + (SKILLS[sk].fixed ? 0 : talentRank(fd.commander, 'veteran'));
@@ -855,6 +857,8 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
     rpN: new Uint8Array(total), rpLeft: new Float32Array(total), rpRate: new Float32Array(total),
     // 種族特性：最大耐久倍率（傭兵重造的船）、上次被帝國主砲打中的時間（重砲齊射）
     hpCap: new Float32Array(total).fill(1), vT: new Float32Array(total).fill(-99),
+    // 持續傷害（感染的腐蝕、蟲族的酸液）：每秒多少、到什麼時候；dorm＝預留的空位（寄生、孵化）；para＝寄生艦（會慢慢死去）
+    dotR: new Float32Array(total), dotT: new Float32Array(total), dorm: new Uint8Array(total), para: new Uint8Array(total),
   };
   const aLocal = new Float32Array(total * 3), aLocal2 = new Float32Array(total * 3), aInfo = new Float32Array(total * 4), aState = new Float32Array(total * 2), aScale = new Float32Array(total), aPath = new Float32Array(total * 4), aSwap = new Float32Array(total * 4), aSwapD = new Float32Array(total);
 
@@ -886,9 +890,9 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
       const isFlag = k === flagSlot;
       const t = isFlag ? 1 : typeOf[k];
       ships.sq[si] = sqi; ships.type[si] = t; ships.alive[si] = 1; ships.side[si] = p.side;
-      const st = SHIP_TYPES[t];
-      ships.hp[si] = st.hp * (isFlag ? 3 : 1);
-      const bm = fleetMods(p.fleetObj || null);   // shMul：機械改造的護盾比較薄
+      const bm = fleetMods(p.fleetObj || null);   // shMul：機械改造、感染的護盾比較薄，蟲族沒有；hpMul：蟲族船體比較厚
+      const st = facShipType(bm.fac, t);   // 蟲族：機庫、酸液孢子射程不同
+      ships.hpCap[si] = bm.hpMul; ships.hp[si] = st.hp * (isFlag ? 3 : 1) * bm.hpMul;
       ships.shMax[si] = ships.sh[si] = st.sh * (isFlag ? 3 : 1) * (1 + bm.shield) * bm.shMul; ships.shT[si] = -99;
       // 各類砲的冷卻錯開（固定雜湊，不動到佈陣的亂數）
       ships.cd[si] = st.guns.main ? st.guns.main.cd * (0.3 + 0.9 * hash01(si * 1.7 + 4)) : 0;
@@ -920,6 +924,20 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
     if (sq.fleet) sq.fleet.sqs.push(sq);
     squadrons.push(sq);
   });
+
+  // 預留的空位：每支艦隊照 dorm 的艦種數量，從後排挑船清空（不算存活、不畫），之後寄生、孵化時才啟用
+  for (const f of fleets) {
+    if (!f.dorm) continue;
+    const need = f.dorm.slice();
+    for (let k = f.sqs.length - 1; k >= 0; k--) {
+      const q = f.sqs[k];
+      for (let n = q.list.length - 1; n >= 0; n--) {
+        const i = q.list[n], ty = ships.type[i];
+        if (need[ty] <= 0 || i === q.flagship) continue;
+        need[ty]--; ships.alive[i] = 0; ships.dorm[i] = 1; q.alive--; q.typeAlive[ty]--; q.nDorm = (q.nDorm || 0) + 1; aState[i * 2] = -1;
+      }
+    }
+  }
 
   shipGeo = new THREE.InstancedBufferGeometry();
   const base = new THREE.PlaneGeometry(1, 1);
@@ -1193,7 +1211,7 @@ function fowHidden(q) { return fowView() && !q.bg && q.side !== GAME.playerSide 
 // 估計的敵方兵力（看得到的照實、最後已知照快照、沒看過的照開戰時）
 function fowEstAlive(side) {
   const f = fowObs(1 - side); let n = 0;
-  for (const g of fleets) if (g.side === side && !g.reserve) for (const q of g.sqs) { if (q.bg) continue; const v = f ? fowSeen(f, q) : q; n += v ? v.alive : q.list.length; }
+  for (const g of fleets) if (g.side === side && !g.reserve) for (const q of g.sqs) { if (q.bg) continue; const v = f ? fowSeen(f, q) : q; n += v ? v.alive : q.list.length - (q.nDorm || 0); }   // 看不到：照編制算（預留的空位不算）
   return n;
 }
 // ── 掃描：從艦隊中心發出 FOW_RULE.scanR 的脈衝，範圍內的敵軍顯示 scanShow 秒；冷卻每一方共用 ──
@@ -1745,7 +1763,7 @@ function groupSpeed(g, t) {
   for (const q of g.sqs) {
     if (q.alive <= 0) continue;
     for (let k = 0; k < NT; k++) if (q.typeAlive[k] > 0 && SHIP_TYPES[k].speed < ts) ts = SHIP_TYPES[k].speed;
-    fs = Math.min(fs, fleetMods(q.fleet).speed);
+    fs = Math.min(fs, fleetMods(q.fleet).speed * (q.zoneMul || 1));   // 腐蝕區域裡：速度降低
     if (!morph && sqMorphing(q, t)) morph = true;
   }
   if (ts > 1.9) ts = 1;
@@ -1976,7 +1994,7 @@ function skillActive(fleet, id) { const s = fleet && fleet.skills[id]; return !!
 //    shield 護盾容量與回充加成、shTaken 護盾受到的傷害倍率
 function fleetMods(fleet) {
   const m = { dmg: 1, shield: 0, shTaken: 1, taken: 1, speed: 1, fwd: 1, mcd: 1, aa: 0, repair: 1, ftrRegen: 1, ftrDmg: 1, morph: 1, fireCd: 1, acc: 1, ffP: 1, defl: 0,
-    rot: 'shield', rotDur: ROTATE_RULE.dur, shRegen: 1, repN: FIELD_REPAIR.n, repCap: 0, fac: 0, facR: 0, armor: 0, shMul: 1, shDelay: 1 };   // fac＝種族特性用的陣營、facR＝專屬天賦的階數；armor 裝甲厚度倍率（0＝沒有）、shMul 護盾容量、shDelay 護盾回充延遲
+    rot: 'shield', rotDur: ROTATE_RULE.dur, shRegen: 1, repN: FIELD_REPAIR.n, repCap: 0, fac: 0, facR: 0, armor: 0, shMul: 1, shDelay: 1, hpMul: 1, regen: 0, harden: 0 };   // fac＝種族特性用的陣營、facR＝專屬天賦的階數；armor 裝甲厚度倍率（0＝沒有）、shMul 護盾容量、shDelay 護盾回充延遲
   if (!fleet) return m;
   m.fac = fleet.fac != null ? fleet.fac : SIDE_FAC[fleet.side] || 0;
   const c = fleet.commander;
@@ -1998,7 +2016,12 @@ function fleetMods(fleet) {
   // 種族特性（數值見 data.js 的 ARMOR_RULE、NET_RULE）
   if (m.fac === 3) { m.armor = 1 + ARMOR_RULE.tal * ((c && c.tal && c.tal.energy) || 0); m.defl = 0; m.shMul = ARMOR_RULE.sh; }   // 機械改造：「能量調度」換成「裝甲強化」
   else if (m.fac === 4) m.shDelay = NET_RULE.delay;
-  if (skillActive(fleet, 'wall')) { m.shTaken *= 0.6; m.taken *= 0.7; }
+  else if (m.fac === 5) m.shMul = INFECT_RULE.sh;
+  else if (m.fac === 6) {   // 蟲族：沒有護盾；「護盾強化」換成「甲殼增生」、「能量調度」換成「甲殼硬化」
+    const r = (id) => (c && c.tal && c.tal[id]) || 0;
+    m.shMul = 0; m.shield = 0; m.defl = 0; m.hpMul = SWARM_RULE.hp; m.regen = 1 + 0.2 * r('shield'); m.harden = SWARM_RULE.harden * r('energy');
+  }
+  if (skillActive(fleet, 'wall')) { if (m.fac === 6) m.taken *= 0.6; else { m.shTaken *= 0.6; m.taken *= 0.7; } }   // 鐵壁：蟲族沒有護盾，全部算在船體減傷
   if (skillActive(fleet, 'charge')) m.fwd *= 1.8;
   if (skillActive(fleet, 'rapid')) m.fireCd *= 0.65;
   if (skillActive(fleet, 'evade')) { m.speed *= 1.4; m.taken *= 0.75; }
@@ -2398,7 +2421,8 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
   if (sideFocus(sq.side) === tq) dmg *= 1.2;
   if (ff) dmg *= ffMul;
   if (am.fac === 1 && !ff) { tq.lkT = t0; tq.lkQ = sq; }   // 聯盟資料鏈：標記這支敵分艦隊
-  pending.push({ nd: gun.dmg, vr: am.fac === 0 && gk === 'main' && !ff ? 1 + am.facR : 0, gk, dr: Math.min(1, dist / far), gr: graze, t: t0 + dur, target, side: sq.side, ff, dirIdx: dirIndexOf(_b.x - _a.x, _b.z - _a.z), asp, fm, dmg, hm: hitMul(asp, sq, tq), fx: rnd() < fxs.fxP * (0.3 + 0.7 * fm) * (volleyShot ? 0.4 : 1), x: _b.x, y: _b.y, z: _b.z });
+  if (sq.zoneMul) dmg *= sq.zoneMul;   // 在腐蝕區域裡：傷害降低
+  pending.push({ co: am.fac === 5 && !ff ? 1 : 0, nd: gun.dmg, vr: am.fac === 0 && gk === 'main' && !ff ? 1 + am.facR : 0, gk, dr: Math.min(1, dist / far), gr: graze, t: t0 + dur, target, side: sq.side, ff, dirIdx: dirIndexOf(_b.x - _a.x, _b.z - _a.z), asp, fm, dmg, hm: hitMul(asp, sq, tq), fx: rnd() < fxs.fxP * (0.3 + 0.7 * fm) * (volleyShot ? 0.4 : 1), x: _b.x, y: _b.y, z: _b.z });
   return true;
 }
 // 齊射：分艦隊每 VOLLEY_CD 秒只能齊射一次；只有裝填過半（剩餘冷卻 ≤ VOLLEY_READY×冷卻）的砲會跟著開火
@@ -2450,11 +2474,100 @@ function killShip(i, t, x, y, z, mul = 1) {
   const sc = TYPE_W[ships.type[i]] * 1.6 * (ships.type[i] <= 1 ? 1.4 : 1) * mul;
   spawnFx(x, y, z, ships.side[i], sc, 18 + rnd() * 6);
   salvageKill(i, t, x, z);
+  swarmInfectKill(i, t, x, y, z);
+}
+// ── 感染、蟲族（規則數值見 data.js 的 INFECT_RULE、SWARM_RULE） ──
+let facZones = [];   // 腐蝕區域：{ x, y, z, r, until, side }
+const facFleet = (q) => (q.mods || fleetMods(q.fleet));
+// 持續傷害（不經過護盾）：同一艘疊加，剩下的量跟新的量合起來，在 dur 秒內扣完
+function addDot(i, amount, dur, t) {
+  const left = ships.dotT[i] > t ? ships.dotR[i] * (ships.dotT[i] - t) : 0;
+  ships.dotT[i] = t + dur; ships.dotR[i] = (left + amount) / dur;
+}
+// 預留的空位：感染艦隊（寄生用）、學了「屍體孵化」的蟲族艦隊（孵化戰艦用）；補給、護送、背景戰鬥沒有
+function fleetDorm(fd, fac, setup) {
+  const none = [0, 0, 0, 0, 0, 0];
+  if (setup.bg || fd.supply || fd.vip) return none;
+  if (fac === 5) return INFECT_RULE.dorm.slice();
+  if (fac === 6 && fd.commander && fd.commander.tal && fd.commander.tal.fac) return SWARM_RULE.corpse.dorm.slice();
+  return none;
+}
+// 艦隊裡某艦種的空位（在還有存活艦的分艦隊裡）
+function dormSlot(f, ty) { for (const q of f.sqs) { if (q.alive <= 0 || q.hidden) continue; for (const j of q.list) if (ships.dorm[j] && !ships.alive[j] && ships.type[j] === ty) return j; } return -1; }
+const nearSqOf = (f, x, z, R) => f.sqs.find((q) => q.alive > 0 && !q.hidden && (q.x - x) ** 2 + (q.z - z) ** 2 < R * R);
+let paraToastT = -99;
+// 船沉了：寄生倒戈（感染）、寄生艦的腐蝕爆發、母巢（蟲族航母）、屍體孵化（蟲族）
+function swarmInfectKill(i, t, x, y, z) {
+  const side = ships.side[i], ty = ships.type[i], dq = squadrons[ships.sq[i]], df = dq.fleet;
+  if (ships.para[i]) {   // 寄生艦沉了
+    ships.para[i] = 0; if (df) df.paraLive = Math.max(0, df.paraLive - 1);
+    const M = facFleet(dq);
+    if (M.fac === 5 && M.facR) { const Z = INFECT_RULE.zone; facZones.push({ x, y, z, r: Z.r + (M.facR - 1) * Z.rTal, until: t + Z.dur, side }); facStats[side].zones++; }
+  }
+  if (facFleet(dq).fac === 6 && ty === 0) {   // 母巢沉了：附近的蟲族分艦隊陷入混亂
+    const H = SWARM_RULE.hive;
+    for (const q of squadrons) if (q.side === side && q.alive > 0 && !q.bg && facFleet(q).fac === 6 && (q.x - x) ** 2 + (q.z - z) ** 2 < H.r * H.r) q.disorderUntil = Math.max(q.disorderUntil || 0, t + H.dur);
+    facStats[side].hive++;
+    if (typeof toast === 'function' && typeof GAME !== 'undefined' && GAME.phase === 'battle') toast(side === GAME.playerSide ? '母巢被擊沉，附近的蟲群陷入混亂！' : '擊沉母巢：附近的蟲群陷入混亂', side === GAME.playerSide ? 'bad' : '');
+  }
+  for (const f of fleets) {
+    if (f.side === side || f.reserve || !f.sqs.length) continue;
+    const M = fleetMods(f);
+    if (M.fac === 5 && (ty === 3 || ty === 4) && f.paraLive < INFECT_RULE.live) {   // 寄生倒戈：附近沉沒的敵方驅逐、護衛
+      const R = INFECT_RULE;
+      if (!nearSqOf(f, x, z, R.r)) continue;
+      const j = dormSlot(f, ty); if (j < 0 || rnd() >= R.chance) continue;
+      reviveShip(j, t, R.cap); ships.para[j] = 1; f.paraLive++; facStats[f.side].para++;
+      shipWorldCPU(j, _c); spawnBeam(x, y, z, _c.x, _c.y, _c.z, t, 0.6, f.side, 0.9, 0.4, 5);
+      if (t - paraToastT > 8 && typeof toast === 'function' && typeof GAME !== 'undefined' && GAME.phase === 'battle') { paraToastT = t; toast(f.side === GAME.playerSide ? '敵艦被寄生，倒戈加入我方' : '我方的船被寄生倒戈了！', f.side === GAME.playerSide ? '' : 'bad'); }
+    } else if (M.fac === 6 && M.facR && ty <= 3) {   // 屍體孵化：附近沉沒的敵方戰艦
+      const C = SWARM_RULE.corpse, q = nearSqOf(f, x, z, C.r); if (!q) continue;
+      let home = -1, bd = 1e18;
+      for (const j of q.list) if (ships.alive[j]) { shipWorldCPU(j, _c); const d = (_c.x - x) ** 2 + (_c.z - z) ** 2; if (d < bd) { bd = d; home = j; } }
+      if (home < 0) continue;
+      for (let k = 0; k < C.ftr * M.facR; k++) if (launchCraft(home, 1, 0, -1, t + k * 0.2, 1)) { FT.wild[launchCraft.last] = 1; facStats[f.side].hatch++; }
+      if (rnd() < C.ship * M.facR) { const j = dormSlot(f, rnd() < 0.5 ? 3 : 4); if (j >= 0) { reviveShip(j, t, M.hpMul); facStats[f.side].hatchShip++; } }
+    }
+  }
+}
+// 每 0.5 秒：腐蝕區域裡有哪些分艦隊、蟲族分艦隊旁邊有沒有孵化囊（補給艦）
+function swarmInfectUpdate(t) {
+  facZones = facZones.filter((Z) => Z.until > t);
+  const S2 = SUPPLY_RULE.range * SUPPLY_RULE.range;
+  for (const q of squadrons) {
+    q.zoneMul = 0; q.hive = false;
+    if (q.bg || q.alive <= 0) continue;
+    const f = facFleet(q).fac;
+    if (f !== 5 && f !== 6) for (const Z of facZones) if ((q.x - Z.x) ** 2 + ((q.y || 0) - Z.y) ** 2 + (q.z - Z.z) ** 2 < Z.r * Z.r) { q.zoneMul = INFECT_RULE.zone.mul; break; }
+    if (f === 6) for (const o of squadrons) if (o.side === q.side && o.alive > 0 && o.typeAlive[SUPPLY_T] > 0 && facFleet(o).fac === 6 && (o.x - q.x) ** 2 + (o.z - q.z) ** 2 < S2) { q.hive = true; break; }
+  }
+  // 腐蝕區域的特效（固定雜湊，不動到模擬的亂數）
+  facZones.forEach((Z, k) => { for (let n = 0; n < 2; n++) { const a = hash01(t * 7.3 + k * 13 + n) * TAU, r = Z.r * Math.sqrt(hash01(t * 3.1 + k * 7 + n * 5)); spawnFx(Z.x + Math.cos(a) * r, Z.y + (hash01(t + n) - 0.5) * 20, Z.z + Math.sin(a) * r, 0, 2.2, 12); } });
+}
+// 每 0.25 秒：持續傷害、寄生艦慢慢死去、蟲族再生
+function swarmInfectTick(dt, t) {
+  for (let i = 0; i < shipCount; i++) {
+    if (!ships.alive[i]) continue;
+    let d = 0;
+    if (ships.dotT[i] > t) d += ships.dotR[i] * dt;
+    if (ships.para[i]) d += SHIP_TYPES[ships.type[i]].hp * INFECT_RULE.decay * dt;
+    if (d > 0) {
+      ships.hp[i] -= d; if (ships.dotT[i] > t) { if (ships.shMax[i] <= 0) ships.shT[i] = Math.max(ships.shT[i], t); /* 腐蝕中的蟲族不會再生（有護盾的船不影響回充） */ facStats[1 - ships.side[i]].dot += d; dmgDealt[1 - ships.side[i]] += d; }
+      if (ships.hp[i] <= 0) { shipWorldCPU(i, _c); killShip(i, t, _c.x, _c.y, _c.z); continue; }
+    }
+    const q = squadrons[ships.sq[i]], M = q.mods;
+    if (M && M.regen && t - ships.shT[i] >= SWARM_RULE.regenDelay) {
+      const mh = maxHp(i); if (ships.hp[i] < mh) { const a = Math.min(mh - ships.hp[i], mh * SWARM_RULE.regen * M.regen * (q.hive ? SWARM_RULE.hiveMul : 1) * dt); ships.hp[i] += a; facStats[ships.side[i]].regen += a; }
+    }
+  }
+  if (stateDirty) { shipGeo.getAttribute('aState').needsUpdate = true; recountAlive(); stateDirty = false; }
 }
 
 // ───────────────────────── 種族特性（規則數值見 data.js 的 VOLLEY_RULE、LINK_RULE、SALVAGE_RULE） ─────────────────────────
-const facStats = [0, 1].map(() => ({ volley: 0, retarget: 0, salvHeal: 0, built: 0, armor: 0 }));   // 統計（除錯、平衡用）；armor＝裝甲擋掉的船體傷害
-function facStatReset() { for (const s of facStats) s.volley = s.retarget = s.salvHeal = s.built = s.armor = 0; }
+// 統計（除錯、平衡用）：armor＝裝甲擋掉的船體傷害、dot＝持續傷害、para＝寄生倒戈艘數、zones＝腐蝕區域、hive＝母巢陣亡、hatch／hatchShip＝屍體孵化的艦載機／戰艦、regen＝蟲族再生量
+const FAC_STAT_KEYS = ['volley', 'retarget', 'salvHeal', 'built', 'armor', 'dot', 'para', 'zones', 'hive', 'hatch', 'hatchShip', 'regen'];
+const facStats = [0, 1].map(() => Object.fromEntries(FAC_STAT_KEYS.map((k) => [k, 0])));
+function facStatReset() { for (const s of facStats) for (const k of FAC_STAT_KEYS) s[k] = 0; }
 // 聯盟飛彈：目標在命中前沉了 → 在原本的落點附近找最近的敵艦，重新擲命中；轉向成功＝改打它
 function misRetarget(e) {
   const R = LINK_RULE.r * (1 + LINK_RULE.rTal * (e.rt - 1));
@@ -2474,8 +2587,8 @@ function misRetarget(e) {
   facStats[e.side].retarget++;
   return true;
 }
-// 陣形混亂（被突破）的時間倍率：機械改造縮短；0＝不會混亂
-function disorderMul(q) { const f = (q.mods || fleetMods(q.fleet)).fac; return f === 3 ? ARMOR_RULE.disorder : 1; }
+// 陣形混亂（被突破）的時間倍率：機械改造縮短；0＝不會混亂（母巢陣亡造成的混亂不經過這裡）
+function disorderMul(q) { const f = (q.mods || fleetMods(q.fleet)).fac; return f === 3 ? ARMOR_RULE.disorder : f === 6 ? 0 : 1; }   // 蟲族：被突破不會混亂
 // 機械智慧・網路連結：每 0.5 秒數一次附近連線中的友軍分艦隊（同一邊、同陣營、NET_RULE.r 內）
 function netUpdate() {
   const R2 = NET_RULE.r * NET_RULE.r, live = (o) => !o.bg && !o.hidden && o.alive > 0 && (o.mods || fleetMods(o.fleet)).fac === 4;
@@ -2529,6 +2642,7 @@ function salvageBuild(t) {
 // 讓沉沒的船回到陣型裡原本的位置（最大耐久 × cap，護盾從零開始回充，飛彈要靠補給）
 function reviveShip(i, t, cap) {
   const q = squadrons[ships.sq[i]], st = SHIP_TYPES[ships.type[i]];
+  if (ships.dorm[i]) { ships.dorm[i] = 0; q.nDorm--; }   // 啟用預留的空位
   ships.alive[i] = 1; ships.hpCap[i] = cap; ships.hp[i] = maxHp(i);
   ships.sh[i] = 0; ships.shT[i] = t; ships.ammo[i] = 0; ships.rpN[i] = 0; ships.rpLeft[i] = 0; ships.vT[i] = -99;
   ships.cd[i] = st.guns.main ? st.guns.main.cd : 0; ships.cd1[i] = 2; ships.cd2[i] = 1; ships.swD[i] = 0;
@@ -2670,7 +2784,7 @@ function launchMissileAt(x, y, z, side, msq, target, dmg, t0, src, accM = 1) {
   const tHit = t0 + dur;
   if (blk >= 0) { bezCPU(i, cut, _c); pending.push({ kind: 'mi', t: t0 + dur * cut, side, x: _c.x, y: _c.y, z: _c.z }); }
   else if (!hit) { wStats[side].mMiss++; pending.push({ kind: 'mi', mi: i, g: misGen[i], t: tHit, side, x: misC[i * 3], y: misC[i * 3 + 1], z: misC[i * 3 + 2] }); }
-  else { const asp = hitAspect(target, x, z, _b.x, _b.z, y, _b.y), lm = msq && fleetMods(msq.fleet); pending.push({ kind: 'mh', rt: lm && lm.fac === 1 ? 1 + lm.facR : 0, src, mi: i, g: misGen[i], t: tHit, target, side, asp, dmg, hm: hitMul(asp, msq, tg), dirIdx: dirIndexOf(dx, dz), x: _b.x, y: _b.y, z: _b.z }); }
+  else { const asp = hitAspect(target, x, z, _b.x, _b.z, y, _b.y), lm = msq && fleetMods(msq.fleet); pending.push({ kind: 'mh', rt: lm && lm.fac === 1 ? 1 + lm.facR : 0, acid: lm && lm.fac === 6 ? 1 : 0, src, mi: i, g: misGen[i], t: tHit, target, side, asp, dmg, hm: hitMul(asp, msq, tg), dirIdx: dirIndexOf(dx, dz), x: _b.x, y: _b.y, z: _b.z }); }
   wStats[side].mFired++;
   return true;
 }
@@ -2720,7 +2834,7 @@ function launchMissile(launcher, t0, maxRange = 0) {
   } else {
     const asp = hitAspect(target, _a.x, _a.z, _b.x, _b.z, _a.y, _b.y);
     const md = SHIP_TYPES[ships.type[launcher]].missile;
-    pending.push({ kind: 'mh', rt, src: 1, mi: i, g: misGen[i], t: tHit, target, side: sq.side, asp, dmg: (md ? md.dmg : 30) * lm.dmg, hm: hitMul(asp, sq, tg), dirIdx: dirIndexOf(dx, dz), x: _b.x, y: _b.y, z: _b.z });
+    pending.push({ kind: 'mh', rt, acid: lm.fac === 6 ? 1 : 0, src: 1, mi: i, g: misGen[i], t: tHit, target, side: sq.side, asp, dmg: (md ? md.dmg : 30) * lm.dmg, hm: hitMul(asp, sq, tg), dirIdx: dirIndexOf(dx, dz), x: _b.x, y: _b.y, z: _b.z });
   }
   wStats[sq.side].mFired++;
   return true;
@@ -2779,6 +2893,7 @@ const FT = {
   role: new Uint8Array(FTR_MAX), tg2: new Uint32Array(FTR_MAX), ammo: new Uint8Array(FTR_MAX), ch: new Float32Array(FTR_MAX), bcd: new Float32Array(FTR_MAX),
   // 區域攻擊派出去的：area＝1，ax／ay／az＝要去的那一點（到了找那附近看得到的敵艦，沒有就在上空盤旋偵察）
   area: new Uint8Array(FTR_MAX), ax: new Float32Array(FTR_MAX), ay: new Float32Array(FTR_MAX), az: new Float32Array(FTR_MAX),
+  wild: new Uint8Array(FTR_MAX),   // 蟲族「屍體孵化」孵出來的：不回機庫（降落＝消失）
 };
 const ftrAttrs = {
   aFP: new THREE.InstancedBufferAttribute(fP, 3).setUsage(THREE.DynamicDrawUsage),
@@ -2876,7 +2991,7 @@ function launchCraft(i, n, kind, tgt = -1, t0 = U.uTime.value, role = 1, area = 
     ftrHead = (j + 1) % FTR_MAX;
     FT.state[j] = 1; FT.side[j] = ships.side[i]; FT.t0[j] = t0 + k * 0.22; FT.carrier[j] = i; FT.seed[j] = rnd();
     FT.kind[j] = kind; FT.ret[j] = 0; FT.tgt[j] = tgt; FT.tk[j] = kind ? 2 : role === 0 ? 0 : 1;
-    FT.role[j] = kind ? 0 : role; FT.ammo[j] = kind ? 0 : CRAFT[role].missiles || 0; FT.ch[j] = 0; FT.bcd[j] = 0; FT.engT[j] = 0;
+    FT.role[j] = kind ? 0 : role; FT.ammo[j] = kind ? 0 : CRAFT[role].missiles || 0; FT.ch[j] = 0; FT.bcd[j] = 0; FT.engT[j] = 0; FT.wild[j] = 0;
     const st = SHIP_TYPES[ships.type[i]];
     FT.fuel[j] = kind ? 40 : CRAFT[role].fuel; FT.heal[j] = kind ? st.repair.amount * fleetMods(squadrons[ships.sq[i]].fleet).repair : 0;   // 損害管制天賦
     FT.hr[j] = kind ? FT.heal[j] / 12 : 0;   // 維修機：每 0.5 秒修多少（6 秒修完）
@@ -2952,7 +3067,7 @@ function swapClear(sqs) {
   if (dirty) aD.needsUpdate = true;
 }
 function rotNeed(i, M) {
-  if (M.rot === 'hull') return ships.hp[i] < ROTATE_RULE.hull * maxHp(i);           // 攻擊型：船體快撐不住才換
+  if (M.rot === 'hull' || ships.shMax[i] <= 0) return ships.hp[i] < ROTATE_RULE.hull * maxHp(i);           // 攻擊型：船體快撐不住才換
   if (M.rot === 'early') return ships.sh[i] < ROTATE_RULE.shEarly * ships.shMax[i];  // 防禦型：護盾快沒了就換
   return ships.sh[i] <= 0.5;                                                         // 一般：護盾打光
 }
@@ -3042,13 +3157,13 @@ function autoWeapons(dt) {
   for (const q of squadrons) q.mods = fleetMods(q.fleet);   // 每 tick 算一次就好
   for (let i = 0; i < shipCount; i++) {
     if (!ships.alive[i]) continue;
-    const st = SHIP_TYPES[ships.type[i]], sq = squadrons[ships.sq[i]];
+    const sq = squadrons[ships.sq[i]], st = facShipType(sq.mods.fac, ships.type[i]);   // 蟲族：機庫比較大、酸液孢子射程短
     if (sq.bg || sq.hidden || (sq.group && sq.group.inactive)) continue;
     // 機庫：慢慢補新機（機庫＋在外面飛的不超過容量）
     if (st.fighters && ships.ftr[i] + ships.fout[i] < st.fighters.n) {
       ships.fbt[i] += dt * sq.mods.ftrRegen;
       if (ships.fbt[i] >= st.fighters.build) {   // 補缺最多的那一種
-        const mx = sq.hmix || (sq.hmix = hangarMix(sq.fleet, st.fighters.n));
+        const mx = sq.hmix && sq.hmixN === st.fighters.n ? sq.hmix : (sq.hmixN = st.fighters.n, sq.hmix = hangarMix(sq.fleet, st.fighters.n));   // 蟲族：同一支分艦隊裡各艦種的機庫大小不同
         let br = -1, bm = 0; for (let r = 0; r < 4; r++) { const miss = mx[r] - ships.hang[i * 4 + r] - ships.foutR[i * 4 + r]; if (miss > bm) { bm = miss; br = r; } }
         ships.fbt[i] = 0; if (br >= 0) { ships.hang[i * 4 + br]++; ships.ftr[i]++; wStats[sq.side].fBuilt++; }
       }
@@ -3172,7 +3287,7 @@ function updateFighters(dt) {
       dx = tx - px; dy = ty - py; dz = tz - pz; d = Math.hypot(dx, dy, dz) || 1; dx /= d; dy /= d; dz /= d;
       if (FT.ret[i] && d < 10) {   // 降落：回到機庫／機上
         if (kind === 2) fowReconReport(i, squadrons[ships.sq[home]].fleet, '返航');   // 偵察機：把被干擾時記下的情報帶回來
-        FT.state[i] = 0; if (kind === 1) ships.rep[home]++; else if (kind === 0) { ships.ftr[home]++; ships.hang[home * 4 + FT.role[i]]++; wStats[s].fLand++; }   // 偵察機不佔機庫
+        FT.state[i] = 0; if (kind === 1) ships.rep[home]++; else if (kind === 0 && FT.wild[i]) FT.wild[i] = 0; else if (kind === 0) { ships.ftr[home]++; ships.hang[home * 4 + FT.role[i]]++; wStats[s].fLand++; }   // 偵察機不佔機庫
         fI[i * 4 + 1] = 0; continue;
       }
       let ex = dx, ey = dy, ez = dz;
@@ -3341,7 +3456,8 @@ function processHits() {
       const L = CRAFT[3], need = raw * L.shieldMul * mods.shTaken;
       if (sh0 >= need) shD = need; else { shD = sh0; hullD = (need - sh0) / (L.shieldMul * mods.shTaken) * L.hullMul * hm; }
     } else if (e.kind === 'mh') {
-      if (sh0 > 0.5) { shD = Math.min(sh0, raw * MISSILE_RULE.shield * mods.shTaken); hullD = raw * MISSILE_RULE.blast * hm; }
+      if (e.acid) addDot(ti, raw * hm * SWARM_RULE.spore.dmg, SWARM_RULE.spore.dur, t);   // 蟲族・酸液孢子：不爆炸，之後幾秒持續腐蝕船體
+      else if (sh0 > 0.5) { shD = Math.min(sh0, raw * MISSILE_RULE.shield * mods.shTaken); hullD = raw * MISSILE_RULE.blast * hm; }
       else hullD = raw * MISSILE_RULE.direct * hm;
     } else {
       // 護盾偏折（opts.deflect）：光束打到護盾還在的船，有機率無傷或減半（天賦「能量調度」提高機率）
@@ -3367,6 +3483,8 @@ function processHits() {
       const cut = Math.min(1 - ARMOR_RULE.min, ARMOR_RULE.a[ships.type[ti]] * mods.armor / nd * (e.gk === 'main' ? ARMOR_RULE.mainMul : 1)), h0 = hullD;
       hullD *= 1 - cut; facStats[tSide].armor += h0 - hullD;
     }
+    if (mods.harden && hullD > 0 && e.kind !== 'mh' && rnd() < mods.harden) hullD *= 0.5;   // 蟲族・甲殼硬化（天賦）
+    if (e.co) addDot(ti, raw * INFECT_RULE.dot, INFECT_RULE.dur, t);   // 感染・腐蝕：打在護盾上也會留下
     ships.sh[ti] = sh0 - shD; if (shD > 0) ships.shT[ti] = t;
     // 護盾被打光：至少 broken 秒後才重新啟動；已經沒護盾時船體再被打，也要重新等 delay 秒
     if (sh0 > 0.5 && ships.sh[ti] <= 0.5) ships.shT[ti] = t + SHIELD_RULE.broken - SHIELD_RULE.delay;
@@ -3478,8 +3596,9 @@ function resetCombat() {
   fP.fill(0); fV.fill(0); fI.fill(0); ftrAttrs.aFI.needsUpdate = true;
   aliveF[0].length = 0; aliveF[1].length = 0; misHead = 0; ftrHead = 0;
   for (const w of wStats) { w.mFired = w.mInt = w.mMiss = w.healed = w.fLaunch = w.rLaunch = w.fLand = w.fLost = w.fBuilt = w.rot = w.fRep = w.fHeal = 0; } for (const a of wDmg) a.fill(0);
-  for (const q of squadrons) { q.enemyD = null; q.drones = 0; q.disorderUntil = 0; q.volleyT = -1e9; q.lkQ = null; q.lkT = -99; q.salvT = -99; q.netN = 0; }
-  for (const f of fleets) { f.parts = 0; f.built = 0; }
+  for (const q of squadrons) { q.enemyD = null; q.drones = 0; q.disorderUntil = 0; q.volleyT = -1e9; q.lkQ = null; q.lkT = -99; q.salvT = -99; q.netN = 0; q.zoneMul = 0; q.hive = false; }
+  for (const f of fleets) { f.parts = 0; f.built = 0; f.paraLive = 0; }
+  facZones = []; paraToastT = -99;
   facStatReset();
   for (let i = 0; i < MIS_MAX; i++) misT[i * 4] = -999;
   misLive.fill(0); AIR.tick = -1;
@@ -5002,6 +5121,8 @@ function simulate(dt) {
   if (opts.fire && opts.rotate) { rotateLines(U.uTime.value); fieldRepair(dt, U.uTime.value); }
   if (opts.fire && simTick % (SALVAGE_RULE.every * SIM_HZ) === 11) salvageBuild(U.uTime.value);   // 傭兵：用零件重造沉沒的船
   if (simTick % 30 === 17) netUpdate();   // 機械智慧：網路連結
+  if (simTick % 30 === 19) swarmInfectUpdate(U.uTime.value);   // 腐蝕區域、孵化囊
+  if (opts.fire && simTick % 15 === 3) swarmInfectTick(0.25, U.uTime.value);   // 持續傷害、寄生艦衰亡、蟲族再生
   updateFighters(dt);
   processHits();
   decayHits(dt);
@@ -5388,7 +5509,10 @@ const FAC_TRAIT = [
     brief: '機械改造艦裝甲厚重，小口徑火力很難打穿，被衝進陣中也很快恢復陣形；但護盾比較薄。', counter: '多帶巡洋艦、驅逐艦，用飛彈與主砲的重火力打它；副砲、防空砲、艦載機掃射的消耗戰對它有利。突破陣型的效果也比較差。' },
   { name: '網路連結', desc: '附近每多一支連線中的友軍分艦隊，射擊就更準（有上限）；護盾受擊後比較快開始回充。被干擾時網路斷線：失去連線加成，命中率下降也比一般更重。',
     brief: '機械智慧族的艦隊彼此連線，聚在一起時射擊精準、護盾回充快；但非常依賴網路。', counter: '用干擾切斷網路（效果特別大），或把它的艦隊分割開來各個擊破。' },
-  null, null,
+  { name: '感染', desc: '光束打中時留下腐蝕，接下來幾秒持續侵蝕船體（不經過護盾）。附近被擊沉的敵方驅逐艦、護衛艦有機率被寄生、倒戈加入感染方（數量有上限；寄生艦只剩四成耐久，而且會慢慢死去）。護盾比較薄。',
+    brief: '感染艦的攻擊會持續腐蝕船體，在它附近被擊沉的小船可能被寄生倒戈。', counter: '保持距離作戰，別讓驅逐艦、護衛艦在它附近沉沒；受損的船及早撤回補給艦旁維修。' },
+  { name: '群體意志', desc: '沒有護盾，但船體比較厚，一段時間沒被打就會再生（孵化囊附近更快）。巡洋艦、驅逐艦用短程的酸液孢子代替飛彈，持續腐蝕船體。航母、戰列艦、巡洋艦都會孵化艦載機。不會潰走，被突破也不會亂了陣形；但航母（母巢）被擊沉時，附近的分艦隊會陷入混亂。',
+    brief: '蟲族艦載機成群、近距離火力兇猛，受傷會再生，而且不會潰逃。', counter: '拉開距離用主砲放風箏、強化防空；優先擊沉航母（母巢）讓周圍陷入混亂。不要用突破陣型衝進蟲群。' },
 ];
 // 各陣營的專屬天賦（天賦樹「種族」那一格，id 'fac'）
 const FAC_TALENT = [
@@ -5397,14 +5521,20 @@ const FAC_TALENT = [
   { name: '拆解專家', max: 2, desc: (r) => `戰場回收的範圍 +${r * 20}%、修補量與零件 +${r * 20}%` },
   { name: '過載', max: 2, desc: (r) => `船體低於 ${Math.round(ARMOR_RULE.over * 100)}% 的船，主砲、副砲射速 +${r * 15}%` },
   { name: '冗餘節點', max: 2, desc: (r) => `被干擾時保留 ${r * 35}% 的連線加成，干擾額外造成的命中率下降減少 ${r * 35}%` },
-  null, null,
+  { name: '腐蝕爆發', max: 2, desc: (r) => `寄生艦被擊沉時，原地留下 ${INFECT_RULE.zone.dur} 秒的腐蝕區域（半徑 ${INFECT_RULE.zone.r + (r - 1) * INFECT_RULE.zone.rTal}）：感染族、蟲族以外的船在裡面傷害、移動速度 −${Math.round((1 - INFECT_RULE.zone.mul) * 100)}%（不疊加）` },
+  { name: '屍體孵化', max: 2, desc: (r) => `附近被擊沉的敵方戰艦孵出 ${r * SWARM_RULE.corpse.ftr} 架攻擊機；${r * SWARM_RULE.corpse.ship * 100}% 機率孵出一艘驅逐艦或護衛艦` },
 ];
 // 陣營讓某些天賦沒有作用時，同一格換成別的天賦（點數、階數不變）：FAC_TAL_SWAP[陣營][天賦 id]＝{ name, desc }
 //   只給 name＝同樣效果、換成符合世界觀的名字；效果真的換掉的要在 fleetMods 裡照陣營處理
 const FAC_TAL_SWAP = [{}, {}, {},
   { energy: { name: '裝甲強化', desc: (r) => `液壓裝甲的厚度 +${r * 25}%（取代能量調度：機械改造艦的護盾薄，偏折用處不大）` } },
   { survey: { name: '偵察無人機' }, hangar: { name: '無人機整備' } },
-  {}, {}];
+  {},
+  // 蟲族：沒有飛彈、沒有護盾（效果換掉的在 fleetMods 處理；酸液孢子沿用飛彈的冷卻，所以「酸腺強化」效果同「飛彈裝填」）
+  { missile: { name: '酸腺強化', desc: (r) => `酸液孢子冷卻 −${r * 10}%` },
+    shield: { name: '甲殼增生', desc: (r) => `船體再生速度 +${r * 20}%（取代護盾強化：蟲族沒有護盾）` },
+    energy: { name: '甲殼硬化', desc: (r) => `被光束打中時 ${Math.round(r * SWARM_RULE.harden * 100)}% 機率傷害減半（取代能量調度：蟲族沒有護盾）` },
+    damage: { name: '快速癒合' }, s_jam: { name: '費洛蒙干擾' }, survey: { name: '偵察孢子' }, hangar: { name: '孵化加速' } }];
 // 依陣營取天賦的實際名稱與說明
 function talFor(t, fac) {
   const f = fac || 0;
@@ -5426,6 +5556,37 @@ const LINK_RULE = { win: 3, acc: 1.2, jam: 0.5, r: 80, rTal: 0.3, mslTal: 0.05 }
 //     被干擾：連線加成歸零、干擾的命中率懲罰 ×jam；天賦「冗餘節點」每階保留 tal 的加成、懲罰的額外部分減少 tal
 const ARMOR_RULE = { a: [3.4, 3.8, 3.1, 2.5, 2.0, 3.1], mainMul: 0.35, min: 0.25, tal: 0.25, sh: 0.9, disorder: 0.5, over: 0.3, overRate: 0.15 };
 const NET_RULE = { r: 520, per: 0.05, max: 3, delay: 0.8, jam: 2.5, tal: 0.35 };
+//   INFECT（蟲族感染人類・感染）：光束打中（不論打在護盾或船體）→ 目標在 dur 秒內船體再受到 dot × 這一發傷害（不經過護盾，同一艘疊加）；護盾容量 ×sh
+//     寄生：敵方驅逐艦、護衛艦沉在感染分艦隊中心 r 內，chance 機率倒戈：感染艦隊開戰時預留的空位（dorm[艦種] 個）啟用，最大耐久 ×cap，每秒損失最大耐久的 decay
+//     每支艦隊同時最多 live 艘、每場最多 max 艘（＝預留的空位）
+//     zone（專屬天賦「腐蝕爆發」）：寄生艦沉了 → 原地 dur 秒的腐蝕區域，半徑 r（每多一階 ＋rTal）；感染族、蟲族以外的分艦隊中心在裡面：傷害、速度 ×mul（不疊加）
+//   SWARM（蟲族・群體意志）：沒有護盾、船體 ×hp；最後一次被打 regenDelay 秒後每秒再生最大耐久的 regen（孵化囊 SUPPLY_RULE.range 內 ×hiveMul；天賦「甲殼增生」每階 ×(1＋0.2)）
+//     spore：巡洋、驅逐的飛彈換成酸液孢子：射程 ×range，命中後 dur 秒內對船體造成 dmg × 飛彈傷害（不經過護盾）
+//     brood：各艦種的艦載機（航母機庫 ×、補機時間 ×；戰列、巡洋另外有小機庫）；harden＝天賦「甲殼硬化」每階的減半機率
+//     hive：航母（母巢）沉了 → r 內的蟲族分艦隊陣形混亂 dur 秒；corpse（專屬天賦「屍體孵化」）：敵方戰艦（航母～驅逐）沉在蟲族分艦隊 r 內
+//       → 孵出 ftr × 階數 架攻擊機（從最近的蟲族船起飛）；ship × 階數 機率孵出一艘（用預留空位 dorm）
+const INFECT_RULE = { dot: 0.1, dur: 8, sh: 0.9, r: 520, chance: 0.3, cap: 0.4, decay: 0.006, live: 3, dorm: [0, 0, 0, 3, 3, 0],
+  zone: { dur: 60, r: 110, rTal: 40, mul: 0.85 } };
+const SWARM_RULE = { hp: 1.5, regenDelay: 8, regen: 0.005, hiveMul: 2, harden: 0.06,
+  spore: { range: 0.6, dmg: 0.85, dur: 6 },
+  brood: { carrier: { n: 1.5, build: 0.6 }, 1: { n: 2, wave: 2, cd: 24, range: 800, build: 20 }, 2: { n: 1, wave: 1, cd: 28, range: 700, build: 24 } },
+  hive: { r: 300, dur: 6 }, corpse: { r: 520, ftr: 2, ship: 0.05, dorm: [0, 0, 0, 2, 2, 0] } };
+// 依陣營取艦種資料：蟲族的艦載機（機庫）與酸液孢子射程不一樣，其他陣營照 SHIP_TYPES
+let BUG_TYPES = null;
+function facShipType(fac, t) {
+  if (fac !== 6) return SHIP_TYPES[t];
+  if (!BUG_TYPES) {
+    const B = SWARM_RULE.brood;
+    BUG_TYPES = SHIP_TYPES.map((s, k) => {
+      const o = { ...s };
+      if (k === 0) o.fighters = { ...s.fighters, n: s.fighters.n * B.carrier.n, build: s.fighters.build * B.carrier.build };
+      else if (B[k]) o.fighters = { ...B[k] };
+      if (s.missile) o.missile = { ...s.missile, range: s.missile.range * SWARM_RULE.spore.range };
+      return o;
+    });
+  }
+  return BUG_TYPES[t];
+}
 const SALVAGE_RULE = { r: 200, heal: 0.015, cd: 8, parts: 0.3, every: 6, cap: 0.5, maxBuild: 0.04, tal: 0.2 };
 const TALENT_BY_ID = Object.fromEntries(TALENTS.map((t) => [t.id, t]));
 function talentRank(c, id) { return (c && c.tal && c.tal[id]) || 0; }
@@ -6268,7 +6429,7 @@ function aiTarget(f, S, C, far, lv) {
   for (const q of squadrons) {
     const v = seenSq(f.side, q);   // 被干擾：位置與兵力是干擾開始時的
     if (q.side === f.side || !v || v.bg || v.alive <= 0 || q.alive <= 0 || Math.hypot(v.x - C.x, v.z - C.z) > far || (fowOn() && v.stale)) continue;   // 戰爭迷霧：只選看得到的
-    let s = q.typeAlive[0] * 4 + (1 - v.alive / Math.max(1, q.list.length)) * 30 - v.alive * 0.05;
+    let s = q.typeAlive[0] * 4 + (1 - v.alive / Math.max(1, q.list.length - (q.nDorm || 0))) * 30 - v.alive * 0.05;   // 預留的空位（寄生、孵化）不算損失
     for (const [A, r] of allies) if (Math.hypot(v.x - A.x, v.z - A.z) < r) s += 12;
     if (s > bs) { bs = s; best = q; }
   }
@@ -6452,6 +6613,8 @@ function aiResupply(f, S, H) {
 
 // ───── 勝負 ─────
 function sideAlive(side) { let n = 0; for (const f of fleets) if (f.side === side && !f.reserve && !f.ally) for (const q of f.sqs) n += q.alive; return n; }   // 友軍（還沒倒戈的傭兵）不算進勝負
+// 蟲族・群體意志：還活著的艦隊全是蟲族的一方不會潰走（要全滅才算輸）
+function noRout(side) { let any = false; for (const f of fleets) if (f.side === side && !f.reserve && !f.ally && f.sqs.some((q) => q.alive > 0)) { if (fleetMods(f).fac !== 6) return false; any = true; } return any; }
 // 劇情戰役的護送目標：剩不到 VIP_KEEP 就算護送失敗
 const VIP_KEEP = 0.4;
 function vipLost() { const f = fleets.find((o) => o.vip); if (!f) return false; let n = 0; for (const q of f.sqs) n += q.alive; return n < f.initial * VIP_KEEP; }
@@ -6460,9 +6623,9 @@ function checkVictory() {
   const a0 = sideAlive(0), a1 = sideAlive(1), p = a0 / Math.max(1, GAME.init[0]), e = a1 / Math.max(1, GAME.init[1]);
   let r = null;
   if (a1 === 0) r = ['win', '殲滅敵軍'];
-  else if (e < ROUT_AT) r = ['win', '敵軍潰走'];
+  else if (e < ROUT_AT && !noRout(1)) r = ['win', '敵軍潰走'];
   else if (a0 === 0) r = ['lose', '我軍全滅'];
-  else if (p < ROUT_AT) r = ['lose', '我軍潰走'];
+  else if (p < ROUT_AT && !noRout(0)) r = ['lose', '我軍潰走'];
   else if (G && G.type === 'escort' && vipLost()) r = ['lose', `${G.name}損失過重`];
   else if (G && G.type === 'cut' && !fleets.some((f) => f.side === 1 && f.supply && !f.reserve && fleetAlive(f).length)) r = ['win', '敵軍補給艦全滅・補給線切斷'];
   else if (t >= tl && G && (G.type === 'survive' || G.type === 'escort')) r = ['win', G.type === 'escort' ? `時間到・${G.name}撐到了最後` : '時間到・撐過了敵軍的攻勢'];
