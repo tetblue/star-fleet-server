@@ -3123,6 +3123,7 @@ function updateFighters(dt) {
     const kind = FT.kind[i], home = FT.carrier[i];
     const RC = FOW_RULE.recon;
     let speed = kind === 2 ? RC.speed[0] + seed * (RC.speed[1] - RC.speed[0]) : kind ? 30 + seed * 8 : CRAFT[FT.role[i]].speed[0] + seed * (CRAFT[FT.role[i]].speed[1] - CRAFT[FT.role[i]].speed[0]);
+    const fsp = PL.on ? PILOT_SPEED : 1; speed *= fsp;   // 駕駛模式：艦載機都飛慢一點（船才顯得大），續航時間照比例拉長
     let dx = vx, dy = vy, dz = vz, d = 1e9, tx = 0, ty = 0, tz = 0, hasT = false;
     if (FT.launch[i] > 0) {
       FT.launch[i] -= dt;
@@ -3145,7 +3146,6 @@ function updateFighters(dt) {
       if (!FT.ret[i]) { const g = FT.tgt[i]; if (g < 0 || !ships.alive[g] || ships.hp[g] >= maxHp(g) * 0.995 || FT.heal[i] <= 0 || FT.fuel[i] <= 0) FT.ret[i] = 1; }
       const goal = FT.ret[i] ? home : FT.tgt[i];
       if (goal < 0 || !ships.alive[goal]) { FT.state[i] = 3; FT.t0[i] = t; continue; }   // 母艦沉了：找不到地方降落
-    const fsp = PL.on ? PILOT_SPEED : 1; speed *= fsp;   // 駕駛模式：艦載機都飛慢一點（船才顯得大），續航時間照比例拉長
       shipWorldCPU(goal, _a); tx = _a.x; ty = _a.y + 1; tz = _a.z;
       dx = tx - px; dy = ty - py; dz = tz - pz; d = Math.hypot(dx, dy, dz) || 1; dx /= d; dy /= d; dz /= d;
       if (FT.ret[i] && d < 10) {   // 降落：回到機庫／機上
