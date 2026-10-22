@@ -238,17 +238,27 @@ const FAC_TRAIT = [
     brief: '聯盟艦隊情報共享、集火精準，飛彈會自動轉向新目標，干擾對它效果有限。', counter: '強化防空攔截飛彈，利用星雲、小行星遮蔽，從多個方向進攻讓它難以集火。' },
   { name: '戰場回收', desc: '附近有船被擊沉時（敵我都算），範圍內的傭兵艦會用殘骸修補船體並累積零件；零件夠了就把艦隊裡沉沒的船重新造出來（新造的船最大耐久只有一半）。',
     brief: '傭兵擅長消耗戰，會從殘骸回收零件修補，甚至把沉沒的戰艦重新造出來。', counter: '速戰速決，集中火力一口氣擊潰整支分艦隊；避免在它附近長時間纏鬥。' },
-  null, null, null, null,
+  { name: '液壓裝甲', desc: '副砲、防空砲、艦載機打到船體時會被裝甲擋掉一部分，單發越小擋得越多；主砲幾乎擋不住，飛彈完全擋不住。護盾比較薄。被突破時陣形混亂的時間縮短。',
+    brief: '機械改造艦裝甲厚重，小口徑火力很難打穿，被衝進陣中也很快恢復陣形；但護盾比較薄。', counter: '多帶巡洋艦、驅逐艦，用飛彈與主砲的重火力打它；副砲、防空砲、艦載機掃射的消耗戰對它有利。突破陣型的效果也比較差。' },
+  { name: '網路連結', desc: '附近每多一支連線中的友軍分艦隊，射擊就更準（有上限）；護盾受擊後比較快開始回充。被干擾時網路斷線：失去連線加成，命中率下降也比一般更重。',
+    brief: '機械智慧族的艦隊彼此連線，聚在一起時射擊精準、護盾回充快；但非常依賴網路。', counter: '用干擾切斷網路（效果特別大），或把它的艦隊分割開來各個擊破。' },
+  null, null,
 ];
 // 各陣營的專屬天賦（天賦樹「種族」那一格，id 'fac'）
 const FAC_TALENT = [
   { name: '齊射指揮', max: 2, desc: (r) => `重砲齊射的判定時間 +${r * 25}%、額外傷害 +${r * 5}%` },
   { name: '智慧導引', max: 2, desc: (r) => `飛彈命中率 +${r * 5}%；飛彈轉向的搜尋範圍 +${r * 30}%` },
   { name: '拆解專家', max: 2, desc: (r) => `戰場回收的範圍 +${r * 20}%、修補量與零件 +${r * 20}%` },
-  null, null, null, null,
+  { name: '過載', max: 2, desc: (r) => `船體低於 ${Math.round(ARMOR_RULE.over * 100)}% 的船，主砲、副砲射速 +${r * 15}%` },
+  { name: '冗餘節點', max: 2, desc: (r) => `被干擾時保留 ${r * 35}% 的連線加成，干擾額外造成的命中率下降減少 ${r * 35}%` },
+  null, null,
 ];
-// 陣營讓某些天賦沒有作用時，同一格換成別的天賦（名稱、說明、效果都換；點數、階數不變）：FAC_TAL_SWAP[陣營][天賦 id]＝{ name, desc }
-const FAC_TAL_SWAP = [{}, {}, {}, {}, {}, {}, {}];
+// 陣營讓某些天賦沒有作用時，同一格換成別的天賦（點數、階數不變）：FAC_TAL_SWAP[陣營][天賦 id]＝{ name, desc }
+//   只給 name＝同樣效果、換成符合世界觀的名字；效果真的換掉的要在 fleetMods 裡照陣營處理
+const FAC_TAL_SWAP = [{}, {}, {},
+  { energy: { name: '裝甲強化', desc: (r) => `液壓裝甲的厚度 +${r * 25}%（取代能量調度：機械改造艦的護盾薄，偏折用處不大）` } },
+  { survey: { name: '偵察無人機' }, hangar: { name: '無人機整備' } },
+  {}, {}];
 // 依陣營取天賦的實際名稱與說明
 function talFor(t, fac) {
   const f = fac || 0;
@@ -264,6 +274,12 @@ function talFor(t, fac) {
 //     每場最多造開戰艘數 × maxBuild 艘；天賦每階 r、heal、parts ×(1＋tal)
 const VOLLEY_RULE = { win: 1.3, bonus: 0.12, winTal: 0.25, bonusTal: 0.05 };
 const LINK_RULE = { win: 3, acc: 1.2, jam: 0.5, r: 80, rTal: 0.3, mslTal: 0.05 };
+//   ARMOR（機械改造・液壓裝甲）：飛彈以外打到船體的每一發，擋掉 a[艦種] ÷ 武器原本的單發傷害（主砲再 ×mainMul）（不算距離衰減；最少留 min 倍），天賦「裝甲強化」每階 a ×(1＋tal)；護盾容量 ×sh；陣形混亂時間 ×disorder
+//     over＝專屬天賦「過載」：船體低於最大耐久的 over，主砲、副砲射速 ×(1＋overRate × 階數)
+//   NET（機械智慧・網路連結）：每 0.5 秒數一次 r 內同陣營、同一邊的分艦隊；每多一支命中率 ×(1＋per)，最多算 max 支；護盾回充延遲 ×delay
+//     被干擾：連線加成歸零、干擾的命中率懲罰 ×jam；天賦「冗餘節點」每階保留 tal 的加成、懲罰的額外部分減少 tal
+const ARMOR_RULE = { a: [3.4, 3.8, 3.1, 2.5, 2.0, 3.1], mainMul: 0.35, min: 0.25, tal: 0.25, sh: 0.9, disorder: 0.5, over: 0.3, overRate: 0.15 };
+const NET_RULE = { r: 520, per: 0.05, max: 3, delay: 0.8, jam: 2.5, tal: 0.35 };
 const SALVAGE_RULE = { r: 200, heal: 0.015, cd: 8, parts: 0.3, every: 6, cap: 0.5, maxBuild: 0.04, tal: 0.2 };
 const TALENT_BY_ID = Object.fromEntries(TALENTS.map((t) => [t.id, t]));
 function talentRank(c, id) { return (c && c.tal && c.tal[id]) || 0; }

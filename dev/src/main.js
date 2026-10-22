@@ -888,7 +888,8 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
       ships.sq[si] = sqi; ships.type[si] = t; ships.alive[si] = 1; ships.side[si] = p.side;
       const st = SHIP_TYPES[t];
       ships.hp[si] = st.hp * (isFlag ? 3 : 1);
-      ships.shMax[si] = ships.sh[si] = st.sh * (isFlag ? 3 : 1) * (1 + fleetMods(p.fleetObj || null).shield); ships.shT[si] = -99;
+      const bm = fleetMods(p.fleetObj || null);   // shMul：機械改造的護盾比較薄
+      ships.shMax[si] = ships.sh[si] = st.sh * (isFlag ? 3 : 1) * (1 + bm.shield) * bm.shMul; ships.shT[si] = -99;
       // 各類砲的冷卻錯開（固定雜湊，不動到佈陣的亂數）
       ships.cd[si] = st.guns.main ? st.guns.main.cd * (0.3 + 0.9 * hash01(si * 1.7 + 4)) : 0;
       ships.cd1[si] = st.guns.sec ? st.guns.sec.cd * (0.3 + 0.9 * hash01(si * 2.9 + 5)) : 0;
@@ -1975,7 +1976,7 @@ function skillActive(fleet, id) { const s = fleet && fleet.skills[id]; return !!
 //    shield 護盾容量與回充加成、shTaken 護盾受到的傷害倍率
 function fleetMods(fleet) {
   const m = { dmg: 1, shield: 0, shTaken: 1, taken: 1, speed: 1, fwd: 1, mcd: 1, aa: 0, repair: 1, ftrRegen: 1, ftrDmg: 1, morph: 1, fireCd: 1, acc: 1, ffP: 1, defl: 0,
-    rot: 'shield', rotDur: ROTATE_RULE.dur, shRegen: 1, repN: FIELD_REPAIR.n, repCap: 0, fac: 0, facR: 0 };   // fac＝種族特性用的陣營、facR＝專屬天賦的階數
+    rot: 'shield', rotDur: ROTATE_RULE.dur, shRegen: 1, repN: FIELD_REPAIR.n, repCap: 0, fac: 0, facR: 0, armor: 0, shMul: 1, shDelay: 1 };   // fac＝種族特性用的陣營、facR＝專屬天賦的階數；armor 裝甲厚度倍率（0＝沒有）、shMul 護盾容量、shDelay 護盾回充延遲
   if (!fleet) return m;
   m.fac = fleet.fac != null ? fleet.fac : SIDE_FAC[fleet.side] || 0;
   const c = fleet.commander;
@@ -1994,6 +1995,9 @@ function fleetMods(fleet) {
       m.facR = Math.min(r('fac'), (FAC_TALENT[m.fac] || { max: 0 }).max);
     }
   }
+  // 種族特性（數值見 data.js 的 ARMOR_RULE、NET_RULE）
+  if (m.fac === 3) { m.armor = 1 + ARMOR_RULE.tal * ((c && c.tal && c.tal.energy) || 0); m.defl = 0; m.shMul = ARMOR_RULE.sh; }   // 機械改造：「能量調度」換成「裝甲強化」
+  else if (m.fac === 4) m.shDelay = NET_RULE.delay;
   if (skillActive(fleet, 'wall')) { m.shTaken *= 0.6; m.taken *= 0.7; }
   if (skillActive(fleet, 'charge')) m.fwd *= 1.8;
   if (skillActive(fleet, 'rapid')) m.fireCd *= 0.65;
@@ -2039,7 +2043,13 @@ function hitChance(gk, gun, dist, target, attackerSq, ax, ay, az, bx, by, bz) {
   let ef = 1;
   if (inTerrain('nebula', ax, az, ay) || inTerrain('nebula', bx, bz, by)) ef *= HIT_RULE.nebula;
   const am = attackerSq.mods || fleetMods(attackerSq.fleet), link = am.fac === 1;   // 聯盟：資料鏈
-  if (jam[attackerSq.side].until > U.uTime.value) ef *= link ? 1 - (1 - HIT_RULE.jammed) * LINK_RULE.jam : HIT_RULE.jammed;
+  const jm = jam[attackerSq.side].until > U.uTime.value;
+  if (jm) {   // 被干擾：聯盟懲罰減半；機械智慧網路斷線，懲罰加重（冗餘節點減輕額外的部分）
+    let p = 1 - HIT_RULE.jammed;
+    if (link) p *= LINK_RULE.jam; else if (am.fac === 4) p *= 1 + (NET_RULE.jam - 1) * (1 - NET_RULE.tal * am.facR);
+    ef *= 1 - p;
+  }
+  if (am.fac === 4 && attackerSq.netN) ef *= 1 + NET_RULE.per * Math.min(attackerSq.netN, NET_RULE.max) * (jm ? NET_RULE.tal * am.facR : 1);   // 機械智慧・網路連結
   if (link && tq.lkQ && tq.lkQ !== attackerSq && U.uTime.value - tq.lkT <= LINK_RULE.win) ef *= LINK_RULE.acc;   // 別支聯盟分艦隊剛打中它
   ef *= am.acc;   // 天賦：精準射擊
   return Math.min(HIT_RULE.max, Math.max(HIT_RULE.min, gun.acc * rf * sf * vf * ef));
@@ -2388,7 +2398,7 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
   if (sideFocus(sq.side) === tq) dmg *= 1.2;
   if (ff) dmg *= ffMul;
   if (am.fac === 1 && !ff) { tq.lkT = t0; tq.lkQ = sq; }   // 聯盟資料鏈：標記這支敵分艦隊
-  pending.push({ vr: am.fac === 0 && gk === 'main' && !ff ? 1 + am.facR : 0, gk, dr: Math.min(1, dist / far), gr: graze, t: t0 + dur, target, side: sq.side, ff, dirIdx: dirIndexOf(_b.x - _a.x, _b.z - _a.z), asp, fm, dmg, hm: hitMul(asp, sq, tq), fx: rnd() < fxs.fxP * (0.3 + 0.7 * fm) * (volleyShot ? 0.4 : 1), x: _b.x, y: _b.y, z: _b.z });
+  pending.push({ nd: gun.dmg, vr: am.fac === 0 && gk === 'main' && !ff ? 1 + am.facR : 0, gk, dr: Math.min(1, dist / far), gr: graze, t: t0 + dur, target, side: sq.side, ff, dirIdx: dirIndexOf(_b.x - _a.x, _b.z - _a.z), asp, fm, dmg, hm: hitMul(asp, sq, tq), fx: rnd() < fxs.fxP * (0.3 + 0.7 * fm) * (volleyShot ? 0.4 : 1), x: _b.x, y: _b.y, z: _b.z });
   return true;
 }
 // 齊射：分艦隊每 VOLLEY_CD 秒只能齊射一次；只有裝填過半（剩餘冷卻 ≤ VOLLEY_READY×冷卻）的砲會跟著開火
@@ -2443,8 +2453,8 @@ function killShip(i, t, x, y, z, mul = 1) {
 }
 
 // ───────────────────────── 種族特性（規則數值見 data.js 的 VOLLEY_RULE、LINK_RULE、SALVAGE_RULE） ─────────────────────────
-const facStats = [0, 1].map(() => ({ volley: 0, retarget: 0, salvHeal: 0, built: 0 }));   // 統計（除錯、平衡用）
-function facStatReset() { for (const s of facStats) s.volley = s.retarget = s.salvHeal = s.built = 0; }
+const facStats = [0, 1].map(() => ({ volley: 0, retarget: 0, salvHeal: 0, built: 0, armor: 0 }));   // 統計（除錯、平衡用）；armor＝裝甲擋掉的船體傷害
+function facStatReset() { for (const s of facStats) s.volley = s.retarget = s.salvHeal = s.built = s.armor = 0; }
 // 聯盟飛彈：目標在命中前沉了 → 在原本的落點附近找最近的敵艦，重新擲命中；轉向成功＝改打它
 function misRetarget(e) {
   const R = LINK_RULE.r * (1 + LINK_RULE.rTal * (e.rt - 1));
@@ -2463,6 +2473,17 @@ function misRetarget(e) {
   e.target = best; e.x = _c.x; e.y = _c.y; e.z = _c.z; e.asp = null;
   facStats[e.side].retarget++;
   return true;
+}
+// 陣形混亂（被突破）的時間倍率：機械改造縮短；0＝不會混亂
+function disorderMul(q) { const f = (q.mods || fleetMods(q.fleet)).fac; return f === 3 ? ARMOR_RULE.disorder : 1; }
+// 機械智慧・網路連結：每 0.5 秒數一次附近連線中的友軍分艦隊（同一邊、同陣營、NET_RULE.r 內）
+function netUpdate() {
+  const R2 = NET_RULE.r * NET_RULE.r, live = (o) => !o.bg && !o.hidden && o.alive > 0 && (o.mods || fleetMods(o.fleet)).fac === 4;
+  for (const q of squadrons) {
+    q.netN = 0;
+    if (!live(q)) continue;
+    for (const o of squadrons) if (o !== q && o.side === q.side && live(o) && (o.x - q.x) ** 2 + ((o.y || 0) - (q.y || 0)) ** 2 + (o.z - q.z) ** 2 < R2) q.netN++;
+  }
 }
 // 傭兵・戰場回收：船沉在傭兵分艦隊附近 → 那支分艦隊修補船體（每支分艦隊 cd 秒一次）、艦隊累積零件
 function salvageKill(i, t, x, z) {
@@ -2896,8 +2917,9 @@ function updateEnemyDist() {   // 每支分艦隊離最近敵方分艦隊（邊�
       if (o.side === q.side || o.bg || o.alive <= 0 || o.hidden) continue;
       const dx = fx - o.x, dz = fz - o.z, u = dx * Math.cos(o.h) - dz * Math.sin(o.h), v = dx * Math.sin(o.h) + dz * Math.cos(o.h);
       if (Math.abs(u) > o.W / 2 || Math.abs(v) > o.D / 2 || Math.abs((q.y || 0) + Math.sin(q.p || 0) * q.D / 2 - (o.y || 0)) > 40) continue;   // 3D：高度也要對上
+      const dm = disorderMul(o); if (dm <= 0) continue;   // 種族：機械改造混亂時間縮短（蟲族之後會是 0＝不會混亂）
       const fresh = !(o.disorderUntil > t);
-      o.disorderUntil = Math.max(o.disorderUntil || 0, t + F.breach);
+      o.disorderUntil = Math.max(o.disorderUntil || 0, t + F.breach * dm);
       if (fresh && typeof toast === 'function' && GAME.phase === 'battle') toast(o.side === GAME.playerSide ? `${o.fleet ? o.fleet.name : ''} ${o.name} 被突破，陣形混亂！` : `突破成功：${o.fleet ? o.fleet.name : ''} ${o.name} 陣形混亂`, o.side === GAME.playerSide ? 'bad' : '');
     }
   }
@@ -3340,6 +3362,11 @@ function processHits() {
       const need = raw * dm * mods.shTaken;
       if (sh0 >= need) shD = need; else { shD = sh0; hullD = (need - sh0) / mods.shTaken * hm; }
     }
+    if (mods.armor && hullD > 0 && e.kind !== 'mh') {   // 機械改造・液壓裝甲：飛彈擋不住；其他＝裝甲厚度 ÷ 武器原本的單發傷害（不算距離衰減），主砲只算 mainMul
+      const nd = e.nd || (e.kind === 'lb' ? CRAFT[3].dps : e.dmg || 1);
+      const cut = Math.min(1 - ARMOR_RULE.min, ARMOR_RULE.a[ships.type[ti]] * mods.armor / nd * (e.gk === 'main' ? ARMOR_RULE.mainMul : 1)), h0 = hullD;
+      hullD *= 1 - cut; facStats[tSide].armor += h0 - hullD;
+    }
     ships.sh[ti] = sh0 - shD; if (shD > 0) ships.shT[ti] = t;
     // 護盾被打光：至少 broken 秒後才重新啟動；已經沒護盾時船體再被打，也要重新等 delay 秒
     if (sh0 > 0.5 && ships.sh[ti] <= 0.5) ships.shT[ti] = t + SHIELD_RULE.broken - SHIELD_RULE.delay;
@@ -3417,8 +3444,9 @@ function continuousFire(dt) {
   }
   // 護盾回充
   for (let i = 0; i < shipCount; i++) {
-    if (!ships.alive[i] || ships.sh[i] >= ships.shMax[i] || t - ships.shT[i] < SHIELD_RULE.delay) continue;
+    if (!ships.alive[i] || ships.sh[i] >= ships.shMax[i]) continue;
     const q = squadrons[ships.sq[i]];
+    if (t - ships.shT[i] < SHIELD_RULE.delay * (q.mods && !(q.mods.fac === 4 && jam[q.side].until > t) ? q.mods.shDelay : 1)) continue;   // 機械智慧：比較快開始回充（被干擾時網路斷線就沒有）
     const s0 = ships.sh[i]; ships.sh[i] = Math.min(ships.shMax[i], s0 + ships.shMax[i] * SHIELD_RULE.rate * (q.mods ? q.mods.shRegen : 1) * dt);
     if (!q.bg) cStats[ships.side[i]].regen += ships.sh[i] - s0;   // 防禦型指揮官回充較快
   }
@@ -3431,8 +3459,10 @@ function continuousFire(dt) {
   const CDS = [ships.cd, ships.cd1, ships.cd2];
   for (let i = 0; i < shipCount; i++) {
     if (!ships.alive[i]) continue;
-    const r = _rate[ships.sq[i]];
+    let r = _rate[ships.sq[i]];
     if (r <= 0) continue;
+    const M = squadrons[ships.sq[i]].mods;   // 機械改造・過載（專屬天賦）：船體危急時射速提高
+    if (M && M.fac === 3 && M.facR && ships.hp[i] < ARMOR_RULE.over * maxHp(i)) r *= 1 + ARMOR_RULE.overRate * M.facR;
     const G = SHIP_TYPES[ships.type[i]].guns, sw = ships.swD[i] > 0 && t < ships.swS[i] + ships.swD[i];   // 前排輪替換位中：主砲、副砲停火（防空照打）
     for (let g = 0; g < 3; g++) {
       const gk = GUN_KEYS[g], gun = G[gk]; if (!gun || (sw && gk !== 'aa')) continue;
@@ -3448,7 +3478,7 @@ function resetCombat() {
   fP.fill(0); fV.fill(0); fI.fill(0); ftrAttrs.aFI.needsUpdate = true;
   aliveF[0].length = 0; aliveF[1].length = 0; misHead = 0; ftrHead = 0;
   for (const w of wStats) { w.mFired = w.mInt = w.mMiss = w.healed = w.fLaunch = w.rLaunch = w.fLand = w.fLost = w.fBuilt = w.rot = w.fRep = w.fHeal = 0; } for (const a of wDmg) a.fill(0);
-  for (const q of squadrons) { q.enemyD = null; q.drones = 0; q.disorderUntil = 0; q.volleyT = -1e9; q.lkQ = null; q.lkT = -99; q.salvT = -99; }
+  for (const q of squadrons) { q.enemyD = null; q.drones = 0; q.disorderUntil = 0; q.volleyT = -1e9; q.lkQ = null; q.lkT = -99; q.salvT = -99; q.netN = 0; }
   for (const f of fleets) { f.parts = 0; f.built = 0; }
   facStatReset();
   for (let i = 0; i < MIS_MAX; i++) misT[i * 4] = -999;
@@ -4971,6 +5001,7 @@ function simulate(dt) {
   autoWeapons(dt);
   if (opts.fire && opts.rotate) { rotateLines(U.uTime.value); fieldRepair(dt, U.uTime.value); }
   if (opts.fire && simTick % (SALVAGE_RULE.every * SIM_HZ) === 11) salvageBuild(U.uTime.value);   // 傭兵：用零件重造沉沒的船
+  if (simTick % 30 === 17) netUpdate();   // 機械智慧：網路連結
   updateFighters(dt);
   processHits();
   decayHits(dt);

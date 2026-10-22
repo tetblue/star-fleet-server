@@ -888,7 +888,8 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
       ships.sq[si] = sqi; ships.type[si] = t; ships.alive[si] = 1; ships.side[si] = p.side;
       const st = SHIP_TYPES[t];
       ships.hp[si] = st.hp * (isFlag ? 3 : 1);
-      ships.shMax[si] = ships.sh[si] = st.sh * (isFlag ? 3 : 1) * (1 + fleetMods(p.fleetObj || null).shield); ships.shT[si] = -99;
+      const bm = fleetMods(p.fleetObj || null);   // shMul：機械改造的護盾比較薄
+      ships.shMax[si] = ships.sh[si] = st.sh * (isFlag ? 3 : 1) * (1 + bm.shield) * bm.shMul; ships.shT[si] = -99;
       // 各類砲的冷卻錯開（固定雜湊，不動到佈陣的亂數）
       ships.cd[si] = st.guns.main ? st.guns.main.cd * (0.3 + 0.9 * hash01(si * 1.7 + 4)) : 0;
       ships.cd1[si] = st.guns.sec ? st.guns.sec.cd * (0.3 + 0.9 * hash01(si * 2.9 + 5)) : 0;
@@ -1975,7 +1976,7 @@ function skillActive(fleet, id) { const s = fleet && fleet.skills[id]; return !!
 //    shield 護盾容量與回充加成、shTaken 護盾受到的傷害倍率
 function fleetMods(fleet) {
   const m = { dmg: 1, shield: 0, shTaken: 1, taken: 1, speed: 1, fwd: 1, mcd: 1, aa: 0, repair: 1, ftrRegen: 1, ftrDmg: 1, morph: 1, fireCd: 1, acc: 1, ffP: 1, defl: 0,
-    rot: 'shield', rotDur: ROTATE_RULE.dur, shRegen: 1, repN: FIELD_REPAIR.n, repCap: 0, fac: 0, facR: 0 };   // fac＝種族特性用的陣營、facR＝專屬天賦的階數
+    rot: 'shield', rotDur: ROTATE_RULE.dur, shRegen: 1, repN: FIELD_REPAIR.n, repCap: 0, fac: 0, facR: 0, armor: 0, shMul: 1, shDelay: 1 };   // fac＝種族特性用的陣營、facR＝專屬天賦的階數；armor 裝甲厚度倍率（0＝沒有）、shMul 護盾容量、shDelay 護盾回充延遲
   if (!fleet) return m;
   m.fac = fleet.fac != null ? fleet.fac : SIDE_FAC[fleet.side] || 0;
   const c = fleet.commander;
@@ -1994,6 +1995,9 @@ function fleetMods(fleet) {
       m.facR = Math.min(r('fac'), (FAC_TALENT[m.fac] || { max: 0 }).max);
     }
   }
+  // 種族特性（數值見 data.js 的 ARMOR_RULE、NET_RULE）
+  if (m.fac === 3) { m.armor = 1 + ARMOR_RULE.tal * ((c && c.tal && c.tal.energy) || 0); m.defl = 0; m.shMul = ARMOR_RULE.sh; }   // 機械改造：「能量調度」換成「裝甲強化」
+  else if (m.fac === 4) m.shDelay = NET_RULE.delay;
   if (skillActive(fleet, 'wall')) { m.shTaken *= 0.6; m.taken *= 0.7; }
   if (skillActive(fleet, 'charge')) m.fwd *= 1.8;
   if (skillActive(fleet, 'rapid')) m.fireCd *= 0.65;
@@ -2039,7 +2043,13 @@ function hitChance(gk, gun, dist, target, attackerSq, ax, ay, az, bx, by, bz) {
   let ef = 1;
   if (inTerrain('nebula', ax, az, ay) || inTerrain('nebula', bx, bz, by)) ef *= HIT_RULE.nebula;
   const am = attackerSq.mods || fleetMods(attackerSq.fleet), link = am.fac === 1;   // 聯盟：資料鏈
-  if (jam[attackerSq.side].until > U.uTime.value) ef *= link ? 1 - (1 - HIT_RULE.jammed) * LINK_RULE.jam : HIT_RULE.jammed;
+  const jm = jam[attackerSq.side].until > U.uTime.value;
+  if (jm) {   // 被干擾：聯盟懲罰減半；機械智慧網路斷線，懲罰加重（冗餘節點減輕額外的部分）
+    let p = 1 - HIT_RULE.jammed;
+    if (link) p *= LINK_RULE.jam; else if (am.fac === 4) p *= 1 + (NET_RULE.jam - 1) * (1 - NET_RULE.tal * am.facR);
+    ef *= 1 - p;
+  }
+  if (am.fac === 4 && attackerSq.netN) ef *= 1 + NET_RULE.per * Math.min(attackerSq.netN, NET_RULE.max) * (jm ? NET_RULE.tal * am.facR : 1);   // 機械智慧・網路連結
   if (link && tq.lkQ && tq.lkQ !== attackerSq && U.uTime.value - tq.lkT <= LINK_RULE.win) ef *= LINK_RULE.acc;   // 別支聯盟分艦隊剛打中它
   ef *= am.acc;   // 天賦：精準射擊
   return Math.min(HIT_RULE.max, Math.max(HIT_RULE.min, gun.acc * rf * sf * vf * ef));
@@ -2111,7 +2121,7 @@ function fireAir(attacker, gk, gun, sq, o, delay) {
   const k = opts.rangeMul || 1, n = gun.near * k, f = Math.max(n + 1, gun.far * k), dist = o.d;
   const rf = dist <= n ? 1 : 1 - (1 - HIT_RULE.farMul) * Math.min(1, (dist - n) / (f - n));
   const sf = o.a ? o.sz : AIR_RULE.missileSize;
-  const vf = 1 - HIT_RULE.speedMax * Math.min(1, o.v / HIT_RULE.speedRef);
+  const vf = 1 - HIT_RULE.speedMax * Math.min(1, (o.a && PL.on ? o.v / PILOT_SPEED : o.v) / HIT_RULE.speedRef);   // 駕駛模式飛得慢，命中率照原本的速度算
   let ef = 1;
   if (inTerrain('nebula', _a.x, _a.z, _a.y) || inTerrain('nebula', o.x, o.z, o.y)) ef *= HIT_RULE.nebula;
   if (jam[sq.side].until > U.uTime.value) ef *= HIT_RULE.jammed;
@@ -2123,12 +2133,13 @@ function fireAir(attacker, gk, gun, sq, o, delay) {
   const gs = gunStats[sq.side][gk]; gs[0]++; if (hit) gs[1]++;
   const as = airStats[sq.side]; as.shots++; if (hit) as.hits++;
   // 畫面：瞄準提前量；沒中就偏一點
-  const lead = dist / 900;
+  const me = PL.on && o.a === 1 && o.i === PL.j, spd = me ? 320 : 900;   // 打向玩家的機：彈速慢、曳光亮又長，看得到飛過來（照提前量瞄準，轉向就閃得掉）
+  const lead = dist / spd;
   let tx = o.x + o.vx * lead, ty = o.y + o.vy * lead, tz = o.z + o.vz * lead;
   if (!hit) { tx += (rnd() - 0.5) * 10; ty += (rnd() - 0.5) * 6; tz += (rnd() - 0.5) * 10; }
-  const fxs = GUN_FX[gk], t0 = U.uTime.value + delay, dur = Math.hypot(tx - _a.x, ty - _a.y, tz - _a.z) / 900;
-  spawnBeam(_a.x, _a.y, _a.z, tx, ty, tz, t0, dur, sq.side, fxs.inten * 0.8, Math.min(0.5, 30 / Math.max(1, dist)), sqFac(sq));
-  if (hit) pending.push({ kind: 'ak', t: t0 + dur, a: o.a, i: o.i, g: o.g, dmg: gun.dmg, side: sq.side });
+  const fxs = GUN_FX[gk], t0 = U.uTime.value + delay, dur = Math.hypot(tx - _a.x, ty - _a.y, tz - _a.z) / spd;
+  spawnBeam(_a.x, _a.y, _a.z, tx, ty, tz, t0, dur, sq.side, fxs.inten * (me ? 1.6 : 0.8), me ? Math.min(0.7, 14 / Math.max(1, dist)) : Math.min(0.5, 30 / Math.max(1, dist)), sqFac(sq));
+  if (hit) pending.push({ kind: 'ak', t: t0 + dur, a: o.a, i: o.i, g: o.g, dmg: gun.dmg, side: sq.side, ...(me ? { sx: _a.x, sy: _a.y, sz: _a.z, px: tx, py: ty, pz: tz } : {}) });
   return true;
 }
 // 擬真難度：友軍誤射。射線（射擊艦 → 目標）先穿過友軍分艦隊時，依穿過的位置與密度有機率打中它。
@@ -2256,7 +2267,7 @@ function rayAir(side, x0, y0, z0, ux, uy, uz, tmax) {
   for (const { o, t } of A) {
     if (o.a === 0) { if (!misLive[o.i] || misGen[o.i] !== o.g) continue; }
     else {
-      const vf = 1 - HIT_RULE.speedMax * Math.min(1, o.v / HIT_RULE.speedRef);
+      const vf = 1 - HIT_RULE.speedMax * Math.min(1, (o.a && PL.on ? o.v / PILOT_SPEED : o.v) / HIT_RULE.speedRef);
       const raw = o.sz * vf * (inTerrain('nebula', o.x, o.z, o.y) ? HIT_RULE.nebula : 1);
       const p = FT.kind[o.i] === 2 ? Math.max(RC.min, raw * RC.acc) : Math.min(HIT_RULE.max, Math.max(HIT_RULE.min, raw));
       if (rnd() >= p) continue;   // 閃過了，光束繼續往前
@@ -2345,7 +2356,7 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
       beamPow[sq.side] += (fA - beamPow[sq.side]) * (beamShots[sq.side] ? 0.01 : 1); beamShots[sq.side]++; beamLastT[sq.side] = U.uTime.value;
       const t0 = U.uTime.value + delay, dur = tA / (fxs.spd + rnd() * 120);
       spawnBeam(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z, t0, dur, sq.side, (volleyShot ? 0.6 : 1) * fxs.inten * (0.4 + 0.6 * fA), Math.min(fxs.len, 60 / tA), sqFac(sq));
-      pending.push({ kind: 'ak', t: t0 + dur, a: o.a, i: o.i, g: o.g, dmg: gun.dmg * dmgMul * fA, side: sq.side });
+      pending.push({ kind: 'ak', t: t0 + dur, a: o.a, i: o.i, g: o.g, dmg: gun.dmg * dmgMul * fA, side: sq.side, ...(PL.on && o.a === 1 && o.i === PL.j ? { sx: _a.x, sy: _a.y, sz: _a.z } : {}) });
       return true;
     }
     hit = blk < 0 && i >= 0;
@@ -2387,7 +2398,7 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
   if (sideFocus(sq.side) === tq) dmg *= 1.2;
   if (ff) dmg *= ffMul;
   if (am.fac === 1 && !ff) { tq.lkT = t0; tq.lkQ = sq; }   // 聯盟資料鏈：標記這支敵分艦隊
-  pending.push({ vr: am.fac === 0 && gk === 'main' && !ff ? 1 + am.facR : 0, gk, dr: Math.min(1, dist / far), gr: graze, t: t0 + dur, target, side: sq.side, ff, dirIdx: dirIndexOf(_b.x - _a.x, _b.z - _a.z), asp, fm, dmg, hm: hitMul(asp, sq, tq), fx: rnd() < fxs.fxP * (0.3 + 0.7 * fm) * (volleyShot ? 0.4 : 1), x: _b.x, y: _b.y, z: _b.z });
+  pending.push({ nd: gun.dmg, vr: am.fac === 0 && gk === 'main' && !ff ? 1 + am.facR : 0, gk, dr: Math.min(1, dist / far), gr: graze, t: t0 + dur, target, side: sq.side, ff, dirIdx: dirIndexOf(_b.x - _a.x, _b.z - _a.z), asp, fm, dmg, hm: hitMul(asp, sq, tq), fx: rnd() < fxs.fxP * (0.3 + 0.7 * fm) * (volleyShot ? 0.4 : 1), x: _b.x, y: _b.y, z: _b.z });
   return true;
 }
 // 齊射：分艦隊每 VOLLEY_CD 秒只能齊射一次；只有裝填過半（剩餘冷卻 ≤ VOLLEY_READY×冷卻）的砲會跟著開火
@@ -2442,8 +2453,8 @@ function killShip(i, t, x, y, z, mul = 1) {
 }
 
 // ───────────────────────── 種族特性（規則數值見 data.js 的 VOLLEY_RULE、LINK_RULE、SALVAGE_RULE） ─────────────────────────
-const facStats = [0, 1].map(() => ({ volley: 0, retarget: 0, salvHeal: 0, built: 0 }));   // 統計（除錯、平衡用）
-function facStatReset() { for (const s of facStats) s.volley = s.retarget = s.salvHeal = s.built = 0; }
+const facStats = [0, 1].map(() => ({ volley: 0, retarget: 0, salvHeal: 0, built: 0, armor: 0 }));   // 統計（除錯、平衡用）；armor＝裝甲擋掉的船體傷害
+function facStatReset() { for (const s of facStats) s.volley = s.retarget = s.salvHeal = s.built = s.armor = 0; }
 // 聯盟飛彈：目標在命中前沉了 → 在原本的落點附近找最近的敵艦，重新擲命中；轉向成功＝改打它
 function misRetarget(e) {
   const R = LINK_RULE.r * (1 + LINK_RULE.rTal * (e.rt - 1));
@@ -2462,6 +2473,17 @@ function misRetarget(e) {
   e.target = best; e.x = _c.x; e.y = _c.y; e.z = _c.z; e.asp = null;
   facStats[e.side].retarget++;
   return true;
+}
+// 陣形混亂（被突破）的時間倍率：機械改造縮短；0＝不會混亂
+function disorderMul(q) { const f = (q.mods || fleetMods(q.fleet)).fac; return f === 3 ? ARMOR_RULE.disorder : 1; }
+// 機械智慧・網路連結：每 0.5 秒數一次附近連線中的友軍分艦隊（同一邊、同陣營、NET_RULE.r 內）
+function netUpdate() {
+  const R2 = NET_RULE.r * NET_RULE.r, live = (o) => !o.bg && !o.hidden && o.alive > 0 && (o.mods || fleetMods(o.fleet)).fac === 4;
+  for (const q of squadrons) {
+    q.netN = 0;
+    if (!live(q)) continue;
+    for (const o of squadrons) if (o !== q && o.side === q.side && live(o) && (o.x - q.x) ** 2 + ((o.y || 0) - (q.y || 0)) ** 2 + (o.z - q.z) ** 2 < R2) q.netN++;
+  }
 }
 // 傭兵・戰場回收：船沉在傭兵分艦隊附近 → 那支分艦隊修補船體（每支分艦隊 cd 秒一次）、艦隊累積零件
 function salvageKill(i, t, x, z) {
@@ -2895,8 +2917,9 @@ function updateEnemyDist() {   // 每支分艦隊離最近敵方分艦隊（邊�
       if (o.side === q.side || o.bg || o.alive <= 0 || o.hidden) continue;
       const dx = fx - o.x, dz = fz - o.z, u = dx * Math.cos(o.h) - dz * Math.sin(o.h), v = dx * Math.sin(o.h) + dz * Math.cos(o.h);
       if (Math.abs(u) > o.W / 2 || Math.abs(v) > o.D / 2 || Math.abs((q.y || 0) + Math.sin(q.p || 0) * q.D / 2 - (o.y || 0)) > 40) continue;   // 3D：高度也要對上
+      const dm = disorderMul(o); if (dm <= 0) continue;   // 種族：機械改造混亂時間縮短（蟲族之後會是 0＝不會混亂）
       const fresh = !(o.disorderUntil > t);
-      o.disorderUntil = Math.max(o.disorderUntil || 0, t + F.breach);
+      o.disorderUntil = Math.max(o.disorderUntil || 0, t + F.breach * dm);
       if (fresh && typeof toast === 'function' && GAME.phase === 'battle') toast(o.side === GAME.playerSide ? `${o.fleet ? o.fleet.name : ''} ${o.name} 被突破，陣形混亂！` : `突破成功：${o.fleet ? o.fleet.name : ''} ${o.name} 陣形混亂`, o.side === GAME.playerSide ? 'bad' : '');
     }
   }
@@ -3122,12 +3145,13 @@ function updateFighters(dt) {
     const kind = FT.kind[i], home = FT.carrier[i];
     const RC = FOW_RULE.recon;
     let speed = kind === 2 ? RC.speed[0] + seed * (RC.speed[1] - RC.speed[0]) : kind ? 30 + seed * 8 : CRAFT[FT.role[i]].speed[0] + seed * (CRAFT[FT.role[i]].speed[1] - CRAFT[FT.role[i]].speed[0]);
+    const fsp = PL.on ? PILOT_SPEED : 1; speed *= fsp;   // 駕駛模式：艦載機都飛慢一點（船才顯得大），續航時間照比例拉長
     let dx = vx, dy = vy, dz = vz, d = 1e9, tx = 0, ty = 0, tz = 0, hasT = false;
     if (FT.launch[i] > 0) {
       FT.launch[i] -= dt;
     } else if (kind === 2 && !FT.ret[i]) {
       // 偵察機：飛到指定的點（tk 0），到了在上空盤旋 loiter 秒（tk 1，區域掃描見 fowUpdate），然後返航
-      FT.fuel[i] -= dt; if (FT.fuel[i] <= 0) FT.ret[i] = 1;
+      FT.fuel[i] -= dt * fsp; if (FT.fuel[i] <= 0) FT.ret[i] = 1;
       tx = FT.ax[i]; ty = FT.ay[i]; tz = FT.az[i];
       dx = tx - px; dy = ty - py; dz = tz - pz; d = Math.hypot(dx, dy, dz) || 1; dx /= d; dy /= d; dz /= d;
       if (FT.tk[i] === 0 && d < 40) { FT.tk[i] = 1; FT.cd[i] = RC.loiter; }
@@ -3140,7 +3164,7 @@ function updateFighters(dt) {
       vx += (ex / el * speed - vx) * k; vy += (ey / el * speed - vy) * k; vz += (ez / el * speed - vz) * k;
     } else if (FT.ret[i] || kind === 1) {
       // 返航（續航用完／維修完）或維修機飛往受傷的船
-      FT.fuel[i] -= dt;
+      FT.fuel[i] -= dt * fsp;
       if (!FT.ret[i]) { const g = FT.tgt[i]; if (g < 0 || !ships.alive[g] || ships.hp[g] >= maxHp(g) * 0.995 || FT.heal[i] <= 0 || FT.fuel[i] <= 0) FT.ret[i] = 1; }
       const goal = FT.ret[i] ? home : FT.tgt[i];
       if (goal < 0 || !ships.alive[goal]) { FT.state[i] = 3; FT.t0[i] = t; continue; }   // 母艦沉了：找不到地方降落
@@ -3162,7 +3186,7 @@ function updateFighters(dt) {
       vx += (ex / el * speed - vx) * k; vy += (ey / el * speed - vy) * k; vz += (ez / el * speed - vz) * k;
     } else {
       const role = FT.role[i], C = CRAFT[role];
-      FT.fuel[i] -= dt;
+      FT.fuel[i] -= dt * fsp;
       if (FT.fuel[i] <= 0) FT.ret[i] = 1;   // 續航用完：下一幀開始返航
       FT.rt[i] -= dt;
       const hq = home >= 0 && home < shipCount ? squadrons[ships.sq[home]] : null;
@@ -3250,12 +3274,14 @@ function updateFighters(dt) {
       // 命中率：攔截機打艦載機／飛彈，攻擊機打船；沒中就偏開
       const fh = FT.tk[i] === 3 ? rnd() < IR.acc.missile : FT.tk[i] === 0 ? rnd() < IR.acc.fighter * (FT.kind[g] === 2 ? FOW_RULE.recon.acc : 1) : rnd() < strikeChance(STRIKE_RULE.fighter, g, s, { x: tx, y: ty, z: tz }) && !(ROCKS.length && rockBlock(px, py, pz, tx, ty, tz) >= 0);   // 掃射船：被巨大小行星擋住就打不到
       const miss = fh ? 1.5 : 7 + rnd() * 6;
-      const jx = (rnd() - 0.5) * miss, jy = fh ? 0 : (rnd() - 0.5) * miss * 0.6, jz = (rnd() - 0.5) * miss, bd = d / 450;
-      spawnBeam(px, py, pz, tx + jx, ty + jy, tz + jz, t, bd, s, 0.35, 0.55);
+      const me = PL.on && FT.tk[i] === 0 && FT.tgt[i] === PL.j, bd = d / (me ? 300 : 450);   // 打向玩家的機：慢一點、亮一點，照提前量瞄準（轉向就閃得掉）
+      const lx = me ? fV[PL.j * 3] * bd : 0, ly = me ? fV[PL.j * 3 + 1] * bd : 0, lz = me ? fV[PL.j * 3 + 2] * bd : 0;
+      const jx = (rnd() - 0.5) * miss, jy = fh ? 0 : (rnd() - 0.5) * miss * 0.6, jz = (rnd() - 0.5) * miss;
+      spawnBeam(px, py, pz, tx + jx + lx, ty + jy + ly, tz + jz + lz, t, bd, s, me ? 1.1 : 0.35, me ? Math.min(0.7, 10 / Math.max(1, d)) : 0.55);
       const fs = ftrStats[s]; fs[0]++; if (fh) fs[1]++;
       if (!fh) { /* 沒打中 */ }
       else if (FT.tk[i] === 3) pending.push({ kind: 'ak', a: 0, t: t + bd, i: g, g: FT.tg2[i], dmg: IR.dmg, side: s });
-      else if (FT.tk[i] === 0) pending.push({ kind: 'ak', a: 1, t: t + bd, i: g, dmg: IR.dmg, side: s });
+      else if (FT.tk[i] === 0) pending.push({ kind: 'ak', a: 1, t: t + bd, i: g, dmg: IR.dmg, side: s, ...(me ? { sx: px, sy: py, sz: pz, px: tx + lx, py: ty + ly, pz: tz + lz } : {}) });
       else { const asp = hitAspect(g, px, pz, tx, tz, py, ty); pending.push({ src: 2, t: t + bd, target: g, side: s, asp, dmg: CRAFT[1].dmg * ftrDmgMul(home), hm: hitMul(asp, home >= 0 && home < shipCount ? squadrons[ships.sq[home]] : null, squadrons[ships.sq[g]]), fx: rnd() < 0.35, dirIdx: dirIndexOf(tx - px, tz - pz), x: tx + jx, y: ty, z: tz + jz }); }
     }
   }
@@ -3336,6 +3362,11 @@ function processHits() {
       const need = raw * dm * mods.shTaken;
       if (sh0 >= need) shD = need; else { shD = sh0; hullD = (need - sh0) / mods.shTaken * hm; }
     }
+    if (mods.armor && hullD > 0 && e.kind !== 'mh') {   // 機械改造・液壓裝甲：飛彈擋不住；其他＝裝甲厚度 ÷ 武器原本的單發傷害（不算距離衰減），主砲只算 mainMul
+      const nd = e.nd || (e.kind === 'lb' ? CRAFT[3].dps : e.dmg || 1);
+      const cut = Math.min(1 - ARMOR_RULE.min, ARMOR_RULE.a[ships.type[ti]] * mods.armor / nd * (e.gk === 'main' ? ARMOR_RULE.mainMul : 1)), h0 = hullD;
+      hullD *= 1 - cut; facStats[tSide].armor += h0 - hullD;
+    }
     ships.sh[ti] = sh0 - shD; if (shD > 0) ships.shT[ti] = t;
     // 護盾被打光：至少 broken 秒後才重新啟動；已經沒護盾時船體再被打，也要重新等 delay 秒
     if (sh0 > 0.5 && ships.sh[ti] <= 0.5) ships.shT[ti] = t + SHIELD_RULE.broken - SHIELD_RULE.delay;
@@ -3413,8 +3444,9 @@ function continuousFire(dt) {
   }
   // 護盾回充
   for (let i = 0; i < shipCount; i++) {
-    if (!ships.alive[i] || ships.sh[i] >= ships.shMax[i] || t - ships.shT[i] < SHIELD_RULE.delay) continue;
+    if (!ships.alive[i] || ships.sh[i] >= ships.shMax[i]) continue;
     const q = squadrons[ships.sq[i]];
+    if (t - ships.shT[i] < SHIELD_RULE.delay * (q.mods && !(q.mods.fac === 4 && jam[q.side].until > t) ? q.mods.shDelay : 1)) continue;   // 機械智慧：比較快開始回充（被干擾時網路斷線就沒有）
     const s0 = ships.sh[i]; ships.sh[i] = Math.min(ships.shMax[i], s0 + ships.shMax[i] * SHIELD_RULE.rate * (q.mods ? q.mods.shRegen : 1) * dt);
     if (!q.bg) cStats[ships.side[i]].regen += ships.sh[i] - s0;   // 防禦型指揮官回充較快
   }
@@ -3427,8 +3459,10 @@ function continuousFire(dt) {
   const CDS = [ships.cd, ships.cd1, ships.cd2];
   for (let i = 0; i < shipCount; i++) {
     if (!ships.alive[i]) continue;
-    const r = _rate[ships.sq[i]];
+    let r = _rate[ships.sq[i]];
     if (r <= 0) continue;
+    const M = squadrons[ships.sq[i]].mods;   // 機械改造・過載（專屬天賦）：船體危急時射速提高
+    if (M && M.fac === 3 && M.facR && ships.hp[i] < ARMOR_RULE.over * maxHp(i)) r *= 1 + ARMOR_RULE.overRate * M.facR;
     const G = SHIP_TYPES[ships.type[i]].guns, sw = ships.swD[i] > 0 && t < ships.swS[i] + ships.swD[i];   // 前排輪替換位中：主砲、副砲停火（防空照打）
     for (let g = 0; g < 3; g++) {
       const gk = GUN_KEYS[g], gun = G[gk]; if (!gun || (sw && gk !== 'aa')) continue;
@@ -3444,7 +3478,7 @@ function resetCombat() {
   fP.fill(0); fV.fill(0); fI.fill(0); ftrAttrs.aFI.needsUpdate = true;
   aliveF[0].length = 0; aliveF[1].length = 0; misHead = 0; ftrHead = 0;
   for (const w of wStats) { w.mFired = w.mInt = w.mMiss = w.healed = w.fLaunch = w.rLaunch = w.fLand = w.fLost = w.fBuilt = w.rot = w.fRep = w.fHeal = 0; } for (const a of wDmg) a.fill(0);
-  for (const q of squadrons) { q.enemyD = null; q.drones = 0; q.disorderUntil = 0; q.volleyT = -1e9; q.lkQ = null; q.lkT = -99; q.salvT = -99; }
+  for (const q of squadrons) { q.enemyD = null; q.drones = 0; q.disorderUntil = 0; q.volleyT = -1e9; q.lkQ = null; q.lkT = -99; q.salvT = -99; q.netN = 0; }
   for (const f of fleets) { f.parts = 0; f.built = 0; }
   facStatReset();
   for (let i = 0; i < MIS_MAX; i++) misT[i * 4] = -999;
@@ -3714,7 +3748,7 @@ const R3 = { ready: false, models: {}, meshByKey: {}, list: [], version: -1, lod
 const opts3 = { detail: 'auto', lodScale: 1 };
 const LOD3_PX = [170, 55, 16, 2];   // 以 CSS px 計：艦長超過幾 px 用第 0/1/2/3 級
 const TYPE_LEN3 = 1.0;       // 3D 艦長＝2D 貼圖寬 × 此值
-const FTR_LEN3 = 1.8;
+const FTR_LEN3 = 0.04;  // 3D 艦載機長度（原本 1.8）：約星際大戰鈦戰機比星艦的比例，戰列艦約 140 倍長、旗艦約 330 倍；指揮模式拉遠時只看得到尾焰
 
 function b64ToBuf(b64) { const s = atob(b64); const u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u.buffer; }
 // 解碼 3D 模型（船體、艦載機、武器共用；第一次用到才解）
@@ -4721,7 +4755,7 @@ const KEY_ACTIONS = [
   ['cam_up', '鏡頭往前', '鏡頭', 'ArrowUp'], ['cam_down', '鏡頭往後', '鏡頭', 'ArrowDown'], ['cam_left', '鏡頭往左', '鏡頭', 'ArrowLeft'], ['cam_right', '鏡頭往右', '鏡頭', 'ArrowRight'],
   ['cam_yaw_l', '3D：向左轉', '鏡頭', 'KeyQ'], ['cam_yaw_r', '3D：向右轉', '鏡頭', 'KeyE'], ['cam_pitch_up', '3D：仰角升高', '鏡頭', 'KeyR'], ['cam_pitch_dn', '3D：仰角降低', '鏡頭', 'KeyT'],
   // 王牌飛行員（駕駛中才有效，可以和上面的鍵重複；滑鼠左右鍵固定是武裝一、二，這裡可以另外綁鍵盤）
-  ['pilot_thr_up', '油門加', '駕駛', 'KeyW'], ['pilot_thr_dn', '油門減', '駕駛', 'KeyS'], ['pilot_roll_l', '向左翻滾', '駕駛', 'KeyA'], ['pilot_roll_r', '向右翻滾', '駕駛', 'KeyD'],
+  ['pilot_thr_up', '油門加', '駕駛', 'KeyW'], ['pilot_thr_dn', '油門減（減到 0 以下＝逆向噴射）', '駕駛', 'KeyS'], ['pilot_stop', '油門歸零（停住）', '駕駛', 'KeyX'], ['pilot_roll_l', '向左翻滾', '駕駛', 'KeyA'], ['pilot_roll_r', '向右翻滾', '駕駛', 'KeyD'],
   ['pilot_boost', '加速', '駕駛', 'ShiftLeft'], ['pilot_w1', '武裝一（滑鼠左鍵之外）', '駕駛', ''], ['pilot_w2', '武裝二（滑鼠右鍵之外）', '駕駛', ''], ['pilot_w3', '武裝三', '駕駛', 'KeyQ'], ['pilot_w4', '武裝四', '駕駛', 'KeyE'],
   ['pilot_target', '鎖定準心附近的敵人', '駕駛', 'KeyT'], ['pilot_view', '背後／座艙視角', '駕駛', 'KeyV'], ['pilot_land', '降落航母整補（靠近己方航母時）', '駕駛', 'KeyR'],
 ];
@@ -4736,8 +4770,8 @@ const UI_OPTS = [
   ['compass', '艦橋方位儀', '指揮官視角上方的方位刻度與各艦隊方位'],
 ];
 const SETTINGS = (() => {
-  const d = { keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
-  try { const s = JSON.parse(STORE.getItem('fleet.settings') || 'null'); if (s) { Object.assign(d.keys, s.keys || {}); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin']) if (s[k] != null) d[k] = s[k]; } } catch (e) { /* 用預設值 */ }
+  const d = { keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, pilotRadar: 'right', ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
+  try { const s = JSON.parse(STORE.getItem('fleet.settings') || 'null'); if (s) { Object.assign(d.keys, s.keys || {}); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin', 'pilotRadar']) if (s[k] != null) d[k] = s[k]; } } catch (e) { /* 用預設值 */ }
   return d;
 })();
 function saveSettings() { try { STORE.setItem('fleet.settings', JSON.stringify(SETTINGS)); } catch (e) { /* 只在本次有效 */ } }
@@ -4967,6 +5001,7 @@ function simulate(dt) {
   autoWeapons(dt);
   if (opts.fire && opts.rotate) { rotateLines(U.uTime.value); fieldRepair(dt, U.uTime.value); }
   if (opts.fire && simTick % (SALVAGE_RULE.every * SIM_HZ) === 11) salvageBuild(U.uTime.value);   // 傭兵：用零件重造沉沒的船
+  if (simTick % 30 === 17) netUpdate();   // 機械智慧：網路連結
   updateFighters(dt);
   processHits();
   decayHits(dt);
@@ -5349,17 +5384,27 @@ const FAC_TRAIT = [
     brief: '聯盟艦隊情報共享、集火精準，飛彈會自動轉向新目標，干擾對它效果有限。', counter: '強化防空攔截飛彈，利用星雲、小行星遮蔽，從多個方向進攻讓它難以集火。' },
   { name: '戰場回收', desc: '附近有船被擊沉時（敵我都算），範圍內的傭兵艦會用殘骸修補船體並累積零件；零件夠了就把艦隊裡沉沒的船重新造出來（新造的船最大耐久只有一半）。',
     brief: '傭兵擅長消耗戰，會從殘骸回收零件修補，甚至把沉沒的戰艦重新造出來。', counter: '速戰速決，集中火力一口氣擊潰整支分艦隊；避免在它附近長時間纏鬥。' },
-  null, null, null, null,
+  { name: '液壓裝甲', desc: '副砲、防空砲、艦載機打到船體時會被裝甲擋掉一部分，單發越小擋得越多；主砲幾乎擋不住，飛彈完全擋不住。護盾比較薄。被突破時陣形混亂的時間縮短。',
+    brief: '機械改造艦裝甲厚重，小口徑火力很難打穿，被衝進陣中也很快恢復陣形；但護盾比較薄。', counter: '多帶巡洋艦、驅逐艦，用飛彈與主砲的重火力打它；副砲、防空砲、艦載機掃射的消耗戰對它有利。突破陣型的效果也比較差。' },
+  { name: '網路連結', desc: '附近每多一支連線中的友軍分艦隊，射擊就更準（有上限）；護盾受擊後比較快開始回充。被干擾時網路斷線：失去連線加成，命中率下降也比一般更重。',
+    brief: '機械智慧族的艦隊彼此連線，聚在一起時射擊精準、護盾回充快；但非常依賴網路。', counter: '用干擾切斷網路（效果特別大），或把它的艦隊分割開來各個擊破。' },
+  null, null,
 ];
 // 各陣營的專屬天賦（天賦樹「種族」那一格，id 'fac'）
 const FAC_TALENT = [
   { name: '齊射指揮', max: 2, desc: (r) => `重砲齊射的判定時間 +${r * 25}%、額外傷害 +${r * 5}%` },
   { name: '智慧導引', max: 2, desc: (r) => `飛彈命中率 +${r * 5}%；飛彈轉向的搜尋範圍 +${r * 30}%` },
   { name: '拆解專家', max: 2, desc: (r) => `戰場回收的範圍 +${r * 20}%、修補量與零件 +${r * 20}%` },
-  null, null, null, null,
+  { name: '過載', max: 2, desc: (r) => `船體低於 ${Math.round(ARMOR_RULE.over * 100)}% 的船，主砲、副砲射速 +${r * 15}%` },
+  { name: '冗餘節點', max: 2, desc: (r) => `被干擾時保留 ${r * 35}% 的連線加成，干擾額外造成的命中率下降減少 ${r * 35}%` },
+  null, null,
 ];
-// 陣營讓某些天賦沒有作用時，同一格換成別的天賦（名稱、說明、效果都換；點數、階數不變）：FAC_TAL_SWAP[陣營][天賦 id]＝{ name, desc }
-const FAC_TAL_SWAP = [{}, {}, {}, {}, {}, {}, {}];
+// 陣營讓某些天賦沒有作用時，同一格換成別的天賦（點數、階數不變）：FAC_TAL_SWAP[陣營][天賦 id]＝{ name, desc }
+//   只給 name＝同樣效果、換成符合世界觀的名字；效果真的換掉的要在 fleetMods 裡照陣營處理
+const FAC_TAL_SWAP = [{}, {}, {},
+  { energy: { name: '裝甲強化', desc: (r) => `液壓裝甲的厚度 +${r * 25}%（取代能量調度：機械改造艦的護盾薄，偏折用處不大）` } },
+  { survey: { name: '偵察無人機' }, hangar: { name: '無人機整備' } },
+  {}, {}];
 // 依陣營取天賦的實際名稱與說明
 function talFor(t, fac) {
   const f = fac || 0;
@@ -5375,6 +5420,12 @@ function talFor(t, fac) {
 //     每場最多造開戰艘數 × maxBuild 艘；天賦每階 r、heal、parts ×(1＋tal)
 const VOLLEY_RULE = { win: 1.3, bonus: 0.12, winTal: 0.25, bonusTal: 0.05 };
 const LINK_RULE = { win: 3, acc: 1.2, jam: 0.5, r: 80, rTal: 0.3, mslTal: 0.05 };
+//   ARMOR（機械改造・液壓裝甲）：飛彈以外打到船體的每一發，擋掉 a[艦種] ÷ 武器原本的單發傷害（主砲再 ×mainMul）（不算距離衰減；最少留 min 倍），天賦「裝甲強化」每階 a ×(1＋tal)；護盾容量 ×sh；陣形混亂時間 ×disorder
+//     over＝專屬天賦「過載」：船體低於最大耐久的 over，主砲、副砲射速 ×(1＋overRate × 階數)
+//   NET（機械智慧・網路連結）：每 0.5 秒數一次 r 內同陣營、同一邊的分艦隊；每多一支命中率 ×(1＋per)，最多算 max 支；護盾回充延遲 ×delay
+//     被干擾：連線加成歸零、干擾的命中率懲罰 ×jam；天賦「冗餘節點」每階保留 tal 的加成、懲罰的額外部分減少 tal
+const ARMOR_RULE = { a: [3.4, 3.8, 3.1, 2.5, 2.0, 3.1], mainMul: 0.35, min: 0.25, tal: 0.25, sh: 0.9, disorder: 0.5, over: 0.3, overRate: 0.15 };
+const NET_RULE = { r: 520, per: 0.05, max: 3, delay: 0.8, jam: 2.5, tal: 0.35 };
 const SALVAGE_RULE = { r: 200, heal: 0.015, cd: 8, parts: 0.3, every: 6, cap: 0.5, maxBuild: 0.04, tal: 0.2 };
 const TALENT_BY_ID = Object.fromEntries(TALENTS.map((t) => [t.id, t]));
 function talentRank(c, id) { return (c && c.tal && c.tal[id]) || 0; }
@@ -11808,10 +11859,13 @@ addEventListener('wheel', (e) => { if (BR.on && TAC.open && e.deltaY < 0 && e.ta
 // 操作：滑鼠移動瞄準方向（機體自動轉過去）、W／S 油門、A／D 翻滾、Shift 加速、左鍵武裝一、右鍵武裝二、T 鎖定準心附近的敵人、V 切換背後／座艙視角。
 // 玩家的輸入不進命令紀錄，所以駕駛的戰鬥沒有回放。
 const PILOT_STORE = 'fleet.pilot';
-const PILOT_FTR_LEN = 0.9;     // 駕駛中所有艦載機的 3D 長度（原本 1.8；畫小一點，船才顯得大）
+const PILOT_FTR_LEN = FTR_LEN3;   // 駕駛中所有艦載機（玩家與 AI）的 3D 長度：與指揮模式相同（main.js 的 FTR_LEN3）
 const PILOT_RESPAWN = 5;       // 被擊墜後幾秒重新出擊
 const PILOT_HITR_F = 1.3;      // 機砲對艦載機的命中半徑（比機身大一點，好打一點）
-const PILOT_ZONE = 1500;       // 戰區半徑：超出會被拉回
+const PILOT_ZONE = 1500;
+const PILOT_DODGE = 3.5;
+const PILOT_SPEED = 0.35;      // 駕駛模式的速度倍率（玩家、AI 艦載機、追蹤飛彈）：飛慢一點，掠過戰艦時才感覺得到它有多大
+const PILOT_REV = 0.4;         // 油門最低 −0.4：逆向噴射，最快倒退巡航速度的 40%（機首方向不變）      // 打向玩家的子彈：到達時機體離預測點超過這個距離＝閃過       // 戰區半徑：超出會被拉回
 // 機體：role＝CRAFT 的索引（防空砲依它的大小算命中）；min／cruise／max＝最低／巡航／加速速度；turn＝每秒最大轉向（弧度）
 const PILOT_FRAMES = [
   { role: 0, name: '攔截機・改', en: 'INTERCEPTOR', hp: 30, sh: 24, shR: 7, min: 22, cruise: 58, max: 96, acc: 46, turn: 2.3, roll: 4.4, boostT: 4,
@@ -11836,10 +11890,12 @@ const PILOT_WEAPONS = {
     desc: '無導引火箭連射，只能打船。彈數有限，回母艦整補。' },
   torpedo: { name: '重型魚雷', type: 'lock', vs: 's', unlock: 800, ammo: 3, cone: 0.3, range: 600, lockT: 0.9, dmg: 70, accM: 1.6, cd: 1,
     desc: '對準敵艦約 1 秒鎖定。威力極大，但會被防空砲攔截。沒鎖定也能發射，打向前方最近的敵艦，命中率較低。' },
+  repair: { name: '維修光束', type: 'beam', heal: true, unlock: 100, range: 70, hps: 12, self: 3, dur: 5, recharge: 8,
+    desc: '對準友艦按住：修復船體與護盾。沒有對準友艦時修復自己（比較慢）。能量 5 秒，8 秒充滿。' },
   lance: { name: '光矛', type: 'beam', unlock: 1400, range: 85, dps: 24, dpsF: 16, dur: 4, recharge: 9,
     desc: '貼近照射的持續光束：護盾消耗 ×1.5，打穿後船體 ×1.5。能量 4 秒，9 秒充滿。' },
 };
-const PILOT_WPN_ORDER = ['pulse', 'homing', 'heavy', 'rocket', 'torpedo', 'lance'];
+const PILOT_WPN_ORDER = ['pulse', 'homing', 'repair', 'heavy', 'rocket', 'torpedo', 'lance'];
 // 四個武裝槽：左鍵、右鍵、Q、E
 const PILOT_SLOTS = [{ name: '武裝一', mouse: '左鍵' }, { name: '武裝二', mouse: '右鍵' }, { name: '武裝三' }, { name: '武裝四' }];
 // 按鍵在「設定 → 按鍵綁定 → 駕駛」修改（KEY_ACTIONS 的 pilot_*）；Shift／Ctrl／Alt 左右邊都算
@@ -11848,7 +11904,33 @@ function plHeld(id) { for (const c of PL.keys) if (plCodeIs(id, c)) return true;
 function plKey(id) { return keyLabel(keyOf(id)); }
 function plSlotKey(k) { const S = PILOT_SLOTS[k], kb = keyOf('pilot_w' + (k + 1)); return [S.mouse, kb ? keyLabel(kb) : ''].filter(Boolean).join('／') || '未綁定'; }
 const PILOT_SLOT_DEF = ['pulse', 'homing', 'homing', 'pulse'];
-const PILOT_MERIT = { ftr: 25, ship: 60, dmg: 0.4, win: 80, draw: 40, lose: 20 };
+const PILOT_MERIT = { ftr: 25, ship: 60, dmg: 0.4, heal: 0.5, fleet: 20, bonus: 40, mission: [100, 140, 180, 230, 280] };
+// ───── 任務：個人紀錄看任務成敗（艦隊戰勝負只是小獎勵） ─────
+// 每次出擊隨機一個主要目標＋0～2 個額外目標；完成主要目標後降落航母結算（也可以繼續打）；被擊墜超過上限＝失敗
+const PILOT_DEATHS = [5, 4, 3, 3, 2];   // 依 AI 難度 1～5
+const PILOT_MIS = {
+  kills: { name: '制空', goal: (li) => [5, 6, 8, 10, 12][li], text: (n) => `擊墜 ${n} 架敵機` },
+  hunt: { name: '獵殺', goal: (li) => [1, 2, 2, 3, 3][li], text: (n) => `擊沉 ${n} 艘指定的敵艦（儀表上標示「目標」）` },
+  damage: { name: '對艦攻擊', goal: (li) => [250, 350, 500, 650, 800][li], text: (n) => `對敵艦造成 ${fmtN(n)} 點傷害` },
+  carrier: { name: '擊沉航母', goal: () => 1, text: () => '擊沉指定的敵方航母' },
+  escort: { name: '護衛航母', goal: (li, T) => Math.round(Math.min(T * 0.7, 150 + 30 * li)), text: (n) => `保護指定的己方航母 ${Math.round(n / 60 * 10) / 10} 分鐘（敵方打擊群會來攻擊它）` },
+};
+const PILOT_BONUS = {
+  nodeath: { name: '一次都沒被擊墜' },
+  fast: { name: '在戰鬥時間的前 60% 完成主要目標' },
+  extra: { name: '另外擊墜 3 架敵機', not: ['kills'] },
+  fleet: { name: '我軍贏得艦隊戰（要打到戰鬥結束）' },
+  hp50: { name: '護衛的航母耐久保持在 50% 以上', only: ['escort'] },
+};
+function pilotMisText(M) { return `${PILOT_MIS[M.type].name}：${PILOT_MIS[M.type].text(M.goal)}`; }
+// 出擊前決定（隨機）：類型、目標量、額外目標、被擊墜上限
+function pilotMisRoll(R, li, T) {
+  const types = Object.keys(PILOT_MIS), type = types[Math.floor(R() * types.length)];
+  const pool = Object.keys(PILOT_BONUS).filter((id) => !(PILOT_BONUS[id].not || []).includes(type) && (!PILOT_BONUS[id].only || PILOT_BONUS[id].only.includes(type))), bonus = [];
+  const nb = Math.floor(R() * 3);
+  while (bonus.length < nb && pool.length) bonus.push(pool.splice(Math.floor(R() * pool.length), 1)[0]);
+  return { type, li, T, goal: PILOT_MIS[type].goal(li, T), bonus, deaths: PILOT_DEATHS[li] };
+}
 for (const k in PILOT_WEAPONS) PILOT_WEAPONS[k].id = k;
 
 // ───── 成長：飛行員等級與天賦、武器熟練度 ─────
@@ -11872,10 +11954,10 @@ function pilotTalUsed(tal) { return PILOT_TALENTS.reduce((a, T) => a + Math.min(
 function pilotTalFree(p) { return pilotLevel(p.xp).lv - 1 - pilotTalUsed(p.tal); }
 // 武器熟練度：用那把武器打中、擊墜、擊沉累積經驗，Lv 0～5
 const PILOT_PROF = [0, 50, 150, 320, 600, 1000];
-const PILOT_PROF_XP = { hitF: 1, ftr: 12, dmg: 0.15, ship: 15 };
+const PILOT_PROF_XP = { hitF: 1, ftr: 12, dmg: 0.15, ship: 15, heal: 0.3 };
 function pilotProf(xp) { let lv = 0; while (lv < 5 && xp >= PILOT_PROF[lv + 1]) lv++; return { lv, xp, cur: PILOT_PROF[lv], next: lv < 5 ? PILOT_PROF[lv + 1] : 0 }; }
 function pilotProfDesc(id, lv) {
-  const W = PILOT_WEAPONS[id], out = [`傷害 +${4 * lv}%`];
+  const W = PILOT_WEAPONS[id], out = [`${W.heal ? '維修量' : '傷害'} +${4 * lv}%`];
   if (W.type === 'gun') out.push(W.ammo ? `彈數 +${10 * lv}%` : `熱量 −${6 * lv}%`);
   if (W.type === 'lock') out.push(`鎖定時間 −${6 * lv}%`, id === 'torpedo' ? `魚雷 +${Math.floor(lv / 2)} 枚` : `飛彈 +${lv} 枚`);
   if (W.type === 'beam') out.push(`能量 +${8 * lv}%`);
@@ -11884,8 +11966,8 @@ function pilotProfDesc(id, lv) {
 // 這一次出擊的實際數值：機體 × 天賦；每個武裝槽的倍率（熟練度 × 天賦）
 function pilotBuild(cfg) {
   const T = (id) => Math.min((PILOT_TALENTS.find((x) => x.id === id) || { max: 0 }).max, (cfg.tal || {})[id] || 0), B = PILOT_FRAMES[cfg.frame] || PILOT_FRAMES[1];
-  const sp = 1 + 0.05 * T('engine'), ag = 1 + 0.06 * T('agile');
-  const fr = { ...B, hp: B.hp * (1 + 0.1 * T('armor')), sh: B.sh * (1 + 0.12 * T('shield')), shR: B.shR * (1 + 0.1 * T('shield')), min: B.min * sp, cruise: B.cruise * sp, max: B.max * sp,
+  const sp = (1 + 0.05 * T('engine')) * PILOT_SPEED, ag = 1 + 0.06 * T('agile');
+  const fr = { ...B, hp: B.hp * (1 + 0.1 * T('armor')), sh: B.sh * (1 + 0.12 * T('shield')), shR: B.shR * (1 + 0.1 * T('shield')), min: B.min * sp, cruise: B.cruise * sp, max: B.max * sp, acc: B.acc * PILOT_SPEED,
     turn: B.turn * ag, roll: B.roll * ag, boostT: B.boostT * (1 + 0.25 * T('boost')) };
   return { fr, taken: 1 - 0.08 * T('ace'), respawn: PILOT_RESPAWN - 1.5 * T('rescue'), bay: 1 + 0.25 * T('bay'), cool: 1 - 0.12 * T('cool'), lock: 1 - 0.15 * T('lock') };
 }
@@ -11936,7 +12018,7 @@ function showPilot() {
   const B = pilotBuild({ frame: p.frame, tal: p.tal }), lo = p.slots.map((id) => { const m = pilotSlotMods(id, pilotProf(p.wxp[id] || 0).lv, B); return `${PILOT_WEAPONS[id].name}${m.max ? ` ${m.max} ${PILOT_WEAPONS[id].type === 'lock' ? '枚' : '發'}` : ''}`; }).join('＋');
   overlay(`<div class="g-wrap">
     <div class="g-head"><h2>王牌飛行員</h2><span class="crumb">不指揮艦隊・駕駛一架艦載機加入隨機戰場・沒有回放</span><span class="g-sp"></span><button class="g-btn" id="pl-back">← 單人戰鬥</button></div>
-    <div class="g-card pl-rec"><div class="pl-lv"><span class="g-dim">飛行員等級</span><b>Lv ${L.lv}</b>${L.need ? `<span class="pl-xp">${bar(L.xp, L.need)}<small>${fmtN(Math.floor(L.xp))}／${fmtN(L.need)}</small></span>` : '<small>最高等級</small>'}</div><div><span class="g-dim">戰功</span><b>${fmtN(p.merit)}</b></div><div><span class="g-dim">出擊</span><b>${p.sorties}</b></div><div><span class="g-dim">勝利</span><b>${p.wins}</b></div>
+    <div class="g-card pl-rec"><div class="pl-lv"><span class="g-dim">飛行員等級</span><b>Lv ${L.lv}</b>${L.need ? `<span class="pl-xp">${bar(L.xp, L.need)}<small>${fmtN(Math.floor(L.xp))}／${fmtN(L.need)}</small></span>` : '<small>最高等級</small>'}</div><div><span class="g-dim">戰功</span><b>${fmtN(p.merit)}</b></div><div><span class="g-dim">出擊</span><b>${p.sorties}</b></div><div><span class="g-dim">任務成功</span><b>${p.wins}</b></div>
       <div><span class="g-dim">擊墜</span><b>${p.kf}</b></div><div><span class="g-dim">擊沉</span><b>${p.ks}</b></div><div><span class="g-dim">被擊墜</span><b>${p.deaths}</b></div>
       <span class="g-dim pl-note">戰功同時是飛行員經驗（升級得天賦點數）與解鎖武裝的門檻；武器用得越多，熟練度越高。</span></div>
     <div class="g-card" style="margin-top:12px"><h3>天賦 <span class="g-dim" style="font-weight:400">可用點數 <b class="${free > 0 ? 'g-pc' : ''}">${free}</b>・每升一級 1 點・可以隨時免費重新分配</span><button class="g-btn sm" id="pl-tal-reset" style="float:right">全部重新分配</button></h3><div class="pl-tals">${tals}</div></div>
@@ -11950,10 +12032,11 @@ function showPilot() {
         <dt>規模</dt><dd>${seg('size', RAND_SIZES.map((s, i) => [i, s.name]))}<div class="g-dim">每一方 ${fmtN(RAND_SIZES[p.size].budget)} 點兵力・${Math.round(RAND_SIZES[p.size].time / 60)} 分鐘</div></dd>
         <dt>AI 難度</dt><dd>${seg('ai', [...WATCH_LV.map((l, i) => [i, l.name]), [-1, '隨機']])}<div class="g-dim">雙方艦隊的指揮官等級與 AI 難度（兩邊相同，戰局要靠你扭轉）</div></dd>
         <dt>地形</dt><dd>${seg('terr', RAND_TERR.map((s, i) => [i, s.name]))}</dd>
-        <dt>勝負</dt><dd>跟著整場艦隊戰：殲滅或擊潰敵軍、時間到依損失比例判定。被擊墜 ${PILOT_RESPAWN} 秒後從母艦重新出擊；己方航母全滅就只能觀戰。</dd></dl></div>
+        <dt>任務</dt><dd>每次出擊隨機指派：${Object.values(PILOT_MIS).map((x) => x.name).join('、')}，另外附 0～2 個額外目標（決定評等）。完成主要目標後靠近己方航母按 ${plKey('pilot_land')} 降落結算，也可以繼續打。指定目標被友軍打掉不算失敗，會改派新目標。</dd>
+        <dt>失敗</dt><dd>被擊墜超過上限（依 AI 難度：${PILOT_DEATHS.map((n, i) => `難度 ${i + 1} ${n} 次`).join('、')}）、護衛的航母被擊沉，或戰鬥結束前沒完成。艦隊戰勝負只是小獎勵。己方航母全滅就無法再出擊。</dd></dl></div>
       <div class="g-card"><h3>操作（滑鼠＋鍵盤）</h3><table class="pl-keys">
         <tr><td>滑鼠移動</td><td>瞄準方向（機體自動轉過去）</td></tr>${PILOT_SLOTS.map((S, k) => `<tr><td>${plSlotKey(k)}</td><td>${S.name}</td></tr>`).join('')}
-        <tr><td>${plKey('pilot_thr_up')}／${plKey('pilot_thr_dn')}</td><td>油門加／減</td></tr><tr><td>${plKey('pilot_roll_l')}／${plKey('pilot_roll_r')}</td><td>翻滾</td></tr><tr><td>${plKey('pilot_boost')}</td><td>加速（有能量）</td></tr>
+        <tr><td>${plKey('pilot_thr_up')}／${plKey('pilot_thr_dn')}</td><td>油門加／減（可以減到 0 停住，再按住減速鍵＝逆向噴射倒退）</td></tr><tr><td>${plKey('pilot_stop')}</td><td>油門歸零</td></tr><tr><td>${plKey('pilot_roll_l')}／${plKey('pilot_roll_r')}</td><td>翻滾</td></tr><tr><td>${plKey('pilot_boost')}</td><td>加速（有能量）</td></tr>
         <tr><td>${plKey('pilot_target')}</td><td>鎖定準心附近的敵人（機砲會顯示提前量）</td></tr><tr><td>${plKey('pilot_view')}</td><td>背後視角／座艙視角</td></tr><tr><td>滾輪</td><td>背後視角的鏡頭距離</td></tr>
         <tr><td>${plKey('pilot_land')}</td><td>靠近己方航母時：自動降落、整補（彈藥、耐久補滿），再彈射起飛</td></tr><tr><td>Esc</td><td>暫停</td></tr></table>
         <div style="margin-top:6px"><button class="g-btn sm" id="pl-keys">修改按鍵…</button></div>
@@ -11976,8 +12059,8 @@ function pilotLayout(p) {
   const pick = (a) => a[Math.floor(R() * a.length)];
   const S = RAND_SIZES[p.size];
   let st = RAND_TERR[p.terr].st; if (st == null) st = R() < 0.15 ? -1 : Math.floor(R() * 15);
-  const li = p.ai < 0 ? Math.floor(R() * WATCH_LV.length) : p.ai, L = WATCH_LV[li].cl;
-  const m = { name: '', fac: p.fac === 1 ? 1 : 0, victory: true, ctl: -1, pilot: { frame: p.frame, slots: p.slots.slice(), tal: { ...p.tal }, prof: Object.fromEntries(p.slots.map((id) => [id, pilotProf(p.wxp[id] || 0).lv])) }, timeLimit: S.time,
+  const li = p.ai < 0 ? Math.floor(R() * WATCH_LV.length) : p.ai, L = WATCH_LV[li].cl, mis = pilotMisRoll(R, li, S.time);
+  const m = { name: '', fac: p.fac === 1 ? 1 : 0, victory: true, ctl: -1, pilot: { frame: p.frame, slots: p.slots.slice(), tal: { ...p.tal }, prof: Object.fromEntries(p.slots.map((id) => [id, pilotProf(p.wxp[id] || 0).lv])), mis }, timeLimit: S.time,
     seed: campHash(p.seed, p.size + 1, 13) % 100000, fleets: [], terrain: st < 0 ? [] : campTerrain(R, st), sides: [] };
   const names = CAMP_NAMES.slice();
   for (const side of [0, 1]) {
@@ -11990,6 +12073,7 @@ function pilotLayout(p) {
       const per = A.mix.reduce((s, x, t) => s + x * SHIP_TYPES[t].cost, 0), n = budget / nF / per;
       const comp = A.mix.map((x) => Math.round(n * x / 10) * 10);
       if (side === 0 && k === 0) comp[0] = Math.max(comp[0], 10);   // 玩家的母艦
+      if (side === 1 && k === 0 && mis.type === 'carrier') comp[0] = Math.max(comp[0], 10);   // 任務：擊沉航母
       const t = tac === 'flank' && nF >= 2 && k === 0 ? 'push' : tac;
       const skills = [], nSk = Math.min(3, 1 + Math.floor(L / 4));
       while (skills.length < nSk) { const s = pick(L >= 5 ? CAMP_SKILLS : CAMP_SKILLS.slice(0, 3)); if (!skills.includes(s)) skills.push(s); }
@@ -12003,7 +12087,7 @@ function pilotLayout(p) {
       comp: aiSupplyComp(S.budget), hangar: HANGAR_DEFAULT.slice(), formation: 'ring', orderly: false, layers: 1,
       x: 0, z: side ? -360 - SUPPLY_RULE.follow : 360 + SUPPLY_RULE.follow, y: 0, h: side ? 0 : Math.PI, ai: null, reserve: false, at: 60 });
   }
-  m.name = `${S.name}・${WATCH_LV[li].name}`;
+  m.name = `${PILOT_MIS[mis.type].name}・${S.name}・${WATCH_LV[li].name}`;
   return m;
 }
 function pilotGo() {
@@ -12017,7 +12101,7 @@ function pilotGo() {
 // ───── 戰鬥中 ─────
 Object.assign(PL, { side: 0, F: [0, 0, 1], U: [0, 1, 0], yaw: 0, pitch: 0, speed: 0, thr: 0.6, boost: 1, hp: 0, sh: 0, shT: -9, inv: 0, dead: false, deadT: 0,
   home: -1, frame: null, slots: [], fire: [false, false, false, false], press: [false, false, false, false], keys: new Set(), tgt: null, cock: false, camD: 1, msl: [], feed: [], hitT: -9, hurtT: -9,
-  rearm: 0, out: 0, rng: 1, stats: null, el: null, ctx: null, pauseEl: null, locked: false, manualT: 0, seed: 0, banner: '' });
+  rearm: 0, out: 0, rng: 1, hits: [], flash: null, stats: null, el: null, ctx: null, pauseEl: null, locked: false, manualT: 0, seed: 0, banner: '' });
 const _pa = new THREE.Vector3(), _pb = new THREE.Vector3(), _pp = new THREE.Vector3();
 function plRnd() { PL.rng = (Math.imul(PL.rng ^ (PL.rng >>> 15), 2246822519) + 0x9e3779b9) >>> 0; return PL.rng / 4294967296; }   // 不動到模擬的亂數
 const v3 = { dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
@@ -12028,18 +12112,20 @@ function pilotResetSlots() { PL.slots = PL.slotIds.map((id) => { const m = pilot
 function pilotBegin(cfg) {
   PL.on = true; PL.spec = false; PL.side = 0; PL.j = FTR_MAX - 1; FT.state[PL.j] = 0;
   PL.B = pilotBuild(cfg); PL.frame = PL.B.fr; PL.taken = PL.B.taken; PL.respawn = PL.B.respawn; PL.prof = cfg.prof || {}; PL.slotIds = cfg.slots.slice();
-  PL.stats = { kf: 0, ks: 0, dmg: 0, deaths: 0, shots: 0, hits: 0, merit: 0, msl: 0, wxp: {} };
-  PL.feed = []; PL.msl = []; PL.tgt = null; PL.cock = false; PL.camD = 1; PL.rng = (battleSeed ^ 0x5bd1e995) >>> 0 || 1; PL.thr = 0.6; PL.saved = false; PL.savedBefore = PL.lv0 = PL.wx0 = null;
+  PL.stats = { kf: 0, ks: 0, dmg: 0, deaths: 0, shots: 0, hits: 0, merit: 0, msl: 0, heal: 0, wxp: {} };
+  PL.feed = []; PL.msl = []; PL.hits = []; PL.flash = null; PL.dodge = 0; PL.tgt = null; PL.cock = false; PL.camD = 1; PL.rng = (battleSeed ^ 0x5bd1e995) >>> 0 || 1; PL.thr = 0.6; PL.saved = false; PL.savedBefore = PL.lv0 = PL.wx0 = null;
   PL.keys.clear(); PL.fire = [false, false, false, false]; PL.press = [false, false, false, false];
   const fl = fleets.find((f) => f.side === PL.side && !f.supply && f.sqs.some((q) => q.list.some((i) => ships.alive[i] && ships.type[i] === 0)));
   PL.home = -1; if (fl) for (const q of fl.sqs) for (const i of q.list) if (PL.home < 0 && ships.alive[i] && ships.type[i] === 0) PL.home = i;
   pilotHudBuild(); document.body.classList.add('pilot-on');
   pilotSpawn(true);
+  pilotMisInit(cfg.mis);
+  if (PL.mis) toast(`任務　${pilotMisText(PL.mis)}${PL.mis.bonus.length ? `　額外：${PL.mis.bonus.map((b) => PILOT_BONUS[b].name).join('、')}` : ''}　被擊墜超過 ${PL.mis.deaths} 次就失敗`, 'pilot');
   toast(`出擊！${PL.frame.name}：${PILOT_WEAPONS[PL.slotIds[0]].name}＋${PILOT_WEAPONS[PL.slotIds[1]].name}（點一下畫面開始駕駛・Esc 暫停）`, 'pilot');
 }
 function pilotEnd() {
   if (!PL.on) return;
-  PL.beam = null; PL.dock = null; pilotBeamFrame();
+  PL.beam = null; PL.dock = null; PL.flash = null; pilotBeamFrame(); pilotHitFrame();
   PL.on = false; PL.spec = false;
   if (PL.j >= 0) FT.state[PL.j] = 0;
   if (document.pointerLockElement) document.exitPointerLock();
@@ -12091,13 +12177,13 @@ function pilotFly(j, dt, t) {
   const A = pilotAim();
   // 速度：油門＋加速
   const boosting = plHeld('pilot_boost');
-  let want = Fr.min + (Fr.cruise - Fr.min) * PL.thr;
+  let want = Fr.cruise * PL.thr;   // 0＝停在原地、負＝逆向噴射倒退
   if (boosting && PL.boost > 0) { want = Fr.max; PL.boost = Math.max(0, PL.boost - dt / Fr.boostT); } else PL.boost = Math.min(1, PL.boost + dt / (Fr.boostT * 2.5));
   PL.boosting = boosting && PL.boost > 0;
   PL.speed += Math.max(-Fr.acc * dt * 1.5, Math.min(Fr.acc * dt, want - PL.speed));
   // 轉向：機首往瞄準方向轉，每秒最多 turn（低速稍微靈活、加速時遲鈍）
   let F = PL.F, U = PL.U;
-  const turn = Fr.turn * (PL.boosting ? 0.7 : 1) * (1 + 0.35 * (1 - PL.thr));
+  const turn = Fr.turn * (PL.boosting ? 0.7 : 1) * (1 + 0.35 * (1 - Math.max(0, PL.thr)));
   const d = Math.max(-1, Math.min(1, v3.dot(F, A))), ang = Math.acos(d);
   let lat = 0;
   if (ang > 1e-4) {
@@ -12125,7 +12211,7 @@ function pilotFly(j, dt, t) {
     const dx = px - r.x, dy = py - r.y, dz = pz - r.z, dd = Math.hypot(dx, dy, dz), R = r.r + 0.8;
     if (dd < R) { px = r.x + dx / dd * R; py = r.y + dy / dd * R; pz = r.z + dz / dd * R; pilotBump(t, 12); }
   }
-  pilotShipBump(t, px, py, pz, (x, y, z) => { px = x; py = y; pz = z; });
+  pilotHullCollide(t, fP[j3], fP[j3 + 1], fP[j3 + 2], px, py, pz, (x, y, z) => { px = x; py = y; pz = z; });
   fP[j3] = px; fP[j3 + 1] = py; fP[j3 + 2] = pz; fV[j3] = vx; fV[j3 + 1] = vy; fV[j3 + 2] = vz;
   // 護盾回充
   if (t - PL.shT > 3) PL.sh = Math.min(Fr.sh, PL.sh + Fr.shR * dt);
@@ -12134,6 +12220,40 @@ function pilotFly(j, dt, t) {
   pilotMissiles(dt, t);
 }
 function pilotBump(t, dmg) { if (t - (PL.bumpT || -9) < 0.5) return; PL.bumpT = t; PL.speed *= 0.5; pilotHurt(dmg, null, true); }
+// 船體碰撞：把這一 tick 的移動線段換到船的模型座標，對船體網格（第 1 級細節）打射線；碰到就停在船身外、減速、扣一點耐久
+// 位置、朝向、漂浮都和 3D 畫面一致（bridgePose），所以可以貼著艦橋、沿著船身低空飛過
+const PL_HULL = {}, _hRC = new THREE.Raycaster(), _hO = new THREE.Vector3(), _hD = new THREE.Vector3(), _hP = {};
+function pilotHullMesh(hk) {
+  if (PL_HULL[hk] !== undefined) return PL_HULL[hk];
+  const M = typeof getModel === 'function' ? getModel(hk) : null, geo = M && (M.lods[1] || M.lods[0]);
+  return (PL_HULL[hk] = geo ? new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide })) : null);
+}
+function pilotHullCollide(t, x0, y0, z0, x1, y1, z1, set) {
+  const mx = x1 - x0, my = y1 - y0, mz = z1 - z0, seg = Math.hypot(mx, my, mz); if (seg < 1e-5) return;
+  const sc = shipGeo.getAttribute('aScale').array, pad = PILOT_FTR_LEN * 0.6;
+  for (const sq of squadrons) {
+    if (sq.alive <= 0 || sq.bg || sq.hidden) continue;
+    const rad = Math.max(sq.W || 0, sq.D || 0) / 2 + 20;
+    if (Math.abs(sq.x - x1) > rad || Math.abs(sq.z - z1) > rad || Math.abs((sq.y || 0) - y1) > rad + 40) continue;
+    for (const i of sq.list) {
+      if (!ships.alive[i]) continue;
+      const L = sc[i] * TYPE_LEN3;
+      shipWorldCPU(i, _pa); if (Math.hypot(_pa.x - x1, _pa.y - y1, _pa.z - z1) > L * 0.75 + seg + pad) continue;
+      const mesh = pilotHullMesh(hullKey(i)); if (!mesh) continue;
+      bridgePose(i, _hP);
+      // 與 writeMatrix 相同的基底：前 F、右 R＝上(0,1,0)×F、上 Uo＝F×R
+      const cp = Math.cos(_hP.p || 0), F = [Math.sin(_hP.h) * cp, Math.sin(_hP.p || 0), Math.cos(_hP.h) * cp], Rr = v3.norm([F[2], 0, -F[0]]), Uo = v3.cross(F, Rr);
+      const loc = (x, y, z) => { const dx = x - _hP.x, dy = y - _hP.y, dz = z - _hP.z; return [(dx * Rr[0] + dy * Rr[1] + dz * Rr[2]) / L, (dx * Uo[0] + dy * Uo[1] + dz * Uo[2]) / L, (dx * F[0] + dy * F[1] + dz * F[2]) / L]; };
+      const a = loc(x0, y0, z0), b = loc(x1, y1, z1), dl = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+      _hO.set(a[0], a[1], a[2]); _hD.set((b[0] - a[0]) / dl, (b[1] - a[1]) / dl, (b[2] - a[2]) / dl);
+      _hRC.set(_hO, _hD); _hRC.far = dl + pad / L;
+      const hit = _hRC.intersectObject(mesh, false)[0]; if (!hit) continue;
+      const k = Math.max(0, (hit.distance * L - pad) / seg);   // 停在船身外 pad 的地方
+      set(x0 + mx * k, y0 + my * k, z0 + mz * k);
+      pilotBump(t, 8); return;
+    }
+  }
+}
 function pilotShipBump(t, px, py, pz, set) {
   const sc = shipGeo.getAttribute('aScale').array;
   for (const sq of squadrons) {
@@ -12204,6 +12324,7 @@ function pilotDockStep(j, dt, t) {
     sp = d.v0 * (1 - e) + 4 * e;
     if (u >= 1) { d.ph = 'deck'; d.t = 0; }
   } else if (d.ph === 'deck') {
+    if (PL.mis && PL.mis.done && !GAME.result) { PL.mis.rtb = true; GAME.result = battleResult('end', '任務完成，返航', { pilotRtb: true }); }   // 完成任務後降落＝結算
     P = K.P; F = K.F; PL.rearm = Math.min(1, d.t / PILOT_DOCK.deckT);
     if (d.t >= PILOT_DOCK.deckT) { PL.hp = Fr.hp; PL.sh = Fr.sh; PL.boost = 1; pilotResetSlots(); PL.rearm = 0; d.ph = 'out'; d.t = 0; pilotFeed('整補完成：彈藥、耐久補滿・彈射起飛！', 'ok'); }
   } else {
@@ -12230,7 +12351,8 @@ function pilotWeapon(k, dt, t, px, py, pz) {
     S.side = 1 - S.side;
     const Rt = v3.cross(F, PL.U), o = (S.side ? 0.25 : -0.25) * PILOT_FTR_LEN;
     const sp = W.spread, D = v3.norm([F[0] + (plRnd() - 0.5) * sp * 2, F[1] + (plRnd() - 0.5) * sp * 2, F[2] + (plRnd() - 0.5) * sp * 2]);
-    pilotShot(px + F[0] * 0.5 + Rt[0] * o, py + F[1] * 0.5 + Rt[1] * o, pz + F[2] * 0.5 + Rt[2] * o, D, W, t, (M.gun || 1) * S.dm);
+    const mz = PILOT_FTR_LEN * 0.6;
+    pilotShot(px + F[0] * mz + Rt[0] * o, py + F[1] * mz + Rt[1] * o, pz + F[2] * mz + Rt[2] * o, D, W, t, (M.gun || 1) * S.dm);
     return;
   }
   if (W.type === 'lock') {
@@ -12243,23 +12365,24 @@ function pilotWeapon(k, dt, t, px, py, pz) {
     if (!PL.press[k] || S.cd > 0 || S.ammo <= 0) return;
     const locked = !!c && S.lockT >= S.need;   // 沒鎖定也能發射
     if (W.vs === 'f') {
-      PL.msl.push({ x: px + F[0], y: py + F[1], z: pz + F[2], vx: F[0] * W.speed, vy: F[1] * W.speed, vz: F[2] * W.speed, tg: locked ? c.i : -1, turn: W.turn * (locked ? 1 : 0.8), age: 0, life: W.life, dmg: W.dmg * S.dm, W, n: 0 });
+      PL.msl.push({ x: px + F[0] * PILOT_FTR_LEN, y: py + F[1] * PILOT_FTR_LEN, z: pz + F[2] * PILOT_FTR_LEN, vx: F[0] * W.speed * PILOT_SPEED, vy: F[1] * W.speed * PILOT_SPEED, vz: F[2] * W.speed * PILOT_SPEED, tg: locked ? c.i : -1, turn: W.turn * (locked ? 1 : 0.8), age: 0, life: W.life / PILOT_SPEED, dmg: W.dmg * S.dm, W, n: 0 });
     } else {
       const tc = locked ? c : c || pilotLockCand({ ...W, cone: 0.6 }, px, py, pz, null);
       if (!tc) { pilotFeed('前方沒有敵艦', 'hint'); return; }
       const hq = squadrons[ships.sq[PL.home >= 0 ? PL.home : 0]], n0 = pending.length;
-      if (launchMissileAt(px + F[0], py + F[1] - 0.3, pz + F[2], PL.side, hq, tc.i, W.dmg * S.dm, t, 1, W.accM * (locked ? 1 : 0.55))) for (let q = n0; q < pending.length; q++) pending[q].pl = S.id;
+      if (launchMissileAt(px + F[0] * PILOT_FTR_LEN, py + F[1] * PILOT_FTR_LEN - PILOT_FTR_LEN * 0.3, pz + F[2] * PILOT_FTR_LEN, PL.side, hq, tc.i, W.dmg * S.dm, t, 1, W.accM * (locked ? 1 : 0.55))) for (let q = n0; q < pending.length; q++) pending[q].pl = S.id;
     }
     S.cd = W.cd; S.ammo--; PL.stats.msl++;
     S.lockT = 0;
     return;
   }
+  if (W.type === 'beam' && W.heal) { pilotRepair(S, W, dt, t, px, py, pz, fire); return; }
   if (W.type === 'beam') {
     const dur = W.dur * S.enM, R = W.range * (M.lanceR || 1);
     if (!fire || S.en <= 0) { S.en = Math.min(1, S.en + dt / W.recharge); if (!fire && S.en > 0.15) S.empty = false; return; }
     if (S.empty) { S.en = Math.min(1, S.en + dt / W.recharge); return; }
     S.en -= dt / dur; if (S.en <= 0) { S.en = 0; S.empty = true; }
-    const ox = px + F[0] * 0.5, oy = py + F[1] * 0.5, oz = pz + F[2] * 0.5;
+    const mz = PILOT_FTR_LEN * 0.6, ox = px + F[0] * mz, oy = py + F[1] * mz, oz = pz + F[2] * mz;
     const h = pilotRay(ox, oy, oz, F, R, null, false);
     const ex = ox + F[0] * h.s, ey = oy + F[1] * h.s, ez = oz + F[2] * h.s;
     PL.beam = { t, b: [ex, ey, ez], hit: h.k };   // 畫面：pilotBeamFrame 每幀畫一條實體光束
@@ -12272,11 +12395,27 @@ function pilotWeapon(k, dt, t, px, py, pz) {
     }
   }
 }
+// 維修光束：對準的友艦（射線碰到的第一艘）修船體與護盾；沒對準友艦就修自己
+function pilotRepair(S, W, dt, t, px, py, pz, fire) {
+  if (!fire || S.en <= 0 || S.empty) { S.en = Math.min(1, S.en + dt / W.recharge); if (!fire && S.en > 0.15) S.empty = false; return; }
+  const F = PL.F, mz = PILOT_FTR_LEN * 0.6, ox = px + F[0] * mz, oy = py + F[1] * mz, oz = pz + F[2] * mz;
+  const h = pilotRay(ox, oy, oz, F, W.range, { shipOnly: true, speed: 1e9 }, false, PL.side);
+  let amt = 0;
+  if (h.k === 's') {
+    const i = h.i, a = Math.min(W.hps * S.dm * dt, maxHp(i) - ships.hp[i]); ships.hp[i] += Math.max(0, a); amt = Math.max(0, a);
+    const b = Math.min(W.hps * 0.6 * S.dm * dt, ships.shMax[i] - ships.sh[i]); if (b > 0) { ships.sh[i] += b; amt += b * 0.5; }
+    PL.beam = { t, b: [ox + F[0] * h.s, oy + F[1] * h.s, oz + F[2] * h.s], hit: 's', heal: true };
+    if (simTick % 9 === 0) spawnFx(PL.beam.b[0], PL.beam.b[1], PL.beam.b[2], PL.side, 0.9, 30);
+  } else if (PL.hp < PL.frame.hp) { amt = Math.min(W.self * S.dm * dt, PL.frame.hp - PL.hp); PL.hp += amt; PL.selfFix = t; }
+  if (amt <= 0) { S.en = Math.min(1, S.en + dt / W.recharge); return; }   // 沒有東西可修：不耗能量
+  S.en -= dt / (W.dur * S.enM); if (S.en <= 0) { S.en = 0; S.empty = true; }
+  pilotCredit('heal', h.k === 's' ? h.i : -1, amt, false, W.id);
+}
 function pilotSq() { const c = PL.home >= 0 ? PL.home : 0; return squadrons[ships.sq[c]]; }
 // 射線：最先碰到的敵方艦載機（lead＝依彈速預測位置）、飛彈、敵艦、岩石；回傳 {k, i, s}
-function pilotRay(ox, oy, oz, D, R, W, lead) {
+function pilotRay(ox, oy, oz, D, R, W, lead, es = 1 - PL.side) {   // es：要打（或修）的那一方
   let best = R, k = '', hi = -1, hg = 0;
-  const es = 1 - PL.side, sp = W ? W.speed : 1e9;
+  const sp = W ? W.speed : 1e9;
   if (!W || !W.shipOnly) {
     airIndex();
     const m = AIR.map[es], C = AIR.cell, r = Math.ceil(R / C) + 1, cx = Math.floor(ox / C), cz = Math.floor(oz / C);
@@ -12347,13 +12486,13 @@ function pilotMissiles(dt, t) {
     const g = m.tg;
     if (live) {
       // 導引：瞄準目標的預測位置（距離 ÷ 彈速 秒後），每秒最多轉 turn 弧度
-      const tx = fP[g * 3], ty = fP[g * 3 + 1], tz = fP[g * 3 + 2], d0 = Math.hypot(tx - m.x, ty - m.y, tz - m.z), tg = Math.min(1.5, d0 / W.speed);
+      const ms = W.speed * PILOT_SPEED, tx = fP[g * 3], ty = fP[g * 3 + 1], tz = fP[g * 3 + 2], d0 = Math.hypot(tx - m.x, ty - m.y, tz - m.z), tg = Math.min(1.5 / PILOT_SPEED, d0 / ms);
       const D = v3.norm([tx + fV[g * 3] * tg - m.x, ty + fV[g * 3 + 1] * tg - m.y, tz + fV[g * 3 + 2] * tg - m.z]), V = v3.norm([m.vx, m.vy, m.vz]);
       const ang = Math.acos(Math.max(-1, Math.min(1, v3.dot(V, D))));
       let N = D;
       const tr = m.turn || W.turn;
       if (ang > tr * dt) { let ax = v3.cross(V, D); if (Math.hypot(ax[0], ax[1], ax[2]) < 1e-6) ax = [0, 1, 0]; N = v3.rot(V, v3.norm(ax), tr * dt); }
-      m.vx = N[0] * W.speed; m.vy = N[1] * W.speed; m.vz = N[2] * W.speed;
+      m.vx = N[0] * ms; m.vy = N[1] * ms; m.vz = N[2] * ms;
     }
     m.x += m.vx * dt; m.y += m.vy * dt; m.z += m.vz * dt;
     if (live) {   // 這一 tick 的線段離目標最近的距離（彈速快，只看端點會穿過去）
@@ -12373,34 +12512,125 @@ function pilotRetarget(m) {
 // 被打中：先扣護盾，打穿扣耐久；歸零＝被擊墜
 function pilotHurt(dmg, e, self) {
   const t = U.uTime.value; if (PL.dead || t < PL.inv) return;
+  if (e && e.px != null) { const j = PL.j; if (Math.hypot(fP[j * 3] - e.px, fP[j * 3 + 1] - e.py, fP[j * 3 + 2] - e.pz) > PILOT_DODGE) { PL.dodge = (PL.dodge || 0) + 1; return; } }   // 閃過了
   PL.shT = t; PL.hurtT = t; dmg *= PL.taken || 1;
   if (PL.sh > 0) { const a = Math.min(PL.sh, dmg); PL.sh -= a; dmg -= a; }
+  pilotHitFx(e, dmg > 0);
   PL.hp -= dmg;
   if (PL.hp > 0) return;
   PL.hp = 0; PL.dead = true; PL.deadT = t; PL.stats.deaths++;
   const j = PL.j; FT.state[j] = 3; FT.t0[j] = t; spawnFx(fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2], PL.side, 3.2, 24);
   PL.fire.fill(false); PL.msl.length = 0; PL.dock = null; PL.beam = null; PL.rearm = 0;
   pilotFeed(self ? '機體撞毀！' : '被擊墜！', 'bad');
+  if (PL.mis && !PL.mis.done && PL.stats.deaths > PL.mis.deaths) pilotMisFail(`被擊墜 ${PL.stats.deaths} 次，超過上限 ${PL.mis.deaths} 次`);
+}
+// 被打中：機體上的閃光（護盾藍、機體橘）＋火花；記下來源方向給儀表畫受擊方向
+function pilotHitFx(e, hull) {
+  const j = PL.j, x = fP[j * 3], y = fP[j * 3 + 1], z = fP[j * 3 + 2], now = performance.now();
+  PL.hurtSh = !hull;
+  const src = e && e.sx != null ? [e.sx, e.sy, e.sz] : null;
+  PL.flash = { t: now, hull, src };
+  if (src) { PL.hits.push({ t: now, x: src[0], y: src[1], z: src[2], hull }); if (PL.hits.length > 10) PL.hits.shift(); }
+  if (hull) spawnFx(x, y, z, PL.side, 0.9, 30);
+  else spawnFx(x, y, z, 2 + fxFac(PL.side) * 8 + (src ? dirIndexOf(x - src[0], z - src[2]) : 0), 1.1, 26);
 }
 function pilotCredit(kind, i, dmg, kill, wid) {
   const S = PL.stats; if (!S) return;
-  if (PILOT_WEAPONS[wid]) S.wxp[wid] = (S.wxp[wid] || 0) + (kind === 'ship' ? dmg * PILOT_PROF_XP.dmg + (kill ? PILOT_PROF_XP.ship : 0) : PILOT_PROF_XP[kind] || 0);   // 武器熟練度
+  if (PILOT_WEAPONS[wid]) S.wxp[wid] = (S.wxp[wid] || 0) + (kind === 'ship' ? dmg * PILOT_PROF_XP.dmg + (kill ? PILOT_PROF_XP.ship : 0) : kind === 'heal' ? dmg * PILOT_PROF_XP.heal : PILOT_PROF_XP[kind] || 0);   // 武器熟練度
   PL.hitT = U.uTime.value;
   S.hits++;
   if (kind === 'hitF') return;
-  if (kind === 'ftr') { S.kf++; S.merit += PILOT_MERIT.ftr; pilotFeed(`擊墜敵機（第 ${S.kf} 架）`, 'kill'); return; }
+  if (kind === 'heal') { S.heal += dmg; S.merit += dmg * PILOT_MERIT.heal; return; }
+  if (kind === 'ftr') { S.kf++; S.merit += PILOT_MERIT.ftr; pilotFeed(`擊墜敵機（第 ${S.kf} 架）`, 'kill'); if (PL.mis && PL.mis.type === 'kills') PL.mis.prog++; return; }
   if (kind === 'ship') {
     S.dmg += dmg; S.merit += dmg * PILOT_MERIT.dmg;
+    const M = PL.mis; if (M && M.type === 'damage') M.prog += dmg;
+    if (M && kill && (M.type === 'hunt' || M.type === 'carrier')) { const k = M.tg.indexOf(i); if (k >= 0) { M.tg[k] = -1; M.prog++; pilotFeed(`擊沉指定目標！（${M.prog}／${M.goal}）`, 'kill'); } }
     if (kill) { S.ks++; S.merit += PILOT_MERIT.ship * (ships.type[i] <= 1 ? 2 : 1); pilotFeed(`擊沉敵${SHIP_TYPES[ships.type[i]].name}！`, 'kill'); }
   }
 }
 function pilotFeed(msg, cls = '') { PL.feed.push({ msg, cls, t: performance.now() }); if (PL.feed.length > 6) PL.feed.shift(); }
 
+// ───── 任務：建立、每幀檢查 ─────
+function pilotMisInit(C) {
+  PL.mis = null; if (!C || !PILOT_MIS[C.type]) return;
+  const M = PL.mis = { ...C, bonus: (C.bonus || []).slice(), prog: 0, done: false, failed: false, why: '', doneT: 0, t0: U.uTime.value, tg: [], esc: -1, minHp: 1, nextWave: U.uTime.value + 25, friendly: 0 };
+  const es = 1 - PL.side;
+  if (M.type === 'hunt') {
+    for (const ty of [2, 3, 4, 1]) for (let i = 0; i < shipCount && M.tg.length < M.goal; i++) if (ships.alive[i] && ships.side[i] === es && ships.type[i] === ty && !squadrons[ships.sq[i]].bg && squadrons[ships.sq[i]].flagship !== i && !M.tg.some((g) => ships.sq[g] === ships.sq[i]) && plRnd() < 0.08) M.tg.push(i);
+    for (let i = 0; i < shipCount && M.tg.length < M.goal; i++) if (ships.alive[i] && ships.side[i] === es && ships.type[i] >= 2 && ships.type[i] <= 4 && !M.tg.includes(i)) M.tg.push(i);   // 不夠：照順序補
+    M.tgType = M.tg.map((i) => ships.type[i]);
+  }
+  if (M.type === 'carrier') {
+    const c = pilotFindShip(es, 0, M.tg); if (c < 0) { M.type = 'hunt'; M.goal = 1; return pilotMisInit({ ...C, type: 'hunt', goal: 1 }); }
+    M.tg = [c]; M.tgType = [0];
+  }
+  if (M.type === 'escort') {
+    let best = -1; for (let i = 0; i < shipCount; i++) if (ships.alive[i] && ships.side[i] === PL.side && ships.type[i] === 0 && !squadrons[ships.sq[i]].bg && (best < 0 || (best === PL.home && i !== PL.home))) best = i;
+    M.esc = best; if (best < 0) return pilotMisInit({ ...C, type: 'kills', goal: PILOT_MIS.kills.goal(C.li) });
+  }
+}
+// 某一方、某艦種、還活著、不在 skip 裡的一艘（隨機挑一支分艦隊）
+function pilotFindShip(side, ty, skip) {
+  const c = []; for (let i = 0; i < shipCount; i++) if (ships.alive[i] && ships.side[i] === side && ships.type[i] === ty && !squadrons[ships.sq[i]].bg && !skip.includes(i)) c.push(i);
+  return c.length ? c[Math.floor(plRnd() * c.length)] : -1;
+}
+function pilotMisDone() {
+  const M = PL.mis; if (M.done || M.failed) return;
+  M.done = true; M.doneT = U.uTime.value - M.t0;
+  pilotFeed(`任務完成！按 ${plKey('pilot_land')} 降落航母結算，或繼續作戰`, 'kill');
+  toast(`任務完成：${PILOT_MIS[M.type].name}。靠近己方航母按 ${plKey('pilot_land')} 降落結算（繼續打可以多拿戰功、完成額外目標）`, 'pilot');
+}
+function pilotMisFail(why) {
+  const M = PL.mis; if (!M || M.done || M.failed) return;
+  M.failed = true; M.why = why;
+  toast(`任務失敗：${why}`, 'bad');
+  if (!GAME.result) GAME.result = battleResult('end', '任務失敗：' + why, { pilotFail: true });
+}
+function pilotMisTick() {
+  const M = PL.mis; if (!M || GAME.result || M.failed) return;
+  const t = U.uTime.value, es = 1 - PL.side;
+  if (M.type === 'hunt' || M.type === 'carrier') {
+    // 指定目標被友軍打掉：不算失敗，換一艘同艦種的；沒有可以換的就當作已排除
+    M.tg.forEach((i, k) => {
+      if (i < 0 || ships.alive[i]) return;
+      const n = pilotFindShip(es, M.tgType[k], M.tg);
+      if (n >= 0) { M.tg[k] = n; pilotFeed('指定目標被友軍擊沉：改派新目標', 'hint'); } else { M.tg[k] = -1; M.prog++; M.friendly++; pilotFeed('指定目標被友軍擊沉（已沒有同類目標）', 'hint'); }
+    });
+  }
+  if (M.type === 'escort' && !M.done) {
+    const c = M.esc;
+    if (!ships.alive[c]) { pilotMisFail('護衛的航母被擊沉'); return; }
+    M.minHp = Math.min(M.minHp, ships.hp[c] / maxHp(c));
+    M.prog = Math.min(M.goal, t - M.t0);
+    if (t >= M.nextWave) { M.nextWave = t + Math.max(18, 32 - 3 * M.li); pilotStrikeWave(M); }
+  }
+  if (M.type === 'escort' && M.done && ships.alive[M.esc]) M.minHp = Math.min(M.minHp, ships.hp[M.esc] / maxHp(M.esc));
+  if (!M.done && M.prog >= M.goal) pilotMisDone();
+}
+// 護衛任務：敵方航母派攻擊機、光束攻擊機往護衛目標打
+function pilotStrikeWave(M) {
+  _pa.set(0, 0, 0); shipWorldCPU(M.esc, _pa); const area = { x: _pa.x, y: _pa.y, z: _pa.z }, t = U.uTime.value, es = 1 - PL.side;
+  const cs = []; for (let i = 0; i < shipCount; i++) if (ships.alive[i] && ships.side[i] === es && ships.type[i] === 0 && !squadrons[ships.sq[i]].bg) cs.push(i);
+  if (!cs.length) return;
+  const n = 3 + M.li; let got = 0;
+  for (let k = 0; k < n; k++) got += launchCraft(cs[k % cs.length], 1, 0, -1, t + k * 0.3, k % 3 === 2 ? 3 : 1, area);
+  if (got) pilotFeed(`敵方打擊群（${got} 架）正飛向護衛目標！`, 'bad');
+}
+function pilotBonusOk(id, R) {
+  const M = PL.mis, S = PL.stats;
+  if (id === 'nodeath') return S.deaths === 0;
+  if (id === 'fast') return M.done && M.doneT <= M.T * 0.6;
+  if (id === 'extra') return S.kf >= 3;
+  if (id === 'fleet') return !!R && R.kind === 'win';
+  if (id === 'hp50') return M.minHp >= 0.5;
+  return false;
+}
 // ───── 鏡頭（每幀） ─────
 function pilotCamera() {
   const j = PL.j, P = [fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2]], A = pilotAim(), FL = PILOT_FTR_LEN;
   camera = camPersp;
-  camPersp.aspect = VW / VH; camPersp.near = 0.04; camPersp.far = 7000;
+  camPersp.aspect = VW / VH; camPersp.near = Math.max(0.005, PILOT_FTR_LEN * 0.4); camPersp.far = 7000;
   if (PL.cock && !PL.dead) {
     const F = PL.F, U = PL.U;
     camPersp.fov = 72;
@@ -12411,7 +12641,7 @@ function pilotCamera() {
   } else {
     // 背後：沿瞄準方向往後拉，鏡頭不跟著側傾
     const Wu = v3.norm([-A[0] * A[1], 1 - A[1] * A[1], -A[2] * A[1]]), dist = 5.2 * FL * PL.camD * (PL.dead ? 3 : 1), up = 1.3 * FL * PL.camD;
-    camPersp.fov = 68 + (PL.boosting ? 8 : 0);
+    camPersp.fov = 55 + (PL.boosting ? 6 : 0);
     camPersp.position.set(P[0] - A[0] * dist + Wu[0] * up, P[1] - A[1] * dist + Wu[1] * up, P[2] - A[2] * dist + Wu[2] * up);
     camPersp.up.set(Wu[0], Wu[1], Wu[2]);
     camPersp.lookAt(camPersp.position.x + A[0], camPersp.position.y + A[1], camPersp.position.z + A[2]);
@@ -12438,6 +12668,7 @@ function pilotKey(e) {
   if (e.repeat) return true;
   PL.keys.add(k);
   if (pilotLive()) for (let s = 0; s < PILOT_SLOTS.length; s++) if (plCodeIs('pilot_w' + (s + 1), k)) { PL.fire[s] = true; PL.press[s] = true; }   // 武裝的鍵盤按鍵
+  if (plCodeIs('pilot_stop', k)) { PL.thr = 0; pilotFeed('油門歸零', 'hint'); }
   if (plCodeIs('pilot_view', k)) { PL.cock = !PL.cock; pilotFeed(PL.cock ? '座艙視角' : '背後視角', 'hint'); }
   if (plCodeIs('pilot_target', k)) pilotPickTarget();
   if (plCodeIs('pilot_land', k) && pilotLive()) pilotLandReq();
@@ -12510,10 +12741,12 @@ function pilotFrame(dt) {
   if (GAME.phase !== 'battle') return;
   if (GAME.result && document.pointerLockElement) document.exitPointerLock();
   // 油門（每幀依按鍵調整）
-  if (!paused && !PL.spec) { if (plHeld('pilot_thr_up')) PL.thr = Math.min(1, PL.thr + dt * 0.8); if (plHeld('pilot_thr_dn')) PL.thr = Math.max(0, PL.thr - dt * 0.8); }
+  if (!paused && !PL.spec) { if (plHeld('pilot_thr_up')) PL.thr = Math.min(1, PL.thr + dt * 0.8); if (plHeld('pilot_thr_dn')) { if (!PL.thrHold) { const z = PL.thr > 0; PL.thr = Math.max(-PILOT_REV, PL.thr - dt * 0.8); if (z && PL.thr <= 0) { PL.thr = 0; PL.thrHold = true; } } } else PL.thrHold = false; }   // 減到 0 先停一下，放開再按才會逆向噴射
   if (PL.dead && !PL.spec && !GAME.result && U.uTime.value - PL.deadT > PL.respawn) pilotSpawn(false);
   if (!PL.spec) updateCamera();
+  pilotMisTick();
   pilotBeamFrame();
+  pilotHitFrame();
   pilotHud();
 }
 function pilotHud() {
@@ -12580,17 +12813,29 @@ function pilotHud() {
     g.strokeStyle = done ? '#ff4040' : '#ffb060'; g.lineWidth = 2; g.beginPath(); g.arc(s[0], s[1], 22 - k * 6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * k); g.stroke(); g.lineWidth = 1.5;
     if (done) { g.fillStyle = '#ff4040'; g.fillText('鎖定', s[0] + 20, s[1] + 18); }
   });
-  pilotRadar(g, W, H, px, py, pz, col, red);
-  pilotGauges(g, W, H, col);
+  pilotMisHud(g, W, H, sw, px, py, pz);
+  const LY = pilotHudLayout(W, H);
+  pilotRadar(g, LY, px, py, pz, col, red);
+  pilotGauges(g, W, H, col, LY);
   // 訊息
   PL.feed = PL.feed.filter((m) => now - m.t < 4000);
   PL.feed.forEach((m, k) => { g.globalAlpha = Math.min(1, (4000 - (now - m.t)) / 600); pilotText(g, W / 2, H * 0.24 + k * 20, m.msg, m.cls === 'bad' ? red : m.cls === 'kill' ? '#ffd36a' : m.cls === 'ok' ? '#8fe39a' : 'rgba(230,235,245,.85)', 14); });
   g.globalAlpha = 1;
   if (PL.out > 0) pilotText(g, W / 2, H * 0.36, PL.out > 4 ? '超出戰區：自動返回' : '即將超出戰區，請返回', red, 16);
+  if (PL.selfFix && U.uTime.value - PL.selfFix < 0.1 && !PL.dock) pilotText(g, W / 2, H * 0.66, '自我修復中…', '#8fe39a', 13);
   if (PL.dock) pilotText(g, W / 2, H * 0.62, PL.dock.ph === 'in' ? '自動降落中…' : PL.dock.ph === 'deck' ? `整補中… ${Math.round(PL.rearm * 100)}%` : '彈射起飛！', '#8fe39a', 15);
   else if (!PL.dead && (simTick % 20 === 0 || PL.nearC == null)) PL.nearC = pilotNearCarrier(px, py, pz, PILOT_DOCK.range) >= 0;
   if (!PL.dock && !PL.dead && PL.nearC) pilotText(g, W / 2, H * 0.62, `按 ${plKey('pilot_land')} 降落整補`, 'rgba(143,227,154,.85)', 13);
-  if (t - PL.hurtT < 0.35) { const k = 1 - (t - PL.hurtT) / 0.35, gr = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.7); gr.addColorStop(0, 'rgba(255,40,30,0)'); gr.addColorStop(1, `rgba(255,40,30,${0.45 * k})`); g.fillStyle = gr; g.fillRect(0, 0, W, H); }
+  if (t - PL.hurtT < 0.35) { const k = 1 - (t - PL.hurtT) / 0.35, c = PL.hurtSh ? '80,160,255' : '255,40,30', gr = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.7); gr.addColorStop(0, `rgba(${c},0)`); gr.addColorStop(1, `rgba(${c},${(PL.hurtSh ? 0.25 : 0.45) * k})`); g.fillStyle = gr; g.fillRect(0, 0, W, H); }
+  // 受擊方向：準心外圍的弧，指向打來的方向（紅＝打到機體、藍＝護盾擋下），1.2 秒淡出
+  PL.hits = PL.hits.filter((h) => now - h.t < 1200);
+  for (const h of PL.hits) {
+    _pp.set(h.x, h.y, h.z).applyMatrix4(camera.matrixWorldInverse);
+    const a = Math.atan2(-_pp.y, _pp.x), al = 1 - (now - h.t) / 1200, r = Math.min(W, H) * 0.16;
+    g.strokeStyle = h.hull ? `rgba(255,74,58,${al})` : `rgba(124,196,255,${al * 0.85})`; g.lineWidth = h.hull ? 6 : 4;
+    g.beginPath(); g.arc(W / 2, H / 2, r, a - 0.32, a + 0.32); g.stroke();
+  }
+  g.lineWidth = 1.5;
   if (PL.dead) { pilotText(g, W / 2, H * 0.42, '被擊墜', red, 26); pilotText(g, W / 2, H * 0.42 + 32, `${Math.max(0, Math.ceil(PL.respawn - (t - PL.deadT)))} 秒後從母艦重新出擊`, 'rgba(230,235,245,.9)', 14); }
   if (!PL.locked && !paused && !GAME.result) pilotText(g, W / 2, H * 0.55, '點一下畫面開始駕駛（滑鼠游標會被鎖定・Esc 暫停）', '#fff', 15);
 }
@@ -12608,16 +12853,52 @@ const PL_BEAM = (() => {
   g.add(halo, glow, core); g.visible = false; g.renderOrder = 7; for (const m of [core, glow, halo]) m.frustumCulled = false; scene.add(g);
   return { g, core, glow, halo };
 })();
-const _bmY = new THREE.Vector3(0, 1, 0), _bmD = new THREE.Vector3();
+const _bmY = new THREE.Vector3(0, 1, 0), _bmD = new THREE.Vector3(), _healCol = new THREE.Color(0.35, 1.0, 0.55);
+const PL_HIT = (() => {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false }));
+  m.visible = false; m.renderOrder = 8; m.frustumCulled = false; scene.add(m); return m;
+})();
+const _hitHull = new THREE.Color(1.0, 0.55, 0.2), _hitSh = new THREE.Color(0.45, 0.75, 1.0);
+function pilotHitFrame() {
+  const f = PL.flash, age = f ? (performance.now() - f.t) / 1000 : 9, on = PL.on && !PL.spec && !PL.dead && !PL.cock && age < 0.22;
+  PL_HIT.visible = on; if (!on) return;
+  const j = PL.j, FL = PILOT_FTR_LEN; let ox = 0, oy = 0, oz = 0;
+  if (f.src) { const dx = f.src[0] - fP[j * 3], dy = f.src[1] - fP[j * 3 + 1], dz = f.src[2] - fP[j * 3 + 2], d = Math.hypot(dx, dy, dz) || 1; ox = dx / d * FL * 0.3; oy = dy / d * FL * 0.3; oz = dz / d * FL * 0.3; }   // 偏向打來的那一側
+  PL_HIT.position.set(fP[j * 3] + ox, fP[j * 3 + 1] + oy, fP[j * 3 + 2] + oz);
+  const k = age / 0.22; PL_HIT.scale.setScalar(FL * (f.hull ? 0.22 + k * 0.4 : 0.75 + k * 0.25));
+  PL_HIT.material.color.copy(f.hull ? _hitHull : _hitSh); PL_HIT.material.opacity = (1 - k) * (f.hull ? 0.85 : 0.5);
+}
 function pilotBeamFrame() {
-  const B = PL.beam, on = PL.on && !PL.spec && !PL.dead && !PL.dock && B && U.uTime.value - B.t < 0.06;
+  const B = PL.beam, on = PL.on && !PL.spec && !PL.dead && !PL.dock && B && B.b && U.uTime.value - B.t < 0.06;
   PL_BEAM.g.visible = !!on; if (!on) return;
-  const j = PL.j, F = PL.F, a = [fP[j * 3] + F[0] * 0.45, fP[j * 3 + 1] + F[1] * 0.45, fP[j * 3 + 2] + F[2] * 0.45];
+  const j = PL.j, F = PL.F, mz = PILOT_FTR_LEN * 0.55, a = [fP[j * 3] + F[0] * mz, fP[j * 3 + 1] + F[1] * mz, fP[j * 3 + 2] + F[2] * mz];
   _bmD.set(B.b[0] - a[0], B.b[1] - a[1], B.b[2] - a[2]); const len = _bmD.length() || 0.01; _bmD.divideScalar(len);
   PL_BEAM.g.position.set((a[0] + B.b[0]) / 2, (a[1] + B.b[1]) / 2, (a[2] + B.b[2]) / 2); PL_BEAM.g.quaternion.setFromUnitVectors(_bmY, _bmD);
-  const now = performance.now() / 1000, w = 0.05 * (1 + 0.35 * Math.sin(now * 53) + 0.2 * Math.sin(now * 31)), col = FACTION[SIDE_FAC[PL.side]].beam;
+  const now = performance.now() / 1000, w = PILOT_FTR_LEN * 0.1 * (1 + 0.35 * Math.sin(now * 53) + 0.2 * Math.sin(now * 31)), col = B.heal ? _healCol : FACTION[SIDE_FAC[PL.side]].beam;
   PL_BEAM.core.scale.set(w, len, w); PL_BEAM.glow.scale.set(w * 3.2, len, w * 3.2); PL_BEAM.halo.scale.set(w * 8, len, w * 8);
   PL_BEAM.glow.material.color.copy(col); PL_BEAM.halo.material.color.copy(col);
+}
+function pilotMisHud(g, W, H, sw, px, py, pz) {
+  const M = PL.mis; if (!M) return;
+  // 指定目標（橘）、護衛目標（綠）
+  const mark = (i, c, txt) => {
+    shipWorldCPU(i, _pb); const s = sw(_pb.x, _pb.y, _pb.z), d = Math.hypot(_pb.x - px, _pb.y - py, _pb.z - pz);
+    if (!s) { pilotEdgeArrow(g, _pb, c); return; }
+    g.strokeStyle = c; g.lineWidth = 2; g.beginPath(); g.moveTo(s[0], s[1] - 14); g.lineTo(s[0] + 14, s[1]); g.lineTo(s[0], s[1] + 14); g.lineTo(s[0] - 14, s[1]); g.closePath(); g.stroke(); g.lineWidth = 1.5;
+    g.fillStyle = c; g.fillText(`${txt} ${Math.round(d)}`, s[0] + 18, s[1] + 12);
+  };
+  for (const i of M.tg) if (i >= 0 && ships.alive[i]) mark(i, '#ff9f40', `目標・${SHIP_TYPES[ships.type[i]].name}`);
+  if (M.esc >= 0 && ships.alive[M.esc]) mark(M.esc, '#8fe39a', `護衛 ${Math.round(ships.hp[M.esc] / maxHp(M.esc) * 100)}%`);
+  // 左上：任務欄
+  const x = 18, y0 = 96, lines = [];
+  const P = PILOT_MIS[M.type], prog = M.type === 'escort' ? `${_fmtT(M.prog)}／${_fmtT(M.goal)}` : M.type === 'damage' ? `${fmtN(Math.floor(M.prog))}／${fmtN(M.goal)}` : `${M.prog}／${M.goal}`;
+  lines.push([`任務・${P.name}　${prog}`, M.done ? '#8fe39a' : '#ffd36a', 14]);
+  lines.push([M.done ? `完成！按 ${plKey('pilot_land')} 降落航母結算` : P.text(M.goal), M.done ? '#8fe39a' : 'rgba(225,232,242,.85)', 12]);
+  lines.push([`被擊墜 ${PL.stats.deaths}／${M.deaths}`, PL.stats.deaths >= M.deaths ? '#ff6a5a' : 'rgba(225,232,242,.75)', 12]);
+  for (const b of M.bonus) { const ok = b === 'fleet' ? null : pilotBonusOk(b); lines.push([`${ok ? '✓' : ok === false && (b === 'nodeath' || b === 'hp50') ? '✗' : '・'} ${PILOT_BONUS[b].name}`, ok ? '#8fe39a' : ok === false && (b === 'nodeath' || b === 'hp50') ? 'rgba(255,106,90,.8)' : 'rgba(225,232,242,.7)', 12]); }
+  const h = lines.length * 18 + 12; g.fillStyle = 'rgba(6,12,22,.55)'; g.fillRect(x - 8, y0 - 14, 330, h);
+  lines.forEach(([t, c, sz], k) => { g.font = `${sz > 12 ? '600 ' : ''}${sz}px "Noto Sans TC", sans-serif`; g.fillStyle = c; g.fillText(t, x, y0 + k * 18); });
+  g.font = '12px "Noto Sans TC", sans-serif';
 }
 function pilotText(g, x, y, s, c, size) { g.font = `600 ${size}px "Noto Sans TC", sans-serif`; g.textAlign = 'center'; g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,.6)'; g.strokeText(s, x, y); g.fillStyle = c; g.fillText(s, x, y); g.textAlign = 'left'; g.font = '12px "Noto Sans TC", sans-serif'; g.lineWidth = 1.5; }
 function pilotEdgeArrow(g, T, c) {
@@ -12626,8 +12907,16 @@ function pilotEdgeArrow(g, T, c) {
   g.fillStyle = c; g.save(); g.translate(x, y); g.rotate(a); g.beginPath(); g.moveTo(12, 0); g.lineTo(-6, -8); g.lineTo(-6, 8); g.closePath(); g.fill(); g.restore();
 }
 // 雷達：以機首方向為上，半徑 600
-function pilotRadar(g, W, H, px, py, pz, col, red) {
-  const R = 74, cx = W / 2, cy = H - R - 18, S = R / 600, h = Math.atan2(PL.F[0], PL.F[2]), ch = Math.cos(h), sh = Math.sin(h);
+// 儀表的位置：背後視角＝雷達在右下（設定可改左下），那一側的儀表往上移；座艙視角＝雷達在中央儀表板
+function pilotHudLayout(W, H) {
+  const R = 74;
+  if (PL.cock && !PL.dead) return { R, cx: W / 2, cy: H - R - 18, cock: true, wBase: H - 104, gBase: H - 112 };
+  const left = SETTINGS.pilotRadar === 'left', cy = H - R - 34;
+  return { R, cx: left ? 22 + R : W - 22 - R, cy, wBase: left ? H - 104 : cy - R - 34, gBase: left ? cy - R - 100 : H - 112 };
+}
+function pilotRadar(g, LY, px, py, pz, col, red) {
+  const R = LY.R, cx = LY.cx, cy = LY.cy, S = R / 600, h = Math.atan2(PL.F[0], PL.F[2]), ch = Math.cos(h), sh = Math.sin(h);
+  if (LY.cock) { g.fillStyle = 'rgba(20,26,36,.95)'; g.strokeStyle = facRGBA(SIDE_FAC[PL.side], 0.5); g.lineWidth = 3; g.beginPath(); g.arc(cx, cy, R + 7, 0, Math.PI * 2); g.fill(); g.stroke(); g.lineWidth = 1.5; }   // 儀表板上的框
   g.fillStyle = 'rgba(6,12,22,.55)'; g.strokeStyle = 'rgba(160,190,220,.35)'; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill(); g.stroke();
   g.beginPath(); g.arc(cx, cy, R / 2, 0, Math.PI * 2); g.stroke();
   const pt = (x, z) => { const dx = x - px, dz = z - pz, u = -(dx * ch - dz * sh), v = dx * sh + dz * ch; const k = Math.hypot(u, v) * S; if (k > R - 2) return null; return [cx + u * S, cy - v * S]; };
@@ -12642,18 +12931,22 @@ function pilotRadar(g, W, H, px, py, pz, col, red) {
   g.fillStyle = col; g.beginPath(); g.moveTo(cx, cy - 6); g.lineTo(cx + 4, cy + 4); g.lineTo(cx - 4, cy + 4); g.closePath(); g.fill();
 }
 // 耐久、護盾、速度、加速、武裝
-function pilotGauges(g, W, H, col) {
-  const Fr = PL.frame, x0 = 22, y0 = H - 112;
+function pilotGauges(g, W, H, col, LY) {
+  const Fr = PL.frame, x0 = 22, y0 = LY.gBase;
   const bar = (x, y, w, k, c, label, val) => { g.fillStyle = 'rgba(6,12,22,.6)'; g.fillRect(x, y, w, 8); g.fillStyle = c; g.fillRect(x, y, w * Math.max(0, Math.min(1, k)), 8); g.fillStyle = 'rgba(220,228,240,.85)'; g.fillText(label, x, y - 8); if (val != null) { g.textAlign = 'right'; g.fillText(val, x + w, y - 8); g.textAlign = 'left'; } };
   bar(x0, y0, 190, PL.sh / Fr.sh, '#7cc4ff', '護盾', Math.ceil(PL.sh));
   bar(x0, y0 + 26, 190, PL.hp / Fr.hp, PL.hp / Fr.hp < 0.35 ? '#ff6a5a' : '#8fe39a', '機體', Math.ceil(PL.hp));
   bar(x0, y0 + 52, 190, PL.boost, PL.boosting ? '#ffd36a' : 'rgba(255,211,106,.6)', '加速能量 (Shift)');
-  g.fillStyle = col; g.font = '600 15px "Noto Sans TC", sans-serif'; g.fillText(`速度 ${Math.round(PL.speed)}`, x0, y0 + 80); g.font = '12px "Noto Sans TC", sans-serif';
-  g.fillStyle = 'rgba(6,12,22,.6)'; g.fillRect(x0 + 90, y0 + 74, 100, 8); g.fillStyle = 'rgba(220,228,240,.8)'; g.fillRect(x0 + 90, y0 + 74, 100 * PL.thr, 8); g.fillText('油門 W/S', x0 + 196, y0 + 78);
+  g.fillStyle = col; g.font = '600 15px "Noto Sans TC", sans-serif'; g.fillText(PL.speed < -0.5 ? `倒退 ${Math.round(-PL.speed)}` : `速度 ${Math.round(PL.speed)}`, x0, y0 + 80); g.font = '12px "Noto Sans TC", sans-serif';
+  { const bw = 100, z0 = x0 + 90 + bw * PILOT_REV / (1 + PILOT_REV), u = bw / (1 + PILOT_REV);   // 油門條：中間的刻度＝0，左邊＝逆向
+    g.fillStyle = 'rgba(6,12,22,.6)'; g.fillRect(x0 + 90, y0 + 74, bw, 8);
+    g.fillStyle = PL.thr < 0 ? 'rgba(255,160,90,.9)' : 'rgba(220,228,240,.8)'; g.fillRect(PL.thr < 0 ? z0 + PL.thr * u : z0, y0 + 74, Math.abs(PL.thr) * u, 8);
+    g.fillStyle = '#fff'; g.fillRect(z0 - 0.5, y0 + 71, 1.5, 14);
+    g.fillStyle = 'rgba(220,228,240,.8)'; g.fillText(`油門 ${plKey('pilot_thr_up')}/${plKey('pilot_thr_dn')}　${plKey('pilot_stop')} 歸零`, x0 + 196, y0 + 78); }
   // 武裝
   const xr = W - 232;
   PL.slots.forEach((S, k) => {
-    const Wd = PILOT_WEAPONS[S.id], y = H - 104 - (PL.slots.length - 1 - k) * 46;
+    const Wd = PILOT_WEAPONS[S.id], y = LY.wBase - (PL.slots.length - 1 - k) * 46;
     g.fillStyle = 'rgba(6,12,22,.6)'; g.fillRect(xr, y - 14, 212, 40);
     g.fillStyle = PL.fire[k] ? '#fff' : col; g.font = '600 13px "Noto Sans TC", sans-serif'; g.fillText(`${plSlotKey(k)}　${Wd.name}`, xr + 8, y); g.font = '12px "Noto Sans TC", sans-serif';
     let k2 = 1, txt = '', c2 = col;
@@ -12671,34 +12964,46 @@ function pilotGauges(g, W, H, col) {
 
 // ───── 戰後 ─────
 function pilotReport() {
-  const R = GAME.result, S = PL.stats || { kf: 0, ks: 0, dmg: 0, deaths: 0, shots: 0, hits: 0, merit: 0 }, m = SIM.m;
+  const R = GAME.result, S = PL.stats || { kf: 0, ks: 0, dmg: 0, deaths: 0, shots: 0, hits: 0, merit: 0, heal: 0 }, m = SIM.m, M = PL.mis;
   setPhase('report');
-  const kind = R.kind === 'win' ? 'win' : R.kind === 'lose' ? 'lose' : R.kind === 'draw' ? 'draw' : 'end';
-  const bonus = R.retreat ? 0 : PILOT_MERIT[kind] || 0, gain = Math.round(S.merit + bonus);
+  // 任務成敗：主要目標完成＝成功；護衛任務打到戰鬥結束、航母還活著也算成功
+  if (M && !M.done && !M.failed && M.type === 'escort' && ships.alive[M.esc] && !R.retreat) { M.done = true; M.doneT = R.t; }
+  const ok = !!M && M.done && !M.failed, li = M ? M.li : 0;
+  const why = !M ? '' : ok ? '' : M.failed ? M.why : R.retreat && !R.pilotRtb ? '中途結束出擊' : '戰鬥結束前沒有完成主要目標';
+  const bon = M ? M.bonus.map((b) => ({ b, ok: ok && pilotBonusOk(b, R) })) : [];
+  const nOk = bon.filter((x) => x.ok).length, grade = !ok ? '失敗' : nOk === bon.length ? 'S' : bon.length - nOk === 1 ? 'A' : 'B';
+  const fleet = R.kind === 'win' ? PILOT_MERIT.fleet : 0, base = ok ? PILOT_MERIT.mission[li] : 0, bonusM = nOk * PILOT_MERIT.bonus;
+  const gain = Math.round(S.merit + base + bonusM + fleet);
   const p = pilotLoad(), before = PL.savedBefore != null ? PL.savedBefore : p.merit, lv0 = PL.lv0 != null ? PL.lv0 : pilotLevel(p.xp).lv, wx0 = PL.wx0 || { ...p.wxp };
   if (!PL.saved) {
     PL.saved = true; PL.savedBefore = before; PL.lv0 = lv0; PL.wx0 = wx0;
     p.xp += gain; for (const [id, x] of Object.entries(S.wxp || {})) p.wxp[id] = (p.wxp[id] || 0) + x;
-    p.merit += gain; p.sorties++; if (kind === 'win') p.wins++; p.kf += S.kf; p.ks += S.ks; p.deaths += S.deaths; pilotSave(p);
+    p.merit += gain; p.sorties++; if (ok) p.wins++; p.kf += S.kf; p.ks += S.ks; p.deaths += S.deaths; pilotSave(p);
   }
   const fresh = PILOT_WPN_ORDER.filter((id) => PILOT_WEAPONS[id].unlock > before && PILOT_WEAPONS[id].unlock <= p.merit).map((id) => PILOT_WEAPONS[id].name);
   const next = PILOT_WPN_ORDER.map((id) => PILOT_WEAPONS[id]).find((w) => w.unlock > p.merit);
-  const label = { win: '我軍勝利', lose: '我軍敗北', draw: '平手', end: '出擊結束' }[kind];
+  const fleetTxt = R.pilotRtb || R.pilotFail || R.retreat ? '艦隊戰尚未分出勝負' : { win: '我軍贏得艦隊戰', lose: '我軍輸掉艦隊戰', draw: '艦隊戰平手' }[R.kind] || '艦隊戰尚未分出勝負';
   overlay(`<div class="g-wrap" style="max-width:820px">
     <div class="g-head"><h2>出擊報告</h2><span class="crumb">${escH(m.name)}　·　${PL.frame ? PL.frame.name : ''}　·　戰鬥時間 ${_fmtT(R.t)}</span></div>
-    <div class="g-card" style="margin-bottom:12px;text-align:center"><p class="result ${kind === 'end' ? 'draw' : kind}">${label}</p><div class="g-dim">${escH(R.why.replace('我方', '我軍').replace('敵方', '敵軍'))}</div>
-      <div style="margin-top:6px">我軍剩 ${Math.round(R.ratio[0] * 100)}%　·　敵軍剩 ${Math.round(R.ratio[1] * 100)}%</div></div>
+    <div class="g-card" style="margin-bottom:12px;text-align:center"><p class="result ${ok ? 'win' : 'lose'}">${ok ? `任務成功・評等 ${grade}` : '任務失敗'}</p>
+      <div>${M ? escH(pilotMisText(M)) : ''}</div>${why ? `<div class="g-dim">${escH(why)}</div>` : ''}
+      ${M && M.friendly ? `<div class="g-dim">其中 ${M.friendly} 個目標被友軍擊沉（不算失敗）</div>` : ''}
+      <div class="g-dim" style="margin-top:6px">${fleetTxt}　·　我軍剩 ${Math.round(R.ratio[0] * 100)}%・敵軍剩 ${Math.round(R.ratio[1] * 100)}%</div></div>
     <div class="intel-grid">
-      <div class="g-card"><h3>個人戰績</h3><dl class="kv"><dt>擊墜敵機</dt><dd>${S.kf} 架</dd><dt>擊沉敵艦</dt><dd>${S.ks} 艘</dd><dt>對艦傷害</dt><dd>${fmtN(Math.round(S.dmg))}</dd>
-        <dt>被擊墜</dt><dd>${S.deaths} 次</dd><dt>射擊</dt><dd>${fmtN(S.shots)} 發${S.msl ? `・飛彈／魚雷 ${S.msl} 枚` : ''}</dd></dl></div>
-      <div class="g-card"><h3>戰功</h3><dl class="kv"><dt>這次出擊</dt><dd><b>+${fmtN(gain)}</b>（戰鬥 ${fmtN(Math.round(S.merit))}＋戰局 ${bonus}）</dd><dt>累積</dt><dd>${fmtN(p.merit)}</dd>
+      <div class="g-card"><h3>任務</h3><dl class="kv"><dt>主要目標</dt><dd>${ok ? '<b class="g-pc">完成</b>' : '未完成'}${M && M.done && M.doneT ? `（${_fmtT(M.doneT)}）` : ''}</dd>
+        ${bon.map((x) => `<dt>額外目標</dt><dd>${x.ok ? '✓' : '✗'} ${PILOT_BONUS[x.b].name}</dd>`).join('') || '<dt>額外目標</dt><dd class="g-dim">這次沒有</dd>'}
+        <dt>被擊墜</dt><dd>${S.deaths}／${M ? M.deaths : '-'} 次</dd></dl>
+        <h3 style="margin-top:12px">個人戰績</h3><dl class="kv"><dt>擊墜敵機</dt><dd>${S.kf} 架</dd><dt>擊沉敵艦</dt><dd>${S.ks} 艘</dd><dt>對艦傷害</dt><dd>${fmtN(Math.round(S.dmg))}</dd>
+        ${S.heal ? `<dt>維修量</dt><dd>${fmtN(Math.round(S.heal))}</dd>` : ''}<dt>射擊</dt><dd>${fmtN(S.shots)} 發${S.msl ? `・飛彈／魚雷 ${S.msl} 枚` : ''}</dd></dl></div>
+      <div class="g-card"><h3>戰功</h3><dl class="kv"><dt>這次出擊</dt><dd><b>+${fmtN(gain)}</b></dd>
+        <dd class="g-dim" style="grid-column:1/-1">戰鬥 ${fmtN(Math.round(S.merit))}＋任務 ${base}＋額外目標 ${bonusM}＋艦隊戰 ${fleet}</dd><dt>累積</dt><dd>${fmtN(p.merit)}</dd>
         ${fresh.length ? `<dt>新解鎖</dt><dd class="g-pc"><b>${fresh.join('、')}</b>（到機庫裝上）</dd>` : ''}
         <dt>飛行員</dt><dd>Lv ${pilotLevel(p.xp).lv}${pilotLevel(p.xp).lv > lv0 ? `　<b class="g-pc">升級！</b>天賦點數 ${pilotTalFree(p)} 點可分配` : pilotTalFree(p) > 0 ? `（天賦點數 ${pilotTalFree(p)} 點未分配）` : ''}</dd>
         ${Object.keys(S.wxp || {}).map((id) => { const a = pilotProf(wx0[id] || 0).lv, b = pilotProf(p.wxp[id] || 0); return `<dt>${PILOT_WEAPONS[id].name}熟練</dt><dd>+${fmtN(Math.round(S.wxp[id]))}　Lv ${b.lv}${b.lv > a ? ' <b class="g-pc">升級！</b>' : ''}${b.next ? `（${fmtN(Math.floor(b.xp))}／${fmtN(b.next)}）` : ''}</dd>`; }).join('')}
         <dt>下一個解鎖</dt><dd>${next ? `${next.name}（還差 ${fmtN(next.unlock - p.merit)}）` : '全部武裝都解鎖了'}</dd></dl>
-        <div class="g-dim" style="font-size:calc(12px * var(--ui));margin-top:8px">駕駛的戰鬥沒有回放，也不算進指揮官的戰績。</div></div>
+        <div class="g-dim" style="font-size:calc(12px * var(--ui));margin-top:8px">個人紀錄只看任務成敗。駕駛的戰鬥沒有回放，也不算進指揮官的戰績。</div></div>
     </div>
-    <div class="g-row" style="margin-top:14px"><button class="g-btn" id="pr-menu">單人戰鬥</button><span class="g-sp"></span><button class="g-btn" id="pr-hangar">機庫</button><button class="g-btn pri" id="pr-again">再出擊（新戰場）→</button></div></div>`);
+    <div class="g-row" style="margin-top:14px"><button class="g-btn" id="pr-menu">單人戰鬥</button><span class="g-sp"></span><button class="g-btn" id="pr-hangar">機庫</button><button class="g-btn pri" id="pr-again">再出擊（新任務）→</button></div></div>`);
   gEl('pr-menu').onclick = showSingle;
   gEl('pr-hangar').onclick = showPilot;
   gEl('pr-again').onclick = pilotGo;
@@ -12772,6 +13077,9 @@ function renderSettings() {
     body = `<div class="set-row"><span>介面大小<br><small class="g-dim">文字、按鈕與面板間距一起放大縮小</small></span>
         <select class="g-sel" id="set-uiscale">${UI_SCALES.map(([v, n]) => `<option value="${v}" ${(SETTINGS.uiScale || 1.2) === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
       <p class="g-dim set-note" style="margin-top:12px">關掉的項目不會顯示在戰鬥畫面上（戰術面板裡的隊列與預覽一律顯示）。</p>
+      <div class="set-h">王牌飛行員</div>
+      <div class="set-row"><span>雷達小地圖的位置（背後視角）<br><small class="g-dim">另一側的儀表會移到雷達上方；座艙視角固定在中央儀表板</small></span>
+        <select class="g-sel" id="set-pradar">${[['right', '右下角（預設）'], ['left', '左下角']].map(([v, n]) => `<option value="${v}" ${(SETTINGS.pilotRadar || 'right') === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
       ${UI_OPTS.map(([k, name, desc]) => `<label class="set-row set-chk"><span>${name}<br><small class="g-dim">${desc}</small></span><input type="checkbox" data-ui="${k}" ${uiOn(k) ? 'checked' : ''}></label>`).join('')}
       <div class="g-row" style="margin-top:12px"><span class="g-sp"></span><button class="g-btn sm" id="set-ureset">全部顯示</button></div>`;
   }
@@ -12782,6 +13090,7 @@ function renderSettings() {
   q('#set-close').onclick = closeSettings;
   qa('[data-tab]').forEach((b) => (b.onclick = () => { SET.tab = b.dataset.tab; SET.capture = null; SET.msg = ''; renderSettings(); }));
   qa('.set-key').forEach((b) => (b.onclick = () => { SET.capture = b.dataset.k; SET.msg = ''; renderSettings(); }));
+  if (q('#set-pradar')) q('#set-pradar').onchange = (e) => { SETTINGS.pilotRadar = e.target.value; saveSettings(); };
   if (q('#set-qmod')) q('#set-qmod').onchange = (e) => { SETTINGS.queueMod = e.target.value; saveSettings(); };
   if (q('#set-kreset')) q('#set-kreset').onclick = () => { for (const a of KEY_ACTIONS) SETTINGS.keys[a[0]] = a[3]; SETTINGS.queueMod = 'Shift'; SET.msg = '已恢復預設按鍵。'; saveSettings(); renderSettings(); };
   if (q('#set-cutin')) q('#set-cutin').onchange = (e) => { SETTINGS.cutin = e.target.checked; saveSettings(); if (!e.target.checked) cutStop(); };
@@ -12854,4 +13163,4 @@ Object.assign(window.__demo, { MOUNTS: () => MOUNTS, mountsOf, openWeaponEditor,
   B && B.done();
   window.__ready = true;
 })();
-Object.assign(window.__demo, { frame, setPaused(v) { paused = v; }, PL, showPilot, pilotGo, pilotPickTarget, pilotLoad, pilotSave, fP: () => fP, PILOT_WEAPONS });   // 王牌飛行員（除錯）
+Object.assign(window.__demo, { frame, setPaused(v) { paused = v; }, pilotLayout, PILOT_MIS, shipPos(i) { const o = {}; bridgePose(i, o); return o; }, getModel, hullKey, pilotHullMesh, pilotHullCollide, pilotCredit, pilotMisTick, pilotHurt, PL, showPilot, pilotGo, pilotPickTarget, pilotLoad, pilotSave, fP: () => fP, PILOT_WEAPONS });   // 王牌飛行員（除錯）
