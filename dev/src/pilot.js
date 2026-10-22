@@ -460,7 +460,8 @@ function pilotWeapon(k, dt, t, px, py, pz) {
     S.side = 1 - S.side;
     const Rt = v3.cross(F, PL.U), o = (S.side ? 0.25 : -0.25) * PILOT_FTR_LEN;
     const sp = W.spread, D = v3.norm([F[0] + (plRnd() - 0.5) * sp * 2, F[1] + (plRnd() - 0.5) * sp * 2, F[2] + (plRnd() - 0.5) * sp * 2]);
-    pilotShot(px + F[0] * 0.5 + Rt[0] * o, py + F[1] * 0.5 + Rt[1] * o, pz + F[2] * 0.5 + Rt[2] * o, D, W, t, (M.gun || 1) * S.dm);
+    const mz = PILOT_FTR_LEN * 0.6;
+    pilotShot(px + F[0] * mz + Rt[0] * o, py + F[1] * mz + Rt[1] * o, pz + F[2] * mz + Rt[2] * o, D, W, t, (M.gun || 1) * S.dm);
     return;
   }
   if (W.type === 'lock') {
@@ -473,12 +474,12 @@ function pilotWeapon(k, dt, t, px, py, pz) {
     if (!PL.press[k] || S.cd > 0 || S.ammo <= 0) return;
     const locked = !!c && S.lockT >= S.need;   // 沒鎖定也能發射
     if (W.vs === 'f') {
-      PL.msl.push({ x: px + F[0], y: py + F[1], z: pz + F[2], vx: F[0] * W.speed, vy: F[1] * W.speed, vz: F[2] * W.speed, tg: locked ? c.i : -1, turn: W.turn * (locked ? 1 : 0.8), age: 0, life: W.life, dmg: W.dmg * S.dm, W, n: 0 });
+      PL.msl.push({ x: px + F[0] * PILOT_FTR_LEN, y: py + F[1] * PILOT_FTR_LEN, z: pz + F[2] * PILOT_FTR_LEN, vx: F[0] * W.speed, vy: F[1] * W.speed, vz: F[2] * W.speed, tg: locked ? c.i : -1, turn: W.turn * (locked ? 1 : 0.8), age: 0, life: W.life, dmg: W.dmg * S.dm, W, n: 0 });
     } else {
       const tc = locked ? c : c || pilotLockCand({ ...W, cone: 0.6 }, px, py, pz, null);
       if (!tc) { pilotFeed('前方沒有敵艦', 'hint'); return; }
       const hq = squadrons[ships.sq[PL.home >= 0 ? PL.home : 0]], n0 = pending.length;
-      if (launchMissileAt(px + F[0], py + F[1] - 0.3, pz + F[2], PL.side, hq, tc.i, W.dmg * S.dm, t, 1, W.accM * (locked ? 1 : 0.55))) for (let q = n0; q < pending.length; q++) pending[q].pl = S.id;
+      if (launchMissileAt(px + F[0] * PILOT_FTR_LEN, py + F[1] * PILOT_FTR_LEN - PILOT_FTR_LEN * 0.3, pz + F[2] * PILOT_FTR_LEN, PL.side, hq, tc.i, W.dmg * S.dm, t, 1, W.accM * (locked ? 1 : 0.55))) for (let q = n0; q < pending.length; q++) pending[q].pl = S.id;
     }
     S.cd = W.cd; S.ammo--; PL.stats.msl++;
     S.lockT = 0;
@@ -490,7 +491,7 @@ function pilotWeapon(k, dt, t, px, py, pz) {
     if (!fire || S.en <= 0) { S.en = Math.min(1, S.en + dt / W.recharge); if (!fire && S.en > 0.15) S.empty = false; return; }
     if (S.empty) { S.en = Math.min(1, S.en + dt / W.recharge); return; }
     S.en -= dt / dur; if (S.en <= 0) { S.en = 0; S.empty = true; }
-    const ox = px + F[0] * 0.5, oy = py + F[1] * 0.5, oz = pz + F[2] * 0.5;
+    const mz = PILOT_FTR_LEN * 0.6, ox = px + F[0] * mz, oy = py + F[1] * mz, oz = pz + F[2] * mz;
     const h = pilotRay(ox, oy, oz, F, R, null, false);
     const ex = ox + F[0] * h.s, ey = oy + F[1] * h.s, ez = oz + F[2] * h.s;
     PL.beam = { t, b: [ex, ey, ez], hit: h.k };   // 畫面：pilotBeamFrame 每幀畫一條實體光束
@@ -506,7 +507,7 @@ function pilotWeapon(k, dt, t, px, py, pz) {
 // 維修光束：對準的友艦（射線碰到的第一艘）修船體與護盾；沒對準友艦就修自己
 function pilotRepair(S, W, dt, t, px, py, pz, fire) {
   if (!fire || S.en <= 0 || S.empty) { S.en = Math.min(1, S.en + dt / W.recharge); if (!fire && S.en > 0.15) S.empty = false; return; }
-  const F = PL.F, ox = px + F[0] * 0.5, oy = py + F[1] * 0.5, oz = pz + F[2] * 0.5;
+  const F = PL.F, mz = PILOT_FTR_LEN * 0.6, ox = px + F[0] * mz, oy = py + F[1] * mz, oz = pz + F[2] * mz;
   const h = pilotRay(ox, oy, oz, F, W.range, { shipOnly: true, speed: 1e9 }, false, PL.side);
   let amt = 0;
   if (h.k === 's') {
@@ -738,7 +739,7 @@ function pilotBonusOk(id, R) {
 function pilotCamera() {
   const j = PL.j, P = [fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2]], A = pilotAim(), FL = PILOT_FTR_LEN;
   camera = camPersp;
-  camPersp.aspect = VW / VH; camPersp.near = 0.04; camPersp.far = 7000;
+  camPersp.aspect = VW / VH; camPersp.near = Math.max(0.005, PILOT_FTR_LEN * 0.4); camPersp.far = 7000;
   if (PL.cock && !PL.dead) {
     const F = PL.F, U = PL.U;
     camPersp.fov = 72;
@@ -978,10 +979,10 @@ function pilotHitFrame() {
 function pilotBeamFrame() {
   const B = PL.beam, on = PL.on && !PL.spec && !PL.dead && !PL.dock && B && B.b && U.uTime.value - B.t < 0.06;
   PL_BEAM.g.visible = !!on; if (!on) return;
-  const j = PL.j, F = PL.F, a = [fP[j * 3] + F[0] * 0.45, fP[j * 3 + 1] + F[1] * 0.45, fP[j * 3 + 2] + F[2] * 0.45];
+  const j = PL.j, F = PL.F, mz = PILOT_FTR_LEN * 0.55, a = [fP[j * 3] + F[0] * mz, fP[j * 3 + 1] + F[1] * mz, fP[j * 3 + 2] + F[2] * mz];
   _bmD.set(B.b[0] - a[0], B.b[1] - a[1], B.b[2] - a[2]); const len = _bmD.length() || 0.01; _bmD.divideScalar(len);
   PL_BEAM.g.position.set((a[0] + B.b[0]) / 2, (a[1] + B.b[1]) / 2, (a[2] + B.b[2]) / 2); PL_BEAM.g.quaternion.setFromUnitVectors(_bmY, _bmD);
-  const now = performance.now() / 1000, w = 0.02 * (1 + 0.35 * Math.sin(now * 53) + 0.2 * Math.sin(now * 31)), col = B.heal ? _healCol : FACTION[SIDE_FAC[PL.side]].beam;
+  const now = performance.now() / 1000, w = PILOT_FTR_LEN * 0.1 * (1 + 0.35 * Math.sin(now * 53) + 0.2 * Math.sin(now * 31)), col = B.heal ? _healCol : FACTION[SIDE_FAC[PL.side]].beam;
   PL_BEAM.core.scale.set(w, len, w); PL_BEAM.glow.scale.set(w * 3.2, len, w * 3.2); PL_BEAM.halo.scale.set(w * 8, len, w * 8);
   PL_BEAM.glow.material.color.copy(col); PL_BEAM.halo.material.color.copy(col);
 }

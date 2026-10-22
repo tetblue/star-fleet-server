@@ -3717,7 +3717,7 @@ const R3 = { ready: false, models: {}, meshByKey: {}, list: [], version: -1, lod
 const opts3 = { detail: 'auto', lodScale: 1 };
 const LOD3_PX = [170, 55, 16, 2];   // 以 CSS px 計：艦長超過幾 px 用第 0/1/2/3 級
 const TYPE_LEN3 = 1.0;       // 3D 艦長＝2D 貼圖寬 × 此值
-const FTR_LEN3 = 0.2;   // 3D 艦載機長度（原本 1.8）：與駕駛模式相同，戰列艦約 28 倍長；拉遠時主要靠尾焰看出位置
+const FTR_LEN3 = 0.04;  // 3D 艦載機長度（原本 1.8）：約星際大戰鈦戰機比星艦的比例，戰列艦約 140 倍長、旗艦約 330 倍；指揮模式拉遠時只看得到尾焰
 
 function b64ToBuf(b64) { const s = atob(b64); const u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u.buffer; }
 // 解碼 3D 模型（船體、艦載機、武器共用；第一次用到才解）
