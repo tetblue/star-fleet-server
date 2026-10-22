@@ -4,7 +4,7 @@
 // 操作：滑鼠移動瞄準方向（機體自動轉過去）、W／S 油門、A／D 翻滾、Shift 加速、左鍵武裝一、右鍵武裝二、T 鎖定準心附近的敵人、V 切換背後／座艙視角。
 // 玩家的輸入不進命令紀錄，所以駕駛的戰鬥沒有回放。
 const PILOT_STORE = 'fleet.pilot';
-const PILOT_FTR_LEN = 0.9;     // 駕駛中所有艦載機的 3D 長度（原本 1.8；畫小一點，船才顯得大）
+const PILOT_FTR_LEN = FTR_LEN3;   // 駕駛中所有艦載機（玩家與 AI）的 3D 長度：與指揮模式相同（main.js 的 FTR_LEN3）
 const PILOT_RESPAWN = 5;       // 被擊墜後幾秒重新出擊
 const PILOT_HITR_F = 1.3;      // 機砲對艦載機的命中半徑（比機身大一點，好打一點）
 const PILOT_ZONE = 1500;
@@ -981,7 +981,7 @@ function pilotBeamFrame() {
   const j = PL.j, F = PL.F, a = [fP[j * 3] + F[0] * 0.45, fP[j * 3 + 1] + F[1] * 0.45, fP[j * 3 + 2] + F[2] * 0.45];
   _bmD.set(B.b[0] - a[0], B.b[1] - a[1], B.b[2] - a[2]); const len = _bmD.length() || 0.01; _bmD.divideScalar(len);
   PL_BEAM.g.position.set((a[0] + B.b[0]) / 2, (a[1] + B.b[1]) / 2, (a[2] + B.b[2]) / 2); PL_BEAM.g.quaternion.setFromUnitVectors(_bmY, _bmD);
-  const now = performance.now() / 1000, w = 0.05 * (1 + 0.35 * Math.sin(now * 53) + 0.2 * Math.sin(now * 31)), col = B.heal ? _healCol : FACTION[SIDE_FAC[PL.side]].beam;
+  const now = performance.now() / 1000, w = 0.02 * (1 + 0.35 * Math.sin(now * 53) + 0.2 * Math.sin(now * 31)), col = B.heal ? _healCol : FACTION[SIDE_FAC[PL.side]].beam;
   PL_BEAM.core.scale.set(w, len, w); PL_BEAM.glow.scale.set(w * 3.2, len, w * 3.2); PL_BEAM.halo.scale.set(w * 8, len, w * 8);
   PL_BEAM.glow.material.color.copy(col); PL_BEAM.halo.material.color.copy(col);
 }
