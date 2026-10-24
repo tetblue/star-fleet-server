@@ -424,7 +424,7 @@ function pilotJumpCharge(j, dt, t) {
   PL.F = F; PL.U = Math.abs(F[1]) < 0.96 ? v3.norm([-F[0] * F[1], 1 - F[1] * F[1], -F[2] * F[1]]) : PL.U; PL.yaw = Math.atan2(F[0], F[2]); PL.pitch = Math.asin(Math.max(-1, Math.min(1, F[1])));
   fV[j3] = F[0] * PL.speed; fV[j3 + 1] = F[1] * PL.speed; fV[j3 + 2] = F[2] * PL.speed;
   spawnBeam(nx - F[0] * 30, ty - F[1] * 30, nz - F[2] * 30, nx, ty, nz, t, 0.25, PL.side, 2.2, 1.0, shipFac(PL.home >= 0 ? PL.home : 0));   // 抵達：從後方拉進來
-  spawnFx(nx, ty, nz, 2 + fxFac(PL.side) * 8, 1.2, 30);
+  spawnFx(nx, ty, nz, 2 + fxFac(PL.side) * 8, PILOT_FTR_LEN * 5, 30);   // 抵達的閃光在機體上：照機體大小
   PL.msl.length = 0; PL.travel = false; PL.inv = Math.max(PL.inv, t + 0.8); PL.jumpCd = t + PILOT_JUMP.cd; PL.jumpFx = performance.now(); PL.jump = null;
   pilotFeed(`躍傳完成：${J.it.enemy ? '敵' : '我'}・${J.it.f.name}`, J.it.enemy ? 'kill' : 'ok');
 }
@@ -784,7 +784,7 @@ function pilotHurt(dmg, e, self) {
   PL.hp -= dmg;
   if (PL.hp > 0) return;
   PL.hp = 0; PL.dead = true; PL.deadT = t; PL.stats.deaths++;
-  const j = PL.j; FT.state[j] = 3; FT.t0[j] = t; spawnFx(fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2], PL.side, 3.2, 24);
+  const j = PL.j; FT.state[j] = 3; FT.t0[j] = t; spawnFx(fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2], PL.side, PILOT_FTR_LEN * 6, 24);   // 爆炸照機體大小（鏡頭很近，太大會蓋滿畫面）
   PL.fire.fill(false); PL.msl.length = 0; PL.dock = null; PL.beam = null; PL.rearm = 0; PL.jump = null;
   pilotFeed(self ? '機體撞毀！' : '被擊墜！', 'bad');
   if (PL.mis && !PL.mis.done && PL.stats.deaths > PL.mis.deaths) pilotMisFail(`被擊墜 ${PL.stats.deaths} 次，超過上限 ${PL.mis.deaths} 次`);
@@ -796,8 +796,8 @@ function pilotHitFx(e, hull) {
   const src = e && e.sx != null ? [e.sx, e.sy, e.sz] : null;
   PL.flash = { t: now, hull, src };
   if (src) { PL.hits.push({ t: now, x: src[0], y: src[1], z: src[2], hull }); if (PL.hits.length > 10) PL.hits.shift(); }
-  if (hull) spawnFx(x, y, z, PL.side, 0.9, 30);
-  else spawnFx(x, y, z, 2 + fxFac(PL.side) * 8 + (src ? dirIndexOf(x - src[0], z - src[2]) : 0), 1.1, 26);
+  if (hull) spawnFx(x, y, z, PL.side, PILOT_FTR_LEN * 1.6, 30);   // 火花照機體大小：原本 0.9 單位，鏡頭只在 0.2 外，會蓋滿整個畫面
+  else spawnFx(x, y, z, 2 + fxFac(PL.side) * 8 + (src ? dirIndexOf(x - src[0], z - src[2]) : 0), PILOT_FTR_LEN * 2.2, 26);
 }
 function pilotCredit(kind, i, dmg, kill, wid) {
   const S = PL.stats; if (!S) return;
@@ -1056,6 +1056,11 @@ function pilotHud() {
   pilotWarn(g, cx, top + (PL.tgt ? 96 : 52), thr, red, now);
   pilotRadar(g, pilotHudLayout(W, H), px, py, pz, col, red, thr, now);
   pilotScore(g, W, col); pilotKeysHint(g, H);
+  // 受傷：只在畫面四周淡淡一圈（紅＝機體、藍＝護盾），中間不會被蓋到
+  if (!PL.dead && t - PL.hurtT < 0.3) {
+    const k = 1 - (t - PL.hurtT) / 0.3, c2 = PL.hurtSh ? '80,160,255' : '255,50,40', dg = Math.hypot(W, H), gr = g.createRadialGradient(cx, cy, dg * 0.4, cx, cy, dg * 0.56);
+    gr.addColorStop(0, `rgba(${c2},0)`); gr.addColorStop(1, `rgba(${c2},${(PL.hurtSh ? 0.14 : 0.24) * k})`); g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  }
   pilotJumpHud(g, W, H, cx, cy, m, now, sw);   // 躍傳選單畫在最上層
   // HIT／DESTROYED：準心右上
   if (PL.pop && !PL.dead) {
@@ -1078,7 +1083,6 @@ function pilotHud() {
   if (PL.dock) pilotText(g, cx, py2, PL.dock.ph === 'in' ? '自動降落中…' : PL.dock.ph === 'deck' ? `整補中… ${Math.round(PL.rearm * 100)}%` : '彈射起飛！', PL_OK, 15);
   else if (!PL.dead && (simTick % 20 === 0 || PL.nearC == null)) PL.nearC = pilotNearCarrier(px, py, pz, PILOT_DOCK.range) >= 0;
   if (!PL.dock && !PL.dead && PL.nearC) pilotText(g, cx, py2, `按 ${plKey('pilot_land')} 降落整補`, 'rgba(143,227,154,.9)', 13);
-  if (t - PL.hurtT < 0.35) { const k = 1 - (t - PL.hurtT) / 0.35, c2 = PL.hurtSh ? '80,160,255' : '255,40,30', gr = g.createRadialGradient(cx, cy, m * 0.35, cx, cy, Math.max(W, H) * 0.7); gr.addColorStop(0, `rgba(${c2},0)`); gr.addColorStop(1, `rgba(${c2},${(PL.hurtSh ? 0.25 : 0.45) * k})`); g.fillStyle = gr; g.fillRect(0, 0, W, H); }
   // 受擊方向：準心外圍的弧，指向打來的方向（紅＝打到機體、藍＝護盾擋下），1.2 秒淡出
   PL.hits = PL.hits.filter((h) => now - h.t < 1200);
   for (const h of PL.hits) {
