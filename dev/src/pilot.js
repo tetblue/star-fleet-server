@@ -41,6 +41,10 @@ const PILOT_WEAPONS = {
     desc: '對準敵艦約 1 秒鎖定。威力極大，但會被防空砲攔截。沒鎖定也能發射，打向前方最近的敵艦，命中率較低。' },
   repair: { name: '維修光束', type: 'beam', heal: true, unlock: 100, range: 70, hps: 12, self: 3, dur: 5, recharge: 8,
     desc: '對準友艦按住：修復船體與護盾。沒有對準友艦時修復自己（比較慢）。能量 5 秒，8 秒充滿。' },
+  // 纏鬥裝備（gear）：不佔武器槽，裝在獨立的纏鬥裝備槽（pilot_gear 鍵）。電磁干擾：啟動後 dur 秒內，玩家 range 內的防空砲、敵機（與之後的追蹤飛彈）都無法鎖定玩家；已經咬住玩家的敵機會丟失目標
+  // 只擋「自動鎖定／追蹤」：已經打出去的子彈照算；未來 PvP 時其他玩家手動瞄準仍然打得到（見 pilotEcmHides）
+  ecm: { name: '電磁干擾', type: 'ecm', gear: true, unlock: 250, range: 300, dur: 6, cd: 25,
+    desc: '按一下啟動：6 秒內周圍 300 範圍的防空砲、敵機、飛彈都無法鎖定你，咬尾的敵機會跟丟。冷卻 25 秒（從啟動開始算）。' },
   lance: { name: '光矛', type: 'beam', unlock: 1400, range: 85, dps: 24, dpsF: 16, dur: 4, recharge: 9,
     desc: '貼近照射的持續光束：護盾消耗 ×1.5，打穿後船體 ×1.5。能量 4 秒，9 秒充滿。' },
 };
@@ -52,6 +56,7 @@ function plCodeIs(id, code) { const c = keyOf(id); if (!c || !code) return false
 function plHeld(id) { for (const c of PL.keys) if (plCodeIs(id, c)) return true; return false; }
 function plKey(id) { return keyLabel(keyOf(id)); }
 function plSlotKey(k) { const S = PILOT_SLOTS[k], kb = keyOf('pilot_w' + (k + 1)); return [S.mouse, kb ? keyLabel(kb) : ''].filter(Boolean).join('／') || '未綁定'; }
+const PILOT_GEAR_ORDER = ['ecm'];   // 纏鬥裝備（獨立一槽，''＝不裝）
 const PILOT_SLOT_DEF = ['pulse', 'homing', 'homing', 'pulse'];
 const PILOT_MERIT = { ftr: 25, ship: 60, dmg: 0.4, heal: 0.5, fleet: 20, bonus: 40, mission: [100, 140, 180, 230, 280] };
 // ───── 任務：個人紀錄看任務成敗（艦隊戰勝負只是小獎勵） ─────
@@ -103,10 +108,12 @@ function pilotTalUsed(tal) { return PILOT_TALENTS.reduce((a, T) => a + Math.min(
 function pilotTalFree(p) { return pilotLevel(p.xp).lv - 1 - pilotTalUsed(p.tal); }
 // 武器熟練度：用那把武器打中、擊墜、擊沉累積經驗，Lv 0～5
 const PILOT_PROF = [0, 50, 150, 320, 600, 1000];
-const PILOT_PROF_XP = { hitF: 1, ftr: 12, dmg: 0.15, ship: 15, heal: 0.3 };
+const PILOT_PROF_XP = { hitF: 1, ftr: 12, dmg: 0.15, ship: 15, heal: 0.3, ecm: 5 };   // ecm：每甩掉一架咬住你的敵機
 function pilotProf(xp) { let lv = 0; while (lv < 5 && xp >= PILOT_PROF[lv + 1]) lv++; return { lv, xp, cur: PILOT_PROF[lv], next: lv < 5 ? PILOT_PROF[lv + 1] : 0 }; }
 function pilotProfDesc(id, lv) {
-  const W = PILOT_WEAPONS[id], out = [`${W.heal ? '維修量' : '傷害'} +${4 * lv}%`];
+  const W = PILOT_WEAPONS[id];
+  if (W.type === 'ecm') return lv ? `持續時間 +${8 * lv}%、冷卻 −${5 * lv}%` : '還沒有加成';
+  const out = [`${W.heal ? '維修量' : '傷害'} +${4 * lv}%`];
   if (W.type === 'gun') out.push(W.ammo ? `彈數 +${10 * lv}%` : `熱量 −${6 * lv}%`);
   if (W.type === 'lock') out.push(`鎖定時間 −${6 * lv}%`, id === 'torpedo' ? `魚雷 +${Math.floor(lv / 2)} 枚` : `飛彈 +${lv} 枚`);
   if (W.type === 'beam') out.push(`能量 +${8 * lv}%`);
@@ -126,18 +133,19 @@ function pilotSlotMods(id, lv, B) {
   if (id === 'homing') ammo = Math.round((W.ammo + (M.homing || 0)) * B.bay) + lv;
   else if (id === 'torpedo') ammo = Math.round((W.ammo + (M.torpedo || 0)) * B.bay) + Math.floor(lv / 2);
   else if (id === 'rocket') ammo = Math.round(W.ammo * (M.rocket || 1) * B.bay * (1 + 0.1 * lv));
-  return { max: ammo, dm: 1 + 0.04 * lv, heatM: B.cool * (1 - 0.06 * lv), need: (W.lockT || 0) * B.lock * (1 - 0.06 * lv), enM: 1 + 0.08 * lv };
+  return { max: ammo, dm: 1 + 0.04 * lv, heatM: B.cool * (1 - 0.06 * lv), need: (W.lockT || 0) * B.lock * (1 - 0.06 * lv), enM: 1 + 0.08 * lv, cdM: 1 - 0.05 * lv };
 }
 
 function pilotLoad() {
   let p = null; try { p = JSON.parse(STORE.getItem(PILOT_STORE) || 'null'); } catch (e) { p = null; }
-  p = Object.assign({ merit: 0, sorties: 0, wins: 0, kf: 0, ks: 0, deaths: 0, fac: 0, frame: 1, slots: PILOT_SLOT_DEF.slice(), size: 1, ai: -1, terr: 3, seed: 0, tal: {}, wxp: {} }, p || {});
+  p = Object.assign({ merit: 0, sorties: 0, wins: 0, kf: 0, ks: 0, deaths: 0, fac: 0, frame: 1, slots: PILOT_SLOT_DEF.slice(), gear: '', size: 1, ai: -1, terr: 3, seed: 0, tal: {}, wxp: {} }, p || {});
   if (p.xp == null) p.xp = p.merit;   // 舊存檔：經驗＝已累積的戰功
   if (!p.tal || typeof p.tal !== 'object') p.tal = {}; if (!p.wxp || typeof p.wxp !== 'object') p.wxp = {};
   if (pilotTalFree(p) < 0) p.tal = {};   // 點數對不上就重新分配
   if (!PILOT_FRAMES[p.frame]) p.frame = 1;
   if (!Array.isArray(p.slots)) p.slots = [];
-  p.slots = PILOT_SLOT_DEF.map((d, k) => { const w = p.slots[k]; return PILOT_WEAPONS[w] && PILOT_WEAPONS[w].unlock <= p.merit ? w : d; });   // 舊存檔只有 2 槽：補上預設
+  p.slots = PILOT_SLOT_DEF.map((d, k) => { const w = p.slots[k]; return PILOT_WEAPONS[w] && !PILOT_WEAPONS[w].gear && PILOT_WEAPONS[w].unlock <= p.merit ? w : d; });
+  if (!PILOT_GEAR_ORDER.includes(p.gear) || PILOT_WEAPONS[p.gear].unlock > p.merit) p.gear = '';   // 舊存檔只有 2 槽：補上預設
   if (p.fac !== 1) p.fac = 0;
   if (!RAND_SIZES[p.size]) p.size = 1; if (!(p.ai >= -1 && p.ai < WATCH_LV.length)) p.ai = -1; if (!RAND_TERR[p.terr]) p.terr = 3;
   return p;
@@ -159,12 +167,18 @@ function showPilot() {
     const P = pilotProf(p.wxp[id] || 0), prof = lock ? '' : `<span class="pl-prof">熟練 Lv ${P.lv}${P.next ? ` ${bar(P.xp - P.cur, P.next - P.cur)}` : '（最高）'}</span>`;
     return `<button class="pl-wpn ${on ? 'on' : ''} ${lock ? 'lock' : ''}" data-slot="${k}" data-w="${id}" ${lock ? 'disabled' : ''} title="${W.desc}"><b>${W.name}</b>${prof}<small>${lock ? `戰功 ${fmtN(W.unlock)} 解鎖` : other && on ? '其他槽也裝了這把（各自的彈藥、鎖定）' : `${W.desc}${P.lv ? `<br>熟練加成：${pilotProfDesc(id, P.lv)}` : ''}`}</small></button>`;
   }).join('');
+  const gcell = ['', ...PILOT_GEAR_ORDER].map((id) => {
+    if (!id) return `<button class="pl-wpn pl-gear ${p.gear ? '' : 'on'}" data-gear=""><b>不裝</b><small>纏鬥裝備槽空著</small></button>`;
+    const W = PILOT_WEAPONS[id], lock = W.unlock > p.merit, P = pilotProf(p.wxp[id] || 0);
+    const prof = lock ? '' : `<span class="pl-prof">熟練 Lv ${P.lv}${P.next ? ` ${bar(P.xp - P.cur, P.next - P.cur)}` : '（最高）'}</span>`;
+    return `<button class="pl-wpn pl-gear ${p.gear === id ? 'on' : ''} ${lock ? 'lock' : ''}" data-gear="${id}" ${lock ? 'disabled' : ''} title="${W.desc}"><b>${W.name}</b>${prof}<small>${lock ? `戰功 ${fmtN(W.unlock)} 解鎖` : `${W.desc}${P.lv ? `<br>熟練加成：${pilotProfDesc(id, P.lv)}` : ''}`}</small></button>`;
+  }).join('');
   const L = pilotLevel(p.xp), free = pilotTalFree(p);
   const tals = PILOT_TALENTS.map((T) => { const r = Math.min(T.max, p.tal[T.id] || 0);
     return `<div class="pl-tal ${r ? 'on' : ''}"><div class="pl-tal-h"><b>${T.name}</b><span class="pl-pips">${Array.from({ length: T.max }, (_, k) => `<i class="${k < r ? 'on' : ''}"></i>`).join('')}</span></div>
       <small>${r ? T.desc(r) : '尚未學習'}${r < T.max ? `　<span class="g-dim">下一級：${T.desc(r + 1)}</span>` : ''}</small>
       <div class="pl-tal-b"><button class="g-btn sm" data-tal="${T.id}" data-d="-1" ${r ? '' : 'disabled'}>−</button><button class="g-btn sm" data-tal="${T.id}" data-d="1" ${r < T.max && free > 0 ? '' : 'disabled'}>＋</button></div></div>`; }).join('');
-  const B = pilotBuild({ frame: p.frame, tal: p.tal }), lo = p.slots.map((id) => { const m = pilotSlotMods(id, pilotProf(p.wxp[id] || 0).lv, B); return `${PILOT_WEAPONS[id].name}${m.max ? ` ${m.max} ${PILOT_WEAPONS[id].type === 'lock' ? '枚' : '發'}` : ''}`; }).join('＋');
+  const B = pilotBuild({ frame: p.frame, tal: p.tal }), lo = p.slots.map((id) => { const m = pilotSlotMods(id, pilotProf(p.wxp[id] || 0).lv, B); return `${PILOT_WEAPONS[id].name}${m.max ? ` ${m.max} ${PILOT_WEAPONS[id].type === 'lock' ? '枚' : '發'}` : ''}`; }).join('＋') + (p.gear ? `・纏鬥裝備：${PILOT_WEAPONS[p.gear].name}` : '');
   overlay(`<div class="g-wrap">
     <div class="g-head"><h2>王牌飛行員</h2><span class="crumb">不指揮艦隊・駕駛一架艦載機加入隨機戰場・沒有回放</span><span class="g-sp"></span><button class="g-btn" id="pl-back">← 單人戰鬥</button></div>
     <div class="g-card pl-rec"><div class="pl-lv"><span class="g-dim">飛行員等級</span><b>Lv ${L.lv}</b>${L.need ? `<span class="pl-xp">${bar(L.xp, L.need)}<small>${fmtN(Math.floor(L.xp))}／${fmtN(L.need)}</small></span>` : '<small>最高等級</small>'}</div><div><span class="g-dim">戰功</span><b>${fmtN(p.merit)}</b></div><div><span class="g-dim">出擊</span><b>${p.sorties}</b></div><div><span class="g-dim">任務成功</span><b>${p.wins}</b></div>
@@ -175,6 +189,7 @@ function showPilot() {
     <div class="intel-grid" style="margin-top:12px">
       ${PILOT_SLOTS.map((S, k) => `<div class="g-card"><h3>${S.name}（${plSlotKey(k)}）</h3><div class="pl-wpns">${wcell(k)}</div></div>`).join('')}
     </div>
+    <div class="g-card" style="margin-top:12px"><h3>纏鬥裝備（${plKey('pilot_gear')}）<span class="g-dim" style="font-weight:400">　不佔武器槽，另外裝一件</span></h3><div class="pl-wpns">${gcell}</div></div>
     <div class="intel-grid" style="margin-top:12px">
       <div class="g-card"><h3>戰場</h3><dl class="kv rd-opts">
         <dt>所屬陣營</dt><dd>${seg('fac', [[0, FACTION_NAME[0]], [1, FACTION_NAME[1]]])}<div class="g-dim">從己方航母起飛；敵軍是另一個陣營</div></dd>
@@ -186,6 +201,7 @@ function showPilot() {
       <div class="g-card"><h3>操作（滑鼠＋鍵盤）</h3><table class="pl-keys">
         <tr><td>滑鼠移動</td><td>瞄準方向（機體自動轉過去）</td></tr>${PILOT_SLOTS.map((S, k) => `<tr><td>${plSlotKey(k)}</td><td>${S.name}</td></tr>`).join('')}
         <tr><td>${plKey('pilot_thr_up')}／${plKey('pilot_thr_dn')}</td><td>油門加／減（可以減到 0 停住，再按住減速鍵＝逆向噴射倒退）</td></tr><tr><td>${plKey('pilot_stop')}</td><td>油門歸零</td></tr><tr><td>${plKey('pilot_roll_l')}／${plKey('pilot_roll_r')}</td><td>翻滾</td></tr><tr><td>${plKey('pilot_boost')}</td><td>加速（有能量）</td></tr>
+        <tr><td>${plKey('pilot_gear')}</td><td>纏鬥裝備（例如電磁干擾）</td></tr>
         <tr><td>${plKey('pilot_target')}</td><td>鎖定準心附近的敵人（機砲會顯示提前量）</td></tr><tr><td>${plKey('pilot_view')}</td><td>背後視角／座艙視角</td></tr><tr><td>滾輪</td><td>背後視角的鏡頭距離</td></tr>
         <tr><td>${plKey('pilot_jump')}</td><td><b>小型躍傳</b>：打開選單用數字鍵選一支艦隊（敵我都可以），充能 ${PILOT_JUMP.calm} 秒（被攻擊時 ${PILOT_JUMP.hot} 秒）後跳到它的交戰距離；冷卻 ${PILOT_JUMP.cd} 秒。從母艦到戰區最快的方法</td></tr>
         <tr><td>${plKey('pilot_land')}</td><td>靠近己方航母時：自動降落、整補（彈藥、耐久補滿），再彈射起飛</td></tr><tr><td>Esc</td><td>暫停</td></tr></table>
@@ -200,7 +216,8 @@ function showPilot() {
   document.querySelectorAll('[data-fr]').forEach((b) => (b.onclick = () => { p.frame = +b.dataset.fr; keep(); }));
   document.querySelectorAll('[data-tal]').forEach((b) => (b.onclick = () => { const T = PILOT_TALENTS.find((x) => x.id === b.dataset.tal), r = (p.tal[T.id] || 0) + +b.dataset.d; if (r < 0 || r > T.max || (+b.dataset.d > 0 && pilotTalFree(p) <= 0)) return; p.tal[T.id] = r; keep(); }));
   gEl('pl-tal-reset').onclick = () => { p.tal = {}; keep(); };
-  document.querySelectorAll('.pl-wpn').forEach((b) => (b.onclick = () => { p.slots[+b.dataset.slot] = b.dataset.w; keep(); }));
+  document.querySelectorAll('.pl-wpn[data-slot]').forEach((b) => (b.onclick = () => { p.slots[+b.dataset.slot] = b.dataset.w; keep(); }));
+  document.querySelectorAll('[data-gear]').forEach((b) => (b.onclick = () => { p.gear = b.dataset.gear; keep(); }));
   document.querySelectorAll('[data-po]').forEach((g) => g.querySelectorAll('button').forEach((b) => (b.onclick = () => { p[g.dataset.po] = +b.dataset.v; keep(); })));
 }
 // 設定 → 模擬室布局（雙方 AI；己方第一艦隊一定有航母）
@@ -210,7 +227,7 @@ function pilotLayout(p) {
   const S = RAND_SIZES[p.size];
   let st = RAND_TERR[p.terr].st; if (st == null) st = R() < 0.15 ? -1 : Math.floor(R() * 15);
   const li = p.ai < 0 ? Math.floor(R() * WATCH_LV.length) : p.ai, L = WATCH_LV[li].cl, mis = pilotMisRoll(R, li, S.time);
-  const m = { name: '', fac: p.fac === 1 ? 1 : 0, victory: true, ctl: -1, pilot: { frame: p.frame, slots: p.slots.slice(), tal: { ...p.tal }, prof: Object.fromEntries(p.slots.map((id) => [id, pilotProf(p.wxp[id] || 0).lv])), mis }, timeLimit: S.time,
+  const m = { name: '', fac: p.fac === 1 ? 1 : 0, victory: true, ctl: -1, pilot: { frame: p.frame, slots: p.slots.slice(), gear: p.gear, tal: { ...p.tal }, prof: Object.fromEntries([...p.slots, p.gear].filter(Boolean).map((id) => [id, pilotProf(p.wxp[id] || 0).lv])), mis }, timeLimit: S.time,
     seed: campHash(p.seed, p.size + 1, 13) % 100000, fleets: [], terrain: st < 0 ? [] : campTerrain(R, st), sides: [] };
   const names = CAMP_NAMES.slice();
   for (const side of [0, 1]) {
@@ -258,12 +275,13 @@ const v3 = { dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], cross: (a, 
   norm: (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; },
   rot: (v, k, a) => { const c = Math.cos(a), s = Math.sin(a), d = v3.dot(k, v), x = v3.cross(k, v); return [v[0] * c + x[0] * s + k[0] * d * (1 - c), v[1] * c + x[1] * s + k[1] * d * (1 - c), v[2] * c + x[2] * s + k[2] * d * (1 - c)]; } };
 function pilotAim() { const cp = Math.cos(PL.pitch); return [Math.sin(PL.yaw) * cp, Math.sin(PL.pitch), Math.cos(PL.yaw) * cp]; }
-function pilotResetSlots() { PL.slots = PL.slotIds.map((id) => { const m = pilotSlotMods(id, PL.prof[id] || 0, PL.B); return { id, ...m, ammo: m.max, heat: 0, over: false, cd: 0, lock: -1, lockK: '', lockT: 0, en: 1, dmgT: 0, side: 0 }; }); }
+function pilotNewSlot(id) { const m = pilotSlotMods(id, PL.prof[id] || 0, PL.B); return { id, ...m, ammo: m.max, heat: 0, over: false, cd: 0, lock: -1, lockK: '', lockT: 0, en: 1, dmgT: 0, side: 0 }; }
+function pilotResetSlots() { PL.slots = PL.slotIds.map(pilotNewSlot); if (!PL.gear && PL.gearId) PL.gear = pilotNewSlot(PL.gearId); }   // 纏鬥裝備的冷卻不因整補重置
 function pilotBegin(cfg) {
   PL.on = true; PL.spec = false; PL.side = 0; PL.j = FTR_MAX - 1; FT.state[PL.j] = 0;
-  PL.B = pilotBuild(cfg); PL.frame = PL.B.fr; PL.taken = PL.B.taken; PL.respawn = PL.B.respawn; PL.prof = cfg.prof || {}; PL.slotIds = cfg.slots.slice();
+  PL.B = pilotBuild(cfg); PL.frame = PL.B.fr; PL.taken = PL.B.taken; PL.respawn = PL.B.respawn; PL.prof = cfg.prof || {}; PL.slotIds = cfg.slots.slice(); PL.gearId = PILOT_WEAPONS[cfg.gear] && PILOT_WEAPONS[cfg.gear].gear ? cfg.gear : ''; PL.gear = null; PL.gearPress = false;
   PL.stats = { kf: 0, ks: 0, dmg: 0, deaths: 0, shots: 0, hits: 0, merit: 0, msl: 0, heal: 0, wxp: {} };
-  PL.feed = []; PL.msl = []; PL.hits = []; PL.flash = null; PL.dodge = 0; PL.tgt = null; PL.cock = false; PL.camD = 1; PL.rng = (battleSeed ^ 0x5bd1e995) >>> 0 || 1; PL.thr = 0.6; PL.saved = false; PL.savedBefore = PL.lv0 = PL.wx0 = null;
+  PL.feed = []; PL.msl = []; PL.hits = []; PL.flash = null; PL.ecm = null; PL.dodge = 0; PL.tgt = null; PL.cock = false; PL.camD = 1; PL.rng = (battleSeed ^ 0x5bd1e995) >>> 0 || 1; PL.thr = 0.6; PL.saved = false; PL.savedBefore = PL.lv0 = PL.wx0 = null;
   PL.keys.clear(); PL.fire = [false, false, false, false]; PL.press = [false, false, false, false];
   const fl = fleets.find((f) => f.side === PL.side && !f.supply && f.sqs.some((q) => q.list.some((i) => ships.alive[i] && ships.type[i] === 0)));
   PL.home = -1; if (fl) for (const q of fl.sqs) for (const i of q.list) if (PL.home < 0 && ships.alive[i] && ships.type[i] === 0) PL.home = i;
@@ -276,7 +294,7 @@ function pilotBegin(cfg) {
 }
 function pilotEnd() {
   if (!PL.on) return;
-  PL.beam = null; PL.dock = null; PL.jump = null; PL.flash = null; pilotBeamFrame(); pilotHitFrame(); ftrTrailMat.uniforms.uTrailMax.value = 1e6;
+  PL.beam = null; PL.dock = null; PL.jump = null; PL.flash = null; PL.ecm = null; pilotBeamFrame(); pilotHitFrame(); ftrTrailMat.uniforms.uTrailMax.value = 1e6;
   PL.on = false; PL.spec = false;
   if (PL.j >= 0) FT.state[PL.j] = 0;
   if (document.pointerLockElement) document.exitPointerLock();
@@ -371,6 +389,7 @@ function pilotFly(j, dt, t) {
   // 護盾回充
   if (t - PL.shT > 3) PL.sh = Math.min(Fr.sh, PL.sh + Fr.shR * dt);
   for (let k = 0; k < PL.slots.length; k++) pilotWeapon(k, dt, t, px, py, pz);
+  pilotGear(dt, t);
   PL.press.fill(false);
   pilotMissiles(dt, t);
 }
@@ -660,6 +679,35 @@ function pilotWeapon(k, dt, t, px, py, pz) {
     }
   }
 }
+// ───── 纏鬥裝備（獨立一槽，pilot_gear 鍵） ─────
+function pilotGear(dt, t) {
+  const S = PL.gear; if (!S) return;
+  const W = PILOT_WEAPONS[S.id], go = PL.gearPress; PL.gearPress = false;
+  S.cd -= dt;
+  if (!go) return;
+  if (S.cd > 0) { pilotFeed(`${W.name}冷卻中（${Math.ceil(S.cd)} 秒）`, 'hint'); return; }
+  if (W.type === 'ecm') pilotEcmOn(S, W, t);
+}
+// 電磁干擾
+function pilotEcmOn(S, W, t) {
+  PL.ecm = { t0: t, until: t + W.dur * S.enM, R: W.range }; S.cd = W.cd * S.cdM;
+  const j = PL.j, px = fP[j * 3], py = fP[j * 3 + 1], pz = fP[j * 3 + 2];
+  let n = 0;   // 已經咬住玩家的敵機：丟失目標，馬上重找（找的時候也會跳過玩家）
+  for (const f of aliveF[1 - PL.side]) {
+    if (FT.tk[f] !== 0 || FT.tgt[f] !== j || Math.hypot(fP[f * 3] - px, fP[f * 3 + 1] - py, fP[f * 3 + 2] - pz) > W.range) continue;
+    FT.tgt[f] = -1; FT.rt[f] = 0; n++;
+  }
+  if (n && PL.stats) PL.stats.wxp.ecm = (PL.stats.wxp.ecm || 0) + n * PILOT_PROF_XP.ecm;
+  spawnFx(px, py, pz, 2 + fxFac(PL.side) * 8, PILOT_FTR_LEN * 10, 22);
+  pilotFeed(`電磁干擾啟動！${n ? `甩掉 ${n} 架咬尾的敵機` : '周圍的敵人無法鎖定你'}`, 'ok');
+}
+function pilotEcmLeft() { return PL.on && PL.ecm && !PL.dead ? Math.max(0, PL.ecm.until - U.uTime.value) : 0; }
+// 敵方的自動瞄準（防空砲、AI 艦載機、追蹤飛彈）找目標時呼叫：o＝空中目標（AIR 表的項目），(x, y, z)＝鎖定它的人在哪
+// 電磁干擾中、而且對方在干擾範圍內＝看不到玩家的機。未來 PvP：只有這些自動鎖定與追蹤吃干擾，玩家手動瞄準的射擊不經過這裡
+function pilotEcmHides(o, x, y, z) {
+  if (!PL.on || !PL.ecm || o.a !== 1 || o.i !== PL.j || pilotEcmLeft() <= 0) return false;
+  const j = PL.j; return Math.hypot(fP[j * 3] - x, fP[j * 3 + 1] - y, fP[j * 3 + 2] - z) <= PL.ecm.R;
+}
 // 維修光束：對準的友艦（射線碰到的第一艘）修船體與護盾；沒對準友艦就修自己
 function pilotRepair(S, W, dt, t, px, py, pz, fire) {
   if (!fire || S.en <= 0 || S.empty) { S.en = Math.min(1, S.en + dt / W.recharge); if (!fire && S.en > 0.15) S.empty = false; return; }
@@ -785,7 +833,7 @@ function pilotHurt(dmg, e, self) {
   if (PL.hp > 0) return;
   PL.hp = 0; PL.dead = true; PL.deadT = t; PL.stats.deaths++;
   const j = PL.j; FT.state[j] = 3; FT.t0[j] = t; spawnFx(fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2], PL.side, PILOT_FTR_LEN * 6, 24);   // 爆炸照機體大小（鏡頭很近，太大會蓋滿畫面）
-  PL.fire.fill(false); PL.msl.length = 0; PL.dock = null; PL.beam = null; PL.rearm = 0; PL.jump = null;
+  PL.fire.fill(false); PL.msl.length = 0; PL.dock = null; PL.beam = null; PL.rearm = 0; PL.jump = null; PL.ecm = null;
   pilotFeed(self ? '機體撞毀！' : '被擊墜！', 'bad');
   if (PL.mis && !PL.mis.done && PL.stats.deaths > PL.mis.deaths) pilotMisFail(`被擊墜 ${PL.stats.deaths} 次，超過上限 ${PL.mis.deaths} 次`);
 }
@@ -938,6 +986,7 @@ function pilotKey(e) {
   if (e.repeat) return true;
   PL.keys.add(k);
   if (pilotLive()) for (let s = 0; s < PILOT_SLOTS.length; s++) if (plCodeIs('pilot_w' + (s + 1), k)) { PL.fire[s] = true; PL.press[s] = true; }   // 武裝的鍵盤按鍵
+  if (plCodeIs('pilot_gear', k) && pilotLive() && !PL.dead && !PL.dock) PL.gearPress = true;   // 纏鬥裝備
   if (plCodeIs('pilot_jump', k) && pilotLive()) pilotJumpKey();
   else if (PL.jump && PL.jump.menu && /^(Digit|Numpad)[1-9]$/.test(k)) pilotJumpPick(+k.slice(-1) - 1);   // 躍傳選單：數字鍵選艦隊
   if (plCodeIs('pilot_stop', k)) { PL.thr = 0; pilotFeed('油門歸零', 'hint'); }
@@ -1079,6 +1128,8 @@ function pilotHud() {
   PL.feed.slice(-4).forEach((f, k) => { g.globalAlpha = Math.min(1, (4000 - (now - f.t)) / 600); pilotText(g, cx, vy + 62 + k * 19, f.msg, f.cls === 'bad' ? red : f.cls === 'kill' ? PL_AMB : f.cls === 'ok' ? PL_OK : 'rgba(230,235,245,.85)', 13); });
   g.globalAlpha = 1;
   const py2 = vy - 26;   // 降落／整補提示：武裝讀數與狀態條之間
+  const ecm = pilotEcmLeft();
+  if (ecm > 0 && !PL.dock) pilotText(g, cx, py2 - 20, `ECM　電磁干擾中 ${ecm.toFixed(1)} 秒・周圍無法鎖定你`, PL_SH, 13);
   if (PL.selfFix && U.uTime.value - PL.selfFix < 0.1 && !PL.dock) pilotText(g, cx, py2, '自我修復中…', PL_OK, 13);
   if (PL.dock) pilotText(g, cx, py2, PL.dock.ph === 'in' ? '自動降落中…' : PL.dock.ph === 'deck' ? `整補中… ${Math.round(PL.rearm * 100)}%` : '彈射起飛！', PL_OK, 15);
   else if (!PL.dead && (simTick % 20 === 0 || PL.nearC == null)) PL.nearC = pilotNearCarrier(px, py, pz, PILOT_DOCK.range) >= 0;
@@ -1266,6 +1317,16 @@ function pilotWpnQuad(g, cx, cy, m, col, red, now) {
     const bx = left ? x - bw : x;
     g.fillStyle = 'rgba(255,255,255,.14)'; g.fillRect(bx, y0 + 33, bw, 3); g.fillStyle = c2; g.fillRect(left ? x - bw * Math.max(0, Math.min(1, k2)) : bx, y0 + 33, bw * Math.max(0, Math.min(1, k2)), 3);
   });
+  // 纏鬥裝備：四格中間、準心正下方
+  const G = PL.gear;
+  if (G) {
+    const Wd = PILOT_WEAPONS[G.id], on = Wd.type === 'ecm' ? pilotEcmLeft() : 0, y = cy + oy + 6, w = 120;
+    const st = on > 0 ? `JAMMING ${on.toFixed(1)}` : G.cd > 0 ? `${Math.ceil(G.cd)}s` : 'READY', c2 = on > 0 ? PL_SH : G.cd > 0 ? PL_AMB : col;
+    const k2 = on > 0 ? on / (Wd.dur * G.enM) : G.cd > 0 ? 1 - G.cd / (Wd.cd * G.cdM) : 1;
+    g.textAlign = 'center'; plFont(g, 10, false, true); g.fillStyle = 'rgba(220,228,240,.6)'; g.fillText(`[${plKey('pilot_gear')}] ${Wd.name}`, cx, y);
+    plFont(g, 13, true, true); g.fillStyle = c2; g.fillText(st, cx, y + 16);
+    g.fillStyle = 'rgba(255,255,255,.14)'; g.fillRect(cx - w / 2, y + 27, w, 3); g.fillStyle = c2; g.fillRect(cx - w / 2, y + 27, w * Math.max(0, Math.min(1, k2)), 3);
+  }
   g.textAlign = 'left';
 }
 // 準心下方：AP（機體耐久，大字）＋護盾條＋AP 條（10 格）＋EN 條（加速能量）

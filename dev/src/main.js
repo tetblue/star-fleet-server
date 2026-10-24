@@ -2110,7 +2110,7 @@ function nearestAir(enemySide, i, gun, R, x, y, z) {
   let best = null, bd = R;
   for (let ax = cx - r; ax <= cx + r; ax++) for (let az = cz - r; az <= cz + r; az++) {
     const arr = m.get(ax * 100003 + az); if (!arr) continue;
-    for (const o of arr) { if (!airFree(o, t)) continue; const dx = o.x - x, dy = o.y - y, dz = o.z - z, d = Math.hypot(dx, dy, dz); if (d < bd && inArc(i, gun, dx, dy, dz, d)) { bd = d; best = o; } }
+    for (const o of arr) { if (!airFree(o, t) || pilotEcmHides(o, x, y, z)) continue; const dx = o.x - x, dy = o.y - y, dz = o.z - z, d = Math.hypot(dx, dy, dz); if (d < bd && inArc(i, gun, dx, dy, dz, d)) { bd = d; best = o; } }
   }
   if (best) best.d = bd;
   return best;
@@ -2124,7 +2124,7 @@ function nearestAirPri(enemySide, i, gun, R) {
   for (let ax = cx - r; ax <= cx + r; ax++) for (let az = cz - r; az <= cz + r; az++) {
     const arr = m.get(ax * 100003 + az); if (!arr) continue;
     for (const o of arr) {
-      if (!airFree(o, t)) continue;
+      if (!airFree(o, t) || pilotEcmHides(o, _a.x, _a.y, _a.z)) continue;   // 玩家開電磁干擾：防空砲鎖不到
       const dx = o.x - _a.x, dy = o.y - _a.y, dz = o.z - _a.z, d = Math.hypot(dx, dy, dz);
       if (o.a === 0) { if (d < dm) { dm = d; bm = o; } } else if (d < df) { df = d; bf = o; }
     }
@@ -3220,7 +3220,7 @@ function interceptAcquire(j, s, cx, cy, cz) {
   let bm = null, dm = R, bf = null, df = R;
   if (m.size) for (let ax = gx - r; ax <= gx + r; ax++) for (let az = gz - r; az <= gz + r; az++) {
     const arr = m.get(ax * 100003 + az); if (!arr) continue;
-    for (const o of arr) { const d = Math.hypot(o.x - cx, o.y - cy, o.z - cz); if (o.a === 0) { if (d < dm) { dm = d; bm = o; } } else if (d < df) { df = d; bf = o; } }
+    for (const o of arr) { if (pilotEcmHides(o, fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2])) continue; const d = Math.hypot(o.x - cx, o.y - cy, o.z - cz); if (o.a === 0) { if (d < dm) { dm = d; bm = o; } } else if (d < df) { df = d; bf = o; } }
   }
   const o = bm || bf;
   if (o) { FT.tgt[j] = o.i; FT.tk[j] = o.a === 0 ? 3 : 0; FT.tg2[j] = o.g || 0; } else FT.tgt[j] = -1;
@@ -3311,7 +3311,7 @@ function updateFighters(dt) {
         // 攔截機：以艦隊中心為巡邏點，攔截附近的敵方飛彈與艦載機
         const G = hq && hq.group, cx0 = G ? G.ax : px, cy0 = G ? (G.ay || 0) : py, cz0 = G ? G.az : pz;
         const g = FT.tgt[i];
-        const ok = g >= 0 && (FT.tk[i] === 3 ? misLive[g] && misGen[g] === FT.tg2[i] : FT.state[g] === 2);
+        const ok = g >= 0 && (FT.tk[i] === 3 ? misLive[g] && misGen[g] === FT.tg2[i] : FT.state[g] === 2 && !(PL.on && g === PL.j && pilotEcmHides({ a: 1, i: g }, px, py, pz)));   // 追的是玩家、玩家開了電磁干擾：跟丟
         if (!ok || FT.rt[i] <= 0) interceptAcquire(i, s, cx0, cy0, cz0);
         const g2 = FT.tgt[i];
         if (g2 >= 0 && FT.tk[i] === 3) { const u = Math.min(1, Math.max(0, (t - misT[g2 * 4]) / misT[g2 * 4 + 1])); bezCPU(g2, u, _c); tx = _c.x; ty = _c.y; tz = _c.z; hasT = true; }
@@ -4876,7 +4876,7 @@ const KEY_ACTIONS = [
   ['cam_yaw_l', '3D：向左轉', '鏡頭', 'KeyQ'], ['cam_yaw_r', '3D：向右轉', '鏡頭', 'KeyE'], ['cam_pitch_up', '3D：仰角升高', '鏡頭', 'KeyR'], ['cam_pitch_dn', '3D：仰角降低', '鏡頭', 'KeyT'],
   // 王牌飛行員（駕駛中才有效，可以和上面的鍵重複；滑鼠左右鍵固定是武裝一、二，這裡可以另外綁鍵盤）
   ['pilot_thr_up', '油門加', '駕駛', 'KeyW'], ['pilot_thr_dn', '油門減（減到 0 以下＝逆向噴射）', '駕駛', 'KeyS'], ['pilot_stop', '油門歸零（停住）', '駕駛', 'KeyX'], ['pilot_roll_l', '向左翻滾', '駕駛', 'KeyA'], ['pilot_roll_r', '向右翻滾', '駕駛', 'KeyD'],
-  ['pilot_boost', '加速', '駕駛', 'ShiftLeft'], ['pilot_w1', '武裝一（滑鼠左鍵之外）', '駕駛', ''], ['pilot_w2', '武裝二（滑鼠右鍵之外）', '駕駛', ''], ['pilot_w3', '武裝三', '駕駛', 'KeyQ'], ['pilot_w4', '武裝四', '駕駛', 'KeyE'],
+  ['pilot_boost', '加速', '駕駛', 'ShiftLeft'], ['pilot_w1', '武裝一（滑鼠左鍵之外）', '駕駛', ''], ['pilot_w2', '武裝二（滑鼠右鍵之外）', '駕駛', ''], ['pilot_w3', '武裝三', '駕駛', 'KeyQ'], ['pilot_w4', '武裝四', '駕駛', 'KeyE'], ['pilot_gear', '纏鬥裝備（例如電磁干擾）', '駕駛', 'KeyF'],
   ['pilot_target', '鎖定準心附近的敵人', '駕駛', 'KeyT'], ['pilot_view', '背後／座艙視角', '駕駛', 'KeyV'], ['pilot_land', '降落航母整補（靠近己方航母時）', '駕駛', 'KeyR'], ['pilot_jump', '小型躍傳：選擇目標艦隊（再用數字鍵 1～9 選）', '駕駛', 'KeyH'],
 ];
 const KEY_CTX = (id) => (id.startsWith('radial_') ? 'radial' : id.startsWith('pilot_') ? 'pilot' : id === 'pitch_mod' ? 'drag' : 'main');   // 不同情境的鍵可以重複（例如 Z＝齊射，右鍵按住時＝仰角）
