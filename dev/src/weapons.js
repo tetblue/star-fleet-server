@@ -38,10 +38,12 @@ function readMounts(obj) {   // 不認得的鍵、壞掉的項目都略過；沒
   if (src && typeof src === 'object') for (const k of MOUNT_KEYS) if (Array.isArray(src[k])) d[k] = src[k].filter(validMount).map(cleanMount);
   // 第 1 版的傭兵驅逐艦（m3）模型船頭方向放反了：舊存檔的掛點換到船身上同一個位置（前後、左右對調；朝向不變，仍然朝船頭）
   if (src && typeof src === 'object' && obj.v === 1 && Array.isArray(src.m3)) d.m3 = d.m3.map((m) => ({ ...m, p: [-m.p[0] || 0, m.p[1], -m.p[2] || 0] }));
+  // 第 3 版之前太空站沒有預設武器：只要打開過編輯器就會存成空的清單，這種空清單改用新的預設
+  if (src && typeof src === 'object' && obj.m && !(obj.v >= 3)) for (const k of STATION_KEYS) if (Array.isArray(src[k]) && !src[k].length && MOUNTS_DEFAULT[k]) d[k] = cloneMounts(MOUNTS_DEFAULT[k]);
   return d;
 }
 let MOUNTS = (() => { try { return readMounts(JSON.parse(STORE.getItem(MOUNT_STORE) || 'null')); } catch (e) { return readMounts(null); } })();
-function saveMounts() { try { STORE.setItem(MOUNT_STORE, JSON.stringify({ v: 2, m: MOUNTS })); } catch (e) { /* 只在本次有效 */ } }
+function saveMounts() { try { STORE.setItem(MOUNT_STORE, JSON.stringify({ v: 3, m: MOUNTS })); } catch (e) { /* 只在本次有效 */ } }
 function mountsOf(hk) { return (MOUNTS[hk] || []).map((m) => ({ ...m, hk })); }
 function mountsChanged(hk) { saveMounts(); R3.version = -1; scheduleWeaponAtlas(hk); }
 
@@ -191,7 +193,7 @@ function buildWeaponEditor() {
   $('wed-undo').onclick = weUndo; $('wed-redo').onclick = weRedo;
   $('wed-reset').onclick = () => { weSnap(); MOUNTS[WE.hk] = cloneMounts(MOUNTS_DEFAULT[WE.hk] || []); WE.sel = -1; weChanged(); };
   $('wed-resetall').onclick = () => { weSnap(); MOUNTS = readMounts(null); WE.sel = -1; weChanged(true); };
-  $('wed-io').onclick = () => { $('wed-json').value = JSON.stringify({ v: 2, m: MOUNTS }); $('wed-iomsg').textContent = ''; $('wed-modal').hidden = false; };
+  $('wed-io').onclick = () => { $('wed-json').value = JSON.stringify({ v: 3, m: MOUNTS }); $('wed-iomsg').textContent = ''; $('wed-modal').hidden = false; };
   $('wed-ioclose').onclick = () => { $('wed-modal').hidden = true; };
   $('wed-copy').onclick = () => { const t = $('wed-json'); t.select(); let ok = false; try { ok = document.execCommand('copy'); } catch (e) { /* 無法複製 */ } if (navigator.clipboard) navigator.clipboard.writeText(t.value).then(() => ($('wed-iomsg').textContent = '已複製'), () => {}); $('wed-iomsg').textContent = ok ? '已複製' : '已選取，請按 Ctrl＋C'; };
   $('wed-apply').onclick = () => {
