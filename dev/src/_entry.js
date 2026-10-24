@@ -2152,7 +2152,7 @@ function fireAir(attacker, gk, gun, sq, o, delay) {
   const rc = o.a === 1 && FT.kind[o.i] === 2, RC = FOW_RULE.recon;   // 偵察機：很難打中（命中率再打折、下限更低，被瞄準的間隔更長）
   const p = rc ? Math.min(HIT_RULE.max, Math.max(RC.min, raw * RC.acc)) : Math.min(HIT_RULE.max, Math.max(HIT_RULE.min, raw));
   const hit = rnd() < p;
-  if (o.a === 0) misShot[o.i]++; else FT.engT[o.i] = U.uTime.value + (rc ? RC.gap : AIR_RULE.fighterGap);
+  if (o.a === 0) misShot[o.i]++; else FT.engT[o.i] = U.uTime.value + (rc ? RC.gap : AIR_RULE.fighterGap) / (PL.on ? PILOT_SPEED : 1);   // 駕駛模式：艦載機慢動作，被瞄準的間隔跟著拉長
   const gs = gunStats[sq.side][gk]; gs[0]++; if (hit) gs[1]++;
   const as = airStats[sq.side]; as.shots++; if (hit) as.hits++;
   // 畫面：瞄準提前量；沒中就偏一點
@@ -2938,14 +2938,14 @@ const ftrSpriteMat = new THREE.ShaderMaterial({
 });
 const FTR_COL = [new THREE.Color(1.0, 0.55, 0.25), new THREE.Color(0.5, 0.8, 1.0), new THREE.Color(1.0, 0.4, 0.3), new THREE.Color(1.0, 0.4, 0.5), new THREE.Color(0.4, 1.0, 0.9), new THREE.Color(0.8, 0.5, 1.0), new THREE.Color(0.65, 1.0, 0.35)];
 const ftrTrailMat = new THREE.ShaderMaterial({
-  uniforms: { uTime: U.uTime, uRes: U.uRes, uCamDir: U.uCamDir, uFog: U.uFog, uFac: { value: FTR_COL } },
+  uniforms: { uTime: U.uTime, uRes: U.uRes, uCamDir: U.uCamDir, uFog: U.uFog, uFac: { value: FTR_COL }, uTrailMax: { value: 1e6 } },   // uTrailMax：尾焰最長幾單位（駕駛模式＝機身的幾倍，見 pilot.js）
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   vertexShader: FTR_GLSL + /* glsl */`
-    varying vec2 vUv; varying float vFac;
+    uniform float uTrailMax; varying vec2 vUv; varying float vFac;
     void main(){
       if (aFI.y < 1.5 || aFI.y > 2.5) { gl_Position = vec4(2.,2.,2.,1.); return; }
       float kind = floor(aFI.w * 0.5);
-      vec3 tailP = aFP - aFV * 0.16;
+      float vl = length(aFV); vec3 tailP = aFP - (vl > 1e-4 ? aFV / vl * min(vl * 0.16, uTrailMax) : vec3(0.));
       vec4 ch = projectionMatrix * viewMatrix * vec4(aFP, 1.), ct = projectionMatrix * viewMatrix * vec4(tailP, 1.);
       vec2 sh = ch.xy / ch.w * uRes * 0.5, st = ct.xy / ct.w * uRes * 0.5;
       vec2 d = sh - st; float L = length(d); vec2 dn = L > 1e-3 ? d / L : vec2(1., 0.);
@@ -3260,26 +3260,27 @@ function updateFighters(dt) {
     const kind = FT.kind[i], home = FT.carrier[i];
     const RC = FOW_RULE.recon;
     let speed = kind === 2 ? RC.speed[0] + seed * (RC.speed[1] - RC.speed[0]) : kind ? 30 + seed * 8 : CRAFT[FT.role[i]].speed[0] + seed * (CRAFT[FT.role[i]].speed[1] - CRAFT[FT.role[i]].speed[0]);
-    const fsp = PL.on ? PILOT_SPEED : 1; speed *= fsp;   // 駕駛模式：艦載機都飛慢一點（船才顯得大），續航時間照比例拉長
+    const fsp = PL.on ? PILOT_SPEED : 1; speed *= fsp;
+    const fdt = dt * fsp;   // 駕駛模式：艦載機的計時（冷卻、照射、續航、轉向）跟著速度一起放慢＝慢動作，每趟的戰果不變   // 駕駛模式：艦載機都飛慢一點（船才顯得大），續航時間照比例拉長
     let dx = vx, dy = vy, dz = vz, d = 1e9, tx = 0, ty = 0, tz = 0, hasT = false;
     if (FT.launch[i] > 0) {
-      FT.launch[i] -= dt;
+      FT.launch[i] -= fdt;
     } else if (kind === 2 && !FT.ret[i]) {
       // 偵察機：飛到指定的點（tk 0），到了在上空盤旋 loiter 秒（tk 1，區域掃描見 fowUpdate），然後返航
-      FT.fuel[i] -= dt * fsp; if (FT.fuel[i] <= 0) FT.ret[i] = 1;
+      FT.fuel[i] -= fdt; if (FT.fuel[i] <= 0) FT.ret[i] = 1;
       tx = FT.ax[i]; ty = FT.ay[i]; tz = FT.az[i];
       dx = tx - px; dy = ty - py; dz = tz - pz; d = Math.hypot(dx, dy, dz) || 1; dx /= d; dy /= d; dz /= d;
       if (FT.tk[i] === 0 && d < 40) { FT.tk[i] = 1; FT.cd[i] = RC.loiter; }
       let ex = dx, ey = dy, ez = dz;
       if (FT.tk[i] === 1) {
-        FT.cd[i] -= dt; if (FT.cd[i] <= 0) FT.ret[i] = 1;
+        FT.cd[i] -= fdt; if (FT.cd[i] <= 0) FT.ret[i] = 1;
         ex = -dz + dx * (d - 45) / 30; ey = dy * 0.5; ez = dx + dz * (d - 45) / 30; speed *= 0.6;   // 繞著那一點盤旋
       }
-      const el = Math.hypot(ex, ey, ez) || 1, k = Math.min(1, 3 * dt);
+      const el = Math.hypot(ex, ey, ez) || 1, k = Math.min(1, 3 * fdt);
       vx += (ex / el * speed - vx) * k; vy += (ey / el * speed - vy) * k; vz += (ez / el * speed - vz) * k;
     } else if (FT.ret[i] || kind === 1) {
       // 返航（續航用完／維修完）或維修機飛往受傷的船
-      FT.fuel[i] -= dt * fsp;
+      FT.fuel[i] -= fdt;
       if (!FT.ret[i]) { const g = FT.tgt[i]; if (g < 0 || !ships.alive[g] || ships.hp[g] >= maxHp(g) * 0.995 || FT.heal[i] <= 0 || FT.fuel[i] <= 0) FT.ret[i] = 1; }
       const goal = FT.ret[i] ? home : FT.tgt[i];
       if (goal < 0 || !ships.alive[goal]) { FT.state[i] = 3; FT.t0[i] = t; continue; }   // 母艦沉了：找不到地方降落
@@ -3294,16 +3295,16 @@ function updateFighters(dt) {
       if (FT.ret[i] && d < 40) speed = Math.max(14, speed * d / 40);   // 進場減速，才停得下來
       if (!FT.ret[i] && d < 9) {   // 在受傷的船旁邊盤旋、修理
         ex = -dz + dx * 0.3; ey = Math.sin(t * 2 + seed * 9) * 0.2; ez = dx + dz * 0.3; speed = 9;
-        FT.cd[i] -= dt;
+        FT.cd[i] -= fdt;
         if (FT.cd[i] <= 0) { FT.cd[i] = 0.5; const g = FT.tgt[i], amt = Math.min(FT.heal[i], FT.hr[i], maxHp(g) - ships.hp[g]); ships.hp[g] += amt; FT.heal[i] -= amt; wStats[s].healed += amt; }
       }
-      const el = Math.hypot(ex, ey, ez) || 1, k = Math.min(1, 3 * dt);
+      const el = Math.hypot(ex, ey, ez) || 1, k = Math.min(1, 3 * fdt);
       vx += (ex / el * speed - vx) * k; vy += (ey / el * speed - vy) * k; vz += (ez / el * speed - vz) * k;
     } else {
       const role = FT.role[i], C = CRAFT[role];
-      FT.fuel[i] -= dt * fsp;
+      FT.fuel[i] -= fdt;
       if (FT.fuel[i] <= 0) FT.ret[i] = 1;   // 續航用完：下一幀開始返航
-      FT.rt[i] -= dt;
+      FT.rt[i] -= fdt;
       const hq = home >= 0 && home < shipCount ? squadrons[ships.sq[home]] : null;
       let mode = 0;   // 0 追擊迴旋、1 巡邏、2 飛彈發射、3 光束照射
       if (role === 0) {
@@ -3335,7 +3336,7 @@ function updateFighters(dt) {
       if (mode === 1) { ex = dx; ey = dy * 0.6; ez = dz; speed *= 0.7; }
       else if (mode === 2 && hasT && d < C.standoff) {   // 到發射距離：橫向繞飛、發射飛彈，打完返航
         ex = -dz + dx * 0.15; ey = 0; ez = dx + dz * 0.15; speed *= 0.7;
-        FT.cd[i] -= dt;
+        FT.cd[i] -= fdt;
         if (FT.cd[i] <= 0 && FT.ammo[i] > 0) {
           FT.cd[i] = 0.7 + rnd() * 0.4;
           if (launchMissileAt(px, py, pz, s, hq, FT.tgt[i], C.dmg * ftrDmgMul(home), t, 2)) FT.ammo[i]--;
@@ -3349,21 +3350,21 @@ function updateFighters(dt) {
         const sw = Math.sin(t * 1.7 + seed * 20) * 0.8;
         ex = dx - dz * sw; ey = dy * 0.6 + Math.sin(t * 1.1 + seed * 9) * 0.35; ez = dz + dx * sw;
         if (role === 1 && d < 16) FT.brk[i] = 1.4;              // 掃射完拉起脫離
-        if (FT.brk[i] > 0) { FT.brk[i] -= dt; ex = -dx + Math.sin(seed * 50) * 0.8; ey = 0.5; ez = -dz + Math.cos(seed * 50) * 0.8; }
+        if (FT.brk[i] > 0) { FT.brk[i] -= fdt; ex = -dx + Math.sin(seed * 50) * 0.8; ey = 0.5; ez = -dz + Math.cos(seed * 50) * 0.8; }
       }
       const yref = hasT ? ty : py; if (py > yref + 45) ey -= 0.6; if (py < yref - 45) ey += 0.6;   // 3D：在目標的高度附近
       const el = Math.hypot(ex, ey, ez) || 1;
-      const k = Math.min(1, 2.6 * dt);
+      const k = Math.min(1, 2.6 * fdt);
       vx += (ex / el * speed - vx) * k; vy += (ey / el * speed - vy) * k; vz += (ez / el * speed - vz) * k;
       // 光束攻擊機：照射
       if (role === 3) {
-        FT.bcd[i] -= dt;
+        FT.bcd[i] -= fdt;
         if (FT.ch[i] > 0) {
           if (!hasT || d > C.range * 1.3) FT.ch[i] = 0;
           else {
-            FT.ch[i] -= dt;
+            FT.ch[i] -= fdt;
             if ((simTick + i) % 3 === 0) spawnBeam(px, py, pz, tx, ty, tz, t, 0.045, s, 1.1, 1.0);
-            FT.cd[i] -= dt;
+            FT.cd[i] -= fdt;
             if (FT.cd[i] <= 0) {
               FT.cd[i] = 0.25;
               const g = FT.tgt[i], fh = rnd() < strikeChance(STRIKE_RULE.lance, g, s, { x: tx, y: ty, z: tz }) && !(ROCKS.length && rockBlock(px, py, pz, tx, ty, tz) >= 0);   // 被巨大小行星擋住就打不到
@@ -3381,7 +3382,7 @@ function updateFighters(dt) {
     fP[i3] = px; fP[i3 + 1] = py; fP[i3 + 2] = pz; fV[i3] = vx; fV[i3 + 1] = vy; fV[i3 + 2] = vz;
     // 射擊：機首大致對準目標才開火
     const gunCraft = kind === 0 && FT.role[i] <= 1;   // 攔截機、攻擊機用機砲；重攻擊機在上面另外處理
-    if (gunCraft && !FT.ret[i]) FT.cd[i] -= dt;
+    if (gunCraft && !FT.ret[i]) FT.cd[i] -= fdt;
     if (gunCraft && !FT.ret[i] && hasT && FT.cd[i] <= 0 && d < (FT.role[i] === 0 ? INTERCEPT_RULE.range : 55) && (vx * dx + vy * dy + vz * dz) / sp > 0.85) {
       const IR = INTERCEPT_RULE;
       FT.cd[i] = FT.role[i] === 0 ? IR.cd[0] + rnd() * (IR.cd[1] - IR.cd[0]) : 0.35 + rnd() * 0.5;
@@ -4876,7 +4877,7 @@ const KEY_ACTIONS = [
   // 王牌飛行員（駕駛中才有效，可以和上面的鍵重複；滑鼠左右鍵固定是武裝一、二，這裡可以另外綁鍵盤）
   ['pilot_thr_up', '油門加', '駕駛', 'KeyW'], ['pilot_thr_dn', '油門減（減到 0 以下＝逆向噴射）', '駕駛', 'KeyS'], ['pilot_stop', '油門歸零（停住）', '駕駛', 'KeyX'], ['pilot_roll_l', '向左翻滾', '駕駛', 'KeyA'], ['pilot_roll_r', '向右翻滾', '駕駛', 'KeyD'],
   ['pilot_boost', '加速', '駕駛', 'ShiftLeft'], ['pilot_w1', '武裝一（滑鼠左鍵之外）', '駕駛', ''], ['pilot_w2', '武裝二（滑鼠右鍵之外）', '駕駛', ''], ['pilot_w3', '武裝三', '駕駛', 'KeyQ'], ['pilot_w4', '武裝四', '駕駛', 'KeyE'],
-  ['pilot_target', '鎖定準心附近的敵人', '駕駛', 'KeyT'], ['pilot_view', '背後／座艙視角', '駕駛', 'KeyV'], ['pilot_land', '降落航母整補（靠近己方航母時）', '駕駛', 'KeyR'],
+  ['pilot_target', '鎖定準心附近的敵人', '駕駛', 'KeyT'], ['pilot_view', '背後／座艙視角', '駕駛', 'KeyV'], ['pilot_land', '降落航母整補（靠近己方航母時）', '駕駛', 'KeyR'], ['pilot_jump', '小型躍傳：選擇目標艦隊（再用數字鍵 1～9 選）', '駕駛', 'KeyH'],
 ];
 const KEY_CTX = (id) => (id.startsWith('radial_') ? 'radial' : id.startsWith('pilot_') ? 'pilot' : id === 'pitch_mod' ? 'drag' : 'main');   // 不同情境的鍵可以重複（例如 Z＝齊射，右鍵按住時＝仰角）
 // 介面資訊預設都顯示
@@ -12027,8 +12028,12 @@ const PILOT_RESPAWN = 5;       // 被擊墜後幾秒重新出擊
 const PILOT_HITR_F = 1.3;      // 機砲對艦載機的命中半徑（比機身大一點，好打一點）
 const PILOT_ZONE = 1500;
 const PILOT_DODGE = 3.5;
-const PILOT_SPEED = 0.35;      // 駕駛模式的速度倍率（玩家、AI 艦載機、追蹤飛彈）：飛慢一點，掠過戰艦時才感覺得到它有多大
-const PILOT_REV = 0.4;         // 油門最低 −0.4：逆向噴射，最快倒退巡航速度的 40%（機首方向不變）      // 打向玩家的子彈：到達時機體離預測點超過這個距離＝閃過       // 戰區半徑：超出會被拉回
+const PILOT_SPEED = 0.1;       // 駕駛模式的速度倍率（玩家、AI 艦載機、追蹤飛彈）：飛慢一點，掠過戰艦時才感覺得到它有多大
+const PILOT_REV = 0.4;
+// 航行加速：附近（ship 內）沒有船、（ftr 內）沒有敵機時，往前的速度 ×mul（駕駛模式很慢，從母艦飛到戰場才不會花好幾分鐘）；靠近船就自動降回來
+// 自動航行：彈射起飛後（或按鍵）自動飛到戰區。從艦隊上方 alt 單位飛過去、速度 ×mul；離敵艦 stop 內、或敵機 ftr 內就交還操控
+const PILOT_JUMP = { calm: 1, hot: 3, hotT: 3, cd: 8, enemy: 140, own: 45, up: 20 };   // take：滑鼠移動累積超過幾像素＝接手
+const PILOT_TRAVEL = { mul: 8, ship: 30, look: 1.2, own: 10, ownLook: 0.3, ftr: 45 };   // 航行加速 ×mul：敵艦船身 ship＋速度×look、友艦船身 own＋速度×ownLook、敵機 ftr 內就自動降回巡航（友軍陣線可以加速穿過）         // 油門最低 −0.4：逆向噴射，最快倒退巡航速度的 40%（機首方向不變）      // 打向玩家的子彈：到達時機體離預測點超過這個距離＝閃過       // 戰區半徑：超出會被拉回
 // 機體：role＝CRAFT 的索引（防空砲依它的大小算命中）；min／cruise／max＝最低／巡航／加速速度；turn＝每秒最大轉向（弧度）
 const PILOT_FRAMES = [
   { role: 0, name: '攔截機・改', en: 'INTERCEPTOR', hp: 30, sh: 24, shR: 7, min: 22, cruise: 58, max: 96, acc: 46, turn: 2.3, roll: 4.4, boostT: 4,
@@ -12201,6 +12206,7 @@ function showPilot() {
         <tr><td>滑鼠移動</td><td>瞄準方向（機體自動轉過去）</td></tr>${PILOT_SLOTS.map((S, k) => `<tr><td>${plSlotKey(k)}</td><td>${S.name}</td></tr>`).join('')}
         <tr><td>${plKey('pilot_thr_up')}／${plKey('pilot_thr_dn')}</td><td>油門加／減（可以減到 0 停住，再按住減速鍵＝逆向噴射倒退）</td></tr><tr><td>${plKey('pilot_stop')}</td><td>油門歸零</td></tr><tr><td>${plKey('pilot_roll_l')}／${plKey('pilot_roll_r')}</td><td>翻滾</td></tr><tr><td>${plKey('pilot_boost')}</td><td>加速（有能量）</td></tr>
         <tr><td>${plKey('pilot_target')}</td><td>鎖定準心附近的敵人（機砲會顯示提前量）</td></tr><tr><td>${plKey('pilot_view')}</td><td>背後視角／座艙視角</td></tr><tr><td>滾輪</td><td>背後視角的鏡頭距離</td></tr>
+        <tr><td>${plKey('pilot_jump')}</td><td><b>小型躍傳</b>：打開選單用數字鍵選一支艦隊（敵我都可以），充能 ${PILOT_JUMP.calm} 秒（被攻擊時 ${PILOT_JUMP.hot} 秒）後跳到它的交戰距離；冷卻 ${PILOT_JUMP.cd} 秒。從母艦到戰區最快的方法</td></tr>
         <tr><td>${plKey('pilot_land')}</td><td>靠近己方航母時：自動降落、整補（彈藥、耐久補滿），再彈射起飛</td></tr><tr><td>Esc</td><td>暫停</td></tr></table>
         <div style="margin-top:6px"><button class="g-btn sm" id="pl-keys">修改按鍵…</button></div>
         <div class="g-dim" style="margin-top:6px">需要滑鼠：開戰後點一下畫面開始駕駛（滑鼠游標會被鎖定）。</div></div>
@@ -12283,12 +12289,13 @@ function pilotBegin(cfg) {
   pilotHudBuild(); document.body.classList.add('pilot-on');
   pilotSpawn(true);
   pilotMisInit(cfg.mis);
+  toast(`小型躍傳：按 ${plKey('pilot_jump')} 選一支艦隊（敵我都可以），充能 ${PILOT_JUMP.calm} 秒後直接跳到它附近；被攻擊時要 ${PILOT_JUMP.hot} 秒`, 'pilot');
   if (PL.mis) toast(`任務　${pilotMisText(PL.mis)}${PL.mis.bonus.length ? `　額外：${PL.mis.bonus.map((b) => PILOT_BONUS[b].name).join('、')}` : ''}　被擊墜超過 ${PL.mis.deaths} 次就失敗`, 'pilot');
   toast(`出擊！${PL.frame.name}：${PILOT_WEAPONS[PL.slotIds[0]].name}＋${PILOT_WEAPONS[PL.slotIds[1]].name}（點一下畫面開始駕駛・Esc 暫停）`, 'pilot');
 }
 function pilotEnd() {
   if (!PL.on) return;
-  PL.beam = null; PL.dock = null; PL.flash = null; pilotBeamFrame(); pilotHitFrame();
+  PL.beam = null; PL.dock = null; PL.jump = null; PL.flash = null; pilotBeamFrame(); pilotHitFrame(); ftrTrailMat.uniforms.uTrailMax.value = 1e6;
   PL.on = false; PL.spec = false;
   if (PL.j >= 0) FT.state[PL.j] = 0;
   if (document.pointerLockElement) document.exitPointerLock();
@@ -12330,7 +12337,8 @@ function pilotSpectate() {
 
 // 每 tick：飛行、碰撞、武器（模擬時間）
 function pilotFly(j, dt, t) {
-  if (PL.dock) { pilotDockStep(j, dt, t); PL.press.fill(false); pilotMissiles(dt, t); return; }   // 自動降落、整補、彈射
+  if (PL.dock) { pilotDockStep(j, dt, t); PL.press.fill(false); pilotMissiles(dt, t); return; }
+  if (PL.jump && PL.jump.charging) pilotJumpCharge(j, dt, t);   // 小型躍傳充能
   const Fr = PL.frame, j3 = j * 3;
   let px = fP[j3], py = fP[j3 + 1], pz = fP[j3 + 2];
   // 戰區外：瞄準方向被拉回中心
@@ -12343,7 +12351,10 @@ function pilotFly(j, dt, t) {
   let want = Fr.cruise * PL.thr;   // 0＝停在原地、負＝逆向噴射倒退
   if (boosting && PL.boost > 0) { want = Fr.max; PL.boost = Math.max(0, PL.boost - dt / Fr.boostT); } else PL.boost = Math.min(1, PL.boost + dt / (Fr.boostT * 2.5));
   PL.boosting = boosting && PL.boost > 0;
-  PL.speed += Math.max(-Fr.acc * dt * 1.5, Math.min(Fr.acc * dt, want - PL.speed));
+  if (simTick % 15 === 0) PL.travel = pilotTravelOk(fP[j3], fP[j3 + 1], fP[j3 + 2]);
+  const tk = PL.travel && want > 0 ? PILOT_TRAVEL.mul : 1; want *= tk;
+  const ak = Math.max(tk, Math.abs(PL.speed) > Fr.max * 1.05 ? PILOT_TRAVEL.mul : 1);   // 航行加速時（或剛結束時）加減速也快一點
+  PL.speed += Math.max(-Fr.acc * ak * dt * 1.5, Math.min(Fr.acc * ak * dt, want - PL.speed));
   // 轉向：機首往瞄準方向轉，每秒最多 turn（低速稍微靈活、加速時遲鈍）
   let F = PL.F, U = PL.U;
   const turn = Fr.turn * (PL.boosting ? 0.7 : 1) * (1 + 0.35 * (1 - Math.max(0, PL.thr)));
@@ -12381,6 +12392,115 @@ function pilotFly(j, dt, t) {
   for (let k = 0; k < PL.slots.length; k++) pilotWeapon(k, dt, t, px, py, pz);
   PL.press.fill(false);
   pilotMissiles(dt, t);
+}
+// ───── 小型躍傳系統 ─────
+// 按 H 打開選單（雙方所有艦隊，數字鍵 1～9 選），選好就開始充能：沒被攻擊 calm 秒；hotT 秒內被打過、或充能中被打＝hot 秒
+// 充能完成：躍傳到那支艦隊的「可交戰距離」（敵方：艦隊邊緣外 enemy、友方：own），在它上方 up、機首朝向艦隊中心；冷卻 cd 秒
+function pilotJumpList() {
+  const j = PL.j, px = fP[j * 3], pz = fP[j * 3 + 2], M = PL.mis, out = [];
+  for (const f of fleets) {
+    if (f.reserve) continue;
+    const al = fleetAlive(f); if (!al.length) continue;
+    const C = centerOf(al); let r = 0, top = -1e9;
+    for (const q of al) { r = Math.max(r, Math.hypot(q.x - C.x, q.z - C.z) + Math.max(q.W || 0, q.D || 0) / 2); top = Math.max(top, q.y || 0); }
+    const mis = !!M && (M.tg.some((i) => i >= 0 && ships.alive[i] && al.includes(squadrons[ships.sq[i]])) || (M.esc >= 0 && ships.alive[M.esc] && al.includes(squadrons[ships.sq[M.esc]])));
+    out.push({ f, enemy: f.side !== PL.side, C, r, top, mis, d: Math.hypot(C.x - px, C.z - pz) - r });
+  }
+  out.sort((a, b) => (b.enemy - a.enemy) || (b.mis - a.mis) || a.d - b.d);   // 敵方在前、任務目標優先、近的優先
+  return out.slice(0, 9);
+}
+function pilotJumpKey() {
+  const J = PL.jump;
+  if (J && J.charging) { PL.jump = null; pilotFeed('取消躍傳', 'hint'); return; }
+  if (J && J.menu) { PL.jump = null; return; }
+  if (PL.dead || PL.dock) return;
+  const t = U.uTime.value; if (t < (PL.jumpCd || 0)) { pilotFeed(`躍傳冷卻中（${Math.ceil(PL.jumpCd - t)} 秒）`, 'hint'); return; }
+  PL.jump = { menu: true, list: pilotJumpList() };
+}
+function pilotJumpPick(k) {
+  const it = PL.jump && PL.jump.list[k]; if (!it) return;
+  const t = U.uTime.value, hot = t - PL.shT < PILOT_JUMP.hotT;
+  PL.jump = { charging: true, it, p: 0, hot };
+  pilotFeed(`躍傳充能：${it.enemy ? '敵' : '我'}・${it.f.name}（${hot ? PILOT_JUMP.hot : PILOT_JUMP.calm} 秒）`, 'ok');
+}
+// 每 tick：累積充能；被打就改成 hot 秒（進度保留）
+function pilotJumpCharge(j, dt, t) {
+  const J = PL.jump; if (t - PL.shT < 0.05) J.hot = true;
+  J.p += dt;
+  if (J.p < (J.hot ? PILOT_JUMP.hot : PILOT_JUMP.calm)) return;
+  const al = fleetAlive(J.it.f); if (!al.length) { PL.jump = null; pilotFeed('目標艦隊已經不在了', 'hint'); return; }
+  // 目的地：從我這邊看過去，艦隊邊緣外 dist、艦隊上方 up；機首朝艦隊中心
+  const C = centerOf(al); let r = 0, top = -1e9;
+  for (const q of al) { r = Math.max(r, Math.hypot(q.x - C.x, q.z - C.z) + Math.max(q.W || 0, q.D || 0) / 2); top = Math.max(top, q.y || 0); }
+  const j3 = j * 3, x0 = fP[j3], y0 = fP[j3 + 1], z0 = fP[j3 + 2];
+  let dx = x0 - C.x, dz = z0 - C.z; const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
+  const R = r + (J.it.enemy ? PILOT_JUMP.enemy : PILOT_JUMP.own), ty = Math.min(ALT_MAX, top + PILOT_JUMP.up);
+  const nx = C.x + dx * R, nz = C.z + dz * R;
+  const F = v3.norm([C.x - nx, (C.y || 0) - ty, C.z - nz]);
+  spawnBeam(x0, y0, z0, x0 + F[0] * 30, y0 + F[1] * 30, z0 + F[2] * 30, t, 0.25, PL.side, 2.2, 1.0, shipFac(PL.home >= 0 ? PL.home : 0));   // 出發：往前一道光
+  spawnFx(x0, y0, z0, 2 + fxFac(PL.side) * 8, 1.2, 30);
+  fP[j3] = nx; fP[j3 + 1] = ty; fP[j3 + 2] = nz;
+  PL.F = F; PL.U = Math.abs(F[1]) < 0.96 ? v3.norm([-F[0] * F[1], 1 - F[1] * F[1], -F[2] * F[1]]) : PL.U; PL.yaw = Math.atan2(F[0], F[2]); PL.pitch = Math.asin(Math.max(-1, Math.min(1, F[1])));
+  fV[j3] = F[0] * PL.speed; fV[j3 + 1] = F[1] * PL.speed; fV[j3 + 2] = F[2] * PL.speed;
+  spawnBeam(nx - F[0] * 30, ty - F[1] * 30, nz - F[2] * 30, nx, ty, nz, t, 0.25, PL.side, 2.2, 1.0, shipFac(PL.home >= 0 ? PL.home : 0));   // 抵達：從後方拉進來
+  spawnFx(nx, ty, nz, 2 + fxFac(PL.side) * 8, 1.2, 30);
+  PL.msl.length = 0; PL.travel = false; PL.inv = Math.max(PL.inv, t + 0.8); PL.jumpCd = t + PILOT_JUMP.cd; PL.jumpFx = performance.now(); PL.jump = null;
+  pilotFeed(`躍傳完成：${J.it.enemy ? '敵' : '我'}・${J.it.f.name}`, J.it.enemy ? 'kill' : 'ok');
+}
+function pilotJumpHud(g, W, H, cx, cy, m, now, sw) {
+  const J = PL.jump;
+  if (PL.jumpFx && now - PL.jumpFx < 450) { const k = 1 - (now - PL.jumpFx) / 450; g.fillStyle = `rgba(200,225,255,${0.55 * k})`; g.fillRect(0, 0, W, H); }   // 躍傳的白光
+  if (PL.dead) return;
+  if (!J) {
+    // 平常：準心下方顯示躍傳狀態；離敵艦很遠時改成醒目的閃爍提示
+    const t = U.uTime.value, y = cy + m * 0.2 + 44; g.textAlign = 'center';
+    if (PL.jumpCd > t) { plFont(g, 11, true); g.fillStyle = 'rgba(200,210,225,.6)'; g.fillText(`小型躍傳 冷卻 ${Math.ceil(PL.jumpCd - t)} 秒`, cx, y); }
+    else if (!PL.dock) {
+      if (simTick % 30 === 0 || PL.farE == null) { const j = PL.j; PL.farE = !squadrons.some((q) => q.side !== PL.side && q.alive > 0 && !q.bg && !q.hidden && Math.hypot(q.x - fP[j * 3], q.z - fP[j * 3 + 2]) - Math.max(q.W || 0, q.D || 0) / 2 < 220); }
+      if (PL.farE) {   // 離戰區很遠：有底框的閃爍提示
+        const a = 0.8 + 0.2 * Math.sin(now / 220), txt = `按 ${plKey('pilot_jump')}　小型躍傳：直接跳到戰區附近`; plFont(g, 15, true); const tw = g.measureText(txt).width + 28;
+        g.fillStyle = 'rgba(6,14,26,.82)'; g.fillRect(cx - tw / 2, y - 14, tw, 28); g.strokeStyle = `rgba(143,216,255,${a})`; g.lineWidth = 1.5; g.strokeRect(cx - tw / 2, y - 14, tw, 28);
+        g.fillStyle = `rgba(170,226,255,${a})`; g.fillText(txt, cx, y + 1);
+      }
+      else { plFont(g, 11, true); g.fillStyle = 'rgba(143,216,255,.7)'; g.fillText(`小型躍傳就緒 [${plKey('pilot_jump')}]`, cx, y); }
+    }
+    g.textAlign = 'left'; return;
+  }
+  if (J.menu) {
+    // 畫面中央的選單＋每支艦隊在戰場上的編號標籤
+    J.list.forEach((it, k) => {
+      const al = fleetAlive(it.f); if (!al.length) return; const C = centerOf(al), p = sw(C.x, it.top + 12, C.z);
+      if (!p) return; const c = it.enemy ? '#ff7a6a' : '#8fd8ff';
+      g.fillStyle = 'rgba(6,12,22,.8)'; g.strokeStyle = c; g.lineWidth = 2; g.beginPath(); g.arc(p[0], p[1], 13, 0, Math.PI * 2); g.fill(); g.stroke(); g.lineWidth = 1.5;
+      g.textAlign = 'center'; plFont(g, 14, true); g.fillStyle = c; g.fillText(String(k + 1), p[0], p[1] + 1);
+      plFont(g, 11); g.fillText(it.f.name, p[0], p[1] + 24); g.textAlign = 'left';
+    });
+    const lh = 26, wv = Math.min(W - 40, 440), x = cx - wv / 2 + 18, hh = J.list.length * lh + 64, y0 = Math.max(cy - hh / 2 + 34, cy - m * 0.02), pulse = 0.55 + 0.45 * Math.sin(now / 180);
+    g.fillStyle = 'rgba(6,12,22,.86)'; g.fillRect(cx - wv / 2, y0 - 34, wv, hh);
+    g.strokeStyle = `rgba(143,216,255,${pulse})`; g.lineWidth = 2; g.strokeRect(cx - wv / 2, y0 - 34, wv, hh); g.lineWidth = 1.5;
+    g.textAlign = 'left'; plFont(g, 16, true); g.fillStyle = '#8fd8ff'; g.fillText('小型躍傳　選擇目標艦隊', x, y0 - 14);
+    J.list.forEach((it, k) => { const y = y0 + 14 + k * lh; plFont(g, 15, true); g.fillStyle = it.enemy ? '#ff7a6a' : '#8fd8ff';
+      g.fillText(`[${k + 1}]  ${it.enemy ? '▼ 敵' : '▲ 我'}・${it.f.name}${it.mis ? '　★任務' : ''}`, x, y);
+      g.textAlign = 'right'; plFont(g, 13); g.fillStyle = 'rgba(220,228,240,.75)'; g.fillText(it.d > 0 ? `距離 ${Math.round(it.d)}` : '附近', cx + wv / 2 - 18, y); g.textAlign = 'left'; });
+    plFont(g, 12); g.fillStyle = 'rgba(200,210,225,.7)'; g.fillText(`數字鍵選擇・${plKey('pilot_jump')} 關閉｜充能：沒被攻擊 ${PILOT_JUMP.calm} 秒、受攻擊 ${PILOT_JUMP.hot} 秒・冷卻 ${PILOT_JUMP.cd} 秒`, x, y0 + 14 + J.list.length * lh + 2);
+    return;
+  }
+  // 充能中：準心下方的進度環
+  const need = J.hot ? PILOT_JUMP.hot : PILOT_JUMP.calm, k = Math.min(1, J.p / need), r = m * 0.07;
+  g.lineWidth = 4; g.strokeStyle = 'rgba(255,255,255,.15)'; g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.stroke();
+  g.strokeStyle = J.hot ? '#ffb060' : '#8fd8ff'; g.beginPath(); g.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * k); g.stroke(); g.lineWidth = 1.5;
+  pilotText(g, cx, cy + r + 18, `躍傳充能 ${(J.p).toFixed(1)}／${need} 秒${J.hot ? '（受攻擊）' : ''}　→ ${J.it.enemy ? '敵' : '我'}・${J.it.f.name}`, J.hot ? '#ffb060' : '#8fd8ff', 13);
+}
+function pilotTravelOk(px, py, pz) {
+  // 看最近的「船身」（不是整支分艦隊的範圍）：越快越早開始煞車；只有敵機會打斷，友軍艦載機不算
+  const T = PILOT_TRAVEL, v = Math.max(0, PL.speed), sc = shipGeo.getAttribute('aScale').array;
+  for (const sq of squadrons) {
+    const R = sq.side === PL.side ? T.own + v * T.ownLook : T.ship + v * T.look;
+    if (sq.alive <= 0 || sq.bg || sq.hidden || Math.hypot(sq.x - px, (sq.y || 0) - py, sq.z - pz) - Math.max(sq.W || 0, sq.D || 0) / 2 > R) continue;
+    for (const i of sq.list) { if (!ships.alive[i]) continue; shipWorldCPU(i, _pa); if (Math.hypot(_pa.x - px, _pa.y - py, _pa.z - pz) - sc[i] * TYPE_LEN3 * 0.5 < R) return false; }
+  }
+  for (const f of aliveF[1 - PL.side]) if (Math.abs(fP[f * 3] - px) < T.ftr && Math.abs(fP[f * 3 + 2] - pz) < T.ftr && Math.hypot(fP[f * 3] - px, fP[f * 3 + 1] - py, fP[f * 3 + 2] - pz) < T.ftr) return false;
+  return true;
 }
 function pilotBump(t, dmg) { if (t - (PL.bumpT || -9) < 0.5) return; PL.bumpT = t; PL.speed *= 0.5; pilotHurt(dmg, null, true); }
 // 船體碰撞：把這一 tick 的移動線段換到船的模型座標，對船體網格（第 1 級細節）打射線；碰到就停在船身外、減速、扣一點耐久
@@ -12431,7 +12551,7 @@ function pilotShipBump(t, px, py, pz, set) {
   }
 }
 // ───── 降落整補：自動進場降落在航母甲板 → 整補 → 彈射起飛（出擊、重新出擊也從甲板彈射） ─────
-const PILOT_DOCK = { range: 90, inT: 2.6, deckT: 3, outT: 1.8 };
+const PILOT_DOCK = { range: 45, inT: 2.6, inMax: 10, deckT: 3, outT: 2.4 };   // 進場時間依距離（最少 inT、最多 inMax 秒）
 const PILOT_DECK = {};
 // 甲板在船體模型上的位置（船長的倍數）：沿中線往下打射線，取偏低的那段高度（避開艦橋塔）
 function pilotDeck(hk) {
@@ -12465,7 +12585,8 @@ function pilotLandReq() {
   if (PL.dead || PL.dock) return;
   const j = PL.j, c = pilotNearCarrier(fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2], PILOT_DOCK.range);
   if (c < 0) { pilotFeed(`附近沒有己方航母（${PILOT_DOCK.range} 以內才能降落）`, 'hint'); return; }
-  PL.dock = { ph: 'in', t: 0, c, S0: [fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2]], U0: PL.U.slice(), v0: PL.speed };
+  shipWorldCPU(c, _pa); const dist = Math.hypot(_pa.x - fP[j * 3], _pa.y - fP[j * 3 + 1], _pa.z - fP[j * 3 + 2]);
+  PL.dock = { ph: 'in', t: 0, c, S0: [fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2]], U0: PL.U.slice(), v0: PL.speed, T: Math.max(PILOT_DOCK.inT, Math.min(PILOT_DOCK.inMax, dist / (PL.frame.cruise * 1.4))) };
   PL.fire.fill(false); PL.beam = null;
   pilotFeed('進場降落（自動駕駛）', 'ok');
 }
@@ -12477,7 +12598,7 @@ function pilotDockStep(j, dt, t) {
   const K = pilotDockPose(c);
   let P, F, U = K.U, sp = 0;
   if (d.ph === 'in') {
-    const u = Math.min(1, d.t / PILOT_DOCK.inT), e = u * u * (3 - 2 * u);
+    const u = Math.min(1, d.t / (d.T || PILOT_DOCK.inT)), e = u * u * (3 - 2 * u);
     const A = [K.P[0] - K.F[0] * K.L * 2.4 + K.U[0] * K.L * 0.5, K.P[1] - K.F[1] * K.L * 2.4 + K.U[1] * K.L * 0.5, K.P[2] - K.F[2] * K.L * 2.4 + K.U[2] * K.L * 0.5];   // 從船尾後上方進場
     P = [0, 1, 2].map((q) => (1 - e) * (1 - e) * d.S0[q] + 2 * (1 - e) * e * A[q] + e * e * K.P[q]);
     const T = v3.norm([0, 1, 2].map((q) => 2 * (1 - e) * (A[q] - d.S0[q]) + 2 * e * (K.P[q] - A[q])));
@@ -12683,7 +12804,7 @@ function pilotHurt(dmg, e, self) {
   if (PL.hp > 0) return;
   PL.hp = 0; PL.dead = true; PL.deadT = t; PL.stats.deaths++;
   const j = PL.j; FT.state[j] = 3; FT.t0[j] = t; spawnFx(fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2], PL.side, 3.2, 24);
-  PL.fire.fill(false); PL.msl.length = 0; PL.dock = null; PL.beam = null; PL.rearm = 0;
+  PL.fire.fill(false); PL.msl.length = 0; PL.dock = null; PL.beam = null; PL.rearm = 0; PL.jump = null;
   pilotFeed(self ? '機體撞毀！' : '被擊墜！', 'bad');
   if (PL.mis && !PL.mis.done && PL.stats.deaths > PL.mis.deaths) pilotMisFail(`被擊墜 ${PL.stats.deaths} 次，超過上限 ${PL.mis.deaths} 次`);
 }
@@ -12702,6 +12823,11 @@ function pilotCredit(kind, i, dmg, kill, wid) {
   if (PILOT_WEAPONS[wid]) S.wxp[wid] = (S.wxp[wid] || 0) + (kind === 'ship' ? dmg * PILOT_PROF_XP.dmg + (kill ? PILOT_PROF_XP.ship : 0) : kind === 'heal' ? dmg * PILOT_PROF_XP.heal : PILOT_PROF_XP[kind] || 0);   // 武器熟練度
   PL.hitT = U.uTime.value;
   S.hits++;
+  // 準心旁的 HIT／DESTROYED（擊墜、擊沉的大字不會馬上被 HIT 蓋掉）
+  const pop = (txt, sub) => { const n = performance.now(); if (!sub && PL.pop && PL.pop.big && n - PL.pop.t < 900) return; PL.pop = { t: n, txt, sub, big: !!sub }; };
+  if (kind === 'hitF' || (kind === 'ship' && !kill)) pop('HIT');
+  else if (kind === 'ftr') pop('DESTROYED', '擊墜');
+  else if (kind === 'ship' && kill) pop('DESTROYED', `擊沉 ${SHIP_TYPES[ships.type[i]].name}`);
   if (kind === 'hitF') return;
   if (kind === 'heal') { S.heal += dmg; S.merit += dmg * PILOT_MERIT.heal; return; }
   if (kind === 'ftr') { S.kf++; S.merit += PILOT_MERIT.ftr; pilotFeed(`擊墜敵機（第 ${S.kf} 架）`, 'kill'); if (PL.mis && PL.mis.type === 'kills') PL.mis.prog++; return; }
@@ -12831,6 +12957,8 @@ function pilotKey(e) {
   if (e.repeat) return true;
   PL.keys.add(k);
   if (pilotLive()) for (let s = 0; s < PILOT_SLOTS.length; s++) if (plCodeIs('pilot_w' + (s + 1), k)) { PL.fire[s] = true; PL.press[s] = true; }   // 武裝的鍵盤按鍵
+  if (plCodeIs('pilot_jump', k) && pilotLive()) pilotJumpKey();
+  else if (PL.jump && PL.jump.menu && /^(Digit|Numpad)[1-9]$/.test(k)) pilotJumpPick(+k.slice(-1) - 1);   // 躍傳選單：數字鍵選艦隊
   if (plCodeIs('pilot_stop', k)) { PL.thr = 0; pilotFeed('油門歸零', 'hint'); }
   if (plCodeIs('pilot_view', k)) { PL.cock = !PL.cock; pilotFeed(PL.cock ? '座艙視角' : '背後視角', 'hint'); }
   if (plCodeIs('pilot_target', k)) pilotPickTarget();
@@ -12906,101 +13034,335 @@ function pilotFrame(dt) {
   // 油門（每幀依按鍵調整）
   if (!paused && !PL.spec) { if (plHeld('pilot_thr_up')) PL.thr = Math.min(1, PL.thr + dt * 0.8); if (plHeld('pilot_thr_dn')) { if (!PL.thrHold) { const z = PL.thr > 0; PL.thr = Math.max(-PILOT_REV, PL.thr - dt * 0.8); if (z && PL.thr <= 0) { PL.thr = 0; PL.thrHold = true; } } } else PL.thrHold = false; }   // 減到 0 先停一下，放開再按才會逆向噴射
   if (PL.dead && !PL.spec && !GAME.result && U.uTime.value - PL.deadT > PL.respawn) pilotSpawn(false);
+  ftrTrailMat.uniforms.uTrailMax.value = PL.spec ? 1e6 : PILOT_FTR_LEN * 5;   // 駕駛中：尾焰最長約機身 5 倍（原本是 0.16 秒的飛行距離，會比艦載機大好幾十倍）
   if (!PL.spec) updateCamera();
   pilotMisTick();
   pilotBeamFrame();
   pilotHitFrame();
   pilotHud();
 }
+// 儀表風格參考《機戰傭兵6》（準心四角的武裝讀數、準心下方的 AP／護盾／EN 條、上方目標資訊條）
+// 與《空戰奇兵7》（俯仰梯、左速度／右高度帶、上方航向帶、目標框與鎖定菱形、WARNING 警告、HIT／DESTROYED 提示）
+const PL_MONO = 'Consolas, "Roboto Mono", "Noto Sans TC", monospace';
+const PL_AMB = '#ffd36a', PL_SH = '#7cc4ff', PL_OK = '#8fe39a';
+function plFont(g, sz, bold, mono) { g.font = `${bold ? '600 ' : ''}${sz}px ${mono ? PL_MONO : '"Noto Sans TC", sans-serif'}`; }
 function pilotHud() {
   const c = PL.el, g = PL.ctx, dpr = Math.min(2, devicePixelRatio || 1), W = innerWidth, H = innerHeight;
   if (c.width !== Math.round(W * dpr) || c.height !== Math.round(H * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }
   g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
   if (PL.spec) { pilotText(g, W / 2, 110, '己方航母全滅：觀戰中', '#ff9a7a', 16); return; }
-  const fac = SIDE_FAC[PL.side], col = FACTION[fac].ui, red = '#ff6a5a', t = U.uTime.value, now = performance.now();
+  const fac = SIDE_FAC[PL.side], col = FACTION[fac].ui, ca = (a) => facRGBA(fac, a), red = '#ff5a4a', t = U.uTime.value, now = performance.now();
   const sw = (x, y, z) => { _pp.set(x, y, z).project(camera); return _pp.z < 1 && _pp.z > -1 ? [(_pp.x * 0.5 + 0.5) * VW, (-_pp.y * 0.5 + 0.5) * VH] : null; };
-  const j = PL.j, px = fP[j * 3], py = fP[j * 3 + 1], pz = fP[j * 3 + 2], A = pilotAim(), F = PL.F, es = 1 - PL.side;
-  g.lineWidth = 1.5; g.font = '12px "Noto Sans TC", sans-serif'; g.textBaseline = 'middle';
+  const j = PL.j, px = fP[j * 3], py = fP[j * 3 + 1], pz = fP[j * 3 + 2], A = pilotAim(), es = 1 - PL.side;
+  const m = Math.min(W, H), cx = W / 2, cy = H / 2, top = 108, vy = cy + m * 0.2;
+  g.lineWidth = 1.5; plFont(g, 12); g.textBaseline = 'middle'; g.textAlign = 'left';
   if (PL.cock && !PL.dead) pilotCockpit(g, W, H, col);
+  const thr = PL.dead ? [] : pilotThreats(px, py, pz);
+  pilotMarkers(g, sw, px, py, pz, es, red, thr, now);
+  const tgtD = pilotTgtHud(g, sw, px, py, pz, red, now);
+  pilotMisHud(g, W, H, sw, px, py, pz);
   if (!PL.dead) {
-    // 準心（瞄準方向）、機首（武器實際指向）
-    const a = sw(px + A[0] * 400, py + A[1] * 400, pz + A[2] * 400);
-    if (a) { g.strokeStyle = 'rgba(255,255,255,.85)'; g.beginPath(); g.arc(a[0], a[1], 9, 0, Math.PI * 2); g.stroke(); }
-    const n = sw(px + F[0] * 160, py + F[1] * 160, pz + F[2] * 160);
-    if (n) { g.strokeStyle = col; g.beginPath(); g.moveTo(n[0] - 12, n[1]); g.lineTo(n[0] - 4, n[1]); g.moveTo(n[0] + 4, n[1]); g.lineTo(n[0] + 12, n[1]); g.moveTo(n[0], n[1] - 12); g.lineTo(n[0], n[1] - 4); g.moveTo(n[0], n[1] + 4); g.lineTo(n[0], n[1] + 12); g.stroke(); }
-    if (t - PL.hitT < 0.15 && n) { g.strokeStyle = '#fff'; g.lineWidth = 2; g.beginPath(); g.moveTo(n[0] - 16, n[1] - 16); g.lineTo(n[0] - 9, n[1] - 9); g.moveTo(n[0] + 16, n[1] - 16); g.lineTo(n[0] + 9, n[1] - 9); g.moveTo(n[0] - 16, n[1] + 16); g.lineTo(n[0] - 9, n[1] + 9); g.moveTo(n[0] + 16, n[1] + 16); g.lineTo(n[0] + 9, n[1] + 9); g.stroke(); g.lineWidth = 1.5; }
+    g.save(); g.shadowColor = 'rgba(0,0,0,.8)'; g.shadowBlur = 3;
+    pilotLadder(g, sw, px, py, pz, ca, cx, cy, m);
+    pilotReticle(g, sw, px, py, pz, A, col, t);
+    pilotTapes(g, cx, cy, m, col, ca, py, tgtD);
+    pilotWpnQuad(g, cx, cy, m, col, red, now);
+    pilotVitals(g, cx, vy, m, ca, red, now);
+    pilotCompass(g, cx, top, m, col, ca, px, pz);
+    g.restore();
   }
-  // 敵方艦載機（近的）：小菱形；敵艦（近的）：小方框
-  g.strokeStyle = red;
+  pilotTgtInfo(g, cx, top + 44);
+  pilotWarn(g, cx, top + (PL.tgt ? 96 : 52), thr, red, now);
+  pilotRadar(g, pilotHudLayout(W, H), px, py, pz, col, red, thr, now);
+  pilotScore(g, W, col); pilotKeysHint(g, H);
+  pilotJumpHud(g, W, H, cx, cy, m, now, sw);   // 躍傳選單畫在最上層
+  // HIT／DESTROYED：準心右上
+  if (PL.pop && !PL.dead) {
+    const P = PL.pop, age = Math.max(0, now - P.t), life = P.big ? 1500 : 380;
+    if (age < life) {
+      const k = Math.min(1, age / 120); g.globalAlpha = Math.min(1, (life - age) / 300);
+      const x = cx + m * 0.06, y = cy - m * 0.055 - (P.big ? 0 : age * 0.02);
+      g.textAlign = 'left'; plFont(g, P.big ? Math.round(18 + 8 * (1 - k)) : 12, true, true);
+      g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,.6)'; g.strokeText(P.txt, x, y); g.fillStyle = P.big ? PL_AMB : '#fff'; g.fillText(P.txt, x, y);
+      if (P.sub) { plFont(g, 12, true); g.strokeText(P.sub, x, y + 20); g.fillText(P.sub, x, y + 20); }
+      g.globalAlpha = 1; g.lineWidth = 1.5;
+    }
+  }
+  // 無線電訊息：準心下方的狀態條底下（最多 4 則）
+  PL.feed = PL.feed.filter((f) => now - f.t < 4000);
+  PL.feed.slice(-4).forEach((f, k) => { g.globalAlpha = Math.min(1, (4000 - (now - f.t)) / 600); pilotText(g, cx, vy + 62 + k * 19, f.msg, f.cls === 'bad' ? red : f.cls === 'kill' ? PL_AMB : f.cls === 'ok' ? PL_OK : 'rgba(230,235,245,.85)', 13); });
+  g.globalAlpha = 1;
+  const py2 = vy - 26;   // 降落／整補提示：武裝讀數與狀態條之間
+  if (PL.selfFix && U.uTime.value - PL.selfFix < 0.1 && !PL.dock) pilotText(g, cx, py2, '自我修復中…', PL_OK, 13);
+  if (PL.dock) pilotText(g, cx, py2, PL.dock.ph === 'in' ? '自動降落中…' : PL.dock.ph === 'deck' ? `整補中… ${Math.round(PL.rearm * 100)}%` : '彈射起飛！', PL_OK, 15);
+  else if (!PL.dead && (simTick % 20 === 0 || PL.nearC == null)) PL.nearC = pilotNearCarrier(px, py, pz, PILOT_DOCK.range) >= 0;
+  if (!PL.dock && !PL.dead && PL.nearC) pilotText(g, cx, py2, `按 ${plKey('pilot_land')} 降落整補`, 'rgba(143,227,154,.9)', 13);
+  if (t - PL.hurtT < 0.35) { const k = 1 - (t - PL.hurtT) / 0.35, c2 = PL.hurtSh ? '80,160,255' : '255,40,30', gr = g.createRadialGradient(cx, cy, m * 0.35, cx, cy, Math.max(W, H) * 0.7); gr.addColorStop(0, `rgba(${c2},0)`); gr.addColorStop(1, `rgba(${c2},${(PL.hurtSh ? 0.25 : 0.45) * k})`); g.fillStyle = gr; g.fillRect(0, 0, W, H); }
+  // 受擊方向：準心外圍的弧，指向打來的方向（紅＝打到機體、藍＝護盾擋下），1.2 秒淡出
+  PL.hits = PL.hits.filter((h) => now - h.t < 1200);
+  for (const h of PL.hits) {
+    _pp.set(h.x, h.y, h.z).applyMatrix4(camera.matrixWorldInverse);
+    const a = Math.atan2(-_pp.y, _pp.x), al = 1 - (now - h.t) / 1200, r = m * 0.16;
+    g.strokeStyle = h.hull ? `rgba(255,74,58,${al})` : `rgba(124,196,255,${al * 0.85})`; g.lineWidth = h.hull ? 6 : 4;
+    g.beginPath(); g.arc(cx, cy, r, a - 0.32, a + 0.32); g.stroke();
+  }
+  g.lineWidth = 1.5;
+  if (PL.dead) { pilotText(g, cx, H * 0.42, '被擊墜', red, 26); pilotText(g, cx, H * 0.42 + 32, `${Math.max(0, Math.ceil(PL.respawn - (t - PL.deadT)))} 秒後從母艦重新出擊`, 'rgba(230,235,245,.9)', 14); }
+  if (!PL.locked && !paused && !GAME.result) pilotText(g, cx, H * 0.55, '點一下畫面開始駕駛（滑鼠游標會被鎖定・Esc 暫停）', '#fff', 15);
+}
+// 咬尾的敵機（AI 的空中目標是玩家、在機尾後方 240 以內）：畫面上紅框閃爍、雷達放大、上方 WARNING
+function pilotThreats(px, py, pz) {
+  const out = [], F = PL.F;
+  for (const f of aliveF[1 - PL.side]) {
+    if (FT.tk[f] !== 0 || FT.tgt[f] !== PL.j) continue;
+    const dx = fP[f * 3] - px, dy = fP[f * 3 + 1] - py, dz = fP[f * 3 + 2] - pz, d = Math.hypot(dx, dy, dz);
+    if (d < 240 && (dx * F[0] + dy * F[1] + dz * F[2]) < -0.25 * d) out.push(f);
+  }
+  return out;
+}
+// 敵機：小方框（近的標距離、咬尾的紅色閃爍＋角括號）；敵艦：近的小方框、遠的分艦隊標距離；母艦：綠色菱形
+function pilotMarkers(g, sw, px, py, pz, es, red, thr, now) {
+  const blink = (now / 160 | 0) % 2 === 0;
+  plFont(g, 10, false, true); g.textAlign = 'left';
   let nF = 0;
   for (const f of aliveF[es]) {
     if (nF > 60) break;
     const x = fP[f * 3], y = fP[f * 3 + 1], z = fP[f * 3 + 2], d = Math.hypot(x - px, y - py, z - pz); if (d > 700) continue;
     const s = sw(x, y, z); if (!s) continue; nF++;
-    const r = d < 150 ? 6 : 4; g.beginPath(); g.moveTo(s[0], s[1] - r); g.lineTo(s[0] + r, s[1]); g.lineTo(s[0], s[1] + r); g.lineTo(s[0] - r, s[1]); g.closePath(); g.stroke();
+    const th = thr.includes(f), r = d < 150 ? 6 : 4;
+    g.strokeStyle = th ? red : 'rgba(255,110,95,.8)'; g.strokeRect(s[0] - r, s[1] - r, r * 2, r * 2);
+    if (th && blink) { const q = r + 6, e = 4; g.beginPath(); for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { g.moveTo(s[0] + sx * q, s[1] + sy * (q - e)); g.lineTo(s[0] + sx * q, s[1] + sy * q); g.lineTo(s[0] + sx * (q - e), s[1] + sy * q); } g.stroke(); }
+    if (d < 320 || th) { g.fillStyle = th ? red : 'rgba(255,150,130,.8)'; g.fillText(String(Math.round(d)), s[0] + r + 4, s[1] + r); }
   }
   const labs = [];
   for (const sq of squadrons) {
     if (sq.alive <= 0 || sq.bg || sq.hidden || sq.side === PL.side) continue;
     const d = Math.hypot(sq.x - px, (sq.y || 0) - py, sq.z - pz), s = sw(sq.x, sq.y || 0, sq.z); if (!s) continue;
     if (d > 160) { labs.push([d, s]); continue; }
-    g.strokeStyle = 'rgba(255,106,90,.5)';   // 近的敵艦：小方框（每支分艦隊最多 12 艘、只框 120 內的）
+    g.strokeStyle = 'rgba(255,106,90,.55)';   // 近的敵艦：小方框（每支分艦隊最多 12 艘、只框 120 內的）
     let nb = 0; for (const i of sq.list) { if (nb >= 12) break; if (!ships.alive[i]) continue; shipWorldCPU(i, _pa); if (Math.hypot(_pa.x - px, _pa.y - py, _pa.z - pz) > 120) continue; const p2 = sw(_pa.x, _pa.y, _pa.z); if (!p2) continue; nb++; g.strokeRect(p2[0] - 5, p2[1] - 5, 10, 10); }
   }
-  labs.sort((a, b) => a[0] - b[0]); g.fillStyle = 'rgba(255,106,90,.8)';   // 遠的敵方分艦隊：只標最近的 6 支（距離）
-  for (const [d, s] of labs.slice(0, 6)) g.fillText(`▼ ${Math.round(d)}`, s[0] + 6, s[1]);
-  if (PL.home >= 0 && ships.alive[PL.home]) { shipWorldCPU(PL.home, _pa); const s = sw(_pa.x, _pa.y, _pa.z); if (s) { g.strokeStyle = '#8fe39a'; g.strokeRect(s[0] - 7, s[1] - 7, 14, 14); g.fillStyle = '#8fe39a'; g.fillText(`母艦 ${Math.round(Math.hypot(_pa.x - px, _pa.y - py, _pa.z - pz))}`, s[0] + 10, s[1]); } }
-  // 指定目標：方框＋距離＋提前量（直射武器）
+  labs.sort((a, b) => a[0] - b[0]);   // 遠的敵方分艦隊：只標最近的 6 支（距離）
+  for (const [d, s] of labs.slice(0, 6)) { g.strokeStyle = 'rgba(255,106,90,.7)'; g.beginPath(); g.moveTo(s[0] - 6, s[1] - 4); g.lineTo(s[0] + 6, s[1] - 4); g.lineTo(s[0], s[1] + 5); g.closePath(); g.stroke(); g.fillStyle = 'rgba(255,120,100,.85)'; g.fillText(String(Math.round(d)), s[0] + 9, s[1]); }
+  if (PL.home >= 0 && ships.alive[PL.home]) {
+    shipWorldCPU(PL.home, _pa); const s = sw(_pa.x, _pa.y, _pa.z);
+    if (s) { g.strokeStyle = PL_OK; g.beginPath(); g.moveTo(s[0], s[1] - 9); g.lineTo(s[0] + 9, s[1]); g.lineTo(s[0], s[1] + 9); g.lineTo(s[0] - 9, s[1]); g.closePath(); g.stroke(); g.fillStyle = PL_OK; g.fillText(`母艦 ${Math.round(Math.hypot(_pa.x - px, _pa.y - py, _pa.z - pz))}`, s[0] + 13, s[1]); }
+  }
+}
+// 指定目標（T 鍵）：黃色角框＋TGT＋距離＋提前量；鎖定武器：菱形從大轉到小，鎖住變紅閃「LOCK」。回傳目標距離（沒有＝null）
+function pilotTgtHud(g, sw, px, py, pz, red, now) {
   const T = pilotTgtPos(PL.tgt, _pb);
   if (PL.tgt && !T) PL.tgt = null;
+  let dist = null;
   if (T && !PL.dead) {
-    const d = Math.hypot(T.x - px, T.y - py, T.z - pz), s = sw(T.x, T.y, T.z);
+    const d = dist = Math.hypot(T.x - px, T.y - py, T.z - pz), s = sw(T.x, T.y, T.z);
     if (s) {
-      g.strokeStyle = '#ffd36a'; g.lineWidth = 2; const r = 16;
+      g.strokeStyle = PL_AMB; g.lineWidth = 2; const r = 16;
       g.beginPath(); for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { g.moveTo(s[0] + sx * r, s[1] + sy * (r - 6)); g.lineTo(s[0] + sx * r, s[1] + sy * r); g.lineTo(s[0] + sx * (r - 6), s[1] + sy * r); } g.stroke();
-      g.fillStyle = '#ffd36a'; g.fillText(`${Math.round(d)}`, s[0] + r + 4, s[1] - r);
+      plFont(g, 10, true, true); g.fillStyle = PL_AMB; g.textAlign = 'left'; g.fillText('TGT', s[0] - r, s[1] - r - 8); g.textAlign = 'right'; g.fillText(String(Math.round(d)), s[0] + r, s[1] + r + 9); g.textAlign = 'left';
       const gun = PL.slots.map((S) => PILOT_WEAPONS[S.id]).find((w) => w.type === 'gun' && (!w.shipOnly || PL.tgt.k === 's'));
       if (gun && PL.tgt.k === 'f' && d < gun.range * 1.6) {
         const tf = d / gun.speed, i = PL.tgt.i, L = sw(T.x + fV[i * 3] * tf, T.y + fV[i * 3 + 1] * tf, T.z + fV[i * 3 + 2] * tf);
         if (L) { g.beginPath(); g.arc(L[0], L[1], 5, 0, Math.PI * 2); g.stroke(); g.beginPath(); g.moveTo(s[0], s[1]); g.lineTo(L[0], L[1]); g.globalAlpha = 0.4; g.stroke(); g.globalAlpha = 1; }
       }
       g.lineWidth = 1.5;
-    } else pilotEdgeArrow(g, T, '#ffd36a');
+    } else pilotEdgeArrow(g, T, PL_AMB, String(Math.round(d)));
   }
-  // 鎖定中的武器：鎖定圈
   PL.slots.forEach((S) => {
     const Wd = PILOT_WEAPONS[S.id]; if (Wd.type !== 'lock' || S.lock < 0 || PL.dead) return;
     const p = S.lockK === 'f' ? (FT.state[S.lock] === 2 ? [fP[S.lock * 3], fP[S.lock * 3 + 1], fP[S.lock * 3 + 2]] : null) : ships.alive[S.lock] ? (shipWorldCPU(S.lock, _pa), [_pa.x, _pa.y, _pa.z]) : null;
     const s = p && sw(p[0], p[1], p[2]); if (!s) return;
-    const k = Math.min(1, S.lockT / Math.max(0.01, S.need)), done = k >= 1;
-    g.strokeStyle = done ? '#ff4040' : '#ffb060'; g.lineWidth = 2; g.beginPath(); g.arc(s[0], s[1], 22 - k * 6, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * k); g.stroke(); g.lineWidth = 1.5;
-    if (done) { g.fillStyle = '#ff4040'; g.fillText('鎖定', s[0] + 20, s[1] + 18); }
+    const k = Math.min(1, S.lockT / Math.max(0.01, S.need)), done = k >= 1, r = (done ? 15 : 34 - k * 17) / Math.SQRT2;
+    g.save(); g.translate(s[0], s[1]); g.rotate(Math.PI / 4 + (1 - k) * Math.PI); g.strokeStyle = done ? red : '#ffb060'; g.lineWidth = 2; g.strokeRect(-r, -r, r * 2, r * 2); g.restore();
+    if (done && (now / 200 | 0) % 2 === 0) { plFont(g, 11, true, true); g.fillStyle = red; g.textAlign = 'center'; g.fillText('LOCK', s[0], s[1] + 26); g.textAlign = 'left'; }
   });
-  pilotMisHud(g, W, H, sw, px, py, pz);
-  const LY = pilotHudLayout(W, H);
-  pilotRadar(g, LY, px, py, pz, col, red);
-  pilotGauges(g, W, H, col, LY);
-  // 訊息
-  PL.feed = PL.feed.filter((m) => now - m.t < 4000);
-  PL.feed.forEach((m, k) => { g.globalAlpha = Math.min(1, (4000 - (now - m.t)) / 600); pilotText(g, W / 2, H * 0.24 + k * 20, m.msg, m.cls === 'bad' ? red : m.cls === 'kill' ? '#ffd36a' : m.cls === 'ok' ? '#8fe39a' : 'rgba(230,235,245,.85)', 14); });
-  g.globalAlpha = 1;
-  if (PL.out > 0) pilotText(g, W / 2, H * 0.36, PL.out > 4 ? '超出戰區：自動返回' : '即將超出戰區，請返回', red, 16);
-  if (PL.selfFix && U.uTime.value - PL.selfFix < 0.1 && !PL.dock) pilotText(g, W / 2, H * 0.66, '自我修復中…', '#8fe39a', 13);
-  if (PL.dock) pilotText(g, W / 2, H * 0.62, PL.dock.ph === 'in' ? '自動降落中…' : PL.dock.ph === 'deck' ? `整補中… ${Math.round(PL.rearm * 100)}%` : '彈射起飛！', '#8fe39a', 15);
-  else if (!PL.dead && (simTick % 20 === 0 || PL.nearC == null)) PL.nearC = pilotNearCarrier(px, py, pz, PILOT_DOCK.range) >= 0;
-  if (!PL.dock && !PL.dead && PL.nearC) pilotText(g, W / 2, H * 0.62, `按 ${plKey('pilot_land')} 降落整補`, 'rgba(143,227,154,.85)', 13);
-  if (t - PL.hurtT < 0.35) { const k = 1 - (t - PL.hurtT) / 0.35, c = PL.hurtSh ? '80,160,255' : '255,40,30', gr = g.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.7); gr.addColorStop(0, `rgba(${c},0)`); gr.addColorStop(1, `rgba(${c},${(PL.hurtSh ? 0.25 : 0.45) * k})`); g.fillStyle = gr; g.fillRect(0, 0, W, H); }
-  // 受擊方向：準心外圍的弧，指向打來的方向（紅＝打到機體、藍＝護盾擋下），1.2 秒淡出
-  PL.hits = PL.hits.filter((h) => now - h.t < 1200);
-  for (const h of PL.hits) {
-    _pp.set(h.x, h.y, h.z).applyMatrix4(camera.matrixWorldInverse);
-    const a = Math.atan2(-_pp.y, _pp.x), al = 1 - (now - h.t) / 1200, r = Math.min(W, H) * 0.16;
-    g.strokeStyle = h.hull ? `rgba(255,74,58,${al})` : `rgba(124,196,255,${al * 0.85})`; g.lineWidth = h.hull ? 6 : 4;
-    g.beginPath(); g.arc(W / 2, H / 2, r, a - 0.32, a + 0.32); g.stroke();
-  }
   g.lineWidth = 1.5;
-  if (PL.dead) { pilotText(g, W / 2, H * 0.42, '被擊墜', red, 26); pilotText(g, W / 2, H * 0.42 + 32, `${Math.max(0, Math.ceil(PL.respawn - (t - PL.deadT)))} 秒後從母艦重新出擊`, 'rgba(230,235,245,.9)', 14); }
-  if (!PL.locked && !paused && !GAME.result) pilotText(g, W / 2, H * 0.55, '點一下畫面開始駕駛（滑鼠游標會被鎖定・Esc 暫停）', '#fff', 15);
+  return dist;
+}
+// 俯仰梯：以鏡頭方向為中心，每 10° 一條（水平線最長；機首下方的線是虛線），只畫在準心周圍的圓內
+function pilotLadder(g, sw, px, py, pz, ca, cx, cy, m) {
+  const h = Math.atan2(-CAM_DIR.x, -CAM_DIR.z), sh = Math.sin(h), ch = Math.cos(h), R = 1500, rad = m * 0.3;
+  const at = (deg) => { const p = deg * Math.PI / 180, cp = Math.cos(p); return [px + sh * cp * R, py + Math.sin(p) * R, pz + ch * cp * R]; };
+  g.save(); g.beginPath(); g.arc(cx, cy, rad, 0, Math.PI * 2); g.clip();
+  g.strokeStyle = ca(0.6); g.fillStyle = ca(0.75); plFont(g, 10, false, true); g.textAlign = 'center';
+  for (let deg = -80; deg <= 80; deg += 10) {
+    const P = at(deg), C = sw(P[0], P[1], P[2]); if (!C || Math.hypot(C[0] - cx, C[1] - cy) > rad + 30) continue;
+    const C2 = sw(P[0] + ch * R * 0.05, P[1], P[2] - sh * R * 0.05), Q = at(deg - Math.sign(deg) * 3), C3 = deg ? sw(Q[0], Q[1], Q[2]) : null; if (!C2) continue;
+    let ux = C2[0] - C[0], uy = C2[1] - C[1]; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
+    let nx = 0, ny = 0; if (C3) { nx = C3[0] - C[0]; ny = C3[1] - C[1]; const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl; }   // 短鉤：指向水平線
+    const hz = deg === 0, half = m * (hz ? 0.28 : 0.1), gap = m * (hz ? 0.06 : 0.035);
+    g.setLineDash(deg < 0 ? [5, 4] : []); g.beginPath();
+    for (const sd of [-1, 1]) {
+      const bx = C[0] + ux * half * sd, by = C[1] + uy * half * sd;
+      g.moveTo(C[0] + ux * gap * sd, C[1] + uy * gap * sd); g.lineTo(bx, by); if (!hz) g.lineTo(bx + nx * 6, by + ny * 6);
+    }
+    g.stroke();
+    if (!hz) for (const sd of [-1, 1]) g.fillText(String(Math.abs(deg)), C[0] + ux * (half + 14) * sd, C[1] + uy * (half + 14) * sd);
+  }
+  g.setLineDash([]); g.textAlign = 'left'; g.restore();
+}
+// 準心：白色圓（瞄準方向）；機首：W 形水線標記（跟著機體側傾），命中時外圍閃 X
+function pilotReticle(g, sw, px, py, pz, A, col, t) {
+  const F = PL.F, U = PL.U, a = sw(px + A[0] * 400, py + A[1] * 400, pz + A[2] * 400);
+  if (a) {
+    g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 1.5; g.beginPath(); g.arc(a[0], a[1], 16, 0, Math.PI * 2); g.stroke();
+    g.beginPath(); for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { g.moveTo(a[0] + dx * 21, a[1] + dy * 21); g.lineTo(a[0] + dx * 28, a[1] + dy * 28); } g.stroke();
+    g.fillStyle = '#fff'; g.fillRect(a[0] - 1, a[1] - 1, 2, 2);
+  }
+  const N = [px + F[0] * 160, py + F[1] * 160, pz + F[2] * 160], Rt = v3.cross(F, U);
+  const n = sw(N[0], N[1], N[2]), w = sw(N[0] + Rt[0] * 8, N[1] + Rt[1] * 8, N[2] + Rt[2] * 8), u = sw(N[0] + U[0] * 8, N[1] + U[1] * 8, N[2] + U[2] * 8);
+  if (n && w && u) {
+    let ax = w[0] - n[0], ay = w[1] - n[1]; const al = Math.hypot(ax, ay) || 1; ax /= al; ay /= al;
+    let dx = n[0] - u[0], dy = n[1] - u[1]; const dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;   // 機體的「下」在畫面上的方向
+    const P = (x, y) => [n[0] + ax * x + dx * y, n[1] + ay * x + dy * y];
+    g.strokeStyle = col; g.lineWidth = 2; g.beginPath();
+    [[-26, 0], [-12, 0], [-6, 7], [0, 0], [6, 7], [12, 0], [26, 0]].forEach(([x, y], k) => { const q = P(x, y); if (k) g.lineTo(q[0], q[1]); else g.moveTo(q[0], q[1]); });
+    const q0 = P(0, -4), q1 = P(0, -10); g.moveTo(q0[0], q0[1]); g.lineTo(q1[0], q1[1]); g.stroke(); g.lineWidth = 1.5;
+    if (t - PL.hitT < 0.15) { g.strokeStyle = '#fff'; g.lineWidth = 2; g.beginPath(); for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { g.moveTo(n[0] + sx * 18, n[1] + sy * 18); g.lineTo(n[0] + sx * 10, n[1] + sy * 10); } g.stroke(); g.lineWidth = 1.5; }
+  }
+}
+// 左：速度帶（含油門條、加速／倒退狀態）；右：高度帶（含目標距離）
+function pilotTapes(g, cx, cy, m, col, ca, alt, tgtD) {
+  const hh = m * 0.16, Fr = PL.frame;
+  const tape = (x, val, step, span, lab, dir) => {
+    const k = hh / span;
+    g.save(); g.beginPath(); g.rect(x - 80, cy - hh, 160, hh * 2); g.clip();
+    g.strokeStyle = ca(0.7); g.fillStyle = ca(0.8); plFont(g, 10, false, true); g.textAlign = dir < 0 ? 'right' : 'left';
+    g.beginPath(); g.moveTo(x, cy - hh); g.lineTo(x, cy + hh);
+    for (let n = Math.floor((val - span) / step); n * step <= val + span; n++) {
+      const v = n * step, y = cy - (v - val) * k, big = ((n % 2) + 2) % 2 === 0;
+      g.moveTo(x, y); g.lineTo(x + dir * (big ? 10 : 5), y);
+      if (big) g.fillText(String(v), x + dir * 14, y);
+    }
+    g.stroke(); g.restore();
+    const bw = 56, bh = 22, bx = dir < 0 ? x - bw - 10 : x + 10, tip = dir < 0 ? x - 2 : x + 2, base = dir < 0 ? bx + bw : bx;   // 讀數框（尖端指向刻度）
+    g.fillStyle = 'rgba(6,12,22,.8)'; g.strokeStyle = col; g.beginPath(); g.moveTo(bx, cy - bh / 2); g.lineTo(bx + bw, cy - bh / 2);
+    if (dir < 0) { g.lineTo(tip, cy); g.lineTo(base, cy + bh / 2); g.lineTo(bx, cy + bh / 2); } else { g.lineTo(bx + bw, cy + bh / 2); g.lineTo(base, cy + bh / 2); g.lineTo(tip, cy); }
+    g.closePath(); g.fill(); g.stroke();
+    plFont(g, 15, true, true); g.fillStyle = '#fff'; g.textAlign = 'center'; g.fillText(String(Math.round(val)), bx + bw / 2, cy + 1);
+    plFont(g, 10, true, true); g.fillStyle = ca(0.85); g.fillText(lab, x, cy - hh - 10);
+    g.textAlign = 'left';
+  };
+  const xs = cx - m * 0.36, xa = cx + m * 0.36;
+  tape(xs, PL.speed / PILOT_SPEED * 10, 50, 300, 'SPD', -1);   // 顯示速度＝實際速度 ÷ 駕駛速度倍率 ×10（巡航約 400～600）
+  tape(xa, alt, 25, 150, 'ALT', 1);
+  // 油門條：速度帶內側，−0.4～1，白線＝0
+  const tx = xs + 9, u = hh * 2 / (1 + PILOT_REV), z = cy + hh - PILOT_REV * u;
+  g.fillStyle = 'rgba(6,12,22,.6)'; g.fillRect(tx, cy - hh, 4, hh * 2);
+  g.fillStyle = PL.thr < 0 ? 'rgba(255,160,90,.95)' : PL.boosting ? PL_AMB : ca(0.9); g.fillRect(tx, PL.thr < 0 ? z : z - PL.thr * u, 4, Math.abs(PL.thr) * u);
+  g.fillStyle = '#fff'; g.fillRect(tx - 2, z - 0.5, 8, 1.5);
+  plFont(g, 10, true, true); g.textAlign = 'right'; const y1 = cy + hh + 14;
+  g.fillStyle = ca(0.85); g.fillText(`THR ${Math.round(PL.thr * 100)}%`, xs, y1);
+  const st = PL.speed < -0.5 ? ['REVERSE 倒退', 'rgba(255,160,90,.95)'] : PL.boosting ? ['BOOST', PL_AMB] : PL.travel && PL.speed > Fr.max * 1.05 ? [`CRUISE ×${PILOT_TRAVEL.mul} 航行加速`, PL_SH] : null;
+  if (st) { g.fillStyle = st[1]; g.fillText(st[0], xs, y1 + 15); }
+  g.textAlign = 'left';
+  if (tgtD != null) { g.fillStyle = PL_AMB; g.fillText(`TGT ${Math.round(tgtD)}`, xa, cy + hh + 14); }
+}
+// 四個武裝槽圍在準心四角（機戰傭兵6）：左鍵＝左下、右鍵＝右下、武裝三＝左上、武裝四＝右上
+function pilotWpnQuad(g, cx, cy, m, col, red, now) {
+  const ox = m * 0.15, oy = m * 0.085, bw = 92;
+  PL.slots.forEach((S, k) => {
+    const Wd = PILOT_WEAPONS[S.id], left = k % 2 === 0, x = left ? cx - ox : cx + ox, y0 = k >= 2 ? cy - oy - 38 : cy + oy, al = left ? 'right' : 'left';
+    let k2 = 1, big = '', sub = '', c2 = col;
+    if (Wd.type === 'gun') {
+      if (Wd.ammo) { k2 = S.ammo / Math.max(1, S.max); big = String(S.ammo); c2 = !S.ammo ? red : k2 < 0.25 ? PL_AMB : col; }
+      else { k2 = 1 - S.heat; big = S.over ? 'OVERHEAT' : String(Math.round(S.heat * 100)); sub = S.over ? '' : 'HEAT%'; c2 = S.over ? red : S.heat > 0.7 ? PL_AMB : col; }
+    } else if (Wd.type === 'lock') {
+      k2 = S.ammo / Math.max(1, S.max); big = String(S.ammo); c2 = S.ammo ? col : red;
+      sub = S.lock >= 0 ? (S.lockT >= S.need ? 'LOCK' : 'LOCKING') : '';
+    } else { k2 = S.en; big = String(Math.round(S.en * 100)); sub = S.empty ? 'CHARGE' : 'EN%'; c2 = S.empty ? PL_AMB : col; }
+    const fire = PL.fire[k], flash = S.over && (now / 150 | 0) % 2;
+    g.textAlign = al;
+    plFont(g, 10, false, true); const key = `[${plSlotKey(k)}]`, kw = g.measureText(key).width;
+    g.fillStyle = 'rgba(220,228,240,.6)'; g.fillText(key, x, y0);
+    plFont(g, 12, true); g.fillStyle = fire ? '#fff' : col; g.fillText(Wd.name, left ? x - kw - 6 : x + kw + 6, y0);
+    plFont(g, 20, true, true); g.fillStyle = flash ? '#fff' : c2; g.fillText(big, x, y0 + 19);
+    if (sub) { const bwid = g.measureText(big).width; plFont(g, 10, true, true); g.fillStyle = sub === 'LOCK' ? red : c2; g.fillText(sub, left ? x - bwid - 6 : x + bwid + 6, y0 + 22); }
+    const bx = left ? x - bw : x;
+    g.fillStyle = 'rgba(255,255,255,.14)'; g.fillRect(bx, y0 + 33, bw, 3); g.fillStyle = c2; g.fillRect(left ? x - bw * Math.max(0, Math.min(1, k2)) : bx, y0 + 33, bw * Math.max(0, Math.min(1, k2)), 3);
+  });
+  g.textAlign = 'left';
+}
+// 準心下方：AP（機體耐久，大字）＋護盾條＋AP 條（10 格）＋EN 條（加速能量）
+function pilotVitals(g, cx, y, m, ca, red, now) {
+  const Fr = PL.frame, w = Math.min(340, m * 0.34), x0 = cx - w / 2, hk = Math.max(0, PL.hp / Fr.hp), sk = Math.max(0, PL.sh / Fr.sh), low = hk < 0.35, bl = (now / 220 | 0) % 2 === 0;
+  plFont(g, 11, true, true); g.fillStyle = 'rgba(220,228,240,.75)'; g.textAlign = 'left'; g.fillText('AP', x0, y + 2);
+  plFont(g, 24, true, true); g.fillStyle = low && bl ? red : '#fff'; g.fillText(String(Math.ceil(PL.hp)), x0 + 24, y);
+  plFont(g, 11, true, true); g.textAlign = 'right'; g.fillStyle = PL_SH; g.fillText(`SHIELD ${Math.ceil(PL.sh)}`, x0 + w, y + 2);
+  const bar = (yy, h, k, c) => { g.fillStyle = 'rgba(6,12,22,.65)'; g.fillRect(x0, yy, w, h); g.fillStyle = c; g.fillRect(x0, yy, w * Math.min(1, k), h); };
+  bar(y + 15, 3, sk, PL_SH);
+  bar(y + 21, 7, hk, low ? red : '#f0f4fa');
+  g.fillStyle = 'rgba(6,12,22,.8)'; for (let q = 1; q < 10; q++) g.fillRect(x0 + w * q / 10 - 0.5, y + 21, 1, 7);   // AP 條分 10 格
+  g.strokeStyle = ca(0.35); g.strokeRect(x0 - 0.5, y + 14.5, w + 1, 14);
+  bar(y + 33, 3, PL.boost, PL.boosting ? PL_AMB : 'rgba(255,211,106,.55)');
+  plFont(g, 9, true, true); g.fillStyle = 'rgba(220,228,240,.6)'; g.fillText('EN', x0 - 5, y + 35);
+  if (PL.boost < 0.15 && bl) { g.textAlign = 'left'; g.fillStyle = PL_AMB; g.fillText('EN LOW', x0 + w + 5, y + 35); }
+  g.textAlign = 'left';
+}
+// 上方航向帶：機首航向（000～359），標出指定目標（黃）、任務目標（橘）、護衛目標與母艦（綠）的方位；超出範圍就停在兩端
+function pilotCompass(g, cx, y, m, col, ca, px, pz) {
+  const w = Math.min(520, m * 0.5), hw = w / 2, F = PL.F, hd = ((-Math.atan2(F[0], F[2]) * 180 / Math.PI) % 360 + 360) % 360, k = w / 90;
+  g.save(); g.beginPath(); g.rect(cx - hw, y - 18, w, 40); g.clip();
+  g.strokeStyle = ca(0.7); g.fillStyle = ca(0.85); plFont(g, 10, false, true); g.textAlign = 'center';
+  g.beginPath(); g.moveTo(cx - hw, y + 6); g.lineTo(cx + hw, y + 6);
+  for (let a = Math.ceil((hd - 46) / 5) * 5; a <= hd + 46; a += 5) {
+    const x = cx + (a - hd) * k, lab = ((a % 30) + 30) % 30 === 0, mid = ((a % 15) + 15) % 15 === 0;
+    g.moveTo(x, y + 6); g.lineTo(x, y + 6 - (lab ? 9 : mid ? 6 : 3));
+    if (lab) g.fillText(String(((a % 360) + 360) % 360).padStart(3, '0'), x, y - 9);
+  }
+  g.stroke(); g.restore();
+  const mk = (X, Z, c) => {
+    const b = -Math.atan2(X - px, Z - pz) * 180 / Math.PI, dd = ((b - hd) % 360 + 540) % 360 - 180, x = cx + Math.max(-45, Math.min(45, dd)) * k;
+    g.fillStyle = c; g.beginPath(); g.moveTo(x, y + 8); g.lineTo(x + 5, y + 15); g.lineTo(x - 5, y + 15); g.closePath(); g.fill();
+  };
+  if (PL.home >= 0 && ships.alive[PL.home]) { shipWorldCPU(PL.home, _pa); mk(_pa.x, _pa.z, PL_OK); }
+  const M = PL.mis;
+  if (M) { for (const i of M.tg) if (i >= 0 && ships.alive[i]) { shipWorldCPU(i, _pa); mk(_pa.x, _pa.z, '#ff9f40'); } if (M.esc >= 0 && ships.alive[M.esc]) { shipWorldCPU(M.esc, _pa); mk(_pa.x, _pa.z, PL_OK); } }
+  const T = pilotTgtPos(PL.tgt, _pa); if (T) mk(T.x, T.z, PL_AMB);
+  g.strokeStyle = col; g.fillStyle = 'rgba(6,12,22,.8)'; g.beginPath(); g.rect(cx - 20, y + 17, 40, 16); g.fill(); g.stroke();   // 讀數
+  plFont(g, 11, true, true); g.fillStyle = '#fff'; g.textAlign = 'center'; g.fillText(String(Math.round(hd) % 360).padStart(3, '0'), cx, y + 26);
+  g.fillStyle = col; g.beginPath(); g.moveTo(cx, y + 7); g.lineTo(cx - 4, y + 1); g.lineTo(cx + 4, y + 1); g.closePath(); g.fill();
+  g.textAlign = 'left';
+}
+// 上方中央：指定目標的資訊條（機戰傭兵6 的頭目條）：名稱、距離、護盾、船體
+function pilotTgtInfo(g, cx, y) {
+  const T = PL.tgt; if (!T || PL.dead) return;
+  let name, hk = null, sk = null;
+  if (T.k === 's') { if (!ships.alive[T.i]) return; name = SHIP_TYPES[ships.type[T.i]].name; hk = ships.hp[T.i] / maxHp(T.i); sk = ships.shMax[T.i] > 0 ? ships.sh[T.i] / ships.shMax[T.i] : null; }
+  else { if (FT.state[T.i] !== 2) return; name = (CRAFT[FT.role[T.i]] || {}).name || '艦載機'; }
+  const M = PL.mis, mt = M && T.k === 's' && M.tg.includes(T.i), w = 280, x0 = cx - w / 2;
+  plFont(g, 12, true); g.textAlign = 'center'; g.fillStyle = mt ? '#ff9f40' : PL_AMB;
+  g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,.6)'; const s = `${mt ? '目標・' : ''}敵${name}`; g.strokeText(s, cx, y); g.fillText(s, cx, y); g.lineWidth = 1.5;
+  if (hk != null) {
+    if (sk != null) { g.fillStyle = 'rgba(6,12,22,.65)'; g.fillRect(x0, y + 11, w, 3); g.fillStyle = PL_SH; g.fillRect(x0, y + 11, w * Math.max(0, Math.min(1, sk)), 3); }
+    g.fillStyle = 'rgba(6,12,22,.65)'; g.fillRect(x0, y + 16, w, 6); g.fillStyle = '#ff7a5a'; g.fillRect(x0, y + 16, w * Math.max(0, Math.min(1, hk)), 6);
+    plFont(g, 10, true, true); g.textAlign = 'right'; g.fillStyle = 'rgba(230,235,245,.85)'; g.fillText(`${Math.ceil(hk * 100)}%`, x0 + w, y + 30);
+  }
+  g.textAlign = 'left';
+}
+// 警告（空戰奇兵7）：被咬尾、機體損傷、超出戰區，紅框閃爍
+function pilotWarn(g, cx, y, thr, red, now) {
+  const L = [];
+  if (thr.length) L.push(`WARNING　敵機咬尾${thr.length > 1 ? ` ×${thr.length}` : ''}`);
+  if (!PL.dead && PL.hp / PL.frame.hp < 0.3) L.push('DAMAGE　機體損傷嚴重');
+  if (PL.out > 0) L.push(PL.out > 4 ? 'OUT OF AREA　超出戰區：自動返回' : 'CAUTION　即將超出戰區，請返回');
+  const on = (now / 250 | 0) % 2 === 0;
+  plFont(g, 13, true, true); g.textAlign = 'center';
+  L.forEach((s, k) => {
+    const yy = y + k * 26, w = g.measureText(s).width + 24;
+    g.fillStyle = on ? 'rgba(120,10,0,.55)' : 'rgba(40,6,4,.45)'; g.fillRect(cx - w / 2, yy - 10, w, 21);
+    g.strokeStyle = red; g.lineWidth = 1.5; g.strokeRect(cx - w / 2, yy - 10, w, 21);
+    g.fillStyle = on ? '#fff' : red; g.fillText(s, cx, yy + 1);
+  });
+  g.textAlign = 'left';
+}
+// 右上：戰功、擊墜、擊沉
+function pilotScore(g, W, col) {
+  const S = PL.stats; g.textAlign = 'right';
+  plFont(g, 10, false, true); g.fillStyle = 'rgba(220,228,240,.6)'; g.fillText('SCORE 戰功', W - 20, 84);
+  plFont(g, 22, true, true); g.fillStyle = col; g.fillText(String(Math.round(S.merit)), W - 20, 104);
+  plFont(g, 12, true); g.fillStyle = 'rgba(230,235,245,.9)'; g.fillText(`擊墜 ${S.kf}　擊沉 ${S.ks}`, W - 20, 126);
+  g.textAlign = 'left'; plFont(g, 12);
 }
 // 座艙框：上方兩根支柱、下方儀表板（跟著機體側傾的是鏡頭，框固定在畫面上）
 function pilotCockpit(g, W, H, col) {
@@ -13043,86 +13405,81 @@ function pilotBeamFrame() {
 }
 function pilotMisHud(g, W, H, sw, px, py, pz) {
   const M = PL.mis; if (!M) return;
-  // 指定目標（橘）、護衛目標（綠）
+  // 指定目標（橘）、護衛目標（綠）：菱形＋名稱＋距離
   const mark = (i, c, txt) => {
     shipWorldCPU(i, _pb); const s = sw(_pb.x, _pb.y, _pb.z), d = Math.hypot(_pb.x - px, _pb.y - py, _pb.z - pz);
-    if (!s) { pilotEdgeArrow(g, _pb, c); return; }
+    if (!s) { pilotEdgeArrow(g, _pb, c, `${txt.split(' ')[0]} ${Math.round(d)}`); return; }
     g.strokeStyle = c; g.lineWidth = 2; g.beginPath(); g.moveTo(s[0], s[1] - 14); g.lineTo(s[0] + 14, s[1]); g.lineTo(s[0], s[1] + 14); g.lineTo(s[0] - 14, s[1]); g.closePath(); g.stroke(); g.lineWidth = 1.5;
-    g.fillStyle = c; g.fillText(`${txt} ${Math.round(d)}`, s[0] + 18, s[1] + 12);
+    plFont(g, 11, true); g.fillStyle = c; g.textAlign = 'left'; g.fillText(txt, s[0] + 18, s[1] + 4); plFont(g, 10, false, true); g.fillText(String(Math.round(d)), s[0] + 18, s[1] + 18);
   };
-  for (const i of M.tg) if (i >= 0 && ships.alive[i]) mark(i, '#ff9f40', `目標・${SHIP_TYPES[ships.type[i]].name}`);
-  if (M.esc >= 0 && ships.alive[M.esc]) mark(M.esc, '#8fe39a', `護衛 ${Math.round(ships.hp[M.esc] / maxHp(M.esc) * 100)}%`);
-  // 左上：任務欄
-  const x = 18, y0 = 96, lines = [];
+  for (const i of M.tg) if (i >= 0 && ships.alive[i]) mark(i, '#ff9f40', `TGT 目標・${SHIP_TYPES[ships.type[i]].name}`);
+  if (M.esc >= 0 && ships.alive[M.esc]) mark(M.esc, PL_OK, `護衛 ${Math.round(ships.hp[M.esc] / maxHp(M.esc) * 100)}%`);
+  // 左上：任務欄（左側色條、MISSION 標頭、主要目標進度條）
+  const x = 20, y0 = 96, w = 330, lines = [];
   const P = PILOT_MIS[M.type], prog = M.type === 'escort' ? `${_fmtT(M.prog)}／${_fmtT(M.goal)}` : M.type === 'damage' ? `${fmtN(Math.floor(M.prog))}／${fmtN(M.goal)}` : `${M.prog}／${M.goal}`;
-  lines.push([`任務・${P.name}　${prog}`, M.done ? '#8fe39a' : '#ffd36a', 14]);
-  lines.push([M.done ? `完成！按 ${plKey('pilot_land')} 降落航母結算` : P.text(M.goal), M.done ? '#8fe39a' : 'rgba(225,232,242,.85)', 12]);
-  lines.push([`被擊墜 ${PL.stats.deaths}／${M.deaths}`, PL.stats.deaths >= M.deaths ? '#ff6a5a' : 'rgba(225,232,242,.75)', 12]);
-  for (const b of M.bonus) { const ok = b === 'fleet' ? null : pilotBonusOk(b); lines.push([`${ok ? '✓' : ok === false && (b === 'nodeath' || b === 'hp50') ? '✗' : '・'} ${PILOT_BONUS[b].name}`, ok ? '#8fe39a' : ok === false && (b === 'nodeath' || b === 'hp50') ? 'rgba(255,106,90,.8)' : 'rgba(225,232,242,.7)', 12]); }
-  const h = lines.length * 18 + 12; g.fillStyle = 'rgba(6,12,22,.55)'; g.fillRect(x - 8, y0 - 14, 330, h);
-  lines.forEach(([t, c, sz], k) => { g.font = `${sz > 12 ? '600 ' : ''}${sz}px "Noto Sans TC", sans-serif`; g.fillStyle = c; g.fillText(t, x, y0 + k * 18); });
-  g.font = '12px "Noto Sans TC", sans-serif';
+  const mc = M.done ? PL_OK : PL_AMB, pk = M.done ? 1 : Math.max(0, Math.min(1, M.prog / Math.max(1, M.goal)));
+  lines.push([M.done ? `完成！按 ${plKey('pilot_land')} 降落航母結算` : P.text(M.goal), M.done ? PL_OK : 'rgba(225,232,242,.85)']);
+  lines.push([`被擊墜 ${PL.stats.deaths}／${M.deaths}`, PL.stats.deaths >= M.deaths ? '#ff6a5a' : 'rgba(225,232,242,.7)']);
+  for (const b of M.bonus) { const ok = b === 'fleet' ? null : pilotBonusOk(b), bad = ok === false && (b === 'nodeath' || b === 'hp50'); lines.push([`${ok ? '✓' : bad ? '✗' : '・'} ${PILOT_BONUS[b].name}`, ok ? PL_OK : bad ? 'rgba(255,106,90,.8)' : 'rgba(225,232,242,.6)']); }
+  const h = 44 + lines.length * 17;
+  const gr = g.createLinearGradient(x - 8, 0, x - 8 + w, 0); gr.addColorStop(0, 'rgba(6,12,22,.7)'); gr.addColorStop(1, 'rgba(6,12,22,0)');
+  g.fillStyle = gr; g.fillRect(x - 8, y0 - 16, w, h); g.fillStyle = mc; g.fillRect(x - 8, y0 - 16, 3, h);
+  plFont(g, 10, true, true); g.fillStyle = 'rgba(220,228,240,.55)'; g.textAlign = 'left'; g.fillText(M.done ? 'MISSION COMPLETE' : 'MISSION', x, y0 - 6);
+  plFont(g, 14, true); g.fillStyle = mc; g.fillText(P.name, x, y0 + 11);
+  plFont(g, 13, true, true); g.textAlign = 'right'; g.fillText(prog, x + w - 40, y0 + 11); g.textAlign = 'left';
+  g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(x, y0 + 21, w - 40, 3); g.fillStyle = mc; g.fillRect(x, y0 + 21, (w - 40) * pk, 3);
+  lines.forEach(([s, c], k) => { plFont(g, 12); g.fillStyle = c; g.fillText(s, x, y0 + 37 + k * 17); });
+  plFont(g, 12);
 }
 function pilotText(g, x, y, s, c, size) { g.font = `600 ${size}px "Noto Sans TC", sans-serif`; g.textAlign = 'center'; g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,.6)'; g.strokeText(s, x, y); g.fillStyle = c; g.fillText(s, x, y); g.textAlign = 'left'; g.font = '12px "Noto Sans TC", sans-serif'; g.lineWidth = 1.5; }
-function pilotEdgeArrow(g, T, c) {
+// 畫面外的目標：準心外圍的箭頭（可附距離）
+function pilotEdgeArrow(g, T, c, label) {
   _pp.set(T.x, T.y, T.z).applyMatrix4(camera.matrixWorldInverse);
   const a = Math.atan2(-_pp.y, _pp.x), W = VW, H = VH, r = Math.min(W, H) * 0.38, x = W / 2 + Math.cos(a) * r, y = H / 2 + Math.sin(a) * r;
-  g.fillStyle = c; g.save(); g.translate(x, y); g.rotate(a); g.beginPath(); g.moveTo(12, 0); g.lineTo(-6, -8); g.lineTo(-6, 8); g.closePath(); g.fill(); g.restore();
+  g.fillStyle = c; g.save(); g.translate(x, y); g.rotate(a); g.beginPath(); g.moveTo(13, 0); g.lineTo(-6, -9); g.lineTo(-2, 0); g.lineTo(-6, 9); g.closePath(); g.fill(); g.restore();
+  if (label) { plFont(g, 10, true, true); g.textAlign = 'center'; g.fillText(label, x - Math.cos(a) * 22, y - Math.sin(a) * 18); g.textAlign = 'left'; }
 }
-// 雷達：以機首方向為上，半徑 600
-// 儀表的位置：背後視角＝雷達在右下（設定可改左下），那一側的儀表往上移；座艙視角＝雷達在中央儀表板
+// 雷達的位置：背後視角＝右下（設定可改左下）；座艙視角＝中央儀表板
 function pilotHudLayout(W, H) {
-  const R = 74;
-  if (PL.cock && !PL.dead) return { R, cx: W / 2, cy: H - R - 18, cock: true, wBase: H - 104, gBase: H - 112 };
-  const left = SETTINGS.pilotRadar === 'left', cy = H - R - 34;
-  return { R, cx: left ? 22 + R : W - 22 - R, cy, wBase: left ? H - 104 : cy - R - 34, gBase: left ? cy - R - 100 : H - 112 };
+  const R = 78;
+  if (PL.cock && !PL.dead) return { R, cx: W / 2, cy: H - R - 18, cock: true };
+  const left = SETTINGS.pilotRadar === 'left';
+  return { R, cx: left ? 26 + R : W - 26 - R, cy: H - R - 38 };
 }
-function pilotRadar(g, LY, px, py, pz, col, red) {
-  const R = LY.R, cx = LY.cx, cy = LY.cy, S = R / 600, h = Math.atan2(PL.F[0], PL.F[2]), ch = Math.cos(h), sh = Math.sin(h);
-  if (LY.cock) { g.fillStyle = 'rgba(20,26,36,.95)'; g.strokeStyle = facRGBA(SIDE_FAC[PL.side], 0.5); g.lineWidth = 3; g.beginPath(); g.arc(cx, cy, R + 7, 0, Math.PI * 2); g.fill(); g.stroke(); g.lineWidth = 1.5; }   // 儀表板上的框
-  g.fillStyle = 'rgba(6,12,22,.55)'; g.strokeStyle = 'rgba(160,190,220,.35)'; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill(); g.stroke();
-  g.beginPath(); g.arc(cx, cy, R / 2, 0, Math.PI * 2); g.stroke();
-  const pt = (x, z) => { const dx = x - px, dz = z - pz, u = -(dx * ch - dz * sh), v = dx * sh + dz * ch; const k = Math.hypot(u, v) * S; if (k > R - 2) return null; return [cx + u * S, cy - v * S]; };
+// 雷達：機首方向朝上、半徑 600；掃描線、視野扇形；咬尾的敵機放大閃爍、任務目標橘色菱形
+function pilotRadar(g, LY, px, py, pz, col, red, thr, now) {
+  const R = LY.R, cx = LY.cx, cy = LY.cy, S = R / 600, h = Math.atan2(PL.F[0], PL.F[2]), ch = Math.cos(h), sh = Math.sin(h), fac = SIDE_FAC[PL.side];
+  if (LY.cock) { g.fillStyle = 'rgba(20,26,36,.95)'; g.strokeStyle = facRGBA(fac, 0.5); g.lineWidth = 3; g.beginPath(); g.arc(cx, cy, R + 7, 0, Math.PI * 2); g.fill(); g.stroke(); g.lineWidth = 1.5; }   // 儀表板上的框
+  g.fillStyle = 'rgba(6,12,22,.62)'; g.strokeStyle = facRGBA(fac, 0.55); g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill(); g.stroke();
+  g.strokeStyle = facRGBA(fac, 0.2); g.beginPath(); g.arc(cx, cy, R / 2, 0, Math.PI * 2); g.moveTo(cx - R, cy); g.lineTo(cx + R, cy); g.moveTo(cx, cy - R); g.lineTo(cx, cy + R); g.stroke();
+  const fv = Math.atan(Math.tan(camPersp.fov * Math.PI / 360) * (VW / VH));   // 視野扇形
+  g.fillStyle = facRGBA(fac, 0.08); g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, R, -Math.PI / 2 - fv, -Math.PI / 2 + fv); g.closePath(); g.fill();
+  const sa = (now / 1000) * 2.2 % (Math.PI * 2);   // 掃描線
+  g.save(); g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.clip();
+  for (let q = 0; q < 6; q++) { g.strokeStyle = facRGBA(fac, 0.32 * (1 - q / 6)); g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(sa - q * 0.06) * R, cy + Math.sin(sa - q * 0.06) * R); g.stroke(); }
+  g.restore();
+  const pt = (x, z) => { const dx = x - px, dz = z - pz, u = -(dx * ch - dz * sh), v = dx * sh + dz * ch; if (Math.hypot(u, v) * S > R - 2) return null; return [cx + u * S, cy - v * S]; };
   for (const sq of squadrons) {
     if (sq.alive <= 0 || sq.bg || sq.hidden) continue;
     const p = pt(sq.x, sq.z); if (!p) continue;
-    g.fillStyle = sq.side === PL.side ? facRGBA(SIDE_FAC[PL.side], 0.85) : red; g.fillRect(p[0] - 2.5, p[1] - 2.5, 5, 5);
+    g.fillStyle = sq.side === PL.side ? facRGBA(fac, 0.85) : red; g.fillRect(p[0] - 2.5, p[1] - 2.5, 5, 5);
   }
   g.fillStyle = 'rgba(255,140,120,.9)';
   for (const f of aliveF[1 - PL.side]) { const p = pt(fP[f * 3], fP[f * 3 + 2]); if (p) g.fillRect(p[0] - 1, p[1] - 1, 2, 2); }
-  if (PL.home >= 0 && ships.alive[PL.home]) { shipWorldCPU(PL.home, _pa); const p = pt(_pa.x, _pa.z); if (p) { g.strokeStyle = '#8fe39a'; g.strokeRect(p[0] - 4, p[1] - 4, 8, 8); } }
+  const bl = (now / 160 | 0) % 2 === 0;
+  for (const f of thr) { const p = pt(fP[f * 3], fP[f * 3 + 2]); if (!p) continue; g.fillStyle = bl ? red : '#fff'; g.beginPath(); g.moveTo(p[0], p[1] - 4); g.lineTo(p[0] + 3.5, p[1] + 3); g.lineTo(p[0] - 3.5, p[1] + 3); g.closePath(); g.fill(); }
+  const M = PL.mis, dia = (i, c) => { shipWorldCPU(i, _pa); const p = pt(_pa.x, _pa.z); if (!p) return; g.strokeStyle = c; g.lineWidth = 1.5; g.beginPath(); g.moveTo(p[0], p[1] - 5); g.lineTo(p[0] + 5, p[1]); g.lineTo(p[0], p[1] + 5); g.lineTo(p[0] - 5, p[1]); g.closePath(); g.stroke(); };
+  if (M) { for (const i of M.tg) if (i >= 0 && ships.alive[i]) dia(i, '#ff9f40'); if (M.esc >= 0 && ships.alive[M.esc]) dia(M.esc, PL_OK); }
+  if (PL.home >= 0 && ships.alive[PL.home]) { shipWorldCPU(PL.home, _pa); const p = pt(_pa.x, _pa.z); if (p) { g.strokeStyle = PL_OK; g.strokeRect(p[0] - 4, p[1] - 4, 8, 8); } }
   g.fillStyle = col; g.beginPath(); g.moveTo(cx, cy - 6); g.lineTo(cx + 4, cy + 4); g.lineTo(cx - 4, cy + 4); g.closePath(); g.fill();
+  plFont(g, 9, false, true); g.fillStyle = 'rgba(220,228,240,.5)'; g.textAlign = 'left'; g.fillText('300', cx + 3, cy - R / 2 - 6); g.fillText('600', cx + 3, cy - R + 8);
+  if (!LY.cock) { g.textAlign = 'center'; g.fillStyle = facRGBA(fac, 0.7); g.fillText('RADAR', cx, cy + R + 10); g.textAlign = 'left'; }
+  plFont(g, 12);
 }
-// 耐久、護盾、速度、加速、武裝
-function pilotGauges(g, W, H, col, LY) {
-  const Fr = PL.frame, x0 = 22, y0 = LY.gBase;
-  const bar = (x, y, w, k, c, label, val) => { g.fillStyle = 'rgba(6,12,22,.6)'; g.fillRect(x, y, w, 8); g.fillStyle = c; g.fillRect(x, y, w * Math.max(0, Math.min(1, k)), 8); g.fillStyle = 'rgba(220,228,240,.85)'; g.fillText(label, x, y - 8); if (val != null) { g.textAlign = 'right'; g.fillText(val, x + w, y - 8); g.textAlign = 'left'; } };
-  bar(x0, y0, 190, PL.sh / Fr.sh, '#7cc4ff', '護盾', Math.ceil(PL.sh));
-  bar(x0, y0 + 26, 190, PL.hp / Fr.hp, PL.hp / Fr.hp < 0.35 ? '#ff6a5a' : '#8fe39a', '機體', Math.ceil(PL.hp));
-  bar(x0, y0 + 52, 190, PL.boost, PL.boosting ? '#ffd36a' : 'rgba(255,211,106,.6)', '加速能量 (Shift)');
-  g.fillStyle = col; g.font = '600 15px "Noto Sans TC", sans-serif'; g.fillText(PL.speed < -0.5 ? `倒退 ${Math.round(-PL.speed)}` : `速度 ${Math.round(PL.speed)}`, x0, y0 + 80); g.font = '12px "Noto Sans TC", sans-serif';
-  { const bw = 100, z0 = x0 + 90 + bw * PILOT_REV / (1 + PILOT_REV), u = bw / (1 + PILOT_REV);   // 油門條：中間的刻度＝0，左邊＝逆向
-    g.fillStyle = 'rgba(6,12,22,.6)'; g.fillRect(x0 + 90, y0 + 74, bw, 8);
-    g.fillStyle = PL.thr < 0 ? 'rgba(255,160,90,.9)' : 'rgba(220,228,240,.8)'; g.fillRect(PL.thr < 0 ? z0 + PL.thr * u : z0, y0 + 74, Math.abs(PL.thr) * u, 8);
-    g.fillStyle = '#fff'; g.fillRect(z0 - 0.5, y0 + 71, 1.5, 14);
-    g.fillStyle = 'rgba(220,228,240,.8)'; g.fillText(`油門 ${plKey('pilot_thr_up')}/${plKey('pilot_thr_dn')}　${plKey('pilot_stop')} 歸零`, x0 + 196, y0 + 78); }
-  // 武裝
-  const xr = W - 232;
-  PL.slots.forEach((S, k) => {
-    const Wd = PILOT_WEAPONS[S.id], y = LY.wBase - (PL.slots.length - 1 - k) * 46;
-    g.fillStyle = 'rgba(6,12,22,.6)'; g.fillRect(xr, y - 14, 212, 40);
-    g.fillStyle = PL.fire[k] ? '#fff' : col; g.font = '600 13px "Noto Sans TC", sans-serif'; g.fillText(`${plSlotKey(k)}　${Wd.name}`, xr + 8, y); g.font = '12px "Noto Sans TC", sans-serif';
-    let k2 = 1, txt = '', c2 = col;
-    if (Wd.type === 'gun') { if (Wd.ammo) { k2 = S.ammo / Math.max(1, S.max); txt = `${S.ammo} 發`; } else { k2 = 1 - S.heat; txt = S.over ? '過熱！' : `熱度 ${Math.round(S.heat * 100)}%`; c2 = S.over ? '#ff6a5a' : S.heat > 0.7 ? '#ffb060' : col; } }
-    else if (Wd.type === 'lock') { k2 = S.ammo / Math.max(1, S.max); txt = `${S.ammo} 枚${S.lock >= 0 ? (S.lockT >= S.need ? '・已鎖定' : '・鎖定中') : ''}`; c2 = S.ammo ? col : '#ff6a5a'; }
-    else { k2 = S.en; txt = S.empty ? '充能中' : `能量 ${Math.round(S.en * 100)}%`; c2 = S.empty ? '#ffb060' : col; }
-    g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(xr + 8, y + 12, 196, 5); g.fillStyle = c2; g.fillRect(xr + 8, y + 12, 196 * Math.max(0, Math.min(1, k2)), 5);
-    g.textAlign = 'right'; g.fillStyle = c2; g.fillText(txt, xr + 204, y); g.textAlign = 'left';
-  });
-  // 個人戰績
-  const S = PL.stats; g.textAlign = 'right'; g.fillStyle = 'rgba(230,235,245,.9)'; g.font = '600 13px "Noto Sans TC", sans-serif';
-  g.fillText(`擊墜 ${S.kf}　擊沉 ${S.ks}　戰功 ${Math.round(S.merit)}`, W - 20, 96); g.textAlign = 'left'; g.font = '12px "Noto Sans TC", sans-serif';
-  g.fillStyle = 'rgba(200,210,225,.55)'; g.fillText(`${plKey('pilot_target')} 鎖定　${plKey('pilot_view')} ${PL.cock ? '背後' : '座艙'}視角　${plKey('pilot_land')} 降落整補　Esc 暫停`, x0, H - 14);
+// 左下：按鍵提示
+function pilotKeysHint(g, H) {
+  plFont(g, 11); g.textAlign = 'left'; g.fillStyle = 'rgba(200,210,225,.5)';
+  g.fillText(`${plKey('pilot_target')} 鎖定　${plKey('pilot_view')} ${PL.cock ? '背後' : '座艙'}視角　${plKey('pilot_land')} 降落整補　${plKey('pilot_thr_up')}/${plKey('pilot_thr_dn')} 油門　${plKey('pilot_stop')} 歸零　Esc 暫停`, 20, H - 14);
 }
 
 // ───── 戰後 ─────
@@ -13303,7 +13660,7 @@ window.__demo = { view, updateCamera, volley, turn, opts, goPreset, changeFormat
 document.getElementById('sand-exit').onclick = () => showMenu();
 Object.assign(window.__demo, { GAME, TAC, SV, svH, svV, groupNodes, SIM, showSim, simStart, simSwitch, simSetup, simEditMid, simGo, simReset, opLevel, setOpLevel, applyOp, OP_LEVELS, ffStats, ffHold, rayStats, deflStats, facStats, maxHp, fleets: () => fleets, showMenu, showSingle, showRandom, showCampaign, showBriefing, showWatch, watchGo, showLoadout, startDeploy, startBattle, showReport, startReplay, SCENARIOS, sideAlive, TUT, TUT_LESSONS, tutStart, showTraining, showManual });
 // 除錯：命令、干擾、補給、地形與統計
-Object.assign(window.__demo, { step: (n = 1) => { for (let k = 0; k < n && !GAME.result; k++) stepSim(); pushSquadronUniforms(); gameFrame(0.2); }, issue, setSelection, squadrons: () => squadrons, ships: () => ships, jammed, seenSq, playerFogged, FOW: () => FOW, FT: () => FT, rockBlock, rocks: () => ROCKS, wStats, ftrStats, ammoRatio, supplyStock });
+Object.assign(window.__demo, { PL, step: (n = 1) => { for (let k = 0; k < n && !GAME.result; k++) stepSim(); pushSquadronUniforms(); gameFrame(0.2); }, issue, setSelection, squadrons: () => squadrons, ships: () => ships, jammed, seenSq, playerFogged, FOW: () => FOW, FT: () => FT, rockBlock, rocks: () => ROCKS, wStats, ftrStats, ammoRatio, supplyStock });
 document.getElementById('tb-attack').onclick = armAttack;
 document.getElementById('tb-queue').onclick = () => { queueToggle = !queueToggle; document.getElementById('tb-queue').classList.toggle('on', queueToggle); };
 document.getElementById('set-btn').onclick = () => openSettings();

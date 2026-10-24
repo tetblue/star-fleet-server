@@ -2152,7 +2152,7 @@ function fireAir(attacker, gk, gun, sq, o, delay) {
   const rc = o.a === 1 && FT.kind[o.i] === 2, RC = FOW_RULE.recon;   // 偵察機：很難打中（命中率再打折、下限更低，被瞄準的間隔更長）
   const p = rc ? Math.min(HIT_RULE.max, Math.max(RC.min, raw * RC.acc)) : Math.min(HIT_RULE.max, Math.max(HIT_RULE.min, raw));
   const hit = rnd() < p;
-  if (o.a === 0) misShot[o.i]++; else FT.engT[o.i] = U.uTime.value + (rc ? RC.gap : AIR_RULE.fighterGap);
+  if (o.a === 0) misShot[o.i]++; else FT.engT[o.i] = U.uTime.value + (rc ? RC.gap : AIR_RULE.fighterGap) / (PL.on ? PILOT_SPEED : 1);   // 駕駛模式：艦載機慢動作，被瞄準的間隔跟著拉長
   const gs = gunStats[sq.side][gk]; gs[0]++; if (hit) gs[1]++;
   const as = airStats[sq.side]; as.shots++; if (hit) as.hits++;
   // 畫面：瞄準提前量；沒中就偏一點
@@ -2938,14 +2938,14 @@ const ftrSpriteMat = new THREE.ShaderMaterial({
 });
 const FTR_COL = [new THREE.Color(1.0, 0.55, 0.25), new THREE.Color(0.5, 0.8, 1.0), new THREE.Color(1.0, 0.4, 0.3), new THREE.Color(1.0, 0.4, 0.5), new THREE.Color(0.4, 1.0, 0.9), new THREE.Color(0.8, 0.5, 1.0), new THREE.Color(0.65, 1.0, 0.35)];
 const ftrTrailMat = new THREE.ShaderMaterial({
-  uniforms: { uTime: U.uTime, uRes: U.uRes, uCamDir: U.uCamDir, uFog: U.uFog, uFac: { value: FTR_COL } },
+  uniforms: { uTime: U.uTime, uRes: U.uRes, uCamDir: U.uCamDir, uFog: U.uFog, uFac: { value: FTR_COL }, uTrailMax: { value: 1e6 } },   // uTrailMax：尾焰最長幾單位（駕駛模式＝機身的幾倍，見 pilot.js）
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   vertexShader: FTR_GLSL + /* glsl */`
-    varying vec2 vUv; varying float vFac;
+    uniform float uTrailMax; varying vec2 vUv; varying float vFac;
     void main(){
       if (aFI.y < 1.5 || aFI.y > 2.5) { gl_Position = vec4(2.,2.,2.,1.); return; }
       float kind = floor(aFI.w * 0.5);
-      vec3 tailP = aFP - aFV * 0.16;
+      float vl = length(aFV); vec3 tailP = aFP - (vl > 1e-4 ? aFV / vl * min(vl * 0.16, uTrailMax) : vec3(0.));
       vec4 ch = projectionMatrix * viewMatrix * vec4(aFP, 1.), ct = projectionMatrix * viewMatrix * vec4(tailP, 1.);
       vec2 sh = ch.xy / ch.w * uRes * 0.5, st = ct.xy / ct.w * uRes * 0.5;
       vec2 d = sh - st; float L = length(d); vec2 dn = L > 1e-3 ? d / L : vec2(1., 0.);
@@ -3260,26 +3260,27 @@ function updateFighters(dt) {
     const kind = FT.kind[i], home = FT.carrier[i];
     const RC = FOW_RULE.recon;
     let speed = kind === 2 ? RC.speed[0] + seed * (RC.speed[1] - RC.speed[0]) : kind ? 30 + seed * 8 : CRAFT[FT.role[i]].speed[0] + seed * (CRAFT[FT.role[i]].speed[1] - CRAFT[FT.role[i]].speed[0]);
-    const fsp = PL.on ? PILOT_SPEED : 1; speed *= fsp;   // 駕駛模式：艦載機都飛慢一點（船才顯得大），續航時間照比例拉長
+    const fsp = PL.on ? PILOT_SPEED : 1; speed *= fsp;
+    const fdt = dt * fsp;   // 駕駛模式：艦載機的計時（冷卻、照射、續航、轉向）跟著速度一起放慢＝慢動作，每趟的戰果不變   // 駕駛模式：艦載機都飛慢一點（船才顯得大），續航時間照比例拉長
     let dx = vx, dy = vy, dz = vz, d = 1e9, tx = 0, ty = 0, tz = 0, hasT = false;
     if (FT.launch[i] > 0) {
-      FT.launch[i] -= dt;
+      FT.launch[i] -= fdt;
     } else if (kind === 2 && !FT.ret[i]) {
       // 偵察機：飛到指定的點（tk 0），到了在上空盤旋 loiter 秒（tk 1，區域掃描見 fowUpdate），然後返航
-      FT.fuel[i] -= dt * fsp; if (FT.fuel[i] <= 0) FT.ret[i] = 1;
+      FT.fuel[i] -= fdt; if (FT.fuel[i] <= 0) FT.ret[i] = 1;
       tx = FT.ax[i]; ty = FT.ay[i]; tz = FT.az[i];
       dx = tx - px; dy = ty - py; dz = tz - pz; d = Math.hypot(dx, dy, dz) || 1; dx /= d; dy /= d; dz /= d;
       if (FT.tk[i] === 0 && d < 40) { FT.tk[i] = 1; FT.cd[i] = RC.loiter; }
       let ex = dx, ey = dy, ez = dz;
       if (FT.tk[i] === 1) {
-        FT.cd[i] -= dt; if (FT.cd[i] <= 0) FT.ret[i] = 1;
+        FT.cd[i] -= fdt; if (FT.cd[i] <= 0) FT.ret[i] = 1;
         ex = -dz + dx * (d - 45) / 30; ey = dy * 0.5; ez = dx + dz * (d - 45) / 30; speed *= 0.6;   // 繞著那一點盤旋
       }
-      const el = Math.hypot(ex, ey, ez) || 1, k = Math.min(1, 3 * dt);
+      const el = Math.hypot(ex, ey, ez) || 1, k = Math.min(1, 3 * fdt);
       vx += (ex / el * speed - vx) * k; vy += (ey / el * speed - vy) * k; vz += (ez / el * speed - vz) * k;
     } else if (FT.ret[i] || kind === 1) {
       // 返航（續航用完／維修完）或維修機飛往受傷的船
-      FT.fuel[i] -= dt * fsp;
+      FT.fuel[i] -= fdt;
       if (!FT.ret[i]) { const g = FT.tgt[i]; if (g < 0 || !ships.alive[g] || ships.hp[g] >= maxHp(g) * 0.995 || FT.heal[i] <= 0 || FT.fuel[i] <= 0) FT.ret[i] = 1; }
       const goal = FT.ret[i] ? home : FT.tgt[i];
       if (goal < 0 || !ships.alive[goal]) { FT.state[i] = 3; FT.t0[i] = t; continue; }   // 母艦沉了：找不到地方降落
@@ -3294,16 +3295,16 @@ function updateFighters(dt) {
       if (FT.ret[i] && d < 40) speed = Math.max(14, speed * d / 40);   // 進場減速，才停得下來
       if (!FT.ret[i] && d < 9) {   // 在受傷的船旁邊盤旋、修理
         ex = -dz + dx * 0.3; ey = Math.sin(t * 2 + seed * 9) * 0.2; ez = dx + dz * 0.3; speed = 9;
-        FT.cd[i] -= dt;
+        FT.cd[i] -= fdt;
         if (FT.cd[i] <= 0) { FT.cd[i] = 0.5; const g = FT.tgt[i], amt = Math.min(FT.heal[i], FT.hr[i], maxHp(g) - ships.hp[g]); ships.hp[g] += amt; FT.heal[i] -= amt; wStats[s].healed += amt; }
       }
-      const el = Math.hypot(ex, ey, ez) || 1, k = Math.min(1, 3 * dt);
+      const el = Math.hypot(ex, ey, ez) || 1, k = Math.min(1, 3 * fdt);
       vx += (ex / el * speed - vx) * k; vy += (ey / el * speed - vy) * k; vz += (ez / el * speed - vz) * k;
     } else {
       const role = FT.role[i], C = CRAFT[role];
-      FT.fuel[i] -= dt * fsp;
+      FT.fuel[i] -= fdt;
       if (FT.fuel[i] <= 0) FT.ret[i] = 1;   // 續航用完：下一幀開始返航
-      FT.rt[i] -= dt;
+      FT.rt[i] -= fdt;
       const hq = home >= 0 && home < shipCount ? squadrons[ships.sq[home]] : null;
       let mode = 0;   // 0 追擊迴旋、1 巡邏、2 飛彈發射、3 光束照射
       if (role === 0) {
@@ -3335,7 +3336,7 @@ function updateFighters(dt) {
       if (mode === 1) { ex = dx; ey = dy * 0.6; ez = dz; speed *= 0.7; }
       else if (mode === 2 && hasT && d < C.standoff) {   // 到發射距離：橫向繞飛、發射飛彈，打完返航
         ex = -dz + dx * 0.15; ey = 0; ez = dx + dz * 0.15; speed *= 0.7;
-        FT.cd[i] -= dt;
+        FT.cd[i] -= fdt;
         if (FT.cd[i] <= 0 && FT.ammo[i] > 0) {
           FT.cd[i] = 0.7 + rnd() * 0.4;
           if (launchMissileAt(px, py, pz, s, hq, FT.tgt[i], C.dmg * ftrDmgMul(home), t, 2)) FT.ammo[i]--;
@@ -3349,21 +3350,21 @@ function updateFighters(dt) {
         const sw = Math.sin(t * 1.7 + seed * 20) * 0.8;
         ex = dx - dz * sw; ey = dy * 0.6 + Math.sin(t * 1.1 + seed * 9) * 0.35; ez = dz + dx * sw;
         if (role === 1 && d < 16) FT.brk[i] = 1.4;              // 掃射完拉起脫離
-        if (FT.brk[i] > 0) { FT.brk[i] -= dt; ex = -dx + Math.sin(seed * 50) * 0.8; ey = 0.5; ez = -dz + Math.cos(seed * 50) * 0.8; }
+        if (FT.brk[i] > 0) { FT.brk[i] -= fdt; ex = -dx + Math.sin(seed * 50) * 0.8; ey = 0.5; ez = -dz + Math.cos(seed * 50) * 0.8; }
       }
       const yref = hasT ? ty : py; if (py > yref + 45) ey -= 0.6; if (py < yref - 45) ey += 0.6;   // 3D：在目標的高度附近
       const el = Math.hypot(ex, ey, ez) || 1;
-      const k = Math.min(1, 2.6 * dt);
+      const k = Math.min(1, 2.6 * fdt);
       vx += (ex / el * speed - vx) * k; vy += (ey / el * speed - vy) * k; vz += (ez / el * speed - vz) * k;
       // 光束攻擊機：照射
       if (role === 3) {
-        FT.bcd[i] -= dt;
+        FT.bcd[i] -= fdt;
         if (FT.ch[i] > 0) {
           if (!hasT || d > C.range * 1.3) FT.ch[i] = 0;
           else {
-            FT.ch[i] -= dt;
+            FT.ch[i] -= fdt;
             if ((simTick + i) % 3 === 0) spawnBeam(px, py, pz, tx, ty, tz, t, 0.045, s, 1.1, 1.0);
-            FT.cd[i] -= dt;
+            FT.cd[i] -= fdt;
             if (FT.cd[i] <= 0) {
               FT.cd[i] = 0.25;
               const g = FT.tgt[i], fh = rnd() < strikeChance(STRIKE_RULE.lance, g, s, { x: tx, y: ty, z: tz }) && !(ROCKS.length && rockBlock(px, py, pz, tx, ty, tz) >= 0);   // 被巨大小行星擋住就打不到
@@ -3381,7 +3382,7 @@ function updateFighters(dt) {
     fP[i3] = px; fP[i3 + 1] = py; fP[i3 + 2] = pz; fV[i3] = vx; fV[i3 + 1] = vy; fV[i3 + 2] = vz;
     // 射擊：機首大致對準目標才開火
     const gunCraft = kind === 0 && FT.role[i] <= 1;   // 攔截機、攻擊機用機砲；重攻擊機在上面另外處理
-    if (gunCraft && !FT.ret[i]) FT.cd[i] -= dt;
+    if (gunCraft && !FT.ret[i]) FT.cd[i] -= fdt;
     if (gunCraft && !FT.ret[i] && hasT && FT.cd[i] <= 0 && d < (FT.role[i] === 0 ? INTERCEPT_RULE.range : 55) && (vx * dx + vy * dy + vz * dz) / sp > 0.85) {
       const IR = INTERCEPT_RULE;
       FT.cd[i] = FT.role[i] === 0 ? IR.cd[0] + rnd() * (IR.cd[1] - IR.cd[0]) : 0.35 + rnd() * 0.5;
@@ -4876,7 +4877,7 @@ const KEY_ACTIONS = [
   // 王牌飛行員（駕駛中才有效，可以和上面的鍵重複；滑鼠左右鍵固定是武裝一、二，這裡可以另外綁鍵盤）
   ['pilot_thr_up', '油門加', '駕駛', 'KeyW'], ['pilot_thr_dn', '油門減（減到 0 以下＝逆向噴射）', '駕駛', 'KeyS'], ['pilot_stop', '油門歸零（停住）', '駕駛', 'KeyX'], ['pilot_roll_l', '向左翻滾', '駕駛', 'KeyA'], ['pilot_roll_r', '向右翻滾', '駕駛', 'KeyD'],
   ['pilot_boost', '加速', '駕駛', 'ShiftLeft'], ['pilot_w1', '武裝一（滑鼠左鍵之外）', '駕駛', ''], ['pilot_w2', '武裝二（滑鼠右鍵之外）', '駕駛', ''], ['pilot_w3', '武裝三', '駕駛', 'KeyQ'], ['pilot_w4', '武裝四', '駕駛', 'KeyE'],
-  ['pilot_target', '鎖定準心附近的敵人', '駕駛', 'KeyT'], ['pilot_view', '背後／座艙視角', '駕駛', 'KeyV'], ['pilot_land', '降落航母整補（靠近己方航母時）', '駕駛', 'KeyR'],
+  ['pilot_target', '鎖定準心附近的敵人', '駕駛', 'KeyT'], ['pilot_view', '背後／座艙視角', '駕駛', 'KeyV'], ['pilot_land', '降落航母整補（靠近己方航母時）', '駕駛', 'KeyR'], ['pilot_jump', '小型躍傳：選擇目標艦隊（再用數字鍵 1～9 選）', '駕駛', 'KeyH'],
 ];
 const KEY_CTX = (id) => (id.startsWith('radial_') ? 'radial' : id.startsWith('pilot_') ? 'pilot' : id === 'pitch_mod' ? 'drag' : 'main');   // 不同情境的鍵可以重複（例如 Z＝齊射，右鍵按住時＝仰角）
 // 介面資訊預設都顯示
