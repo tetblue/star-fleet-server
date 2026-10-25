@@ -19,7 +19,7 @@ Object.assign(BR, { on: false, el: null, fleet: null, fleetId: -1, ship: -1, shi
 const _brV = new THREE.Vector3(), _brT = new THREE.Vector3();
 
 function bridgeClampPitch(p) { return Math.max(BR_PMIN, Math.min(BR_PMAX, p)); }
-function bridgeConsoleH() { return Math.round(Math.min(820, Math.max(340, innerHeight * 0.7))); }
+function bridgeConsoleH() { return innerHeight; }   // 戰術台：低頭後占滿整個畫面
 function bridgeConsoleK() { const x = Math.max(0, Math.min(1, (-BR.pitch - 0.42) / (0.98 - 0.42))); return x * x * (3 - 2 * x); }
 function bridgeFleets() { return fleets.filter((f) => f.side === GAME.playerSide && !f.reserve && fleetAlive(f).length); }
 

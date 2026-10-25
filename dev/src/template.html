@@ -404,7 +404,7 @@
   .tac-pop .tac-forms .g-btn.on { border-color: rgba(143,227,165,.85); color: #8fe3a5; background: rgba(20,60,35,.5); }
   .tac-side { flex: 1 1 42%; max-width: calc(780px * var(--ui)); min-width: 0; display: flex; flex-direction: column; gap: calc(8px * var(--sp)); padding: calc(10px * var(--sp)) calc(12px * var(--sp)); }
   .tac-list { flex: 1; min-height: 0; overflow: auto; padding-right: 4px; }
-  .tac-cc { flex: none; } .tac-cc .ch-box { padding: calc(5px * var(--sp)); } .tac-cc .cc-b { height: calc(38px * var(--ui)); }
+  .tac-cc { flex: none; } .tac-cc .ch-box { padding: calc(5px * var(--sp)); }
   .tac-card { cursor: pointer; } .tac-card:hover { border-color: rgba(255,255,255,.4); }
   .tac-skl { display: flex; flex-wrap: wrap; gap: calc(6px * var(--sp)) calc(12px * var(--sp)); margin-top: calc(4px * var(--sp)); font-size: calc(12.5px * var(--ui)); }
   .tac-skl span { color: var(--dim); } .tac-skl span.on { color: #8fe3a5; } .tac-skl span.ok { color: var(--text); }
@@ -691,11 +691,11 @@
   @media (max-width: 759px) { .tv-grid { grid-template-columns: 1fr; } }
   /* ── 作戰 HUD（hud.js）：左下小地圖、中下選取面板、右下指令卡 ── */
   #cmdhud { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; padding: 0 calc(8px * var(--sp)) calc(8px * var(--sp)); gap: calc(8px * var(--sp)); align-items: flex-end; pointer-events: none;
-    grid-template-columns: calc(170px * var(--ui)) minmax(0, 1fr) calc(300px * var(--ui)); }
+    grid-template-columns: calc(170px * var(--ui)) minmax(0, 1fr) var(--ccw); }
   body.ch-on #cmdhud { display: grid; }
   body.game-battle #skillbar, body.game-battle.tac-on #selbar { display: none !important; }   /* 技能在指令卡上；戰術面板右側就是選取資訊 */
   body.ch-on #selbar, body.ch-on #skillbar, body.ch-on #help-btn, body.ch-on #set-btn { display: none !important; }
-  body.ch-on #touchbar { bottom: calc(190px * var(--ui)); }
+  body.ch-on #touchbar { bottom: calc(var(--ccw) * 0.6 + 64px); }
   #cmdhud > *, #cmdhud .ch-mid > * { pointer-events: auto; }
   #cmdhud .ch-mid { pointer-events: none; display: flex; flex-direction: column; gap: calc(4px * var(--sp)); min-width: 0; max-width: calc(560px * var(--ui)); justify-self: center; width: 100%; }
   .ch-box { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: calc(6px * var(--sp)); }
@@ -728,11 +728,33 @@
   .tt-h { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; } .tt-h b { color: var(--pc); font-size: calc(13px * var(--ui)); }
   .tt-h kbd { font: inherit; font-size: calc(11px * var(--ui)); color: #ffd27a; border: 1px solid rgba(255,210,122,.5); border-radius: 3px; padding: 0 5px; }
   .tt-d small { color: var(--dim); } .tt-s { color: #8fe3a5; margin-top: 3px; } .tt-w { color: #ff9a7a; margin-top: 3px; } .tt-q { color: var(--dim); font-size: calc(11px * var(--ui)); margin-top: 3px; }
+  /* 艦橋：小地圖在左下角、儀表板上方（只看） */
+  #ch-mm.br { position: absolute; left: max(calc(var(--pw) + 8px), 12vw); bottom: calc(var(--dh) + 10px); width: calc(190px * var(--ui)); height: calc(190px * var(--ui)); pointer-events: none; z-index: 2; }
+  body.br-mm #br-stat { max-height: calc(100vh - var(--dh) - 140px - calc(190px * var(--ui))); }
+  /* 艦橋的戰術台：占滿畫面，平面地圖為主、側視圖（垂直）為輔 */
+  body.tac-console .tac-mapwrap { flex-basis: 70%; }
+  body.tac-console .tac-mapbox { flex: 1 1 72%; }
+  body.tac-console .tac-svbox { flex: 0 0 28%; }
   body.ui-no-skillbar #cmdhud #ch-card, body.ui-no-selbar #ch-sel, body.ui-no-minimap #ch-mm { visibility: hidden; }
   body.ch-on #hint { display: none; }
-  @media (max-width: 1100px) { #cmdhud { grid-template-columns: calc(140px * var(--ui)) minmax(0, 1fr) calc(260px * var(--ui)); } #ch-mm { height: calc(140px * var(--ui)); } .cc-b { font-size: calc(10.5px * var(--ui)); } }
-  @media (max-width: 860px) { #cmdhud { grid-template-columns: minmax(0, 1fr) calc(290px * var(--ui)); } #ch-mm { display: none; } .cc-b { font-size: calc(10px * var(--ui)); } }
+  @media (max-width: 1100px) { #cmdhud { grid-template-columns: calc(140px * var(--ui)) minmax(0, 1fr) var(--ccw); } #ch-mm { height: calc(140px * var(--ui)); } .cc-b { font-size: calc(10.5px * var(--ui)); } }
+  @media (max-width: 860px) { #cmdhud { grid-template-columns: minmax(0, 1fr) var(--ccw); } #ch-mm { display: none; } .cc-b { font-size: calc(10px * var(--ui)); } }
   @media (max-width: 600px) { #cmdhud { grid-template-columns: 1fr; } #cmdhud .ch-mid { display: none; } }
+  /* 戰場右下角的指令卡：寬度至少是畫面的 1/3，按鈕是正方形（字跟著放大） */
+  :root { --ccw: max(33.4vw, calc(300px * var(--ui))); }
+  @media (max-width: 600px) { :root { --ccw: calc(100vw - 16px); } }
+  /* 戰術面板／艦橋戰術台：右側欄至少放得下 1/3 畫面寬的指令卡 */
+  .tac-side { flex: 0 0 calc(var(--ccw) + calc(30px * var(--sp))); max-width: none; }
+  /* 一般戰術面板（只占下半部）：指令卡放在清單右邊，清單才不會被擠扁；艦橋戰術台占滿畫面，指令卡放在清單下方 */
+  body:not(.tac-console) .tac-side { flex-direction: row; align-items: flex-end; flex-basis: calc(var(--ccw) + calc(260px * var(--ui)) + calc(38px * var(--sp))); }
+  body:not(.tac-console) .tac-list { align-self: stretch; min-width: 0; }
+  body:not(.tac-console) .tac-cc { width: var(--ccw); }
+  @media (max-width: 600px) { .tac-side { flex-basis: 50%; } }
+  #cmdhud .ch-grid, .tac-cc .ch-grid { gap: calc(5px * var(--sp)); }
+  #cmdhud .cc-b, .tac-cc .cc-b { height: auto; aspect-ratio: 1 / 1; padding: 16% 3px 3px; font-size: clamp(calc(11px * var(--ui)), 1.2vw, 24px); }
+  #cmdhud .cc-k, .tac-cc .cc-k { left: 7%; top: 4%; font-size: clamp(calc(10px * var(--ui)), 1vw, 20px); }
+  #cmdhud .cc-b small, .tac-cc .cc-b small { font-size: clamp(calc(9.5px * var(--ui)), 0.82vw, 16px); margin-top: 3px; }
+  #cmdhud #ch-page, .tac-cc #ch-page { font-size: clamp(calc(11px * var(--ui)), 0.85vw, 16px); }
   body.pf-0 .ch-box { background: linear-gradient(180deg, rgba(24,18,10,.92), rgba(10,11,18,.9)); border: 1px solid rgba(242,179,90,.5); box-shadow: inset 0 0 0 2px rgba(8,9,14,.9), inset 0 0 0 3px rgba(242,179,90,.22), 0 2px 10px rgba(0,0,0,.5); border-radius: 3px; }
   body.pf-0 .cs-fn, body.pf-0 .tt-h b { font-family: "Noto Serif TC", "PMingLiU", "Songti TC", serif; letter-spacing: .1em; color: #ffe2b0; }
   body.pf-1 .ch-box { background: linear-gradient(180deg, rgba(8,20,36,.9), rgba(4,10,20,.9)); border: 1px solid rgba(124,196,255,.55); border-radius: 0; box-shadow: inset 0 1px 0 rgba(180,225,255,.25), inset 0 0 14px rgba(60,140,220,.12); }

@@ -189,6 +189,7 @@ function buildCmdHud() {
     gEl('ch-sel').onclick = chSelClick;
     gEl('ch-cg').onclick = (e) => { const b = e.target.closest('[data-cg]'); if (b) cgKey({ code: 'Digit' + b.dataset.cg, preventDefault() {}, shiftKey: e.shiftKey }); };
     mmBind(gEl('ch-mmc'));
+    CH.mmEl = gEl('ch-mm');
   }
   CH.page = 'main'; CH.selSig = ''; CH.acc = 1;
   cgReset();
@@ -206,6 +207,12 @@ function cmdHudFrame(dt) {
   const host = inTac ? TAC.cc : CH.el;
   if (CH.cardEl.parentElement !== host) { host.appendChild(CH.cardEl); CH.tipI = -1; ccTip(); }
   if (on !== CH.shown) { CH.shown = on; document.body.classList.toggle('ch-on', on); }
+  // 艦橋：左下角一直顯示小地圖（只看、不能點）；低頭看戰術台就收起來
+  const brMM = BR.on && !!BR.el && !inTac && (GAME.phase === 'battle' || GAME.phase === 'replay') && uiOn('minimap');
+  const mmHost = brMM ? BR.el : CH.el;
+  if (CH.mmEl.parentElement !== mmHost) { if (brMM) BR.el.appendChild(CH.mmEl); else CH.el.insertBefore(CH.mmEl, CH.el.firstChild); }
+  if (brMM !== CH.brMM) { CH.brMM = brMM; CH.mmEl.classList.toggle('br', brMM); document.body.classList.toggle('br-mm', brMM); if (brMM) CH.mmAcc = 1; }
+  if (brMM) { CH.mmAcc += dt; if (CH.mmAcc >= 1 / 15) { CH.mmAcc = 0; mmDraw(); } }
   if (card !== CH.card) { CH.card = card; CH.cardEl.style.display = card ? '' : 'none'; if (!card) { CH.tipI = -1; ccTip(); } else ccRefresh(true); }
   if (!on && !inTac) return;
   CH.acc += dt; CH.mmAcc += dt;
@@ -352,6 +359,16 @@ function mmDraw() {
     const r = Math.max(3, Math.max(q0.W, q0.D) * k * 0.5);
     c.strokeStyle = '#ffffff'; c.lineWidth = 1; c.strokeRect(G.toX(q0.x) - r, G.toY(q0.z) - r, r * 2, r * 2);
   }
+  // 艦橋：畫旗艦的位置與視線方向（扇形）
+  if (BR.on) {
+    const P0 = camPersp.position, d = camPersp.getWorldDirection(new THREE.Vector3()), a = Math.atan2(d.x, d.z);
+    const hf = Math.atan(Math.tan(THREE.MathUtils.degToRad(camPersp.fov / 2)) * camPersp.aspect), L = 520;
+    const pt = (ang) => [G.toX(P0.x + Math.sin(ang) * L), G.toY(P0.z + Math.cos(ang) * L)];
+    c.fillStyle = 'rgba(255,255,255,.1)'; c.strokeStyle = 'rgba(255,255,255,.7)'; c.lineWidth = 1;
+    c.beginPath(); c.moveTo(G.toX(P0.x), G.toY(P0.z)); c.lineTo(...pt(a - hf)); c.lineTo(...pt(a + hf)); c.closePath(); c.fill(); c.stroke();
+    c.fillStyle = '#fff'; c.beginPath(); c.arc(G.toX(P0.x), G.toY(P0.z), 2.5, 0, TAU); c.fill();
+    return;
+  }
   // 鏡頭看到的範圍
   const hh = CH.el ? CH.el.getBoundingClientRect().top : VH, pts = [[0, 0], [VW, 0], [VW, Math.min(VH, hh)], [0, Math.min(VH, hh)]].map(([x, y]) => groundAt(x, y)).map((p) => p && { x: Math.max(B.x0, Math.min(B.x1, p.x)), z: Math.max(B.z0, Math.min(B.z1, p.z)) });
   if (pts.every(Boolean)) {
@@ -368,6 +385,7 @@ function mmBind(cv) {
   const look = (p) => { camAnim = null; view.target.x = p.x; view.target.z = p.z; updateCamera(); };
   cv.addEventListener('pointerdown', (e) => {
     e.preventDefault(); e.stopPropagation();
+    if (BR.on) return;   // 艦橋：只看
     const p = at(e), A = GAME.skillArm;
     if (e.button === 2) {
       if (A) { skillEsc(); return; }
