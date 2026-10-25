@@ -4311,21 +4311,28 @@ function setSelection(list, add = false) {
   selectionChanged();
 }
 function toggleSelect(q) {
-  if ((GAME.phase === 'battle' || GAME.phase === 'deploy') && q.side !== GAME.playerSide) return;
+  if ((GAME.phase === 'battle' || GAME.phase === 'deploy') && (q.side !== GAME.playerSide || q.bg || (q.fleet && q.fleet.ally))) return;
   if (q.side !== cmdSide) { setSelection([q]); return; }
   if (selected.has(q)) selected.delete(q); else selected.add(q);
   selectionChanged();
 }
 function clearSelection() { selected.clear(); selectionChanged(); }
-// 作戰中點選：第一次點＝整支艦隊；整支艦隊已選取時再點其中一支＝只選那支分艦隊（可單獨下陣型、移動、攻擊）；
-// 只選著那支時再點＝回到整支艦隊。Alt＋點＝直接選分艦隊
-function fleetUnit(q) { return GAME.phase !== 'sandbox' && q.fleet ? q.fleet.sqs.filter((x) => x.alive > 0 && !x.bg) : [q]; }
-function pickUnit(q, alt) {
-  const all = fleetUnit(q);
-  if (alt || all.length <= 1) return [q];
-  const fleetSel = selected.size === all.length && all.every((x) => selected.has(x));
-  return fleetSel ? [q] : all;
+// 點選規則（戰場、戰術面板、側視圖共用）：單擊＝只選那一支分艦隊；Shift／Ctrl＋點＝加選／取消那一支；
+// 連點兩下＝它所屬的整支艦隊（按著 Shift＝加進目前的選取）。要選多支只能用這些、框選或「全選」鍵（預設 F2）
+function fleetUnit(q) { return q.fleet ? q.fleet.sqs.filter((x) => x.alive > 0 && !x.bg) : [q]; }
+let lastPick = { k: null, t: 0 };
+function isDblPick(q) {   // 短時間內第二次點到同一支艦隊（不一定是同一支分艦隊）
+  const now = performance.now(), k = q ? q.fleet || q : null, dbl = !!k && lastPick.k === k && now - lastPick.t < 350;
+  lastPick = dbl ? { k: null, t: 0 } : { k, t: now };
+  return dbl;
 }
+function clickSelect(q, add, dbl) {
+  if (!q) { if (!add) clearSelection(); return; }
+  if (dbl) setSelection(fleetUnit(q), add);
+  else if (add) toggleSelect(q);
+  else setSelection([q]);
+}
+function selectAllUnits() { setSelection(sideSquadrons(GAME.phase === 'battle' || GAME.phase === 'deploy' ? GAME.playerSide : cmdSide)); }
 // 指令對象：有選取就用選取，沒有就是整支艦隊
 function actOn() { const l = [...selected].filter((q) => q.alive > 0); return l.length ? l : sideSquadrons(cmdSide); }
 function actSet() { return new Set(actOn()); }
@@ -4669,7 +4676,7 @@ function radialFocusFleet() {
 function openRadial(m) {
   // 沒有選取時，按在自己的分艦隊上＝先選它（作戰中選整支艦隊）
   const q = squadronAt(m.x0, m.y0);
-  if (q && q.side === cmdSide && !q.bg && !selected.has(q)) setSelection(GAME.phase !== 'sandbox' && q.fleet ? q.fleet.sqs.filter((x) => x.alive > 0) : [q]);
+  if (q && q.side === cmdSide && !q.bg && !selected.has(q)) setSelection([q]);
   if (!selected.size) return false;
   showRadial(m);
   return true;
@@ -4748,13 +4755,9 @@ function mouseUp(e) {
   if (m.mode === 'aimclick') { confirmAim(groundAt(e.clientX, e.clientY), pivot); return; }
   if (m.mode === 'vpress') { if (m.btn !== 0) return; m.mode = 'lpress'; }   // 回放／觀摩：沒拖曳的左鍵＝選取，右鍵點一下不做事
   if (m.mode === 'lpress') {
-    // 左鍵：選擇（作戰中點一下＝整支艦隊；Shift／Ctrl＋點＝加選；連點兩下＝全軍；拖曳＝框選分艦隊）
+    // 左鍵：單擊＝一支分艦隊；Shift／Ctrl＋點＝加選；連點兩下＝整支艦隊；拖曳＝框選
     const q = squadronAt(e.clientX, e.clientY);
-    if (e.detail >= 2 && q) setSelection(sideSquadrons(q.side));
-    else if (q) {
-      if (e.shiftKey || e.ctrlKey) { const u = e.altKey ? [q] : fleetUnit(q), on = u.every((x) => selected.has(x)); if (q.side === cmdSide) { for (const x of u) on ? selected.delete(x) : selected.add(x); selectionChanged(); } }
-      else setSelection(pickUnit(q, e.altKey));
-    } else if (!e.shiftKey) clearSelection();
+    clickSelect(q, e.shiftKey || e.ctrlKey, isDblPick(q));
   } else if (m.mode === 'box') {
     boxEl.style.display = 'none';
     boxSelect(m.x0, m.y0, e.clientX, e.clientY, e.shiftKey);
@@ -4846,7 +4849,7 @@ function touchUp(e) {
     moveOrAttack(groundAt(e.clientX, e.clientY));
   } else if (m.mode === 'tpress') {
     const q = squadronAt(e.clientX, e.clientY), now = performance.now();
-    if (q && lastTap.q === q && now - lastTap.t < 320) setSelection(sideSquadrons(q.side));
+    if (q && lastTap.q === q && now - lastTap.t < 320) setSelection(fleetUnit(q));
     else if (q) { if (q.side === cmdSide && selected.size && !selected.has(q) && multiTap) toggleSelect(q); else setSelection([q]); }
     else clearSelection();
     lastTap = { t: now, q };
@@ -4880,7 +4883,7 @@ const KEY_ACTIONS = [
   ['cc_13', '指令卡 3-4（技能 4）', '指令卡', 'KeyV'], ['cc_14', '指令卡 3-5（技能 5／更多技能／返回）', '指令卡', 'KeyB'],
   ['pitch_mod', '仰角（右鍵按住時按著轉滾輪）', '移動', 'KeyZ'],
   ['pause', '暫停／繼續', '時間', 'Space'], ['speed_up', '加速', '時間', 'Equal'], ['speed_down', '減速', '時間', 'Minus'],
-  ['tactical', '戰術面板（艦橋：低頭／抬頭）', '介面', 'Tab'], ['bridge', '指揮官視角（旗艦艦橋）', '介面', 'F2'], ['render', '切換 2D／3D', '介面', 'KeyM'], ['help', '操作說明', '介面', 'Slash'], ['settings', '設定', '介面', 'F10'],
+  ['tactical', '戰術面板（艦橋：低頭／抬頭）', '介面', 'Tab'], ['select_all', '選取全部單位', '介面', 'F2'], ['bridge', '指揮官視角（旗艦艦橋）', '介面', 'F3'], ['render', '切換 2D／3D', '介面', 'KeyM'], ['help', '操作說明', '介面', 'Slash'], ['settings', '設定', '介面', 'F10'],
   ['radial_prev', '輪盤：上一頁', '輪盤', 'KeyQ'], ['radial_next', '輪盤：下一頁', '輪盤', 'KeyE'],
   ['cam_up', '鏡頭往前', '鏡頭', 'ArrowUp'], ['cam_down', '鏡頭往後', '鏡頭', 'ArrowDown'], ['cam_left', '鏡頭往左', '鏡頭', 'ArrowLeft'], ['cam_right', '鏡頭往右', '鏡頭', 'ArrowRight'],
   ['cam_yaw_l', '3D：向左轉', '鏡頭', 'Insert'], ['cam_yaw_r', '3D：向右轉', '鏡頭', 'Delete'], ['cam_pitch_up', '3D：仰角升高', '鏡頭', 'PageUp'], ['cam_pitch_dn', '3D：仰角降低', '鏡頭', 'PageDown'],
@@ -4900,10 +4903,11 @@ const UI_OPTS = [
   ['compass', '艦橋方位儀', '指揮官視角上方的方位刻度與各艦隊方位'],
 ];
 const SETTINGS = (() => {
-  const d = { keyVer: 2, keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, pilotRadar: 'right', ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
+  const d = { keyVer: 3, keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, pilotRadar: 'right', ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
   try { const s = JSON.parse(STORE.getItem('fleet.settings') || 'null'); if (s) { const k0 = { ...(s.keys || {}) };
       // 第 2 版按鍵（指令卡）：舊存檔的鏡頭旋轉 Q／E／R／T、艦橋 B 會和指令卡衝突，沒改過的換成新的預設
       if (!(s.keyVer >= 2)) for (const [id, old] of [['cam_yaw_l', 'KeyQ'], ['cam_yaw_r', 'KeyE'], ['cam_pitch_up', 'KeyR'], ['cam_pitch_dn', 'KeyT'], ['bridge', 'KeyB']]) if (k0[id] === old) delete k0[id];
+      if (!(s.keyVer >= 3) && k0.bridge === 'F2') delete k0.bridge;   // 第 3 版：F2 改成全選，艦橋移到 F3
       Object.assign(d.keys, k0); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin', 'pilotRadar']) if (s[k] != null) d[k] = s[k]; } } catch (e) { /* 用預設值 */ }
   return d;
 })();
@@ -4939,6 +4943,7 @@ function runKeyAction(id, e) {
     case 'tactical': if (GAME.phase === 'sandbox') setCmdSide(1 - cmdSide); else toggleTac(); return true;   // 測試場：切換指揮陣營
     case 'render': setRenderMode(mode3D ? '2d' : '3d'); return true;
     case 'bridge': toggleBridge(); return true;
+    case 'select_all': if (BR.on && bridgeConsoleK() < 0.9) { bridgeNoCmd(); return true; } selectAllUnits(); return true;
     case 'help': toggleHelp(); return true;
     case 'settings': toggleSettings(); return true;
   }
@@ -4958,7 +4963,7 @@ addEventListener('keydown', (e) => {
     if (settingsOpen()) { closeSettings(); return; }
     if (ms && ms.mode === 'radial') { closeRadial(); ms = null; return; } if (skillEsc()) return; if (ccBack()) return; if (tacOpen()) { closeTac(); return; } if (aim) cancelAim(); else if (ms) cancelDrag(); else clearSelection(); return;
   }
-  if (k === 'KeyA' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (BR.on && bridgeConsoleK() < 0.9) { bridgeNoCmd(); return; } setCmdSide(cmdSide); return; }   // Ctrl＋A 全選（固定）
+  if (k === 'KeyA' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (BR.on && bridgeConsoleK() < 0.9) { bridgeNoCmd(); return; } selectAllUnits(); return; }   // Ctrl＋A 全選（固定）
   if (k === 'NumpadAdd') { setSpeed(speedIdx + 1); return; }
   if (k === 'NumpadSubtract') { setSpeed(speedIdx - 1); return; }
   if (settingsOpen()) return;
@@ -8993,13 +8998,13 @@ const TUT_LESSONS = [
         goal: '把鏡頭移開一段距離', check: (S) => Math.hypot(view.target.x - S.cam.x, view.target.z - S.cam.z) > 220 },
       { title: '縮放', text: '轉動<b>滑鼠滾輪</b>拉近、拉遠。拉遠時艦隊會變成戰術符號（外框），適合看全局；拉近可以看清楚每一艘船。<br><small>觸控：雙指縮放。</small>',
         goal: '拉近或拉遠鏡頭', check: (S) => Math.abs(view.height - S.cam.h) > 260 },
-      { title: '選取一支艦隊', text: '用<b>滑鼠左鍵點</b>一支我方艦隊（橘色）。作戰中點任何一支分艦隊都會選起它所屬的整支艦隊。畫面下方的<b>選取資訊列</b>會顯示選了什麼。',
+      { title: '選取一支艦隊', text: '用<b>滑鼠左鍵點</b>一支我方分艦隊（橘色），單擊只會選起那一支分艦隊；<b>左鍵連點兩下</b>會選起它所屬的整支艦隊。畫面下方的<b>選取資訊列</b>會顯示選了什麼。',
         goal: '只選取一支艦隊', check: () => tutSelFleets().size === 1 },
-      { title: '加選', text: '按住 <kbd>Shift</kbd>（或 <kbd>Ctrl</kbd>）再左鍵點<b>另一支</b>艦隊，兩支就會一起被選取。之後下的命令會同時給它們。',
+      { title: '加選', text: '按住 <kbd>Shift</kbd>（或 <kbd>Ctrl</kbd>）再左鍵點<b>另一支</b>艦隊（連點兩下＝加選整支艦隊），兩支就會一起被選取。之後下的命令會同時給它們。',
         goal: '同時選取兩支艦隊', check: () => tutSelFleets().size >= 2 },
       { title: '取消選取', text: '按 <kbd>Esc</kbd> 取消選取。沒有選取任何東西時下命令＝<b>對全軍下令</b>，要小心。',
         goal: '取消所有選取', check: () => selected.size === 0 },
-      { title: '框選與全選', text: '按住<b>左鍵拖曳</b>可以框選；<b>左鍵連點兩下</b>（或 <kbd>Ctrl</kbd>＋<kbd>A</kbd>）選取全軍。',
+      { title: '框選與全選', text: () => `按住<b>左鍵拖曳</b>可以框選；按 ${tutK('select_all')}（或 <kbd>Ctrl</kbd>＋<kbd>A</kbd>）選取全軍。`,
         goal: '選取全軍', check: () => { const all = sideSquadrons(0); return all.length > 0 && all.every((q) => selected.has(q)); } },
       { title: '暫停', text: () => `按 ${tutK('pause')} 暫停。<b>暫停中仍然可以下命令</b>：遇到混亂的局面先暫停、想清楚、下好命令再繼續，是最重要的指揮習慣。`,
         goal: '暫停遊戲', check: () => paused },
@@ -9465,7 +9470,7 @@ function manBody(id) {
   switch (id) {
     case 'ops': {
       const grps = [...new Set(KEY_ACTIONS.map((a) => a[2]))];
-      return P('以下按鍵是目前的設定（「⚙ 設定 → 按鍵綁定」可以改）。滑鼠：<b>左鍵</b>選取（拖曳框選、連點兩下全選、按住不動＝指令輪盤）、<b>右鍵</b>移動（按住拖曳＝朝向、同時轉滾輪＝高度）、<b>中鍵</b>拖曳＝平移（3D：旋轉）、<b>滾輪</b>縮放。') +
+      return P('以下按鍵是目前的設定（「⚙ 設定 → 按鍵綁定」可以改）。滑鼠：<b>左鍵</b>選取（單擊＝一支分艦隊、連點兩下＝整支艦隊、拖曳框選、按住不動＝指令輪盤）、<b>右鍵</b>移動（按住拖曳＝朝向、同時轉滾輪＝高度）、<b>中鍵</b>拖曳＝平移（3D：旋轉）、<b>滾輪</b>縮放。') +
         P(`<b>指令卡</b>（右下角）：所有命令都是按鈕，滑鼠移上去會說明用途；<b>按鍵＝格子的位置</b>（第一排 Q W E R T、第二排 A S D F G、第三排 Z X C V B＝技能）。「陣型 ▸」會換成陣型頁，選好或按 <kbd>Esc</kbd> 回主頁。<b>編隊</b>：<kbd>Ctrl</kbd>＋數字＝把選取編成那一隊、數字＝選取、連按兩下＝鏡頭跳過去、<kbd>Shift</kbd>＋數字＝加入；開戰時每支艦隊自動編成 1、2、3…。<b>小地圖</b>（左下角）：左鍵＝移動鏡頭、右鍵＝選取的艦隊移動過去。`) +
         P(`按住 ${tutKQ()} 再下令＝排進<b>戰術隊列</b>；不按直接下令＝清掉隊列。<kbd>Esc</kbd> 取消選取／取消選目標；<kbd>Ctrl</kbd>＋<kbd>A</kbd> 全選。`) +
         `<div class="man-keys">${grps.map((g) => `<div><h4>${g}</h4><table class="tut-tbl">${KEY_ACTIONS.filter((a) => a[2] === g).map(([k, n]) => `<tr><td class="tl">${n}</td><td>${tutK(k)}</td></tr>`).join('')}</table></div>`).join('')}</div>` +
@@ -11218,7 +11223,6 @@ function tacHit(w, side) {
   }
   return best;
 }
-const tacUnit = (q) => (q.fleet ? q.fleet.sqs.filter((x) => x.alive > 0 && !x.bg) : [q]);
 function tacDown(e) {
   TAC.cv.setPointerCapture(e.pointerId);
   const w = tacWorld(e), r = TAC.cv.getBoundingClientRect();
@@ -11242,7 +11246,7 @@ function tacDown(e) {
   if (TAC.node) closeNodePop();
   const q = tacHit(w, cmdSide);
   if (touch) {
-    if (q) { setSelection(pickUnit(q, false)); TAC.drag = null; return; }
+    if (q) { setSelection(isDblPick(q) ? fleetUnit(q) : [q]); TAC.drag = null; return; }
     TAC.drag = selected.size ? { kind: 'right', A: w, x0: e.clientX, y0: e.clientY } : null;   // 觸控：有選取時點空地＝移動，拖曳＝朝向
     return;
   }
@@ -11251,7 +11255,7 @@ function tacDown(e) {
   d.timer = setTimeout(() => { if (TAC.drag === d && d.kind === 'lpress') tacRadial(d); }, RADIAL_HOLD);
 }
 function tacRadial(d) {
-  if (d.q && !selected.has(d.q)) setSelection(tacUnit(d.q));
+  if (d.q && !selected.has(d.q)) setSelection([d.q]);
   if (!selected.size) return false;
   showRadial(d); d.kind = 'radial';   // showRadial 會設 mode；這裡用 kind 區分
   return true;
@@ -11287,10 +11291,7 @@ function tacUp(e) {
     drawTac(); drawSideView(); return;
   }
   if (d.kind === 'lpress') {
-    if (d.q) {
-      if (d.add) { const u = d.alt ? [d.q] : tacUnit(d.q), on = u.every((x) => selected.has(x)); for (const x of u) on ? selected.delete(x) : selected.add(x); selectionChanged(); }
-      else setSelection(pickUnit(d.q, d.alt));
-    } else if (!d.add) clearSelection();
+    clickSelect(d.q, d.add, isDblPick(d.q));
   } else if (d.kind === 'right') {
     if (!selected.size) return;
     const B = tacWorld(e);
@@ -11509,7 +11510,7 @@ function svUp() {
   else if (d.kind === 'svpitch' && d.P != null) nodeEdit(d.nd, 'alt', { P: d.P });
   else if (d.kind === 'svpress') {   // 短按：選取
     const q = svHit(d.px, d.py);
-    if (q) setSelection(d.alt ? [q] : pickUnit(q, false), d.add); else if (!d.add) clearSelection();
+    clickSelect(q, d.add, isDblPick(q));
   }
   if (d.kind === 'svnode' || d.kind === 'svpitch') updateTacSide();
   drawSideView(); if (paused) drawTac();

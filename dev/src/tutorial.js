@@ -82,13 +82,13 @@ const TUT_LESSONS = [
         goal: '把鏡頭移開一段距離', check: (S) => Math.hypot(view.target.x - S.cam.x, view.target.z - S.cam.z) > 220 },
       { title: '縮放', text: '轉動<b>滑鼠滾輪</b>拉近、拉遠。拉遠時艦隊會變成戰術符號（外框），適合看全局；拉近可以看清楚每一艘船。<br><small>觸控：雙指縮放。</small>',
         goal: '拉近或拉遠鏡頭', check: (S) => Math.abs(view.height - S.cam.h) > 260 },
-      { title: '選取一支艦隊', text: '用<b>滑鼠左鍵點</b>一支我方艦隊（橘色）。作戰中點任何一支分艦隊都會選起它所屬的整支艦隊。畫面下方的<b>選取資訊列</b>會顯示選了什麼。',
+      { title: '選取一支艦隊', text: '用<b>滑鼠左鍵點</b>一支我方分艦隊（橘色），單擊只會選起那一支分艦隊；<b>左鍵連點兩下</b>會選起它所屬的整支艦隊。畫面下方的<b>選取資訊列</b>會顯示選了什麼。',
         goal: '只選取一支艦隊', check: () => tutSelFleets().size === 1 },
-      { title: '加選', text: '按住 <kbd>Shift</kbd>（或 <kbd>Ctrl</kbd>）再左鍵點<b>另一支</b>艦隊，兩支就會一起被選取。之後下的命令會同時給它們。',
+      { title: '加選', text: '按住 <kbd>Shift</kbd>（或 <kbd>Ctrl</kbd>）再左鍵點<b>另一支</b>艦隊（連點兩下＝加選整支艦隊），兩支就會一起被選取。之後下的命令會同時給它們。',
         goal: '同時選取兩支艦隊', check: () => tutSelFleets().size >= 2 },
       { title: '取消選取', text: '按 <kbd>Esc</kbd> 取消選取。沒有選取任何東西時下命令＝<b>對全軍下令</b>，要小心。',
         goal: '取消所有選取', check: () => selected.size === 0 },
-      { title: '框選與全選', text: '按住<b>左鍵拖曳</b>可以框選；<b>左鍵連點兩下</b>（或 <kbd>Ctrl</kbd>＋<kbd>A</kbd>）選取全軍。',
+      { title: '框選與全選', text: () => `按住<b>左鍵拖曳</b>可以框選；按 ${tutK('select_all')}（或 <kbd>Ctrl</kbd>＋<kbd>A</kbd>）選取全軍。`,
         goal: '選取全軍', check: () => { const all = sideSquadrons(0); return all.length > 0 && all.every((q) => selected.has(q)); } },
       { title: '暫停', text: () => `按 ${tutK('pause')} 暫停。<b>暫停中仍然可以下命令</b>：遇到混亂的局面先暫停、想清楚、下好命令再繼續，是最重要的指揮習慣。`,
         goal: '暫停遊戲', check: () => paused },
@@ -554,7 +554,7 @@ function manBody(id) {
   switch (id) {
     case 'ops': {
       const grps = [...new Set(KEY_ACTIONS.map((a) => a[2]))];
-      return P('以下按鍵是目前的設定（「⚙ 設定 → 按鍵綁定」可以改）。滑鼠：<b>左鍵</b>選取（拖曳框選、連點兩下全選、按住不動＝指令輪盤）、<b>右鍵</b>移動（按住拖曳＝朝向、同時轉滾輪＝高度）、<b>中鍵</b>拖曳＝平移（3D：旋轉）、<b>滾輪</b>縮放。') +
+      return P('以下按鍵是目前的設定（「⚙ 設定 → 按鍵綁定」可以改）。滑鼠：<b>左鍵</b>選取（單擊＝一支分艦隊、連點兩下＝整支艦隊、拖曳框選、按住不動＝指令輪盤）、<b>右鍵</b>移動（按住拖曳＝朝向、同時轉滾輪＝高度）、<b>中鍵</b>拖曳＝平移（3D：旋轉）、<b>滾輪</b>縮放。') +
         P(`<b>指令卡</b>（右下角）：所有命令都是按鈕，滑鼠移上去會說明用途；<b>按鍵＝格子的位置</b>（第一排 Q W E R T、第二排 A S D F G、第三排 Z X C V B＝技能）。「陣型 ▸」會換成陣型頁，選好或按 <kbd>Esc</kbd> 回主頁。<b>編隊</b>：<kbd>Ctrl</kbd>＋數字＝把選取編成那一隊、數字＝選取、連按兩下＝鏡頭跳過去、<kbd>Shift</kbd>＋數字＝加入；開戰時每支艦隊自動編成 1、2、3…。<b>小地圖</b>（左下角）：左鍵＝移動鏡頭、右鍵＝選取的艦隊移動過去。`) +
         P(`按住 ${tutKQ()} 再下令＝排進<b>戰術隊列</b>；不按直接下令＝清掉隊列。<kbd>Esc</kbd> 取消選取／取消選目標；<kbd>Ctrl</kbd>＋<kbd>A</kbd> 全選。`) +
         `<div class="man-keys">${grps.map((g) => `<div><h4>${g}</h4><table class="tut-tbl">${KEY_ACTIONS.filter((a) => a[2] === g).map(([k, n]) => `<tr><td class="tl">${n}</td><td>${tutK(k)}</td></tr>`).join('')}</table></div>`).join('')}</div>` +

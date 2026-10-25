@@ -863,9 +863,10 @@
   <h3>操作說明</h3><p style="margin:-4px 0 8px;color:var(--dim);font-size:calc(12.5px * var(--ui))">以下是預設按鍵；可在「⚙ 設定 → 按鍵綁定」修改。</p>
   <div class="cols">
     <div><h4>滑鼠＋鍵盤</h4><table>
-      <tr><td>左鍵點</td><td>選擇（作戰中＝整支艦隊）；Shift／Ctrl＋點：加選</td></tr>
+      <tr><td>左鍵點</td><td>只選取那一支分艦隊；Shift／Ctrl＋點：加選／取消那一支</td></tr>
       <tr><td>左鍵拖曳</td><td>框選分艦隊</td></tr>
-      <tr><td>左鍵連點兩下</td><td>選取全軍</td></tr>
+      <tr><td>左鍵連點兩下</td><td>選取那支分艦隊所屬的整支艦隊（Shift＋連點＝加選整支艦隊）</td></tr>
+      <tr><td>F2／Ctrl＋A</td><td>選取全部單位</td></tr>
       <tr><td>Tab</td><td>作戰中：戰術面板（簡化俯視圖，可下令；打開時自動暫停）</td></tr>
       <tr><td>左鍵按住不動</td><td>指令輪盤：滑向指令後放開＝下令；停在中間放開＝取消。輪盤出現時按 Q／E 切換「陣型／攻擊」兩頁（選取後按任何地方都可以）</td></tr>
       <tr><td>左鍵點技能</td><td>施放；集中火力再用左鍵點敵方分艦隊（右鍵或 Esc 取消）</td></tr>
@@ -887,7 +888,7 @@
       <tr><td>M</td><td>切換 2D／3D</td></tr>
       <tr><td>3D：中鍵拖曳</td><td>旋轉鏡頭（Shift＋中鍵：平移）</td></tr>
       <tr><td>3D：Insert／Delete、PgUp／PgDn</td><td>水平旋轉、調整仰角</td></tr>
-      <tr><td>F2</td><td>指揮官視角：從旗艦艦橋看前方（自動用 3D）。滑鼠左右移動＝轉頭：往左看滑出「戰況」、往右看滑出「各艦隊旗艦」子畫面（點一下切換艦橋）。滑鼠移到畫面最下方、滾輪往下或 Tab＝低頭看戰術台（看著戰術台時滑鼠移到最上方＝抬頭）；艦橋上只能透過戰術台下令</td></tr>
+      <tr><td>F3</td><td>指揮官視角：從旗艦艦橋看前方（自動用 3D）。滑鼠左右移動＝轉頭：往左看滑出「戰況」、往右看滑出「各艦隊旗艦」子畫面（點一下切換艦橋）。滑鼠移到畫面最下方、滾輪往下或 Tab＝低頭看戰術台（看著戰術台時滑鼠移到最上方＝抬頭）；艦橋上只能透過戰術台下令</td></tr>
     </table></div>
     <div><h4>觸控</h4><table>
       <tr><td>點</td><td>選取分艦隊</td></tr>
@@ -1005,7 +1006,7 @@
 
 <div id="boot"><div class="boot-card"><h1>星海艦隊戰</h1><div class="sub">FLEET TACTICS · 內網伺服器</div><div id="boot-body"><p class="boot-st">連線中…</p></div></div></div>
 <div id="save-badge" hidden>⚠ 存檔還沒同步到伺服器，重試中…</div>
-<script>window.__BUILD = "20261026001255"; window.__ASSETS = { ships: "assets/ships.webp", fx: "assets/fx.webp", fighters: "assets/fighters.webp" };</script>
+<script>window.__BUILD = "20261026001923"; window.__ASSETS = { ships: "assets/ships.webp", fx: "assets/fx.webp", fighters: "assets/fighters.webp" };</script>
 <script>// ═══ 啟動前：登入伺服器、取得存檔、提供 STORE（取代 localStorage，寫入會自動同步到伺服器）═══
 (() => {
   'use strict';

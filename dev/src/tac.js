@@ -423,7 +423,6 @@ function tacHit(w, side) {
   }
   return best;
 }
-const tacUnit = (q) => (q.fleet ? q.fleet.sqs.filter((x) => x.alive > 0 && !x.bg) : [q]);
 function tacDown(e) {
   TAC.cv.setPointerCapture(e.pointerId);
   const w = tacWorld(e), r = TAC.cv.getBoundingClientRect();
@@ -447,7 +446,7 @@ function tacDown(e) {
   if (TAC.node) closeNodePop();
   const q = tacHit(w, cmdSide);
   if (touch) {
-    if (q) { setSelection(pickUnit(q, false)); TAC.drag = null; return; }
+    if (q) { setSelection(isDblPick(q) ? fleetUnit(q) : [q]); TAC.drag = null; return; }
     TAC.drag = selected.size ? { kind: 'right', A: w, x0: e.clientX, y0: e.clientY } : null;   // 觸控：有選取時點空地＝移動，拖曳＝朝向
     return;
   }
@@ -456,7 +455,7 @@ function tacDown(e) {
   d.timer = setTimeout(() => { if (TAC.drag === d && d.kind === 'lpress') tacRadial(d); }, RADIAL_HOLD);
 }
 function tacRadial(d) {
-  if (d.q && !selected.has(d.q)) setSelection(tacUnit(d.q));
+  if (d.q && !selected.has(d.q)) setSelection([d.q]);
   if (!selected.size) return false;
   showRadial(d); d.kind = 'radial';   // showRadial 會設 mode；這裡用 kind 區分
   return true;
@@ -492,10 +491,7 @@ function tacUp(e) {
     drawTac(); drawSideView(); return;
   }
   if (d.kind === 'lpress') {
-    if (d.q) {
-      if (d.add) { const u = d.alt ? [d.q] : tacUnit(d.q), on = u.every((x) => selected.has(x)); for (const x of u) on ? selected.delete(x) : selected.add(x); selectionChanged(); }
-      else setSelection(pickUnit(d.q, d.alt));
-    } else if (!d.add) clearSelection();
+    clickSelect(d.q, d.add, isDblPick(d.q));
   } else if (d.kind === 'right') {
     if (!selected.size) return;
     const B = tacWorld(e);
@@ -714,7 +710,7 @@ function svUp() {
   else if (d.kind === 'svpitch' && d.P != null) nodeEdit(d.nd, 'alt', { P: d.P });
   else if (d.kind === 'svpress') {   // 短按：選取
     const q = svHit(d.px, d.py);
-    if (q) setSelection(d.alt ? [q] : pickUnit(q, false), d.add); else if (!d.add) clearSelection();
+    clickSelect(q, d.add, isDblPick(q));
   }
   if (d.kind === 'svnode' || d.kind === 'svpitch') updateTacSide();
   drawSideView(); if (paused) drawTac();
