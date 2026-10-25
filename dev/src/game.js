@@ -967,8 +967,8 @@ function gamePointer(type, e) {
   // 技能選目標：左鍵（或觸控）點敵方分艦隊；右鍵取消
   if (GAME.skillArm && type === 'down' && e.pointerType !== 'touch' && e.button === 2) { skillEsc(); return true; }
   if (GAME.skillArm && GAME.skillArm.point && type === 'down' && (e.pointerType === 'touch' || e.button === 0)) {
-    const A = GAME.skillArm, p = groundAt(e.clientX, e.clientY, A.area || A.recon ? selAlt() : 0);
-    if (p) { if (A.area) cmdArea({ x: p.x, y: selAlt(), z: p.z }); else if (A.recon) cmdRecon(A.f, { x: p.x, y: selAlt(), z: p.z }); else skillCmd(GAME.skillArm.f, GAME.skillArm.id, null, p); GAME.skillArm = null; hideHint(); } else toast('請點選地圖上的位置（Esc 取消）');
+    const A = GAME.skillArm, p = groundAt(e.clientX, e.clientY, A.area || A.recon || A.move ? selAlt() : 0);
+    if (p) { if (A.move) cmdMoveTo(p); else if (A.area) cmdArea({ x: p.x, y: selAlt(), z: p.z }); else if (A.recon) cmdRecon(A.f, { x: p.x, y: selAlt(), z: p.z }); else skillCmd(GAME.skillArm.f, GAME.skillArm.id, null, p); GAME.skillArm = null; hideHint(); } else toast('請點選地圖上的位置（Esc 取消）');
     return true;
   }
   if (GAME.skillArm && type === 'down' && (e.pointerType === 'touch' || e.button === 0)) {
@@ -1036,7 +1036,7 @@ function startBattle() {
   force3D(); if (GAME.op === 2) enterBridge();   // 擬真：開戰直接上艦橋
   if (opts.fow && SETTINGS.autoScan === false) issue('autoscan', { on: false });   // 戰爭迷霧：玩家關掉了自動掃描（記在命令裡）
   cutPlay(cutSpecStart(GAME.sc));
-  toast(`${GAME.sc.name}　開戰！${GAME.op ? `（${OP_LEVELS[GAME.op].name}難度）` : ''}（${keyLabel(keyOf('pause'))} 暫停、${keyLabel(keyOf('speed_up'))}／${keyLabel(keyOf('speed_down'))} 調速度、${keyLabel(keyOf('attack'))}＋左鍵點敵軍＝指定攻擊）`);
+  toast(`${GAME.sc.name}　開戰！${GAME.op ? `（${OP_LEVELS[GAME.op].name}難度）` : ''}（${keyText('pause')} 暫停、${keyText('speed_up')}／${keyText('speed_down')} 調速度、${keyText('attack')}＋左鍵點敵軍＝指定攻擊）`);
 }
 const _fmtT = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 let _hudAcc = 0;
@@ -1045,8 +1045,9 @@ function buildBattleHud() {
   gEl('battlehud').innerHTML = `<div><div class="lbl" id="bh-t0"></div><div class="bar s0"><i id="bh-b0"></i></div></div>
     <div class="timer"><span id="bh-tm"></span><div class="lbl" style="text-align:center" id="bh-tl"></div></div>
     <div><div class="lbl" style="text-align:right" id="bh-t1"></div><div class="bar s1"><i id="bh-b1"></i></div></div>
-    <button class="g-btn sm" id="bh-pause"></button><button class="g-btn sm" id="bh-speed"></button><button class="g-btn sm" id="bh-tac" title="Tab">戰術面板</button><button class="g-btn sm" id="bh-3d" title="M"></button><button class="g-btn sm" id="bh-br"></button><button class="g-btn sm" id="bh-set" title="設定">⚙</button>${GAME.sc && GAME.sc.sim && !GAME.replaying && !GAME.watch ? '<button class="g-btn sm" id="bh-ctl" title="模擬室：接管另一方（該方 AI 暫停）"></button><button class="g-btn sm" id="bh-edit" title="模擬室：暫停並調整配置與設定">✎ 編輯配置</button>' : ''}<button class="g-btn sm" id="bh-quit"></button>`;
+    <button class="g-btn sm" id="bh-pause"></button><button class="g-btn sm" id="bh-speed"></button><button class="g-btn sm" id="bh-tac" title="${keyText('tactical')}">戰術面板</button><button class="g-btn sm" id="bh-3d" title="${keyText('render')}"></button><button class="g-btn sm" id="bh-br"></button><button class="g-btn sm" id="bh-help" title="操作說明（${keyText('help')}）">?</button><button class="g-btn sm" id="bh-set" title="設定（${keyText('settings')}）">⚙</button>${GAME.sc && GAME.sc.sim && !GAME.replaying && !GAME.watch ? '<button class="g-btn sm" id="bh-ctl" title="模擬室：接管另一方（該方 AI 暫停）"></button><button class="g-btn sm" id="bh-edit" title="模擬室：暫停並調整配置與設定">✎ 編輯配置</button>' : ''}<button class="g-btn sm" id="bh-quit"></button>`;
   gEl('bh-set').onclick = () => openSettings();
+  gEl('bh-help').onclick = toggleHelp;
   if (gEl('bh-ctl')) gEl('bh-ctl').onclick = simSwitch;
   if (gEl('bh-edit')) gEl('bh-edit').onclick = simEditMid;
   gEl('bh-tac').onclick = toggleTac;
@@ -1060,6 +1061,7 @@ function buildBattleHud() {
     quitBattle();
   };
   watchHud();   // 觀摩：雙方 AI 的解說面板
+  buildCmdHud();   // 小地圖、選取面板、指令卡（hud.js）
   const mine = GAME.watch || NET.spec || GAME.pilot ? [] : fleets.filter((f) => f.side === GAME.playerSide && f.commander && !f.ally);   // 觀摩：不能放技能；友軍傭兵的技能由 AI 自己用
   gEl('skillbar').innerHTML = mine.map((f) => `<div class="sk-fleet"><div class="nm"><b>${f.name}</b>　${f.commander.name} Lv ${f.commander.level}</div>${Object.keys(f.skills).map((id) =>
     `<button class="g-btn sk-btn" data-f="${f.id}" data-s="${id}" title="${SKILLS[id].desc}">${SKILLS[id].name}<small></small><i class="cdv"></i></button>`).join('')}</div>`).join('');
@@ -1068,6 +1070,7 @@ function buildBattleHud() {
 function gameFrame(dt) {
   if (GAME.phase !== 'battle' && GAME.phase !== 'replay') return;
   tacFrame(dt);
+  cmdHudFrame(dt);
   _hudAcc += dt;
   if (GAME.result && !GAME.reportShown) {
     paused = true; updateTimeUI();
@@ -1097,13 +1100,13 @@ function gameFrame(dt) {
   if (!gEl('bh-quit').dataset.sure) gEl('bh-quit').textContent = GAME.replaying ? '結束回放' : NET.on ? (NET.spec ? '離開觀戰' : '投降') : GAME.watch ? '結束觀摩' : GAME.pilot ? '結束出擊' : sim ? '結束模擬' : GAME.sc && GAME.sc.tut ? '結束教學' : '撤退';
   if (gEl('bh-ctl')) gEl('bh-ctl').textContent = `切換指揮 → ${simSideName(SIM.m, 1 - GAME.playerSide)}`;
   gEl('bh-3d').textContent = mode3D ? '2D 畫面' : '3D 畫面';
-  gEl('bh-br').textContent = BR.on ? '離開艦橋' : '艦橋視角'; gEl('bh-br').title = `指揮官視角（${keyLabel(keyOf('bridge'))}）`;
+  gEl('bh-br').textContent = BR.on ? '離開艦橋' : '艦橋視角'; gEl('bh-br').title = `指揮官視角（${keyText('bridge')}）`;
   gEl('bh-tac').textContent = BR.on ? (bridgeConsoleK() > 0.5 ? '抬頭' : '戰術台') : '戰術面板';
   if (GAME.phase !== 'battle') return;
   document.querySelectorAll('#skillbar .sk-btn').forEach((b) => {
     const f = fleets[+b.dataset.f], id = b.dataset.s, s = f.skills[id], def = SKILLS[id];
     const act = t < s.until, cd = Math.max(0, s.ready - t), arm = !!GAME.skillArm && GAME.skillArm.f === f && GAME.skillArm.id === id;
-    b.querySelector('small').textContent = act ? `生效 ${Math.ceil(s.until - t)} 秒` : s.left <= 0 ? '已用完' : cd > 0 ? `冷卻 ${Math.ceil(cd)} 秒` : `剩 ${s.left} 次・鍵 ${keyLabel(keyOf('skill_' + id))}`;
+    b.querySelector('small').textContent = act ? `生效 ${Math.ceil(s.until - t)} 秒` : s.left <= 0 ? '已用完' : cd > 0 ? `冷卻 ${Math.ceil(cd)} 秒` : `剩 ${s.left} 次`;
     b.classList.toggle('active', act); b.classList.toggle('arm', arm);
     b.disabled = s.left <= 0 || cd > 0 || f.reserve || f.sqs.every((q) => q.alive <= 0);   // 還沒進場的艦隊（傭兵支援）不能放技能
     b.querySelector('.cdv').style.width = cd > 0 ? (1 - cd / def.cd) * 100 + '%' : '0';

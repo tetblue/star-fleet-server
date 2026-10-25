@@ -12,7 +12,7 @@ const BR_PANEL_YAW = { stat: -1.2, pip: 1.2 };   // 方位儀上標示懸浮視�
 const BR_MOUSE_MAX = 1.75, BR_MOUSE_DEAD = 0.12;   // 游標在最邊緣＝轉 100°；中央 12% 不轉
 const BR_WIN_OPEN = 0.75, BR_WIN_CLOSE = 0.35;      // 轉頭超過約 43° 滑出視窗，回到 20° 內收回
 // 艦橋上被擋下的命令（要低頭看戰術台才能用）
-const BR_CMD_KEYS = new Set(['orderly', 'attack', 'volley', 'missile', 'turn', 'area', 'scan']);
+const BR_CMD_KEYS = new Set(['move', 'stop', 'orderly', 'attack', 'volley', 'missile', 'turn', 'area', 'scan']);
 function bridgeBlocksKey(id) { return BR.on && bridgeConsoleK() < 0.9 && (id.startsWith('form_') || id.startsWith('skill_') || BR_CMD_KEYS.has(id)); }
 Object.assign(BR, { on: false, el: null, fleet: null, fleetId: -1, ship: -1, shipFleet: null, shipH: null, pose: {},
   yaw: 0, pitch: BR_FWD, tYaw: 0, tPitch: BR_FWD, mYaw: 0, kYaw: 0, open: { stat: false, pip: false }, tp: null, closing: false, prev: null, lastIn: 0, acc: 1, pips: {}, pipRR: 0, fallback: {}, sig: '', pipSig: '' });
@@ -169,7 +169,7 @@ addEventListener('pointermove', (e) => {
   else if (k > 0.9 && e.clientY <= Math.max(14, H * 0.03)) bridgeLook(null, BR_FWD);
 });
 let _brNoCmdT = 0;
-function bridgeNoCmd() { const n = performance.now(); if (n - _brNoCmdT < 2500) return; _brNoCmdT = n; toast(`艦橋上要低頭看戰術台才能下令（滑鼠移到畫面最下方／滾輪往下／${keyLabel(keyOf('tactical'))}）`, 'hint'); }
+function bridgeNoCmd() { const n = performance.now(); if (n - _brNoCmdT < 2500) return; _brNoCmdT = n; toast(`艦橋上要低頭看戰術台才能下令（滑鼠移到畫面最下方／滾輪往下／${keyText('tactical')}）`, 'hint'); }
 
 // ── 每幀 ──
 function bridgeFrame(dt) {
@@ -359,13 +359,13 @@ function bridgeHudSlow(cw, span, pxA) {
   const proxy = BR.ship >= 0 && BR.fleet.sqs.every((q) => q.flagship !== BR.ship);
   gEl('br-title').textContent = `${fl.name}旗艦艦橋${proxy ? '（代理旗艦）' : ''}`;
   gEl('br-tabt').textContent = bridgeConsoleK() > 0.5 ? '▲ 抬頭' : '▼ 戰術台';
-  gEl('br-tabk').textContent = keyLabel(keyOf('tactical'));
-  gEl('br-exit').textContent = `離開艦橋 ${keyLabel(keyOf('bridge'))}`;
+  gEl('br-tabk').textContent = keyText('tactical');
+  gEl('br-exit').textContent = `離開艦橋 ${keyText('bridge')}`;
   gEl('br-pause').textContent = paused ? '▶ 繼續' : '❚❚ 暫停'; gEl('br-pause').classList.toggle('lit', paused);
   gEl('br-speed').textContent = cmdSlowOn ? `×${effSpeed()} 下令中` : '×' + SPEEDS[speedIdx];
   gEl('br-quit').textContent = GAME.replaying ? '結束回放' : '撤退';
   gEl('br-time').textContent = timeLeftText(t); gEl('br-tl').textContent = GAME.replaying ? '回放中' : paused ? '暫停中' : battleSetup.timeLimit >= SIM_INF ? '模擬室' : '剩餘時間';
-  gEl('br-hint').textContent = bridgeConsoleK() > 0.5 ? '' : `滑鼠左右移動＝轉頭（左：戰況　右：各艦隊旗艦）　下令：滑鼠移到最下方／滾輪往下／${keyLabel(keyOf('tactical'))} 低頭看戰術台`;
+  gEl('br-hint').textContent = bridgeConsoleK() > 0.5 ? '' : `滑鼠左右移動＝轉頭（左：戰況　右：各艦隊旗艦）　下令：滑鼠移到最下方／滾輪往下／${keyText('tactical')} 低頭看戰術台`;
   BR.el.querySelectorAll('.br-pin').forEach((b) => b.classList.toggle('on', !!SETTINGS.brPins[b.dataset.pin]));
   // 方位儀標記：各艦隊、懸浮視窗
   const marks = [];
@@ -430,7 +430,7 @@ function bridgeHudSlow(cw, span, pxA) {
   gEl('br-stat-b').innerHTML = `<div class="g-row"><span class="g-dim">${battleSetup.timeLimit >= SIM_INF ? '' : '剩餘'}</span><b>${timeLeftText(t)}</b><span class="g-sp"></span><span class="g-dim">${paused ? '暫停中' : '×' + SPEEDS[speedIdx]}</span></div>
     <div class="br-fr"><span class="g-pc">我軍 ${Math.round(p0 * 100)}%</span><span class="g-sp"></span><span class="g-ec">敵軍 ${fog ? '？？？' : (fv ? '估計 ' : '') + Math.round(p1e * 100) + '%'}</span></div>
     <div class="br-vs">${bar(p0, 'me')}${fog ? '' : bar(p1e, 'en')}</div>
-    ${fv ? `<div class="br-fr g-dim">自動掃描 ${FOW.auto[GAME.playerSide] ? (fowScanLeft(GAME.playerSide) > 0 ? `冷卻 ${Math.ceil(fowScanLeft(GAME.playerSide))} 秒` : '待命') : '關'}・區域掃描 ${fowHasCarrier(fl) ? (fowReconLeft(fl) > 0 ? `冷卻 ${Math.ceil(fowReconLeft(fl))} 秒` : `可用（戰術台 ${keyLabel(keyOf('scan'))}）`) : '本艦隊沒有航母'}${jammed(GAME.playerSide) ? '・通訊受干擾，不能共享情報' : ''}</div>` : ''}
+    ${fv ? `<div class="br-fr g-dim">自動掃描 ${FOW.auto[GAME.playerSide] ? (fowScanLeft(GAME.playerSide) > 0 ? `冷卻 ${Math.ceil(fowScanLeft(GAME.playerSide))} 秒` : '待命') : '關'}・區域掃描 ${fowHasCarrier(fl) ? (fowReconLeft(fl) > 0 ? `冷卻 ${Math.ceil(fowReconLeft(fl))} 秒` : `可用（戰術台 ${keyText('scan')}）`) : '本艦隊沒有航母'}${jammed(GAME.playerSide) ? '・通訊受干擾，不能共享情報' : ''}</div>` : ''}
     <div class="br-h">本艦隊・${fl.name}</div>
     <div class="br-fr"><span>旗艦 ${SHIP_TYPES[ships.type[BR.ship]] ? SHIP_TYPES[ships.type[BR.ship]].name : ''}${isOrig ? '' : '（代理）'}</span><span class="g-sp"></span><span class="g-dim">耐久 ${Math.round(fhp * 100)}%</span></div>${bar(fhp, fhp < 0.35 ? 'bad' : 'me')}
     <div class="br-fr"><span>兵力 ${ships5(n)} 艘（${Math.round(n / fl.initial * 100)}%）</span><span class="g-sp"></span><span>${g ? FORMATIONS[g.formation].name : ''}</span><span class="tac-st ${st[1]}">${st[0]}</span></div>

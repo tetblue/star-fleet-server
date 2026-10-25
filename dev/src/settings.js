@@ -8,6 +8,7 @@ function applyUISettings() {
   b.classList.toggle('ui-no-stats', !uiOn('stats'));
   b.classList.toggle('ui-no-skillbar', !uiOn('skillbar'));
   b.classList.toggle('ui-no-selbar', !uiOn('selbar'));
+  b.classList.toggle('ui-no-minimap', !uiOn('minimap'));
   document.documentElement.style.setProperty('--ui', SETTINGS.uiScale || 1.2);
 }
 const UI_SCALES = [[1, '小（原本大小）'], [1.1, '中'], [1.2, '大（預設）'], [1.35, '特大'], [1.5, '超大']];
@@ -40,12 +41,12 @@ function renderSettings() {
     body = `<p class="g-dim set-note">點右邊的按鍵後，按下新的鍵即可改綁（Esc 取消、Backspace 清除）。輪盤的鍵只在輪盤開著時有效，所以可以和鏡頭共用。Esc 與 Ctrl＋A（全選）固定不能改。</p>
       ${SET.msg ? `<p class="set-msg">${SET.msg}</p>` : ''}
       <div class="set-keys">${groups.map((gname) => `<div class="set-grp"><h4>${gname}</h4>${KEY_ACTIONS.filter((a) => a[2] === gname).map(([id, name]) => `
-        <div class="set-row"><span>${name}</span><button class="g-btn sm set-key ${SET.capture === id ? 'cap' : ''}" data-k="${id}">${SET.capture === id ? '按下新按鍵…' : keyLabel(keyOf(id))}</button></div>`).join('')}</div>`).join('')}</div>
+        <div class="set-row"><span>${name}</span><button class="g-btn sm set-key ${SET.capture === id ? 'cap' : ''}" data-k="${id}">${SET.capture === id ? '按下新按鍵…' : keyText(id)}</button></div>`).join('')}</div>`).join('')}</div>
       <div class="set-row" style="margin-top:10px"><span>排進戰術隊列的修飾鍵（按住它再下令）</span>
         <select class="g-sel" id="set-qmod">${['Shift', 'Control', 'Alt'].map((m) => `<option value="${m}" ${SETTINGS.queueMod === m ? 'selected' : ''}>${m === 'Control' ? 'Ctrl' : m}</option>`).join('')}</select></div>
       <div class="g-row" style="margin-top:12px"><span class="g-sp"></span><button class="g-btn sm" id="set-kreset">按鍵恢復預設</button></div>`;
   } else if (SET.tab === 'game') {
-    body = `<div class="set-row"><span>開戰時的遊戲速度<br><small class="g-dim">戰鬥中仍可用 ${keyLabel(keyOf('speed_up'))}／${keyLabel(keyOf('speed_down'))} 或上方按鈕調整</small></span>
+    body = `<div class="set-row"><span>開戰時的遊戲速度<br><small class="g-dim">戰鬥中仍可用 ${keyText('speed_up')}／${keyText('speed_down')} 或上方按鈕調整</small></span>
         <select class="g-sel" id="set-speed">${SPEEDS.map((v, i) => `<option value="${i}" ${SETTINGS.speedIdx === i ? 'selected' : ''}>×${v}</option>`).join('')}</select></div>
       <div class="set-row"><span>目前的遊戲速度</span><span class="g-row">${SPEEDS.map((v, i) => `<button class="g-btn sm ${speedIdx === i ? 'pri' : ''}" data-sp="${i}">×${v}</button>`).join('')}</span></div>
       <div class="set-row"><span>下令時自動減速<br><small class="g-dim">沒有暫停時，按住右鍵移動、打開指令輪盤、選攻擊或技能目標的期間，遊戲變慢，下完命令恢復原本速度</small></span>
@@ -53,7 +54,7 @@ function renderSettings() {
       <label class="set-row set-chk"><span>打開戰術面板時自動暫停<br><small class="g-dim">只限單人模式</small></span><input type="checkbox" id="set-tacpause" ${SETTINGS.tacPause ? 'checked' : ''}></label>
       <label class="set-row set-chk"><span>過場動畫<br><small class="g-dim">開戰、勝利／敗北／平手、戰鬥回放時的文字切入（APNG）</small></span><input type="checkbox" id="set-cutin" ${SETTINGS.cutin !== false ? 'checked' : ''}></label>
       <div class="set-row"><span>過場動畫工坊<br><small class="g-dim">自己打字做切入動畫，預覽並下載成 APNG</small></span><button class="g-btn sm" id="set-cutstudio">工坊…</button></div>
-      <div class="set-h">指揮官視角（艦橋，${keyLabel(keyOf('bridge'))}）</div>
+      <div class="set-h">指揮官視角（艦橋，${keyText('bridge')}）</div>
       <label class="set-row set-chk"><span>低頭看戰術台時自動暫停<br><small class="g-dim">只限單人模式；預設不暫停，邊看戰場邊下令</small></span><input type="checkbox" id="set-brpause" ${SETTINGS.bridgePause ? 'checked' : ''}></label>
       <label class="set-row set-chk"><span>「戰況」視窗固定在畫面上<br><small class="g-dim">不勾＝放在艦橋左側，轉頭才看得到</small></span><input type="checkbox" id="set-pin-stat" ${SETTINGS.brPins.stat ? 'checked' : ''}></label>
       <label class="set-row set-chk"><span>「各艦隊旗艦」視窗固定在畫面上<br><small class="g-dim">不勾＝放在艦橋右側，轉頭才看得到</small></span><input type="checkbox" id="set-pin-pip" ${SETTINGS.brPins.pip ? 'checked' : ''}></label>

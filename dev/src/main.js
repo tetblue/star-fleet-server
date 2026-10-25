@@ -3688,6 +3688,15 @@ function execCommand(c) {
       g = grp(); if (g) { moveGroup(g, c.x, c.z, c.H, { pivot: c.pivot, width: c.width, uturn: c.uturn, y: c.y, P: c.P }); g.cur = g.plan || Math.abs((g.ayT || 0) - (g.ay || 0)) > 1 ? { type: 'move', x: c.x, z: c.z } : null; } break;
     }
     case 'face': g = grp(); if (g) faceGroup(g, Math.atan2(c.x - g.ax, c.z - g.az)); break;
+    case 'stop': {   // 停止：停在原地，取消移動、隊列、指定目標、區域攻擊
+      for (const q of list) if (q.fleet && q.fleet.supply) q.fleet.follow = -1;
+      for (const gg of selGroups(list)) {
+        gg.queue = []; gg.target = null; gg.area = null; for (const q of gg.sqs) if (set.has(q)) q.atk = null;
+        if (gg.plan || gg.goal) moveGroup(gg, gg.ax, gg.az, null);
+        gg.ayT = gg.ay || 0; gg.cur = null; g = gg;
+      }
+      break;
+    }
     case 'alt': {
       // 只改高度（與俯仰）：水平的移動照常進行；多支部隊保持彼此的高度差
       if (opts.flat) break;   // 一般難度：艦隊都在同一平面
@@ -4530,7 +4539,7 @@ canvas.addEventListener('wheel', (e) => {
 // 選取部隊目前的平均高度（右鍵就在這個高度的水平面上取點，游標才會對準部隊）
 // 仰角鍵（預設 Z）：右鍵按住時按著它轉滾輪＝調整仰角（這時不會觸發齊射）
 function pitchHeld() { return keyHeld('pitch_mod'); }
-function altHelp() { return `滾輪：高度　${keyLabel(keyOf('pitch_mod'))}＋滾輪：仰角`; }
+function altHelp() { return `滾輪：高度　${keyText('pitch_mod')}＋滾輪：仰角`; }
 function rightDragging() { return (ms && (ms.mode === 'rpress' || ms.mode === 'raim')) || (typeof TAC !== 'undefined' && TAC.drag && (TAC.drag.kind === 'right' || TAC.drag.kind === 'sright')) || (GAME.phase === 'deploy' && GAME.drag && !GAME.drag.touch); }
 function selAlt() { const l = actOn(); if (!l.length) return 0; let s = 0; for (const q of l) s += q.group ? (q.group.ay || 0) : (q.y || 0); return s / l.length; }
 function selPitch() { const l = actOn(); return l.length && l[0].group ? (l[0].group.pCmd || 0) : 0; }
@@ -4624,14 +4633,14 @@ function buildRadial() {
 function renderRadial() {
   const page = RADIAL_PAGES[radialPage], n = page.items.length, R = RADIAL_R, r0 = RADIAL_DEAD, c = R + 4;
   const pt = (rad, a) => [c + Math.sin(a) * rad, c - Math.cos(a) * rad];
-  let svg = `<div class="rad-tabs">${RADIAL_PAGES.map((p, k) => `<span class="${k === radialPage ? 'on' : ''}" style="--c:${p.col}">${p.name}</span>`).join(`<i>${keyLabel(keyOf('radial_prev'))}／${keyLabel(keyOf('radial_next'))} 切換</i>`)}</div>`;
+  let svg = `<div class="rad-tabs">${RADIAL_PAGES.map((p, k) => `<span class="${k === radialPage ? 'on' : ''}" style="--c:${p.col}">${p.name}</span>`).join(`<i>${keyText('radial_prev')}／${keyText('radial_next')} 切換</i>`)}</div>`;
   svg += `<svg width="${c * 2}" height="${c * 2}" viewBox="0 0 ${c * 2} ${c * 2}" style="--c:${page.col}">`;
   page.items.forEach((it, i) => {
     const a0 = (i - 0.5) / n * TAU, a1 = (i + 0.5) / n * TAU;
     const [x0, y0] = pt(R, a0), [x1, y1] = pt(R, a1), [x2, y2] = pt(r0, a1), [x3, y3] = pt(r0, a0);
     svg += `<path data-i="${i}" d="M${x0} ${y0} A${R} ${R} 0 0 1 ${x1} ${y1} L${x2} ${y2} A${r0} ${r0} 0 0 0 ${x3} ${y3} Z"/>`;
     const [tx, ty] = pt((R + r0) / 2 + 4, i / n * TAU);
-    svg += `<text x="${tx}" y="${ty}" data-t="${i}">${it.label}</text><text class="k" x="${tx}" y="${ty + 14}">${keyLabel(keyOf(it.act))}</text>`;
+    svg += `<text x="${tx}" y="${ty}" data-t="${i}">${it.label}</text><text class="k" x="${tx}" y="${ty + 14}">${keyText(it.act)}</text>`;
   });
   svg += `<circle cx="${c}" cy="${c}" r="${r0 - 2}" class="mid"/><text x="${c}" y="${c + 4}" class="cancel">取消</text></svg>`;
   radialEl.innerHTML = svg;
@@ -4671,7 +4680,7 @@ function showRadial(m) {
   radialEl.style.left = m.x0 + 'px'; radialEl.style.top = m.y0 + 'px';
   radialEl.hidden = false; m.mode = 'radial'; m.pick = -1;
   renderRadial();
-  hint(`滑向指令後放開；停在中間放開＝取消。${keyLabel(keyOf('radial_prev'))}／${keyLabel(keyOf('radial_next'))} 切換「陣型／攻擊」（按住 ${SETTINGS.queueMod}＝排進隊列）`);
+  hint(`滑向指令後放開；停在中間放開＝取消。${keyText('radial_prev')}／${keyText('radial_next')} 切換「陣型／攻擊」（按住 ${SETTINGS.queueMod}＝排進隊列）`);
 }
 function radialOpen() { return !!radialEl && !radialEl.hidden; }
 function radialFlip(d) { if (!radialOpen()) return false; radialPage = (radialPage + d + RADIAL_PAGES.length) % RADIAL_PAGES.length; renderRadial(); return true; }
@@ -4862,18 +4871,19 @@ canvas.addEventListener('pointercancel', (e) => { touches.delete(e.pointerId); c
 // ── 按鍵綁定（可在「設定」修改）──
 // [動作, 名稱, 分組, 預設鍵]。分組 radial 的鍵只在輪盤開著時有效，所以可以和鏡頭共用 Q／E
 const KEY_ACTIONS = [
-  ['form_line', '橫陣', '陣型', 'Digit1'], ['form_spindle', '紡錘陣', '陣型', 'Digit2'], ['form_crescent', '凹形陣', '陣型', 'Digit3'],
-  ['form_ring', '圓陣', '陣型', 'Digit4'], ['form_column', '縱陣', '陣型', 'Digit5'], ['form_wedge', '圓錐陣', '陣型', 'KeyW'], ['form_hcone', '空心錐陣', '陣型', 'KeyH'], ['orderly', '整齊排列切換', '陣型', 'KeyF'],
-  ['attack', '指定攻擊（再點敵軍）', '攻擊', 'KeyA'], ['volley', '全艦齊射', '攻擊', 'KeyZ'], ['missile', '飛彈齊射', '攻擊', 'KeyX'],
-  ['area', '區域攻擊（再點地圖）', '攻擊', 'KeyD'], ['scan', '區域掃描：航母派偵察機（再點地圖）', '攻擊', 'KeyC'],
-  ['skill_focus', '集中火力', '技能', 'Digit6'], ['skill_wall', '鐵壁', '技能', 'Digit7'], ['skill_charge', '突進', '技能', 'Digit8'],
-  ['skill_rapid', '極速射擊', '技能', 'Digit9'], ['skill_evade', '機動迴避', '技能', 'Digit0'], ['skill_jam', '干擾', '技能', 'KeyJ'], ['skill_reinforce', '呼叫增援', '技能', 'KeyG'],
-  ['turn', '向右轉 45°', '移動', 'KeyV'], ['pitch_mod', '仰角（右鍵按住時按著轉滾輪）', '移動', 'KeyZ'],
+  // 指令卡（右下角 3 排 × 5 格）：按鍵＝格子的位置，內容依選取與頁面而變（括號＝主頁／陣型頁的內容）
+  ['cc_0', '指令卡 1-1（移動／橫陣）', '指令卡', 'KeyQ'], ['cc_1', '指令卡 1-2（停止／紡錘陣）', '指令卡', 'KeyW'], ['cc_2', '指令卡 1-3（攻擊／凹形陣）', '指令卡', 'KeyE'],
+  ['cc_3', '指令卡 1-4（區域攻擊／圓陣）', '指令卡', 'KeyR'], ['cc_4', '指令卡 1-5（轉向 45°／縱陣）', '指令卡', 'KeyT'],
+  ['cc_5', '指令卡 2-1（陣型頁／圓錐陣）', '指令卡', 'KeyA'], ['cc_6', '指令卡 2-2（整齊排列／空心錐陣）', '指令卡', 'KeyS'], ['cc_7', '指令卡 2-3（全艦齊射／整齊排列）', '指令卡', 'KeyD'],
+  ['cc_8', '指令卡 2-4（飛彈齊射／1 層）', '指令卡', 'KeyF'], ['cc_9', '指令卡 2-5（區域掃描／3 層）', '指令卡', 'KeyG'],
+  ['cc_10', '指令卡 3-1（技能 1）', '指令卡', 'KeyZ'], ['cc_11', '指令卡 3-2（技能 2）', '指令卡', 'KeyX'], ['cc_12', '指令卡 3-3（技能 3）', '指令卡', 'KeyC'],
+  ['cc_13', '指令卡 3-4（技能 4）', '指令卡', 'KeyV'], ['cc_14', '指令卡 3-5（技能 5／更多技能／返回）', '指令卡', 'KeyB'],
+  ['pitch_mod', '仰角（右鍵按住時按著轉滾輪）', '移動', 'KeyZ'],
   ['pause', '暫停／繼續', '時間', 'Space'], ['speed_up', '加速', '時間', 'Equal'], ['speed_down', '減速', '時間', 'Minus'],
-  ['tactical', '戰術面板（艦橋：低頭／抬頭）', '介面', 'Tab'], ['bridge', '指揮官視角（旗艦艦橋）', '介面', 'KeyB'], ['render', '切換 2D／3D', '介面', 'KeyM'], ['help', '操作說明', '介面', 'Slash'], ['settings', '設定', '介面', 'F10'],
+  ['tactical', '戰術面板（艦橋：低頭／抬頭）', '介面', 'Tab'], ['bridge', '指揮官視角（旗艦艦橋）', '介面', 'F2'], ['render', '切換 2D／3D', '介面', 'KeyM'], ['help', '操作說明', '介面', 'Slash'], ['settings', '設定', '介面', 'F10'],
   ['radial_prev', '輪盤：上一頁', '輪盤', 'KeyQ'], ['radial_next', '輪盤：下一頁', '輪盤', 'KeyE'],
   ['cam_up', '鏡頭往前', '鏡頭', 'ArrowUp'], ['cam_down', '鏡頭往後', '鏡頭', 'ArrowDown'], ['cam_left', '鏡頭往左', '鏡頭', 'ArrowLeft'], ['cam_right', '鏡頭往右', '鏡頭', 'ArrowRight'],
-  ['cam_yaw_l', '3D：向左轉', '鏡頭', 'KeyQ'], ['cam_yaw_r', '3D：向右轉', '鏡頭', 'KeyE'], ['cam_pitch_up', '3D：仰角升高', '鏡頭', 'KeyR'], ['cam_pitch_dn', '3D：仰角降低', '鏡頭', 'KeyT'],
+  ['cam_yaw_l', '3D：向左轉', '鏡頭', 'Insert'], ['cam_yaw_r', '3D：向右轉', '鏡頭', 'Delete'], ['cam_pitch_up', '3D：仰角升高', '鏡頭', 'PageUp'], ['cam_pitch_dn', '3D：仰角降低', '鏡頭', 'PageDown'],
   // 王牌飛行員（駕駛中才有效，可以和上面的鍵重複；滑鼠左右鍵固定是武裝一、二，這裡可以另外綁鍵盤）
   ['pilot_thr_up', '油門加', '駕駛', 'KeyW'], ['pilot_thr_dn', '油門減（減到 0 以下＝逆向噴射）', '駕駛', 'KeyS'], ['pilot_stop', '油門歸零（停住）', '駕駛', 'KeyX'], ['pilot_roll_l', '向左翻滾', '駕駛', 'KeyA'], ['pilot_roll_r', '向右翻滾', '駕駛', 'KeyD'],
   ['pilot_boost', '加速', '駕駛', 'ShiftLeft'], ['pilot_w1', '武裝一（滑鼠左鍵之外）', '駕駛', ''], ['pilot_w2', '武裝二（滑鼠右鍵之外）', '駕駛', ''], ['pilot_w3', '武裝三', '駕駛', 'KeyQ'], ['pilot_w4', '武裝四', '駕駛', 'KeyE'], ['pilot_gear', '纏鬥裝備（例如電磁干擾）', '駕駛', 'KeyF'],
@@ -4885,13 +4895,16 @@ const UI_OPTS = [
   ['labels', '分艦隊標籤', '戰場上每支分艦隊的名稱與艦數'], ['outlines', '戰術符號外框', '拉遠時的分艦隊外框'],
   ['preview', '命令預覽', '目的地框、移動路線、變陣後的位置'], ['queue', '戰術隊列', '隊列每一步的顏色、箭頭與編號（戰術面板一律顯示）'],
   ['blink', '閃爍提醒', '正在執行的命令會閃爍'], ['ghosts', '暫停時的預定位置小點', '暫停時用小點畫出每艘船的預定位置'],
-  ['stats', '戰況數據', '左上角的光束威力與被擊沉方向'], ['skillbar', '技能列', '畫面下方的技能按鈕'],
-  ['selbar', '選取資訊列', '畫面下方顯示目前選取'], ['toasts', '通知訊息', '開戰、技能、增援等通知'],
+  ['stats', '戰況數據', '左上角的光束威力與被擊沉方向'], ['skillbar', '指令卡', '右下角的指令按鈕（關掉後按鍵照樣有效）'],
+  ['selbar', '選取面板', '畫面下方顯示目前選取的艦隊、兵力與命令'], ['minimap', '小地圖', '左下角的全戰場縮圖：點＝移動鏡頭、右鍵＝移動選取的艦隊'], ['toasts', '通知訊息', '開戰、技能、增援等通知'],
   ['compass', '艦橋方位儀', '指揮官視角上方的方位刻度與各艦隊方位'],
 ];
 const SETTINGS = (() => {
-  const d = { keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, pilotRadar: 'right', ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
-  try { const s = JSON.parse(STORE.getItem('fleet.settings') || 'null'); if (s) { Object.assign(d.keys, s.keys || {}); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin', 'pilotRadar']) if (s[k] != null) d[k] = s[k]; } } catch (e) { /* 用預設值 */ }
+  const d = { keyVer: 2, keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, pilotRadar: 'right', ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
+  try { const s = JSON.parse(STORE.getItem('fleet.settings') || 'null'); if (s) { const k0 = { ...(s.keys || {}) };
+      // 第 2 版按鍵（指令卡）：舊存檔的鏡頭旋轉 Q／E／R／T、艦橋 B 會和指令卡衝突，沒改過的換成新的預設
+      if (!(s.keyVer >= 2)) for (const [id, old] of [['cam_yaw_l', 'KeyQ'], ['cam_yaw_r', 'KeyE'], ['cam_pitch_up', 'KeyR'], ['cam_pitch_dn', 'KeyT'], ['bridge', 'KeyB']]) if (k0[id] === old) delete k0[id];
+      Object.assign(d.keys, k0); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin', 'pilotRadar']) if (s[k] != null) d[k] = s[k]; } } catch (e) { /* 用預設值 */ }
   return d;
 })();
 function saveSettings() { try { STORE.setItem('fleet.settings', JSON.stringify(SETTINGS)); } catch (e) { /* 只在本次有效 */ } }
@@ -4909,6 +4922,7 @@ function keyLabel(code) {
 }
 function keyHeld(id) { const c = keyOf(id); return !!c && keysDown.has(c); }
 function runKeyAction(id, e) {
+  if (id.startsWith('cc_')) return ccPress(+id.slice(3));
   if (id.startsWith('form_')) { cmdFormation(id.slice(5)); return true; }
   if (id.startsWith('skill_')) return skillKey(id.slice(6));
   switch (id) {
@@ -4942,14 +4956,16 @@ addEventListener('keydown', (e) => {
   if (k === keyOf('pitch_mod') && rightDragging()) { e.preventDefault(); keysDown.add(k); return; }   // 右鍵按住中：當成仰角鍵
   if (k === 'Escape') {
     if (settingsOpen()) { closeSettings(); return; }
-    if (ms && ms.mode === 'radial') { closeRadial(); ms = null; return; } if (skillEsc()) return; if (tacOpen()) { closeTac(); return; } if (aim) cancelAim(); else if (ms) cancelDrag(); else clearSelection(); return;
+    if (ms && ms.mode === 'radial') { closeRadial(); ms = null; return; } if (skillEsc()) return; if (ccBack()) return; if (tacOpen()) { closeTac(); return; } if (aim) cancelAim(); else if (ms) cancelDrag(); else clearSelection(); return;
   }
   if (k === 'KeyA' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (BR.on && bridgeConsoleK() < 0.9) { bridgeNoCmd(); return; } setCmdSide(cmdSide); return; }   // Ctrl＋A 全選（固定）
   if (k === 'NumpadAdd') { setSpeed(speedIdx + 1); return; }
   if (k === 'NumpadSubtract') { setSpeed(speedIdx - 1); return; }
   if (settingsOpen()) return;
+  if (cgKey(e)) return;   // 數字鍵＝編隊
   for (const [id] of KEY_ACTIONS) {
     if (KEY_CTX(id) !== 'main' || keyOf(id) !== k) continue;
+    if (id.startsWith('cc_') && (e.ctrlKey || e.altKey || e.metaKey)) continue;   // 指令卡：Shift 可以（排進隊列），其他修飾鍵不算
     if (k === 'Tab' || k === 'Space' || k === 'Slash' || k.startsWith('Arrow') || k.startsWith('F')) e.preventDefault();
     if (bridgeBlocksKey(id)) { bridgeNoCmd(); return; }   // 艦橋：命令只能在戰術台下
     if (runKeyAction(id, e)) return;

@@ -54,7 +54,7 @@ const PILOT_SLOTS = [{ name: '武裝一', mouse: '左鍵' }, { name: '武裝二'
 // 按鍵在「設定 → 按鍵綁定 → 駕駛」修改（KEY_ACTIONS 的 pilot_*）；Shift／Ctrl／Alt 左右邊都算
 function plCodeIs(id, code) { const c = keyOf(id); if (!c || !code) return false; if (c === code) return true; const m = /^(Shift|Control|Alt|Meta)/.exec(c); return !!m && code.startsWith(m[1]); }
 function plHeld(id) { for (const c of PL.keys) if (plCodeIs(id, c)) return true; return false; }
-function plKey(id) { return keyLabel(keyOf(id)); }
+function plKey(id) { return keyText(id); }
 function plSlotKey(k) { const S = PILOT_SLOTS[k], kb = keyOf('pilot_w' + (k + 1)); return [S.mouse, kb ? keyLabel(kb) : ''].filter(Boolean).join('／') || '未綁定'; }
 const PILOT_GEAR_ORDER = ['ecm'];   // 纏鬥裝備（獨立一槽，''＝不裝）
 const PILOT_SLOT_DEF = ['pulse', 'homing', 'homing', 'pulse'];

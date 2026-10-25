@@ -13,9 +13,9 @@ function buildTac() {
       <button class="g-btn sm" id="tac-fit" title="地圖自動對準部隊（滾輪縮放、拖曳平移後會改成手動）">⤢ 自動對焦</button><button class="g-btn sm" id="tac-pause"></button><button class="g-btn sm" id="tac-speed"></button><button class="g-btn sm" id="tac-close">關閉（Tab）</button></div>
     <div class="tac-body"><div class="tac-mapwrap"><div class="tac-mapbox"><canvas id="tac-map"></canvas>
         <div class="tac-pop" id="tac-pop" hidden></div></div>
-      <div class="tac-svbox"><div class="tac-svbar"><span id="tac-svt"></span><button class="g-btn sm" id="tac-svfit" title="恢復自動縮放">⤢ 重設</button><button class="g-btn sm" id="tac-svaxis" title="切換側視的方向"></button></div><div class="tac-svcv"><canvas id="tac-sv"></canvas></div></div></div><div class="tac-side" id="tac-side"></div></div>`;
+      <div class="tac-svbox"><div class="tac-svbar"><span id="tac-svt"></span><button class="g-btn sm" id="tac-svfit" title="恢復自動縮放">⤢ 重設</button><button class="g-btn sm" id="tac-svaxis" title="切換側視的方向"></button></div><div class="tac-svcv"><canvas id="tac-sv"></canvas></div></div></div><div class="tac-side"><div class="tac-list" id="tac-side"></div><div class="tac-cc" id="tac-cc"></div></div></div>`;
   document.body.appendChild(el);
-  TAC.el = el; TAC.cv = el.querySelector('#tac-map'); TAC.ctx = TAC.cv.getContext('2d'); TAC.side = el.querySelector('#tac-side'); TAC.pop = el.querySelector('#tac-pop');
+  TAC.el = el; TAC.cv = el.querySelector('#tac-map'); TAC.ctx = TAC.cv.getContext('2d'); TAC.side = el.querySelector('#tac-side'); TAC.cc = el.querySelector('#tac-cc'); TAC.pop = el.querySelector('#tac-pop');
   el.querySelector('#tac-close').onclick = closeTac;
   el.querySelector('#tac-fit').onclick = () => { TAC.auto = true; tacFit(true); drawTac(); };
   TAC.pop.addEventListener('pointerdown', (e) => e.stopPropagation());
@@ -91,8 +91,8 @@ function openTac() {
   document.body.classList.add('tac-on'); resize();          // 一般：戰場畫面讓出空間，不被蓋住
   const ap = BR.on ? SETTINGS.bridgePause : SETTINGS.tacPause;
   TAC.autoPaused = ap && !paused; if (ap) { paused = true; updateTimeUI(); }   // 單人：打開就暫停（可在設定關掉）
-  gEl('tac-close').textContent = BR.on ? `抬頭（${keyLabel(keyOf('tactical'))}）` : `關閉（${keyLabel(keyOf('tactical'))}）`;
-  const help = gEl('tac-help'); help.textContent = help.title = `左鍵：選艦隊／拖曳＝平移／按住＝指令輪盤　Shift＋左鍵拖曳：框選　滾輪：縮放　右鍵：移動（拖曳＝朝向）　${SETTINGS.queueMod}＋右鍵：加節點　節點：點＝陣型／刪除、拖曳＝改位置　${keyLabel(keyOf('attack'))}＋左鍵：指定攻擊`;
+  gEl('tac-close').textContent = BR.on ? `抬頭（${keyText('tactical')}）` : `關閉（${keyText('tactical')}）`;
+  const help = gEl('tac-help'); help.textContent = help.title = `左鍵：選艦隊／拖曳＝平移／按住＝指令輪盤　Shift＋左鍵拖曳：框選　滾輪：縮放　右鍵：移動（拖曳＝朝向）　${SETTINGS.queueMod}＋右鍵：加節點　節點：點＝陣型／刪除、拖曳＝改位置　右側：點艦隊＝選取，下方指令卡對選取下令（按鍵＝格子位置）`;
   buildTacSide(); tacResize(); drawTac();
 }
 function closeTac() {
@@ -307,7 +307,7 @@ function drawTac() {
   const d = TAC.drag;
   if (d && d.kind === 'right' && d.B && d.moved) { c.strokeStyle = '#fff'; c.beginPath(); c.moveTo(tx(d.A.x), tz(d.A.z)); c.lineTo(tx(d.B.x), tz(d.B.z)); c.stroke(); c.beginPath(); c.arc(tx(d.A.x), tz(d.A.z), 4, 0, TAU); c.fillStyle = '#fff'; c.fill(); }
   if (d && d.kind === 'box') { c.strokeStyle = 'rgba(255,255,255,.7)'; c.strokeRect(d.sx, d.sy, d.cx - d.sx, d.cy - d.sy); }
-  if (GAME.skillArm) { const A = GAME.skillArm; c.fillStyle = '#ffd27a'; c.font = `${uiPx(13)}px system-ui`; c.textAlign = 'center'; c.fillText(A.attack ? '指定攻擊：左鍵點敵方分艦隊（右鍵／Esc 取消）' : A.area ? '區域攻擊：左鍵點地圖上的位置（右鍵／Esc 取消）' : A.recon ? `區域掃描（${A.f.name}的偵察機）：左鍵點地圖上要掃描的位置（右鍵／Esc 取消）` : `${SKILLS[A.id].name}：${A.point ? '左鍵點地圖上的位置' : '左鍵點敵方分艦隊'}（右鍵／Esc 取消）`, W / 2, 22); }
+  if (GAME.skillArm) { const A = GAME.skillArm; c.fillStyle = '#ffd27a'; c.font = `${uiPx(13)}px system-ui`; c.textAlign = 'center'; c.fillText(A.move ? '移動：左鍵點地圖上的目的地（右鍵／Esc 取消）' : A.attack ? '指定攻擊：左鍵點敵方分艦隊（右鍵／Esc 取消）' : A.area ? '區域攻擊：左鍵點地圖上的位置（右鍵／Esc 取消）' : A.recon ? `區域掃描（${A.f.name}的偵察機）：左鍵點地圖上要掃描的位置（右鍵／Esc 取消）` : `${SKILLS[A.id].name}：${A.point ? '左鍵點地圖上的位置' : '左鍵點敵方分艦隊'}（右鍵／Esc 取消）`, W / 2, 22); }
 }
 
 // ── 側欄：我方艦隊卡片（下令）＋敵方概況 ──
@@ -317,29 +317,22 @@ function buildTacSide() {
       <div class="g-row"><b class="g-pc">${f.name}</b><span class="g-dim">${f.commander ? f.commander.name + ' Lv ' + f.commander.level : ''}</span><span class="g-sp"></span><span class="tac-st"></span></div>
       <div class="tac-bar"><i></i></div><div class="tac-info g-dim"></div>
       <div class="tac-sec"><span class="tac-lb">分艦隊</span><div class="tac-sqs"></div></div>
-      <div class="tac-sec"><span class="tac-lb" style="color:#8fe3a5">陣型</span><div class="tac-forms">${RADIAL_ORDER.map((k, i) => `<button class="g-btn sm" data-form="${k}" title="${FORMATIONS[k].note}（鍵 ${keyLabel(keyOf('form_' + k))}）">${FORMATIONS[k].name}</button>`).join('')}
-        <button class="g-btn sm" data-ord title="鍵 ${keyLabel(keyOf('orderly'))}">整齊</button><button class="g-btn sm" data-ly="1">1 層</button><button class="g-btn sm" data-ly="3">3 層</button></div></div>
-      <div class="tac-sec"><span class="tac-lb" style="color:#ff6a4a">攻擊・技能</span><div class="tac-acts"><button class="g-btn sm" data-atk title="${keyLabel(keyOf('attack'))}＋左鍵">指定攻擊</button><button class="g-btn sm" data-area title="${keyLabel(keyOf('area'))}＋左鍵點地圖：對那裡開火 ${FOW_RULE.area.dur} 秒（射程內的光束、飛彈、艦載機）">區域攻擊</button>${fowOn() && fowHasCarrier(f) ? `<button class="g-btn sm" data-scan title="${keyLabel(keyOf('scan'))}＋左鍵點地圖：航母派出偵察機（不佔機庫、沒有武裝、速度快、難以擊中、裝甲薄）飛到那裡盤旋 ${FOW_RULE.recon.loiter} 秒，半徑 ${Math.round(fowReconR(f))} 的球體內的敵軍都看得到，飛行路徑上看到的也一起回報；被干擾時情報記在機上，飛回母艦（或干擾結束）才回報；每支艦隊冷卻 ${FOW_RULE.recon.cd} 秒">區域掃描<small></small></button>` : ''}${f.supply ? '<button class="g-btn sm" data-fol title="自動跟在指定艦隊的後方；直接下移動命令會取消跟隨"></button>' : ''}${Object.keys(f.skills).map((id) => `<button class="g-btn sm tac-sk" data-sk="${id}" title="${SKILLS[id].desc}">${SKILLS[id].name}<small></small></button>`).join('')}<span class="g-sp"></span><button class="g-btn sm" data-sel>選取</button></div></div>
+      <div class="tac-skl"></div>${f.supply ? '<div class="tac-sec"><button class="g-btn sm" data-fol title="自動跟在指定艦隊的後方；直接下移動命令會取消跟隨"></button></div>' : ''}
       <div class="tac-q"></div>
     </div>`).join('')}
     <div class="tac-h" style="margin-top:12px">敵方艦隊</div><div id="tac-enemy"></div>`;
   gEl('tac-enemy').onclick = (e) => { if (e.target.closest('[data-autoscan]')) cmdAutoScan(!FOW.auto[GAME.playerSide]); };   // 敵方概況每 0.2 秒重畫：用委派
   const pick = (f) => setSelection(fleetAlive(f));
-  // 卡片上的命令：已選了這支艦隊裡的幾支分艦隊＝只對它們下令；否則對整支艦隊
-  const use = (f) => { const al = fleetAlive(f); if (!selected.size || ![...selected].every((q) => al.includes(q))) pick(f); };
-  const grpOf = () => { const l = [...selected]; return l.length && l.every((q) => q.group === l[0].group) ? l[0].group : null; };
+  // 點卡片＝選取整支艦隊（Shift＝加選／取消）；命令一律用下方的指令卡
   TAC.side.querySelectorAll('.tac-card').forEach((card) => {
     const f = fleets[+card.dataset.f];
-    card.querySelector('[data-sel]').onclick = () => pick(f);
-    card.querySelector('[data-atk]').onclick = () => { use(f); armAttack(); };
-    card.querySelector('[data-area]').onclick = () => { use(f); armArea(); };
-    const sc = card.querySelector('[data-scan]'); if (sc) sc.onclick = () => armRecon(f);
-    card.querySelectorAll('[data-form]').forEach((b) => (b.onclick = () => { use(f); cmdFormation(b.dataset.form); }));
-    card.querySelector('[data-ord]').onclick = () => { use(f); const g = grpOf(); cmdOrderly(!(g && g.orderly)); };
-    card.querySelectorAll('[data-ly]').forEach((b) => (b.onclick = () => { use(f); const g = grpOf(); if (g && !g.orderly) cmdOrderly(true); cmdLayers(+b.dataset.ly); }));
+    card.onclick = (e) => {
+      if (e.target.closest('button')) return;
+      if (e.shiftKey || e.ctrlKey) { const al = fleetAlive(f), all = al.every((q) => selected.has(q)); for (const q of al) all ? selected.delete(q) : selected.add(q); selectionChanged(); }
+      else pick(f);
+    };
     card.querySelector('.tac-sqs').onclick = (e) => { const b = e.target.closest('[data-sq]'); if (!b) return; const q = squadrons[+b.dataset.sq]; if (!q || q.alive <= 0) return;
       if (e.shiftKey || e.ctrlKey) { selected.has(q) ? selected.delete(q) : selected.add(q); selectionChanged(); } else setSelection([q]); };
-    card.querySelectorAll('[data-sk]').forEach((b) => (b.onclick = () => armSkill(f, b.dataset.sk)));
     const fol = card.querySelector('[data-fol]');
     if (fol) fol.onclick = () => {   // 補給艦隊：輪流切換跟隨的艦隊（不跟隨 → 第一艦隊 → …）
       const ids = [-1, ...fleets.filter((o) => o.side === f.side && !o.supply && !o.reserve && fleetAlive(o).length).map((o) => o.id)];
@@ -368,9 +361,6 @@ function updateTacSide() {
     card.querySelector('.tac-info').textContent = `${ships5(n)} 艘（${Math.round(n / f.initial * 100)}%）・${g ? FORMATIONS[g.formation].name : '-'}・${comp.map((v, k) => (v ? SHIP_TYPES[k].name + ships5(v) : '')).filter(Boolean).join(' ')}${ammo}`;
     const fol = card.querySelector('[data-fol]');
     if (fol) { const T = fleets.find((o) => o.id === f.follow); fol.textContent = `跟隨：${T ? T.name : '不跟隨'}`; fol.classList.toggle('on', !!T); }
-    card.querySelectorAll('[data-form]').forEach((b) => b.classList.toggle('on', !!g && g.formation === b.dataset.form));
-    card.querySelector('[data-ord]').classList.toggle('on', !!g && g.orderly);
-    card.querySelectorAll('[data-ly]').forEach((b) => b.classList.toggle('on', !!g && g.orderly && (g.layers || 1) === +b.dataset.ly));
     // 隊列：正在執行的（閃爍）→ 之後的命令，依種類上色
     const chip = (k, txt, cur) => `<span class="qchip ${cur ? 'cur' : ''}" style="--c:${hex(CMD_COL[k])}">${txt}</span>`;
     const itxt = (it) => it.type === 'alt' ? '高度 ' + (it.y > 0 ? '▲' : '▼') + Math.abs(Math.round(it.y)) : it.type === 'move' ? '移動' + (it.y != null ? ' ' + yTxt(it.y) : '') + pitchTxt(it.P) : it.type === 'form' ? '陣型 ' + FORMATIONS[it.kind].name : it.type === 'orderly' ? (it.on ? '整齊' : '自然') : it.type === 'layers' ? it.n + ' 層' : it.type === 'turn' ? turnTxt(it.d) : SALVO_NAME[it.type] ? SALVO_NAME[it.type] : it.type === 'area' ? '區域攻擊' : it.type === 'skill' ? '⚡' + SKILLS[it.skill].name : '攻擊 ' + (squadrons[it.target] ? squadrons[it.target].name : '');
@@ -379,14 +369,15 @@ function updateTacSide() {
     if (g && g.queue) g.queue.forEach((it, i) => parts.push(chip(itemKind(it), `${i + 1}. ${itxt(it)}`, false)));
     const qh = parts.length ? `<span class="tac-lb">隊列</span>${parts.join('<i class="qarr">➜</i>')}${g && g.queue && g.queue.length ? ' <button class="g-btn sm" data-qc>清除</button>' : ''}` : '';
     const qe = card.querySelector('.tac-q'); if (qe.dataset.h !== qh) { qe.dataset.h = qh; qe.innerHTML = qh; }
-    card.querySelectorAll('[data-sk]').forEach((b) => {
-      const s = f.skills[b.dataset.sk], cd = Math.max(0, s.ready - t);
-      b.querySelector('small').textContent = t < s.until ? ` 生效 ${Math.ceil(s.until - t)}s` : s.left <= 0 ? ' 用完' : cd > 0 ? ` ${Math.ceil(cd)}s` : ` ×${s.left}`;
-      b.disabled = s.left <= 0 || cd > 0 || !al.length;
-    });
-    const sc = card.querySelector('[data-scan]');
-    if (sc) { const cd = fowReconLeft(f), ok = fowHasCarrier(f); sc.querySelector('small').textContent = !ok ? ' 沒有航母' : cd > 0 ? ` ${Math.ceil(cd)}s` : jammed(f.side) ? ' 受干擾' : ''; sc.disabled = cd > 0 || !ok; }
+    // 技能與偵察機：只顯示狀態（施放用指令卡）
+    const skl = Object.keys(f.skills).map((id) => { const sk = f.skills[id], cd = Math.max(0, sk.ready - t), on = t < sk.until;
+      return `<span class="${on ? 'on' : sk.left > 0 && cd <= 0 ? 'ok' : ''}" title="${SKILLS[id].desc}">${SKILLS[id].name} ${on ? '生效 ' + Math.ceil(sk.until - t) + 's' : sk.left <= 0 ? '用完' : cd > 0 ? Math.ceil(cd) + 's' : '×' + sk.left}</span>`; });
+    if (fowOn() && fowHasCarrier(f)) { const cd = fowReconLeft(f); skl.push(`<span class="${cd > 0 ? '' : 'ok'}">偵察機 ${cd > 0 ? Math.ceil(cd) + 's' : jammed(f.side) ? '受干擾' : '待命'}</span>`); }
+    const sh2 = skl.join(''), ske = card.querySelector('.tac-skl'); if (ske.dataset.h !== sh2) { ske.dataset.h = sh2; ske.innerHTML = sh2; }
   });
+  // 選取改變（編隊鍵、在地圖上點）：右側清單捲到那支艦隊
+  const selSig = [...selected].map((q) => squadrons.indexOf(q)).join(',');
+  if (selSig !== TAC.selSig) { TAC.selSig = selSig; const c = TAC.side.querySelector('.tac-card.sel, .tac-card.part'); if (c) c.scrollIntoView({ block: 'nearest' }); }
   const en = fleets.filter((f) => f.side !== GAME.playerSide && !f.reserve);
   const enEl = gEl('tac-enemy'), enH = playerFogged() ? `<div class="tac-ecard"><div class="g-warn">通訊受干擾：敵方資料不明（剩 ${Math.ceil(jam[GAME.playerSide].until - t)} 秒）</div><div class="g-dim">地圖上只顯示干擾開始時的最後已知位置</div></div>` : fowView() ? fowEnemyCards(en, t) : en.map((f) => { const al = fleetAlive(f), n = sumA(al.map((q) => q.alive)), g = al[0] && al[0].group, st = fleetStatus(f);
     return `<div class="tac-ecard"><div class="g-row"><b class="g-ec">${f.name}</b><span class="g-sp"></span><span class="tac-st ${st[1]}">${st[0]}</span></div>
@@ -401,7 +392,7 @@ function fowEnemyCards(en, t) {
   const me = GAME.playerSide, jm = jammed(me);
   const on = FOW.auto[me], cd = fowScanLeft(me);
   const head = `<div class="tac-ecard"><div class="${jm ? 'g-warn' : 'g-dim'}">${jm ? `通訊受干擾（剩 ${Math.ceil(jam[me].until - t)} 秒）：各艦隊不能共享情報，掃描沒有結果` : '戰爭迷霧：只看得到偵測範圍內、掃描到的敵軍'}</div>
-    <div class="g-row"><button class="g-btn sm ${on ? 'on' : ''}" data-autoscan title="還有敵方艦隊看不到時，冷卻好了就自動從艦隊發出脈衝掃描（半徑 ${FOW_RULE.scanR}；被掃到的一方會知道掃描來的方向）">自動掃描：${on ? '開' : '關'}</button><span class="g-dim">${cd > 0 ? `冷卻 ${Math.ceil(cd)} 秒` : on ? '待命' : ''}</span><span class="g-sp"></span><span class="g-dim">區域掃描 ${keyLabel(keyOf('scan'))}＋點地圖</span></div></div>`;
+    <div class="g-row"><button class="g-btn sm ${on ? 'on' : ''}" data-autoscan title="還有敵方艦隊看不到時，冷卻好了就自動從艦隊發出脈衝掃描（半徑 ${FOW_RULE.scanR}；被掃到的一方會知道掃描來的方向）">自動掃描：${on ? '開' : '關'}</button><span class="g-dim">${cd > 0 ? `冷卻 ${Math.ceil(cd)} 秒` : on ? '待命' : ''}</span><span class="g-sp"></span><span class="g-dim">區域掃描 ${keyText('scan')}＋點地圖</span></div></div>`;
   return head + en.map((f) => {
     const vs = f.sqs.map((q) => pSeen(q, Infinity)).filter((q) => q && !q.bg && q.alive > 0), live = vs.filter((q) => !q.stale);
     if (!vs.length) return `<div class="tac-ecard"><div class="g-row"><b class="g-ec">${f.name}</b><span class="g-sp"></span><span class="tac-st">位置不明</span></div></div>`;
@@ -438,7 +429,7 @@ function tacDown(e) {
   const w = tacWorld(e), r = TAC.cv.getBoundingClientRect();
   if (GAME.skillArm && e.pointerType !== 'touch' && e.button === 2) { skillEsc(); return; }
   if (GAME.skillArm && GAME.skillArm.point) {   // 點地圖上的位置：區域攻擊、呼叫增援
-    if (GAME.skillArm.area) cmdArea({ x: w.x, y: selAlt(), z: w.z }); else if (GAME.skillArm.recon) cmdRecon(GAME.skillArm.f, { x: w.x, y: selAlt(), z: w.z }); else skillCmd(GAME.skillArm.f, GAME.skillArm.id, null, w);
+    if (GAME.skillArm.move) cmdMoveTo(w); else if (GAME.skillArm.area) cmdArea({ x: w.x, y: selAlt(), z: w.z }); else if (GAME.skillArm.recon) cmdRecon(GAME.skillArm.f, { x: w.x, y: selAlt(), z: w.z }); else skillCmd(GAME.skillArm.f, GAME.skillArm.id, null, w);
     GAME.skillArm = null; hideHint(); drawTac(); return;
   }
   if (GAME.skillArm) {

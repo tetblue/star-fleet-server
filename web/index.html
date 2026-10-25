@@ -402,7 +402,12 @@
   .tac-pop .g-dim { font-size: calc(12.5px * var(--ui)); margin: calc(6px * var(--sp)) 0; line-height: 1.6; }
   .tac-pop-l { font-size: calc(12.5px * var(--ui)); color: #8fe3a5; margin: calc(8px * var(--sp)) 0 calc(6px * var(--sp)); letter-spacing: .06em; }
   .tac-pop .tac-forms .g-btn.on { border-color: rgba(143,227,165,.85); color: #8fe3a5; background: rgba(20,60,35,.5); }
-  .tac-side { flex: 1 1 42%; max-width: calc(780px * var(--ui)); overflow: auto; padding: calc(12px * var(--sp)) calc(16px * var(--sp)); }
+  .tac-side { flex: 1 1 42%; max-width: calc(780px * var(--ui)); min-width: 0; display: flex; flex-direction: column; gap: calc(8px * var(--sp)); padding: calc(10px * var(--sp)) calc(12px * var(--sp)); }
+  .tac-list { flex: 1; min-height: 0; overflow: auto; padding-right: 4px; }
+  .tac-cc { flex: none; } .tac-cc .ch-box { padding: calc(5px * var(--sp)); } .tac-cc .cc-b { height: calc(38px * var(--ui)); }
+  .tac-card { cursor: pointer; } .tac-card:hover { border-color: rgba(255,255,255,.4); }
+  .tac-skl { display: flex; flex-wrap: wrap; gap: calc(6px * var(--sp)) calc(12px * var(--sp)); margin-top: calc(4px * var(--sp)); font-size: calc(12.5px * var(--ui)); }
+  .tac-skl span { color: var(--dim); } .tac-skl span.on { color: #8fe3a5; } .tac-skl span.ok { color: var(--text); }
   .tac-h { font-size: calc(13px * var(--ui)); letter-spacing: .16em; color: var(--dim); margin: calc(4px * var(--sp)) 0 calc(8px * var(--sp)); }
   .tac-card, .tac-ecard { border: 1px solid var(--line); border-radius: 5px; padding: calc(10px * var(--sp)) calc(14px * var(--sp)); margin-bottom: calc(12px * var(--sp)); background: rgba(10,15,28,.8); font-size: calc(14.5px * var(--ui)); line-height: 1.45; }
   .tac-card.sel { border-color: rgba(255,255,255,.6); } .tac-card.part { border-color: rgba(255,255,255,.32); border-style: dashed; }
@@ -684,6 +689,55 @@
   .tv-b { font-size: calc(12px * var(--ui)); } .tv-f { display: flex; justify-content: space-between; align-items: center; margin-top: calc(6px * var(--sp)); } .tv-cost { color: var(--emp); }
   .tv-mine { display: flex; gap: calc(8px * var(--sp)); align-items: center; padding: calc(4px * var(--sp)) 0; border-bottom: 1px solid rgba(255,255,255,.05); font-size: calc(12.5px * var(--ui)); }
   @media (max-width: 759px) { .tv-grid { grid-template-columns: 1fr; } }
+  /* ── 作戰 HUD（hud.js）：左下小地圖、中下選取面板、右下指令卡 ── */
+  #cmdhud { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; padding: 0 calc(8px * var(--sp)) calc(8px * var(--sp)); gap: calc(8px * var(--sp)); align-items: flex-end; pointer-events: none;
+    grid-template-columns: calc(170px * var(--ui)) minmax(0, 1fr) calc(300px * var(--ui)); }
+  body.ch-on #cmdhud { display: grid; }
+  body.game-battle #skillbar, body.game-battle.tac-on #selbar { display: none !important; }   /* 技能在指令卡上；戰術面板右側就是選取資訊 */
+  body.ch-on #selbar, body.ch-on #skillbar, body.ch-on #help-btn, body.ch-on #set-btn { display: none !important; }
+  body.ch-on #touchbar { bottom: calc(190px * var(--ui)); }
+  #cmdhud > *, #cmdhud .ch-mid > * { pointer-events: auto; }
+  #cmdhud .ch-mid { pointer-events: none; display: flex; flex-direction: column; gap: calc(4px * var(--sp)); min-width: 0; max-width: calc(560px * var(--ui)); justify-self: center; width: 100%; }
+  .ch-box { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: calc(6px * var(--sp)); }
+  #ch-mm { padding: 3px; height: calc(170px * var(--ui)); } #ch-mmc { position: static; inset: auto; display: block; width: 100%; height: 100%; cursor: crosshair; }
+  #ch-sel { min-height: calc(112px * var(--ui)); font-size: calc(12px * var(--ui)); }
+  .cs-h { display: flex; gap: calc(10px * var(--sp)); align-items: baseline; white-space: nowrap; overflow: hidden; } .cs-h span { color: var(--dim); }
+  .cs-fn { color: var(--pc); font-size: calc(14px * var(--ui)); }
+  .cs-st { color: var(--text); margin: calc(3px * var(--sp)) 0 calc(5px * var(--sp)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .cs-sk { color: #8fe3a5; }
+  .cs-ts { display: flex; flex-wrap: wrap; gap: calc(4px * var(--sp)); max-height: calc(70px * var(--ui)); overflow: hidden; }
+  .cs-t { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: calc(92px * var(--ui)); padding: calc(3px * var(--sp)) calc(5px * var(--sp)); background: rgba(255,255,255,.04); border: 1px solid var(--line); border-radius: 3px; color: var(--text); font: inherit; cursor: pointer; text-align: left; }
+  .cs-t:hover { border-color: var(--pc); } .cs-t.dead { opacity: .4; } .cs-t.warn { border-color: #ff8a6a; }
+  .cs-tn { font-size: calc(11.5px * var(--ui)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; } .cs-tc { font-size: calc(10.5px * var(--ui)); color: var(--dim); }
+  .cs-bar { display: block; width: 100%; height: 3px; background: #0b1222; } .cs-bar i { display: block; height: 100%; background: #5fe38a; } .cs-bar i.mid { background: #ffd27a; } .cs-bar i.bad { background: #ff6a5a; }
+  #ch-cg { display: flex; gap: calc(4px * var(--sp)); flex-wrap: wrap; pointer-events: none; }
+  .cg-b { pointer-events: auto; font: inherit; font-size: calc(11px * var(--ui)); color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 3px; padding: 1px calc(6px * var(--sp)); cursor: pointer; max-width: calc(140px * var(--ui)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cg-b b { color: #ffd27a; margin-right: 4px; } .cg-b:hover { border-color: var(--pc); } .cg-hint { font-size: calc(11px * var(--ui)); color: var(--dim); opacity: .7; }
+  #ch-page { font-size: calc(11px * var(--ui)); color: var(--dim); margin-bottom: calc(4px * var(--sp)); white-space: nowrap; overflow: hidden; }
+  .ch-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: calc(4px * var(--sp)); }
+  .cc-b { position: relative; height: calc(44px * var(--ui)); padding: calc(10px * var(--ui)) 2px 2px; font: inherit; font-size: calc(11.5px * var(--ui)); line-height: 1.15; color: var(--text); background: rgba(255,255,255,.05); border: 1px solid rgba(150,175,220,.3); border-radius: 4px; cursor: pointer; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .cc-b:hover { border-color: var(--pc); background: rgba(255,255,255,.1); }
+  .cc-n { white-space: nowrap; max-width: 100%; overflow: hidden; }
+  .cc-k { position: absolute; left: 3px; top: 1px; font-size: calc(10px * var(--ui)); font-weight: 700; color: #ffd27a; }
+  .cc-b small { font-size: calc(9.5px * var(--ui)); color: var(--dim); white-space: nowrap; }
+  .cc-cd { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.55); pointer-events: none; }
+  .cc-b.empty { visibility: hidden; } .cc-b.off { opacity: .45; } .cc-b.on { border-color: #8fe3a5; color: #8fe3a5; }
+  .cc-b.arm { border-color: #ffd27a; color: #ffd27a; background: rgba(255,210,122,.15); } .cc-b.act { opacity: 1; border-color: #8fe3a5; box-shadow: inset 0 0 8px rgba(143,227,165,.35); }
+  .cc-b.sk { background: rgba(80,140,255,.1); } .cc-b.nav { background: rgba(143,227,165,.08); }
+  #ch-tip { position: fixed; right: calc(8px * var(--sp)); bottom: calc(196px * var(--ui)); width: calc(300px * var(--ui)); max-width: calc(100vw - 16px); z-index: 30; pointer-events: none; background: rgba(6,10,20,.96); border: 1px solid var(--line); border-radius: 6px; padding: calc(8px * var(--sp)) calc(10px * var(--sp)); font-size: calc(12px * var(--ui)); line-height: 1.55; }
+  #ch-tip[hidden] { display: none; }
+  .tt-h { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; } .tt-h b { color: var(--pc); font-size: calc(13px * var(--ui)); }
+  .tt-h kbd { font: inherit; font-size: calc(11px * var(--ui)); color: #ffd27a; border: 1px solid rgba(255,210,122,.5); border-radius: 3px; padding: 0 5px; }
+  .tt-d small { color: var(--dim); } .tt-s { color: #8fe3a5; margin-top: 3px; } .tt-w { color: #ff9a7a; margin-top: 3px; } .tt-q { color: var(--dim); font-size: calc(11px * var(--ui)); margin-top: 3px; }
+  body.ui-no-skillbar #cmdhud #ch-card, body.ui-no-selbar #ch-sel, body.ui-no-minimap #ch-mm { visibility: hidden; }
+  body.ch-on #hint { display: none; }
+  @media (max-width: 1100px) { #cmdhud { grid-template-columns: calc(140px * var(--ui)) minmax(0, 1fr) calc(260px * var(--ui)); } #ch-mm { height: calc(140px * var(--ui)); } .cc-b { font-size: calc(10.5px * var(--ui)); } }
+  @media (max-width: 860px) { #cmdhud { grid-template-columns: minmax(0, 1fr) calc(290px * var(--ui)); } #ch-mm { display: none; } .cc-b { font-size: calc(10px * var(--ui)); } }
+  @media (max-width: 600px) { #cmdhud { grid-template-columns: 1fr; } #cmdhud .ch-mid { display: none; } }
+  body.pf-0 .ch-box { background: linear-gradient(180deg, rgba(24,18,10,.92), rgba(10,11,18,.9)); border: 1px solid rgba(242,179,90,.5); box-shadow: inset 0 0 0 2px rgba(8,9,14,.9), inset 0 0 0 3px rgba(242,179,90,.22), 0 2px 10px rgba(0,0,0,.5); border-radius: 3px; }
+  body.pf-0 .cs-fn, body.pf-0 .tt-h b { font-family: "Noto Serif TC", "PMingLiU", "Songti TC", serif; letter-spacing: .1em; color: #ffe2b0; }
+  body.pf-1 .ch-box { background: linear-gradient(180deg, rgba(8,20,36,.9), rgba(4,10,20,.9)); border: 1px solid rgba(124,196,255,.55); border-radius: 0; box-shadow: inset 0 1px 0 rgba(180,225,255,.25), inset 0 0 14px rgba(60,140,220,.12); }
+  body.pf-1 .cc-b, body.pf-1 .cs-t, body.pf-1 .cg-b { border-radius: 0; } body.pf-1 .cs-fn { font-family: "Consolas", "SF Mono", ui-monospace, monospace; color: #cfeaff; }
+
 
   /* ── 陣營主題（作戰中的介面）：body.pf-0＝帝國（金、雙框、菱形紋飾），body.pf-1＝聯盟（青藍、切角、掃描線）── */
   body.pf-1 { --pc: var(--all); --ec: var(--emp); }
@@ -798,21 +852,20 @@
       <tr><td>右鍵按住＋滾輪</td><td>3D：調整目的地高度（每格 20）；按住 Z 轉滾輪＝到達後的仰角（每格 5°）。戰術面板下方的側視圖：右鍵上下拖＝把選取的部隊升降到那個高度</td></tr>
       <tr><td>下令時減速</td><td>沒有暫停時，按住右鍵、打開輪盤、選攻擊／技能目標的期間，遊戲自動降到 ×0.2，下完恢復（設定 → 遊戲可以調整或關閉）</td></tr>
       <tr><td>Shift＋命令</td><td>排進戰術隊列：前一個動作完成（抵達、變陣結束）才執行下一個。例：Shift＋右鍵移動 → Shift＋輪盤換陣型 → Shift＋技能。不按 Shift 直接下令＝取消隊列</td></tr>
-      <tr><td>A ＋ 左鍵點敵軍</td><td>選取的艦隊集中攻擊該分艦隊（沒選＝全軍）</td></tr>
+      <tr><td>指令卡（右下角）</td><td>所有命令都是按鈕，滑鼠移上去會說明。按鍵＝格子的位置：第一排 Q 移動、W 停止、E 攻擊、R 區域攻擊、T 轉向 45°；第二排 A 陣型頁、S 整齊排列、D 全艦齊射、F 飛彈齊射、G 區域掃描；第三排 Z X C V B＝選取艦隊的技能。陣型頁：Q～T、A、S＝七種陣型，Esc 返回</td></tr>
+      <tr><td>E（攻擊）＋左鍵點敵軍</td><td>選取的艦隊集中攻擊該分艦隊（沒選＝全軍）</td></tr>
+      <tr><td>數字鍵</td><td>編隊：Ctrl＋數字＝把選取編成那一隊、數字＝選取、連按兩下＝鏡頭跳過去、Shift＋數字＝加入。開戰時每支艦隊自動編成 1、2、3…</td></tr>
+      <tr><td>小地圖（左下角）</td><td>左鍵點／拖曳＝移動鏡頭；右鍵＝選取的艦隊移動過去</td></tr>
+      <tr><td>選取面板（下方中間）</td><td>點分艦隊＝只選它、Shift＋點＝從選取移除、連點兩下＝鏡頭跳過去</td></tr>
       <tr><td>中鍵拖曳／方向鍵</td><td>平移鏡頭；滾輪縮放</td></tr>
-      <tr><td>1～5、W、H</td><td>橫陣／紡錘陣／凹形陣／圓陣／縱陣、W＝圓錐陣、H＝空心錐陣</td></tr>
-      <tr><td>F</td><td>切換整齊排列</td></tr>
-      <tr><td>Z</td><td>全艦齊射（飛彈、艦載機、維修機都是自動的：敵人進入射程就自己發射、出擊，各艦各自冷卻）</td></tr>
-      <tr><td>X</td><td>飛彈齊射：選取的艦隊裡冷卻好、還有彈藥的巡洋艦與驅逐艦立刻一起發射（會扣彈藥）；輪盤「攻擊」頁也有</td></tr>
-      <tr><td>V</td><td>轉向 45°</td></tr>
       <tr><td>空白鍵</td><td>暫停（暫停中也能下令）</td></tr>
       <tr><td>＋／－</td><td>時間速度</td></tr>
       <tr><td>Tab</td><td>測試場：切換指揮陣營</td></tr>
       <tr><td>Esc</td><td>取消選取</td></tr>
       <tr><td>M</td><td>切換 2D／3D</td></tr>
       <tr><td>3D：中鍵拖曳</td><td>旋轉鏡頭（Shift＋中鍵：平移）</td></tr>
-      <tr><td>3D：Q／E、R／T</td><td>水平旋轉、調整仰角</td></tr>
-      <tr><td>B</td><td>指揮官視角：從旗艦艦橋看前方（自動用 3D）。滑鼠左右移動＝轉頭：往左看滑出「戰況」、往右看滑出「各艦隊旗艦」子畫面（點一下切換艦橋）。滑鼠移到畫面最下方、滾輪往下或 Tab＝低頭看戰術台（看著戰術台時滑鼠移到最上方＝抬頭）；艦橋上只能透過戰術台下令</td></tr>
+      <tr><td>3D：Insert／Delete、PgUp／PgDn</td><td>水平旋轉、調整仰角</td></tr>
+      <tr><td>F2</td><td>指揮官視角：從旗艦艦橋看前方（自動用 3D）。滑鼠左右移動＝轉頭：往左看滑出「戰況」、往右看滑出「各艦隊旗艦」子畫面（點一下切換艦橋）。滑鼠移到畫面最下方、滾輪往下或 Tab＝低頭看戰術台（看著戰術台時滑鼠移到最上方＝抬頭）；艦橋上只能透過戰術台下令</td></tr>
     </table></div>
     <div><h4>觸控</h4><table>
       <tr><td>點</td><td>選取分艦隊</td></tr>
@@ -842,9 +895,9 @@
     </table>
     <h4 style="margin-top:14px">操作難度</h4>
     <p style="margin:0;color:var(--dim);font-size:calc(13px * var(--ui));line-height:1.6">在「單人戰鬥」或編成畫面選擇。一般：可用 2D、3D 與指揮官模式，艦隊都在同一平面（不能升降）。進階：作戰中只能用 3D 與指揮官模式，艦隊可以上下移動。擬真：開戰直接上艦橋、作戰中不能離開指揮官模式（部署時仍可看 3D 全圖），艦隊可以上下移動，而且射線穿過「別的部隊」的友軍時可能誤傷：別把部隊排在另一個部隊的正後方。多支艦隊編成同一個部隊（同一個陣型）時有協同射界，射線被自己部隊擋住多半會停火，只有少數仍誤傷（部隊裡指揮官等級越高越少），代價是縱深陣型的後排火力會變少（指揮官天賦「完美布陣」：被擋住也照樣開火，誤傷的傷害也會降低；「火線管制」：降低誤傷的機率）。同一支艦隊拆成不同部隊時一樣會互相誤傷。回放不受限制。模擬室也套用這裡選的操作難度。</p>
-    <p style="margin:0;color:var(--dim);font-size:calc(13px * var(--ui));line-height:1.6">擬真的戰爭迷霧：只看得到偵測範圍內的敵軍（護衛艦 750、戰列艦／巡洋艦 650、驅逐艦 600、航母 550、補給艦 450；巨大小行星會擋住視線），攻擊型艦載機周圍 250 也看得到。沒被干擾時全軍共享情報；被「干擾」時各艦隊只看得到自己偵測到的。看不到的敵軍不畫，只留「最後已知位置」。自動攻擊（光束、飛彈、艦載機）只打看得到的敵人；敵艦開火後幾秒內，被打的艦隊看得到它。自動掃描：還有敵方艦隊看不到時，冷卻好了就自動從艦隊發出半徑 1200 的脈衝，掃到的敵軍顯示 6 秒，冷卻 40 秒（全軍共用；戰術台可以關掉）；被干擾時照樣發出但沒有結果；被掃到的一方只會知道掃描來的方向。區域掃描（C＋點地圖）：航母派出偵察機（不佔機庫、沒有武裝、速度快、難以擊中、裝甲薄，會被防空砲和攔截機打下來）飛到那一點盤旋 8 秒，半徑 350 的球體內的敵軍都看得到（天賦「偵察機」每階半徑 +20%），飛行路徑上（去程、回程）周圍 300 看到的也一起回報；每支艦隊冷卻 20 秒。被干擾時偵察機照樣偵察，但情報記在機上，飛回母艦或干擾結束時才回報（成為最後已知位置）；中途被打下來，情報就沒了。區域攻擊（D＋點地圖）：選取的艦隊對那一點開火 20 秒，射程不夠的不會開火；有看不到的敵艦在那裡＝盲射（命中率減半）。AI 也受同樣的限制。模擬室可以關掉戰爭迷霧。</p>
+    <p style="margin:0;color:var(--dim);font-size:calc(13px * var(--ui));line-height:1.6">擬真的戰爭迷霧：只看得到偵測範圍內的敵軍（護衛艦 750、戰列艦／巡洋艦 650、驅逐艦 600、航母 550、補給艦 450；巨大小行星會擋住視線），攻擊型艦載機周圍 250 也看得到。沒被干擾時全軍共享情報；被「干擾」時各艦隊只看得到自己偵測到的。看不到的敵軍不畫，只留「最後已知位置」。自動攻擊（光束、飛彈、艦載機）只打看得到的敵人；敵艦開火後幾秒內，被打的艦隊看得到它。自動掃描：還有敵方艦隊看不到時，冷卻好了就自動從艦隊發出半徑 1200 的脈衝，掃到的敵軍顯示 6 秒，冷卻 40 秒（全軍共用；戰術台可以關掉）；被干擾時照樣發出但沒有結果；被掃到的一方只會知道掃描來的方向。區域掃描（G＋點地圖）：航母派出偵察機（不佔機庫、沒有武裝、速度快、難以擊中、裝甲薄，會被防空砲和攔截機打下來）飛到那一點盤旋 8 秒，半徑 350 的球體內的敵軍都看得到（天賦「偵察機」每階半徑 +20%），飛行路徑上（去程、回程）周圍 300 看到的也一起回報；每支艦隊冷卻 20 秒。被干擾時偵察機照樣偵察，但情報記在機上，飛回母艦或干擾結束時才回報（成為最後已知位置）；中途被打下來，情報就沒了。區域攻擊（R＋點地圖）：選取的艦隊對那一點開火 20 秒，射程不夠的不會開火；有看不到的敵艦在那裡＝盲射（命中率減半）。AI 也受同樣的限制。模擬室可以關掉戰爭迷霧。</p>
     <h4 style="margin-top:14px">作戰模式</h4>
-    <p style="margin:0;color:var(--dim);font-size:calc(13px * var(--ui));line-height:1.6">主選單 →「單人戰鬥」→「訓練作戰」（隨機戰役、無限戰場流程相同）：讀作戰簡報（情報可能有誤或不完整）→ 用預算編成艦隊、指派指揮官 → 在橘色部署區用右鍵點擊放置艦隊（右鍵拖曳指定朝向，↺↻ 旋轉；左鍵點艦隊切換要放的那一支）→ 開戰。敵軍損失 75% 即潰走（勝利）；時間到依雙方損失比例判定。技能：按畫面下方按鈕或鍵 6／7／8（集中火力／鐵壁／突進），集中火力要再點一支敵方分艦隊。按 A 再左鍵點敵方分艦隊＝指定攻擊目標（不加傷害、沒有次數限制）。空白鍵暫停，＋／－ 調速度（×0.5～×8）。戰後可以觀看回放。</p>
+    <p style="margin:0;color:var(--dim);font-size:calc(13px * var(--ui));line-height:1.6">主選單 →「單人戰鬥」→「訓練作戰」（隨機戰役、無限戰場流程相同）：讀作戰簡報（情報可能有誤或不完整）→ 用預算編成艦隊、指派指揮官 → 在橘色部署區用右鍵點擊放置艦隊（右鍵拖曳指定朝向，↺↻ 旋轉；左鍵點艦隊切換要放的那一支）→ 開戰。敵軍損失 75% 即潰走（勝利）；時間到依雙方損失比例判定。技能：按右下角指令卡下排的按鈕（或 Z／X／C…），集中火力要再點一支敵方分艦隊。按 E（攻擊）再左鍵點敵方分艦隊＝指定攻擊目標（不加傷害、沒有次數限制）。空白鍵暫停，＋／－ 調速度（×0.5～×8）。戰後可以觀看回放。</p>
     <h4 style="margin-top:14px">移動規則</h4>
     <p style="margin:0;color:var(--dim);font-size:calc(13px * var(--ui));line-height:1.6">指定朝向與目前朝向差 60° 以內：直接過去，邊走邊微調；目標在後方就倒退（半速），在側面 0.6 倍速。差 60°～120°：原地轉向，重排、移動、轉向同時進行。差 120° 以上：反向迴轉——窄的陣型（縱陣等）蛇行，艦首帶頭繞彎、後面沿同一條路跟上；寬的陣型（橫陣等）打散，每艘船各自繞弧線掉頭，到目的地重新組成陣型。可在測試場面板「反向迴轉」固定用其中一種。迴轉途中下的變陣命令，會在迴轉完成後執行。</p>
     <h4 style="margin-top:14px">光束射程</h4>
@@ -930,7 +983,7 @@
 
 <div id="boot"><div class="boot-card"><h1>星海艦隊戰</h1><div class="sub">FLEET TACTICS · 內網伺服器</div><div id="boot-body"><p class="boot-st">連線中…</p></div></div></div>
 <div id="save-badge" hidden>⚠ 存檔還沒同步到伺服器，重試中…</div>
-<script>window.__BUILD = "20261025002528"; window.__ASSETS = { ships: "assets/ships.webp", fx: "assets/fx.webp", fighters: "assets/fighters.webp" };</script>
+<script>window.__BUILD = "20261025120015"; window.__ASSETS = { ships: "assets/ships.webp", fx: "assets/fx.webp", fighters: "assets/fighters.webp" };</script>
 <script>// ═══ 啟動前：登入伺服器、取得存檔、提供 STORE（取代 localStorage，寫入會自動同步到伺服器）═══
 (() => {
   'use strict';

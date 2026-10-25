@@ -7,7 +7,7 @@ const TUT_STORE = 'fleet.tut', TUT_MERIT = 50;
 const TUT = { L: null, i: 0, S: null, ok: false, okT: 0, el: null, min: false, timer: 0, complete: false, pausedBy: false, marks: null };
 function tutLoad() { try { return JSON.parse(STORE.getItem(TUT_STORE) || 'null') || { done: {} }; } catch (e) { return { done: {} }; } }
 function tutSave(d) { try { STORE.setItem(TUT_STORE, JSON.stringify(d)); } catch (e) { /* 只在本次 */ } }
-const tutK = (id) => `<kbd>${keyLabel(keyOf(id))}</kbd>`;
+const tutK = (id) => `<kbd>${keyText(id)}</kbd>`;
 const tutKQ = () => `<kbd>${SETTINGS.queueMod === 'Control' ? 'Ctrl' : SETTINGS.queueMod}</kbd>`;
 
 // ───── 課程用的小工具 ─────
@@ -129,7 +129,7 @@ const TUT_LESSONS = [
     fleets: [{ name: '第一艦隊', x: 0, z: 520, comp: TMIX(10, 24, 60, 80, 70) }],
     steps: [
       { title: '陣型決定火力與弱點', pause: true, text: () => `陣型影響<b>火力倍率、防空、速度、受擊</b>。每種陣型的特性：<br>${tutFormTable()}` },
-      { title: '試試各種陣型', text: () => `選取艦隊，按 ${tutK('form_line')}～${tutK('form_column')}、${tutK('form_wedge')}、${tutK('form_hcone')} 換陣型，至少試 4 種。<b>變陣需要約 ${MORPH_DUR} 秒</b>，變陣中的艦隊比較脆弱，不要在敵人眼前亂換。`,
+      { title: '試試各種陣型', text: () => `選取艦隊，點右下角指令卡的<b>「陣型 ▸」</b>（鍵 ${tutK('page_form')}）打開陣型頁，再點想要的陣型（或按格子上的鍵，例如 ${tutK('form_line')}＝橫陣），至少試 4 種。<b>變陣需要約 ${MORPH_DUR} 秒</b>，變陣中的艦隊比較脆弱，不要在敵人眼前亂換。`,
         goal: '試過 4 種陣型', check: (S) => S.forms().size >= 4,
         live: (S) => `已試：${[...S.forms()].map((k) => FORMATIONS[k] ? FORMATIONS[k].name : k).join('、') || '—'}` },
       { title: '整齊排列', text: () => `按 ${tutK('orderly')} 切換<b>整齊排列</b>：船排成規則的格子（自然＝較鬆散）。整齊排列比較好預測射界；編成畫面也可以選「整齊・3 層」。`,
@@ -198,7 +198,7 @@ const TUT_LESSONS = [
     ],
     steps: [
       { title: '技能列', pause: true, text: () => `畫面下方是<b>技能列</b>，每位指揮官有自己的技能；每個技能每場有<b>次數</b>，用過後要<b>冷卻</b>。<br>${tutSkillTable(['focus', 'wall', 'charge', 'rapid', 'evade'])}` },
-      { title: '突進', text: () => `按 ${tutK('skill_charge')}（或點技能列）放<b>突進</b>：向前速度 ×1.8，快速拉近距離。`,
+      { title: '突進', text: () => `按 ${tutK('skill_charge')}（或點右下角指令卡下排的技能）放<b>突進</b>：向前速度 ×1.8，快速拉近距離。`,
         goal: '使用突進', check: (S) => S.skill('charge') },
       { title: '集中火力', text: () => `進入射程後按 ${tutK('skill_focus')}，再<b>左鍵點一支敵方分艦隊</b>：全軍集中砲擊它、傷害 +20%。`,
         goal: '使用集中火力', check: (S) => S.skill('focus') },
@@ -337,7 +337,7 @@ function tutShipTable() {
   return `<table class="tut-tbl"><tr><th>艦種</th><th>點數</th><th>耐久／護盾</th><th>速度</th><th class="tl">定位</th></tr>${SHIP_TYPES.map((s, t) => `<tr><td><b>${s.name}</b></td><td>${s.cost}</td><td>${s.hp}／${s.sh}</td><td>${s.speed}</td><td class="tl">${role[t] || ''}</td></tr>`).join('')}</table>`;
 }
 function tutSkillTable(ids = Object.keys(SKILLS)) {
-  const key = (id) => (keyOf('skill_' + id) ? tutK('skill_' + id) : '');
+  const key = (id) => (ccPosOf('skill_' + id) ? tutK('skill_' + id) : '<small>指令卡下排</small>');
   return `<table class="tut-tbl"><tr><th>技能</th><th>鍵</th><th>次數</th><th>冷卻</th><th class="tl">效果</th></tr>${ids.map((id) => { const s = SKILLS[id]; return `<tr><td><b>${s.name}</b></td><td>${key(id)}</td><td>${s.uses}</td><td>${s.cd ? s.cd + ' 秒' : '—'}</td><td class="tl">${s.desc}</td></tr>`; }).join('')}</table>`;
 }
 const TUT_COUNTER = {
@@ -534,7 +534,7 @@ function showTraining(L) {
           <dt>操作難度</dt><dd>${OP_LEVELS[L.op || 0].name}<span class="conf">${OP_LEVELS[L.op || 0].desc}</span></dd>
           <dt>流程</dt><dd>${L.flow === 'loadout' ? '編成 → 部署 → 開戰（正式流程，教學面板一路說明）' : `直接進入戰場，共 ${L.steps.length} 個步驟`}${L.victory ? '；要打贏這一戰' : ''}</dd>
           <dt>獎勵</dt><dd>${done ? '已領取' : `第一次完成：${TUT_MERIT} 功勳`}（教學不給指揮官經驗）</dd></dl></div>
-        <div class="g-card"><h3>怎麼進行</h3><div class="g-dim" style="font-size:calc(13px * var(--ui));line-height:1.7">開始後右側會出現<b>教學面板</b>：照著目標操作，完成就自動前進；說明步驟按「下一步」。不想做的步驟可以「跳過」，面板可以縮小。戰鬥中隨時可以按 <kbd>${keyLabel(keyOf('pause'))}</kbd> 暫停、按 <kbd>${keyLabel(keyOf('help'))}</kbd> 看操作說明。</div></div>
+        <div class="g-card"><h3>怎麼進行</h3><div class="g-dim" style="font-size:calc(13px * var(--ui));line-height:1.7">開始後右側會出現<b>教學面板</b>：照著目標操作，完成就自動前進；說明步驟按「下一步」。不想做的步驟可以「跳過」，面板可以縮小。戰鬥中隨時可以按 <kbd>${keyText('pause')}</kbd> 暫停、按 <kbd>${keyText('help')}</kbd> 看操作說明。</div></div>
         <div class="g-row"><button class="g-btn" id="b-man">戰術手冊</button><span class="g-sp"></span><button class="g-btn pri" id="b-go">開始教學 →</button></div>
       </div></div></div>`);
   bindTrainList();
@@ -555,6 +555,7 @@ function manBody(id) {
     case 'ops': {
       const grps = [...new Set(KEY_ACTIONS.map((a) => a[2]))];
       return P('以下按鍵是目前的設定（「⚙ 設定 → 按鍵綁定」可以改）。滑鼠：<b>左鍵</b>選取（拖曳框選、連點兩下全選、按住不動＝指令輪盤）、<b>右鍵</b>移動（按住拖曳＝朝向、同時轉滾輪＝高度）、<b>中鍵</b>拖曳＝平移（3D：旋轉）、<b>滾輪</b>縮放。') +
+        P(`<b>指令卡</b>（右下角）：所有命令都是按鈕，滑鼠移上去會說明用途；<b>按鍵＝格子的位置</b>（第一排 Q W E R T、第二排 A S D F G、第三排 Z X C V B＝技能）。「陣型 ▸」會換成陣型頁，選好或按 <kbd>Esc</kbd> 回主頁。<b>編隊</b>：<kbd>Ctrl</kbd>＋數字＝把選取編成那一隊、數字＝選取、連按兩下＝鏡頭跳過去、<kbd>Shift</kbd>＋數字＝加入；開戰時每支艦隊自動編成 1、2、3…。<b>小地圖</b>（左下角）：左鍵＝移動鏡頭、右鍵＝選取的艦隊移動過去。`) +
         P(`按住 ${tutKQ()} 再下令＝排進<b>戰術隊列</b>；不按直接下令＝清掉隊列。<kbd>Esc</kbd> 取消選取／取消選目標；<kbd>Ctrl</kbd>＋<kbd>A</kbd> 全選。`) +
         `<div class="man-keys">${grps.map((g) => `<div><h4>${g}</h4><table class="tut-tbl">${KEY_ACTIONS.filter((a) => a[2] === g).map(([k, n]) => `<tr><td class="tl">${n}</td><td>${tutK(k)}</td></tr>`).join('')}</table></div>`).join('')}</div>` +
         P('觸控：點＝選取、連點兩下＝整支艦隊、長按後放開＝移動（在敵軍上＝集中砲火）、長按拖曳＝目的地與朝向；「畫線」「隊列」「攻擊」按鈕在畫面上。');
