@@ -1091,12 +1091,55 @@ function startBattle() {
 }
 const _fmtT = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 let _hudAcc = 0;
+// 右上角戰鬥列的簡易圖示（16×16，線條跟著文字顏色）
+const BH_IC = (() => {
+  const s = (d) => `<svg class="bh-ic" viewBox="0 0 16 16" aria-hidden="true">${d}</svg>`;
+  const ship = '<path d="M8 4.5 L10.5 11 L8 9.8 L5.5 11 Z" fill="currentColor" stroke="none"/>';   // 朝上的船
+  return {
+    pause: s('<rect x="4" y="3" width="2.6" height="10" fill="currentColor" stroke="none"/><rect x="9.4" y="3" width="2.6" height="10" fill="currentColor" stroke="none"/>'),
+    play: s('<path d="M5 3 L13 8 L5 13 Z" fill="currentColor" stroke="none"/>'),
+    tac: s('<rect x="2" y="2.5" width="12" height="11" rx="1"/><path d="M2 6.5h12M6 2.5v11"/><circle cx="10" cy="10" r="1.3" fill="currentColor"/>'),
+    bridge: s('<circle cx="8" cy="8" r="4.2"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/><path d="M8 1.5v2.3M8 12.2v2.3M1.5 8h2.3M12.2 8h2.3M3.4 3.4l1.6 1.6M11 11l1.6 1.6M3.4 12.6 5 11M11 5l1.6-1.6"/>'),
+    report: s('<path d="M2 14h12"/><rect x="3" y="8" width="2.4" height="5" fill="currentColor" stroke="none"/><rect x="6.8" y="4" width="2.4" height="9" fill="currentColor" stroke="none"/><rect x="10.6" y="6" width="2.4" height="7" fill="currentColor" stroke="none"/>'),
+    aim: s('<circle cx="8" cy="8" r="5"/><circle cx="8" cy="8" r="1.4" fill="currentColor"/><path d="M8 1v3M8 12v3M1 8h3M12 8h3"/>'),
+    front: s(ship + '<path d="M8 1.2v2.6" stroke="#ff7a6a" stroke-width="2"/>'),
+    side: s(ship + '<path d="M1.5 8h2.6M11.9 8h2.6" stroke="#ff7a6a" stroke-width="2"/>'),
+    rear: s(ship + '<path d="M8 12.2v2.6" stroke="#ff7a6a" stroke-width="2"/>'),
+    fighter: s('<path d="M8 2 L9 7 L14 9.5 L9 9.5 L8.6 12.5 L10.2 14 H5.8 L7.4 12.5 L7 9.5 L2 9.5 L7 7 Z" fill="currentColor" stroke="none"/>'),
+    missile: s('<path d="M3 13 L11 5" stroke-width="2.2"/><path d="M11 5 L13.5 2.5 M10 3.5 L12.5 3.5 L12.5 6" /><path d="M3 13 L2 14" stroke="#ffb35a"/>'),
+  };
+})();
+// 戰況簡報：右上角戰鬥列下方的小面板（數字來自 main.js 每幀更新的 #hud）
+function bhRepOpen() { return SETTINGS.ui.report === true && uiOn('stats'); }
+function bhRepToggle() { SETTINGS.ui.report = !bhRepOpen(); saveSettings(); bhRepFrame(); }
+function bhRepFrame() {
+  let el = gEl('bh-rep');
+  if (!el) { el = document.createElement('div'); el.id = 'bh-rep'; document.body.appendChild(el); }
+  const bh = gEl('battlehud'), on = bhRepOpen() && !bh.hidden && GAME.phase !== 'deploy';
+  el.hidden = !on; if (gEl('bh-rep-b')) gEl('bh-rep-b').classList.toggle('on', on);
+  const top = bh.hidden ? 10 : bh.getBoundingClientRect().bottom + 6;
+  el.style.top = top + 'px';
+  document.body.style.setProperty('--toast-top', (on ? top + el.offsetHeight + 6 : top) + 'px');   // 通知排在戰鬥列（和簡報）下方
+  if (!on) return;
+  const tx = (id) => (gEl(id) ? gEl(id).textContent : '–'), dm = [0, 1].map((s) => tx('h-dmg' + s).split('／').map((v) => v.trim()));
+  const nm = (s) => (s === GAME.playerSide ? '我軍' : '敵軍');
+  const row = (ic, tip, a, b) => `<tr title="${tip}"><th>${ic}</th><td class="s0">${a}</td><td class="s1">${b}</td></tr>`;
+  const html = `<table><tr><th></th><td class="s0 h">${nm(0)}</td><td class="s1 h">${nm(1)}</td></tr>
+    ${row(BH_IC.aim, '光束命中率', tx('h-bp0'), tx('h-bp1'))}
+    ${row(BH_IC.front, '被擊沉：正面', dm[0][0], dm[1][0])}${row(BH_IC.side, '被擊沉：側面', dm[0][1], dm[1][1])}${row(BH_IC.rear, '被擊沉：背後', dm[0][2], dm[1][2])}
+    ${row(BH_IC.fighter, '艦載機（在場）', tx('h-ftr0'), tx('h-ftr1'))}
+    <tr title="飛行中的飛彈（全場）"><th>${BH_IC.missile}</th><td colspan="2" class="c">${tx('h-mis')}</td></tr></table>`;
+  if (el.innerHTML !== html) el.innerHTML = html;
+}
 // 戰鬥 HUD 與技能列：結構只建一次，之後只更新文字（避免重畫吃掉點擊）
+// 右上角：雙方兵力＋時間，指令都是圖示按鈕（滑鼠移上去看說明）
 function buildBattleHud() {
-  gEl('battlehud').innerHTML = `<div><div class="lbl" id="bh-t0"></div><div class="bar s0"><i id="bh-b0"></i></div></div>
-    <div class="timer"><span id="bh-tm"></span><div class="lbl" style="text-align:center" id="bh-tl"></div></div>
-    <div><div class="lbl" style="text-align:right" id="bh-t1"></div><div class="bar s1"><i id="bh-b1"></i></div></div>
-    <button class="g-btn sm" id="bh-pause"></button><button class="g-btn sm" id="bh-speed"></button><button class="g-btn sm" id="bh-tac" title="${keyText('tactical')}">戰術面板</button><button class="g-btn sm" id="bh-3d" title="${keyText('render')}"></button><button class="g-btn sm" id="bh-br"></button><button class="g-btn sm" id="bh-help" title="操作說明（${keyText('help')}）">?</button><button class="g-btn sm" id="bh-set" title="設定（${keyText('settings')}）">⚙</button>${GAME.sc && GAME.sc.sim && !GAME.replaying && !GAME.watch ? '<button class="g-btn sm" id="bh-ctl" title="模擬室：接管另一方（該方 AI 暫停）"></button><button class="g-btn sm" id="bh-edit" title="模擬室：暫停並調整配置與設定">✎ 編輯配置</button>' : ''}<button class="g-btn sm" id="bh-quit"></button>`;
+  gEl('battlehud').innerHTML = `<div class="side"><div class="lbl" id="bh-t0"></div><div class="bar s0"><i id="bh-b0"></i></div></div>
+    <div class="timer"><span id="bh-tm"></span><div class="lbl" id="bh-tl"></div></div>
+    <div class="side"><div class="lbl" style="text-align:right" id="bh-t1"></div><div class="bar s1"><i id="bh-b1"></i></div></div>
+    <span class="bh-sep"></span>
+    <button class="g-btn sm ic" id="bh-pause"></button><button class="g-btn sm" id="bh-speed"></button><button class="g-btn sm ic" id="bh-tac">${BH_IC.tac}</button><button class="g-btn sm" id="bh-3d" title="切換 2D／3D 畫面（${keyText('render')}）"></button><button class="g-btn sm ic" id="bh-br">${BH_IC.bridge}</button>${uiOn('stats') ? `<button class="g-btn sm ic" id="bh-rep-b" title="戰況簡報：命中率、被擊沉方向、艦載機與飛彈">${BH_IC.report}</button>` : ''}<button class="g-btn sm ic" id="bh-help" title="操作說明（${keyText('help')}）">?</button><button class="g-btn sm ic" id="bh-set" title="設定（${keyText('settings')}）">⚙</button>${GAME.sc && GAME.sc.sim && !GAME.replaying && !GAME.watch ? '<button class="g-btn sm" id="bh-ctl" title="模擬室：接管另一方（該方 AI 暫停）"></button><button class="g-btn sm" id="bh-edit" title="模擬室：暫停並調整配置與設定">✎ 編輯</button>' : ''}<button class="g-btn sm" id="bh-quit"></button>`;
+  if (gEl('bh-rep-b')) gEl('bh-rep-b').onclick = bhRepToggle;
   gEl('bh-set').onclick = () => openSettings();
   gEl('bh-help').onclick = toggleHelp;
   if (gEl('bh-ctl')) gEl('bh-ctl').onclick = simSwitch;
@@ -1138,21 +1181,31 @@ function gameFrame(dt) {
   if (!gEl('bh-tm')) buildBattleHud();
   const sim = GAME.sc && GAME.sc.sim, nm = (s) => (NET.on ? mpSideName(s) : sim ? simSideName(SIM.m, s) + (s === GAME.playerSide && !GAME.watch ? (GAME.pilot ? '（我軍）' : '（指揮中）') : '') : s === GAME.playerSide ? '我軍' : '敵軍');
   if (GAME.watch) watchFrame();
-  gEl('bh-t0').textContent = `${nm(0)} ${Math.round(p * 100)}%　${ships5(a0)} 艘`; gEl('bh-b0').style.width = p * 100 + '%';
+  // 兵力只顯示百分比，艘數放在滑鼠提示裡
+  const setT = (s, txt, tip) => { const el = gEl('bh-t' + s); el.textContent = txt; el.parentElement.title = tip; };
+  setT(0, `${nm(0)} ${Math.round(p * 100)}%`, `${nm(0)}：剩 ${ships5(a0)} 艘`); gEl('bh-b0').style.width = p * 100 + '%';
   const fogE = playerFogged() ? 1 - GAME.playerSide : -1;   // 雷達受干擾：敵方兵力不明（長條停在原處）
-  if (fogE === 0) gEl('bh-t0').textContent = `${nm(0)} ？？？`;
-  if (fogE === 1) gEl('bh-t1').textContent = `${nm(1)} ？？？（雷達受干擾）`; else { gEl('bh-t1').textContent = `${nm(1)} ${Math.round(e * 100)}%　${ships5(a1)} 艘`; gEl('bh-b1').style.width = e * 100 + '%'; }
+  if (fogE === 0) setT(0, `${nm(0)} ？？？`, '雷達受干擾：兵力不明');
+  if (fogE === 1) setT(1, `${nm(1)} ？？？`, '雷達受干擾：兵力不明'); else { setT(1, `${nm(1)} ${Math.round(e * 100)}%`, `${nm(1)}：剩 ${ships5(a1)} 艘`); gEl('bh-b1').style.width = e * 100 + '%'; }
   if (fowView()) {   // 戰爭迷霧：對方兵力只能估計（看得到的照實、最後已知照當時、沒看過的照開戰時）
     const os = 1 - GAME.playerSide, est = fowEstAlive(os), r = est / Math.max(1, GAME.init[os]);
-    gEl('bh-t' + os).textContent = `${nm(os)} 估計 ${Math.round(r * 100)}%　≈${ships5(est)} 艘${jammed(GAME.playerSide) ? '（通訊受干擾）' : ''}`; gEl('bh-b' + os).style.width = r * 100 + '%';
+    setT(os, `${nm(os)} ≈${Math.round(r * 100)}%`, `${nm(os)}：估計約 ${ships5(est)} 艘${jammed(GAME.playerSide) ? '（通訊受干擾）' : ''}`); gEl('bh-b' + os).style.width = r * 100 + '%';
   }
-  gEl('bh-tm').textContent = tl >= SIM_INF ? _fmtT(t + SIM.t0) : _fmtT(Math.max(0, tl - t)); gEl('bh-tl').textContent = GAME.replaying ? '回放中' : tl >= SIM_INF ? '經過時間' : '剩餘時間';
-  gEl('bh-pause').textContent = NET.on ? '不能暫停' : paused ? '▶ 繼續' : '❚❚ 暫停'; gEl('bh-speed').textContent = NET.on ? `×${NET.speed}${NET.lag ? ' 等待連線…' : ''}` : cmdSlowOn ? `×${effSpeed()} 下令中` : '×' + SPEEDS[speedIdx]; gEl('bh-speed').classList.toggle('slow', cmdSlowOn);
+  gEl('bh-tm').textContent = tl >= SIM_INF ? _fmtT(t + SIM.t0) : _fmtT(Math.max(0, tl - t));
+  gEl('bh-tl').textContent = GAME.replaying ? '回放中' : paused && !NET.on ? '已暫停' : tl >= SIM_INF ? '經過時間' : '剩餘時間';
+  gEl('bh-tl').classList.toggle('paused', paused && !NET.on);
+  const pb = gEl('bh-pause'), pIc = NET.on ? 'pause' : paused ? 'play' : 'pause';
+  if (pb.dataset.ic !== pIc) { pb.dataset.ic = pIc; pb.innerHTML = BH_IC[pIc]; }
+  pb.disabled = NET.on; pb.classList.toggle('on', paused && !NET.on);
+  pb.title = NET.on ? '多人對戰不能暫停' : `${paused ? '繼續' : '暫停'}（${keyText('pause')}）`;
+  gEl('bh-speed').textContent = NET.on ? `×${NET.speed}${NET.lag ? ' …' : ''}` : cmdSlowOn ? `×${effSpeed()}` : '×' + SPEEDS[speedIdx]; gEl('bh-speed').classList.toggle('slow', cmdSlowOn);
+  gEl('bh-speed').title = NET.on ? (NET.lag ? '等待連線…' : '遊戲速度（房主決定）') : cmdSlowOn ? '下令中：自動放慢' : `遊戲速度（${keyText('speed_up')}／${keyText('speed_down')}）`;
   if (!gEl('bh-quit').dataset.sure) gEl('bh-quit').textContent = GAME.replaying ? '結束回放' : NET.on ? (NET.spec ? '離開觀戰' : '投降') : GAME.watch ? '結束觀摩' : GAME.pilot ? '結束出擊' : sim ? '結束模擬' : GAME.sc && GAME.sc.tut ? '結束教學' : '撤退';
-  if (gEl('bh-ctl')) gEl('bh-ctl').textContent = `切換指揮 → ${simSideName(SIM.m, 1 - GAME.playerSide)}`;
-  gEl('bh-3d').textContent = mode3D ? '2D 畫面' : '3D 畫面';
-  gEl('bh-br').textContent = BR.on ? '離開艦橋' : '艦橋視角'; gEl('bh-br').title = `指揮官視角（${keyText('bridge')}）`;
-  gEl('bh-tac').textContent = BR.on ? (bridgeConsoleK() > 0.5 ? '抬頭' : '戰術台') : '戰術面板';
+  if (gEl('bh-ctl')) gEl('bh-ctl').textContent = `切換 → ${simSideName(SIM.m, 1 - GAME.playerSide)}`;
+  gEl('bh-3d').textContent = mode3D ? '2D' : '3D';
+  gEl('bh-br').title = `${BR.on ? '離開艦橋' : '艦橋視角'}（${keyText('bridge')}）`; gEl('bh-br').classList.toggle('on', BR.on);
+  gEl('bh-tac').title = `${BR.on ? (bridgeConsoleK() > 0.5 ? '抬頭' : '戰術台') : '戰術面板'}（${keyText('tactical')}）`;
+  bhRepFrame();
   if (GAME.phase !== 'battle') return;
   document.querySelectorAll('#skillbar .sk-btn').forEach((b) => {
     const f = fleets[+b.dataset.f], id = b.dataset.s, s = f.skills[id], def = SKILLS[id];

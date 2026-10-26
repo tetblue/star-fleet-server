@@ -341,23 +341,38 @@
   .xpbar { height: 6px; background: #0b1222; border-radius: 3px; overflow: hidden; margin-top: calc(4px * var(--sp)); } .xpbar i { display: block; height: 100%; background: #8fe3a5; }
   @media (max-width: 760px) { .brief, .intel-grid { grid-template-columns: 1fr; } .g-menu h1 { font-size: calc(24px * var(--ui)); } }
   @media (max-width: 640px) {
-    #battlehud { gap: calc(6px * var(--sp)) calc(10px * var(--sp)); padding: calc(4px * var(--sp)) calc(8px * var(--sp)); flex-wrap: wrap; justify-content: center; width: calc(100vw - 16px); }
-    #battlehud .bar { width: calc(96px * var(--ui)); } #battlehud .timer { font-size: calc(15px * var(--ui)); min-width: calc(48px * var(--ui)); }
-    body.game-battle #status { top: calc(92px * var(--ui)); } body.game-battle #hud { top: calc(112px * var(--ui)); }
+    #battlehud { gap: calc(6px * var(--sp)); padding: calc(4px * var(--sp)) calc(8px * var(--sp)); justify-content: center; right: 8px; max-width: calc(100vw - 16px); }
+    #battlehud .bar { width: calc(64px * var(--ui)); } #battlehud .bh-sep { display: none; }
     body.touch #skillbar { bottom: calc(150px * var(--ui)); } .sk-btn { min-width: calc(64px * var(--ui)); padding: calc(4px * var(--sp)) calc(6px * var(--sp)); }
   }
 
-  #battlehud { position: fixed; left: 50%; top: 10px; transform: translateX(-50%); z-index: 6; display: flex; gap: calc(14px * var(--sp)); align-items: center;
-    background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: calc(6px * var(--sp)) calc(12px * var(--sp)); font-variant-numeric: tabular-nums; pointer-events: auto; }
-  #battlehud .bar { width: calc(130px * var(--ui)); height: 7px; background: #0b1222; border-radius: 4px; overflow: hidden; }
+  /* 戰鬥列：右上角、精簡（兵力只顯示百分比，按鈕是圖示，說明在滑鼠提示裡） */
+  #battlehud { position: fixed; right: 10px; top: 10px; z-index: 6; display: flex; gap: calc(8px * var(--sp)); align-items: center; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100vw - 20px);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: calc(4px * var(--sp)) calc(10px * var(--sp)); font-variant-numeric: tabular-nums; pointer-events: auto; }
+  #battlehud .bar { width: calc(78px * var(--ui)); height: 5px; background: #0b1222; border-radius: 3px; overflow: hidden; margin-top: 2px; }
   #battlehud .bar i { display: block; height: 100%; }
   #battlehud .bar.s0 i { background: var(--pc); } #battlehud .bar.s1 i { background: var(--ec); margin-left: auto; }
-  #battlehud .timer { font-size: calc(18px * var(--ui)); font-weight: 600; min-width: calc(64px * var(--ui)); text-align: center; }
-  #battlehud .lbl { font-size: calc(11px * var(--ui)); color: var(--dim); }
-  body.game-battle #status { top: calc(58px * var(--ui)); }
-  body.game-on #hud .row, body.game-on #hud .gpuname, body.game-on #hud h1, body.game-on #panel-toggle, body.game-on #panel { display: none !important; }
-  body.game-on #hud .row.dmg { display: flex !important; }
-  body.game-on #hud .forces { display: none; } body.game-battle #hud { top: calc(70px * var(--ui)); } body.game-deploy #selbar { display: none; }
+  #battlehud .timer { font-size: calc(15px * var(--ui)); font-weight: 600; min-width: calc(52px * var(--ui)); text-align: center; line-height: 1.1; }
+  #battlehud .timer .lbl { text-align: center; font-weight: 400; } #battlehud .timer .lbl.paused { color: #ffd27a; }
+  #battlehud .lbl { font-size: calc(10.5px * var(--ui)); color: var(--dim); white-space: nowrap; }
+  #battlehud .bh-sep { width: 1px; align-self: stretch; background: var(--line); }
+  #battlehud .g-btn.sm { padding: calc(3px * var(--sp)) calc(7px * var(--sp)); min-width: calc(28px * var(--ui)); }
+  #battlehud .g-btn.ic { display: inline-grid; place-items: center; }
+  #battlehud .g-btn.on { border-color: #ffd27a; color: #ffd27a; background: rgba(255,210,122,.14); }
+  .bh-ic { width: calc(14px * var(--ui)); height: calc(14px * var(--ui)); display: block; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+  /* 戰況簡報：戰鬥列下方的小面板 */
+  #bh-rep { position: fixed; right: 10px; z-index: 6; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: calc(5px * var(--sp)) calc(10px * var(--sp)); font-size: calc(12px * var(--ui)); font-variant-numeric: tabular-nums; pointer-events: auto; }
+  #bh-rep[hidden], body:not(.game-battle) #bh-rep, body.bridge-on #bh-rep, body.pilot-on:not(.pilot-spec) #bh-rep { display: none !important; }
+  #bh-rep table { border-collapse: collapse; } #bh-rep th { padding: 2px calc(8px * var(--sp)) 2px 0; color: var(--dim); }
+  #bh-rep td { padding: 2px 0 2px calc(10px * var(--sp)); text-align: right; min-width: calc(44px * var(--ui)); }
+  #bh-rep td.h { font-size: calc(11px * var(--ui)); color: var(--dim); } #bh-rep td.c { text-align: center; }
+  #bh-rep td.s0 { color: var(--pc); } #bh-rep td.s1 { color: var(--ec); } #bh-rep tr[title] { cursor: help; }
+  /* 戰鬥中：中上方的暫停／速度字樣併進戰鬥列，通知改到右上角戰鬥列下方 */
+  body.game-battle #status { display: none !important; }
+  body.game-battle #toasts { left: auto; right: 10px; transform: none; top: var(--toast-top, calc(56px * var(--ui))); align-items: flex-end; max-width: min(calc(380px * var(--ui)), calc(100vw - 20px)); }
+  body.game-battle .toast { font-size: calc(12px * var(--ui)); padding: calc(4px * var(--sp)) calc(10px * var(--sp)); }
+  body.game-on #hud, body.game-on #panel-toggle, body.game-on #panel { display: none !important; }
+  body.game-deploy #selbar { display: none; }
   #skillbar { position: fixed; left: 50%; bottom: calc(52px * var(--ui)); transform: translateX(-50%); z-index: 5; display: flex; gap: calc(10px * var(--sp)); align-items: flex-end; flex-wrap: wrap; justify-content: center; max-width: calc(100vw - calc(24px * var(--ui))); }
   body.touch #skillbar { bottom: calc(96px * var(--ui)); }
   .sk-fleet { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: calc(5px * var(--sp)) calc(8px * var(--sp)); }
@@ -703,8 +718,9 @@
   .tv-mine { display: flex; gap: calc(8px * var(--sp)); align-items: center; padding: calc(4px * var(--sp)) 0; border-bottom: 1px solid rgba(255,255,255,.05); font-size: calc(12.5px * var(--ui)); }
   @media (max-width: 759px) { .tv-grid { grid-template-columns: 1fr; } }
   /* ── 作戰 HUD（hud.js）：左下小地圖、中下選取面板、右下指令卡 ── */
-  #cmdhud { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; padding: 0 calc(8px * var(--sp)) calc(8px * var(--sp)); gap: calc(8px * var(--sp)); align-items: flex-end; pointer-events: none;
-    grid-template-columns: calc(170px * var(--ui)) minmax(0, 1fr) var(--ccw); }
+  /* 下方三塊（小地圖、選取面板、指令卡）一樣高：整排撐到指令卡的高度，小地圖欄寬≈指令卡高度（接近正方形） */
+  #cmdhud { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; padding: 0 calc(8px * var(--sp)) calc(8px * var(--sp)); gap: calc(8px * var(--sp)); align-items: stretch; pointer-events: none;
+    grid-template-columns: var(--chh) minmax(0, 1fr) var(--ccw); }
   body.ch-on #cmdhud { display: grid; }
   body.game-battle #skillbar, body.game-battle.tac-on #selbar { display: none !important; }   /* 技能在指令卡上；戰術面板右側就是選取資訊 */
   body.ch-on #selbar, body.ch-on #skillbar, body.ch-on #help-btn, body.ch-on #set-btn { display: none !important; }
@@ -712,8 +728,8 @@
   #cmdhud > *, #cmdhud .ch-mid > * { pointer-events: auto; }
   #cmdhud .ch-mid { pointer-events: none; display: flex; flex-direction: column; gap: calc(4px * var(--sp)); min-width: 0; max-width: calc(560px * var(--ui)); justify-self: center; width: 100%; }
   .ch-box { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: calc(6px * var(--sp)); }
-  #ch-mm { padding: 3px; height: calc(170px * var(--ui)); } #ch-mmc { position: static; inset: auto; display: block; width: 100%; height: 100%; cursor: crosshair; }
-  #ch-sel { min-height: calc(112px * var(--ui)); font-size: calc(12px * var(--ui)); }
+  #ch-mm { position: relative; padding: 3px; min-height: calc(140px * var(--ui)); } #ch-mmc { position: absolute; inset: 3px; display: block; width: calc(100% - 6px); height: calc(100% - 6px); cursor: crosshair; }
+  #ch-sel { flex: 1 1 auto; min-height: calc(112px * var(--ui)); overflow: hidden; font-size: calc(12px * var(--ui)); }
   .cs-h { display: flex; gap: calc(10px * var(--sp)); align-items: baseline; white-space: nowrap; overflow: hidden; } .cs-h span { color: var(--dim); }
   .cs-fn { color: var(--pc); font-size: calc(14px * var(--ui)); }
   .cs-st { color: var(--text); margin: calc(3px * var(--sp)) 0 calc(5px * var(--sp)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .cs-sk { color: #8fe3a5; }
@@ -723,6 +739,7 @@
   .cs-tn { font-size: calc(11.5px * var(--ui)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; } .cs-tc { font-size: calc(10.5px * var(--ui)); color: var(--dim); }
   .cs-bar { display: block; width: 100%; height: 3px; background: #0b1222; } .cs-bar i { display: block; height: 100%; background: #5fe38a; } .cs-bar i.mid { background: #ffd27a; } .cs-bar i.bad { background: #ff6a5a; }
   #ch-cg { display: flex; gap: calc(4px * var(--sp)); flex-wrap: wrap; pointer-events: none; }
+  #cmdhud .ch-mid { position: relative; } #cmdhud #ch-cg { position: absolute; left: 0; right: 0; bottom: calc(100% + calc(4px * var(--sp))); }   /* 編隊按鈕浮在選取面板上方，面板才跟小地圖、指令卡一樣高 */
   .cg-b { pointer-events: auto; font: inherit; font-size: calc(11px * var(--ui)); color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 3px; padding: 1px calc(6px * var(--sp)); cursor: pointer; max-width: calc(140px * var(--ui)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .cg-b b { color: #ffd27a; margin-right: 4px; } .cg-b:hover { border-color: var(--pc); } .cg-hint { font-size: calc(11px * var(--ui)); color: var(--dim); opacity: .7; }
   #ch-page { font-size: calc(11px * var(--ui)); color: var(--dim); margin-bottom: calc(4px * var(--sp)); white-space: nowrap; overflow: hidden; }
@@ -750,11 +767,11 @@
   body.tac-console .tac-svbox { flex: 0 0 28%; }
   body.ui-no-skillbar #cmdhud #ch-card, body.ui-no-selbar #ch-sel, body.ui-no-minimap #ch-mm { visibility: hidden; }
   body.ch-on #hint { display: none; }
-  @media (max-width: 1100px) { #cmdhud { grid-template-columns: calc(140px * var(--ui)) minmax(0, 1fr) var(--ccw); } #ch-mm { height: calc(140px * var(--ui)); } .cc-b { font-size: calc(10.5px * var(--ui)); } }
+  @media (max-width: 1100px) { .cc-b { font-size: calc(10.5px * var(--ui)); } }
   @media (max-width: 860px) { #cmdhud { grid-template-columns: minmax(0, 1fr) var(--ccw); } #ch-mm { display: none; } .cc-b { font-size: calc(10px * var(--ui)); } }
   @media (max-width: 600px) { #cmdhud { grid-template-columns: 1fr; } #cmdhud .ch-mid { display: none; } }
   /* 戰場右下角的指令卡：寬度＝畫面的 1/4（跟著解析度縮放），按鈕是正方形（字跟著放大） */
-  :root { --ccw: 25vw; }
+  :root { --ccw: 25vw; --chh: calc(var(--ccw) * 0.6 + 26px); }
   @media (max-width: 600px) { :root { --ccw: calc(100vw - 16px); } }
   /* 戰術面板／艦橋戰術台：右側欄放得下 1/4 畫面寬的指令卡 */
   .tac-side { flex: 0 0 calc(var(--ccw) + calc(30px * var(--sp))); max-width: none; }
