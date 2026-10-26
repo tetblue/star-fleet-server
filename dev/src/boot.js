@@ -59,7 +59,7 @@ async function autoStory(id, o = {}) {
     GAME.watch = true; GAME.replaying = false; GAME.result = null; GAME.lineK = 0; GAME.dlineK = 0; GAME.log = []; GAME.simCtl = null; GAME.phase = 'battle';
     newBattle(sc.seed + 1, setup); setRule('fire', true); setRule('advance', false);
     GAME.init = [sideAlive(0), sideAlive(1)];
-    const cap = (sc.timeLimit + 30) * SIM_HZ, t0 = performance.now();
+    const cap = (sc.untimed ? sc.timeLimit * 3 : sc.timeLimit + 30) * SIM_HZ, t0 = performance.now();
     while (!GAME.result && simTick < cap) { for (let k = 0; k < 600 && !GAME.result; k++) stepSim(); await new Promise((r) => { const ch = new MessageChannel(); ch.port1.onmessage = r; ch.port2.postMessage(0); }); }   // 不用 setTimeout：背景分頁會被降速
     const R = GAME.result || { kind: 'none', why: '沒有分出勝負', t: U.uTime.value, ratio: [sideAlive(0) / GAME.init[0], sideAlive(1) / GAME.init[1]] };
     const vip = fleets.find((f) => f.vip), vipLeft = vip ? vip.sqs.reduce((a, x) => a + x.alive, 0) / vip.initial : null;

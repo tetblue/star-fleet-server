@@ -75,7 +75,7 @@ function meritFor(R, sc) {
 function tavernAfterBattle(R, sc) {
   const mul = rewardMul(R);
   if (!mul) return 0;   // 開戰就撤退：不給功勳、也不換候選人
-  const m = Math.round(meritFor(R, sc) * mul);
+  const sb = speedBonus(R), m = Math.round(meritFor(R, sc) * mul * (sb ? 1 + sb.add : 1));   // 速戰獎勵
   ROSTER.merit += m; ROSTER.battles++;
   tavernRefresh();   // 內含存檔
   return m;

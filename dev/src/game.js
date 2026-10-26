@@ -203,7 +203,7 @@ function makeSetup(sc, lo, attempt) {
     fleetsS.push({ side: 1, name: ev.name, ax: sx * 800, az: -140 + R() * 200, ay: Math.round((R() - 0.5) * 240), h: sx < 0 ? Math.PI / 2 : -Math.PI / 2, formation: ev.formation, comp: ev.comp.slice(),
       commander: ev.commander ? { ...ev.commander } : reinforceCmdr(sc), reserve: true, activateAt: at, ai: { tactic: 'push', level: sc.level } });
   }
-  return { bg: false, terrain: sc.terrain, fleets: fleetsS, scenario: sc.id, timeLimit: sc.timeLimit, level: sc.level, factions: sc.enemyFac != null ? [lo.faction || 0, sc.enemyFac] : (lo.faction || 0) === 1 ? [1, 0] : [0, 1], ...(sc.goal ? { goal: sc.goal } : {}), ...(sc.lines ? { lines: sc.lines } : {}), ...(sc.dlines ? { dlines: sc.dlines } : {}), ...(sc.defect ? { defect: sc.defect } : {}), ...(sc.aiOmni ? { omni: [false, true] } : {}) };   // aiOmni：這一關的 AI 不受戰爭迷霧限制
+  return { bg: false, terrain: sc.terrain, fleets: fleetsS, scenario: sc.id, timeLimit: sc.timeLimit, level: sc.level, factions: sc.enemyFac != null ? [lo.faction || 0, sc.enemyFac] : (lo.faction || 0) === 1 ? [1, 0] : [0, 1], ...(sc.goal ? { goal: sc.goal } : {}), ...(sc.lines ? { lines: sc.lines } : {}), ...(sc.dlines ? { dlines: sc.dlines } : {}), ...(sc.defect ? { defect: sc.defect } : {}), ...(sc.aiOmni ? { omni: [false, true] } : {}), ...(sc.untimed ? { untimed: true } : {}) };   // untimed：沒有時限（timeLimit 只當目標時間）；aiOmni：這一關的 AI 不受戰爭迷霧限制
 }
 
 // ───── 技能（命令 'skill'） ─────
@@ -461,7 +461,7 @@ function aiThink0(f) {
     aiTarget(f, S, C, far, lv);
   }
   // ── 難度 5：看時間與戰損調整打法（領先就拉開距離拖到時間到，落後就推進衝鋒）──
-  if (lv >= 5 && battleSetup.timeLimit < SIM_INF && t > battleSetup.timeLimit * 0.65 && t > (S.tmT || 0)) {
+  if (lv >= 5 && battleSetup.timeLimit < SIM_INF && !battleSetup.untimed && t > battleSetup.timeLimit * 0.65 && t > (S.tmT || 0)) {
     const me = sideAlive(f.side) / Math.max(1, GAME.init[f.side]), op = sideAlive(1 - f.side) / Math.max(1, GAME.init[1 - f.side]);
     if (me - op > 0.12 && f.ai.tactic !== 'kite') { S.tmT = t + 20; S.base = S.base || f.ai.tactic; f.ai.tactic = 'kite'; S.goal = null; S.phase = null; if (GAME.watch) toast(`${f.name}：戰損領先，拉開距離拖時間`); }
     else if (op - me > 0.02 && f.ai.tactic === 'kite') { S.tmT = t + 20; f.ai.tactic = S.base && S.base !== 'kite' ? S.base : 'push'; S.goal = null; aiSkill(f, 'charge'); if (GAME.watch) toast(`${f.name}：時間不多又落後，全力進攻`); }
@@ -568,7 +568,7 @@ function checkVictory() {
   else if (G && G.type === 'escort' && vipLost()) r = ['lose', `${G.name}損失過重`];
   else if (G && G.type === 'cut' && !fleets.some((f) => f.side === 1 && f.supply && !f.reserve && fleetAlive(f).length)) r = ['win', '敵軍補給艦全滅・補給線切斷'];
   else if (t >= tl && G && (G.type === 'survive' || G.type === 'escort')) r = ['win', G.type === 'escort' ? `時間到・${G.name}撐到了最後` : '時間到・撐過了敵軍的攻勢'];
-  else if (t >= tl) {
+  else if (t >= tl && !battleSetup.untimed) {
     const lp = 1 - p, le = 1 - e;
     r = le - lp > 0.08 ? ['win', '時間到・判定勝利（敵方損失較重）'] : lp - le > 0.08 ? ['lose', '時間到・判定敗北（我方損失較重）'] : ['draw', '時間到・平手'];
   }
@@ -1191,8 +1191,10 @@ function gameFrame(dt) {
     const os = 1 - GAME.playerSide, est = fowEstAlive(os), r = est / Math.max(1, GAME.init[os]);
     setT(os, `${nm(os)} ≈${Math.round(r * 100)}%`, `${nm(os)}：估計約 ${ships5(est)} 艘${jammed(GAME.playerSide) ? '（通訊受干擾）' : ''}`); gEl('bh-b' + os).style.width = r * 100 + '%';
   }
-  gEl('bh-tm').textContent = tl >= SIM_INF ? _fmtT(t + SIM.t0) : _fmtT(Math.max(0, tl - t));
-  gEl('bh-tl').textContent = GAME.replaying ? '回放中' : paused && !NET.on ? '已暫停' : tl >= SIM_INF ? '經過時間' : '剩餘時間';
+  const unt = battleSetup.untimed;   // 沒有時限的主線關卡：顯示經過時間與目標時間
+  gEl('bh-tm').textContent = unt ? _fmtT(t) : tl >= SIM_INF ? _fmtT(t + SIM.t0) : _fmtT(Math.max(0, tl - t));
+  gEl('bh-tm').classList.toggle('over', !!unt && t > tl);
+  gEl('bh-tl').textContent = GAME.replaying ? '回放中' : paused && !NET.on ? '已暫停' : unt ? `目標 ${_fmtT(tl)}` : tl >= SIM_INF ? '經過時間' : '剩餘時間';
   gEl('bh-tl').classList.toggle('paused', paused && !NET.on);
   const pb = gEl('bh-pause'), pIc = NET.on ? 'pause' : paused ? 'play' : 'pause';
   if (pb.dataset.ic !== pIc) { pb.dataset.ic = pIc; pb.innerHTML = BH_IC[pIc]; }
@@ -1229,9 +1231,16 @@ function battleStats() {
 // 經驗：勝 60／平 35／敗 20，加上擊沉量（每 100 個敵方圖示 +5，最多 +60），艦隊存活過半再 +10
 // 撤退：開戰不到 RETREAT_MIN_T 秒＝不給獎勵；之後撤退＝獎勵減半
 function rewardMul(R) { return !R.retreat ? 1 : R.t < RETREAT_MIN_T ? 0 : 0.5; }
+// 速戰獎勵（沒有時限的主線關卡）：在目標時間的某個比例內獲勝，經驗與功勳加成
+const SPEED_TIERS = [{ at: 0.5, add: 0.5, name: '閃電戰' }, { at: 0.75, add: 0.3, name: '速戰速決' }, { at: 1, add: 0.15, name: '目標時間內完成' }];
+function speedBonus(R) {
+  if (!battleSetup || !battleSetup.untimed || R.kind !== 'win' || R.retreat) return null;
+  const k = R.t / battleSetup.timeLimit, b = SPEED_TIERS.find((x) => k <= x.at);
+  return b ? { ...b, par: battleSetup.timeLimit } : null;
+}
 function awardXP(R, st) {
   const enemyLost = sumA(st.init[1]) - sumA(st.left[1]);
-  const base = R.kind === 'win' ? 60 : R.kind === 'draw' ? 35 : 20, mul = rewardMul(R);
+  const base = R.kind === 'win' ? 60 : R.kind === 'draw' ? 35 : 20, sb = speedBonus(R), mul = rewardMul(R) * (sb ? 1 + sb.add : 1);
   const out = fleets.filter((f) => f.side === GAME.playerSide && f.commander).map((f) => {
     const alive = sumA(f.sqs.map((q) => q.alive)), surv = alive / f.initial;
     const xp = Math.round((base + Math.min(60, Math.round(enemyLost / 100 * 5)) + (surv > 0.5 ? 10 : 0)) * mul);
@@ -1256,7 +1265,7 @@ function showReport() {
   const label = { win: '勝利', lose: '敗北', draw: '平手' }[R.kind];
   overlay(`<div class="g-wrap">
     <div class="g-head"><h2>戰後報告</h2><span class="crumb">${sc.name}　·　${OP_LEVELS[(battleSetup && battleSetup.op) || 0].name}難度　·　戰鬥時間 ${_fmtT(R.t)}</span></div>
-    <div class="g-card" style="margin-bottom:12px;text-align:center"><p class="result ${R.kind}">${label}</p><div class="g-dim">${R.why}${R.retreat ? (rewardMul(R) ? '（撤退：經驗與功勳減半）' : `（開戰 ${RETREAT_MIN_T} 秒內撤退：不給經驗與功勳）`) : ''}</div>
+    <div class="g-card" style="margin-bottom:12px;text-align:center"><p class="result ${R.kind}">${label}</p><div class="g-dim">${R.why}${speedBonus(R) ? `　<b class="g-emp">${speedBonus(R).name}</b>（目標 ${_fmtT(speedBonus(R).par)}：經驗與功勳 +${Math.round(speedBonus(R).add * 100)}%）` : ''}${R.retreat ? (rewardMul(R) ? '（撤退：經驗與功勳減半）' : `（開戰 ${RETREAT_MIN_T} 秒內撤退：不給經驗與功勳）`) : ''}</div>
       <div style="margin-top:6px">我軍剩 ${Math.round(R.ratio[0] * 100)}%　·　敵軍剩 ${Math.round(R.ratio[1] * 100)}%</div></div>${sc.saga ? storyAfterHTML(R) : ''}
     <div class="intel-grid">
       <div class="g-card"><h3>兵力損失（艘）</h3><table class="stat-tbl"><tr><th>艦種</th><th>我軍出擊</th><th>我軍損失</th><th>敵軍出擊</th><th>敵軍損失</th></tr>

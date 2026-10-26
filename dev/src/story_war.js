@@ -366,6 +366,7 @@ function storyScenario(id) {
     intel: { accuracy: W.intel ? W.intel[0] : 0.8, hide: W.intel ? W.intel[1].slice() : [] },
     enemySupply: W.supply ? { comp: aiSupplyComp(B * W.supply), formation: 'ring', x: enemy[0].x, z: enemy[0].z - 230, h: 0, follow: 0 } : null,
     goal: W.goal ? { type: W.goal, ...(W.vip ? { name: W.vip.name } : {}) } : null, lines: W.lines ? W.lines.map(([t, who, msg]) => [t, who, storyText(msg)]) : null, dlines: W.dlines ? W.dlines.map(([t, who, msg]) => [t, who, storyText(msg)]) : null, defect: W.defect || null, after: storyText(W.after || ''), decoy: W.decoy || 0 };
+  if (W.goal !== 'survive' && W.goal !== 'escort') sc.untimed = true;   // 主線只有防守任務（撐到時限、護送）有時限；其他關的時間只當目標時間（越快打完獎勵越多）
   if (W.enemyFac != null) sc.enemyFac = W.enemyFac;
   if (W.allies) sc.allies = W.allies.map(([name, cn, trait, level, skills, arch, pow, formation, tactic, x, defect, fac]) => ({ name, commander: { name: cn, trait, level: Math.max(1, level + D.lv), skills: skills.slice() },
     comp: comp(arch, pow), formation, tactic, x, z: 300 + ZONE_SHIFT - 40, h: Math.PI, fac: fac != null ? fac : 2, defectAt: defect != null ? defect : null }));
@@ -393,11 +394,12 @@ function storyLoadout(sc) {
 function storyGoalRows(sc) {
   const G = sc.goal, min = Math.round(sc.timeLimit / 60), pct = Math.round((1 - ROUT_AT) * 100);
   const rout = `我軍損失超過 ${pct}%（潰走）`, er = `使敵軍損失超過 ${pct}%（潰走）`;
-  const T = !G ? ['殲滅敵軍，或' + er, rout, `${min} 分鐘（時間到依雙方損失比例判定）`]
+  const par = `沒有時限・${min} 分鐘內獲勝有額外經驗與功勳（${SPEED_TIERS.map((b) => `${Math.round(b.at * 100)}% 時間內 +${Math.round(b.add * 100)}%`).join('、')}）`;
+  const T = !G ? ['殲滅敵軍，或' + er, rout, par]
     : G.type === 'survive' ? [`撐過 ${min} 分鐘，或${er}`, rout, `${min} 分鐘（撐到時間就是勝利）`]
     : G.type === 'escort' ? [`保護${G.name}撐過 ${min} 分鐘，或${er}`, `${G.name}損失超過 ${Math.round((1 - VIP_KEEP) * 100)}%，或${rout}`, `${min} 分鐘（${G.name}撐到時間就是勝利）`]
-    : [`擊沉敵方所有補給艦，或${er}`, rout, `${min} 分鐘（時間到依雙方損失比例判定）`];
-  return `<dt>勝利條件</dt><dd>${T[0]}</dd><dt>敗北條件</dt><dd>${T[1]}</dd><dt>時間限制</dt><dd>${T[2]}</dd>`;
+    : [`擊沉敵方所有補給艦，或${er}`, rout, par];
+  return `<dt>勝利條件</dt><dd>${T[0]}</dd><dt>敗北條件</dt><dd>${T[1]}</dd><dt>${sc.untimed ? '目標時間' : '時間限制'}</dt><dd>${T[2]}</dd>`;
 }
 // 作戰簡報
 function storyBriefing(id) {

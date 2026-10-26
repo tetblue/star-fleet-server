@@ -12,7 +12,7 @@ const SIM_CN = '一二三四五六七八九十';
 const SIM_TERR_MAX_SOLID = 8;   // 實體障礙最多 8 個（著色器與碰撞的上限）
 const simSideName = (m, side) => FACTION_NAME[side ? 1 - m.fac : m.fac];
 // 戰術面板、艦橋共用：一般作戰＝剩餘時間；模擬室（無時限）＝整場的經過時間
-function timeLeftText(t) { const tl = battleSetup.timeLimit; return tl >= SIM_INF ? `經過 ${_fmtT(t + SIM.t0)}` : _fmtT(Math.max(0, tl - t)); }
+function timeLeftText(t) { const tl = battleSetup.timeLimit; return battleSetup.untimed ? _fmtT(t) : tl >= SIM_INF ? `經過 ${_fmtT(t + SIM.t0)}` : _fmtT(Math.max(0, tl - t)); }
 
 // ───── 布局資料 ─────
 function simCmdrFrom(c, mode = 'lv') {
