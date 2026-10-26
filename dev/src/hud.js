@@ -57,7 +57,7 @@ function ccItems() {
   const back = { act: 'back', name: '返回', sub: 'Esc', desc: '回到主頁', ok: true, nav: true };
   const none = '沒有可以指揮的艦隊';
   if (CH.page === 'form') {
-    CC_FORMS.forEach((k, i) => { const F = FORMATIONS[k]; it[i] = { act: 'form_' + k, name: F.name, desc: `${F.note}<br><small>火力 ×${F.fire}　變陣約 ${MORPH_DUR} 秒，變陣中比較脆弱</small>`, ok: has, why: none, on: !!(g0 && g0.formation === k) }; });
+    CC_FORMS.forEach((k, i) => { const F = FORMATIONS[k]; it[i] = { act: 'form_' + k, name: F.name, desc: `${F.note}<br><small>火力 ×${F.fire}　變陣至少 ${MORPH_DUR} 秒（艦隊越大越久），變陣中比較脆弱</small>`, ok: has, why: none, on: !!(g0 && g0.formation === k) }; });
     it[7] = { act: 'orderly', name: '整齊排列', sub: g0 ? (g0.orderly ? '開' : '關') : '', desc: '切換整齊排列：等距網格，射界比較好預測（關＝自然、較鬆散）', ok: has, why: none, on: !!(g0 && g0.orderly) };
     it[8] = { act: 'layers_1', name: '1 層', desc: '整齊排列時排成 1 層（畫面最整齊）', ok: has, why: none, on: !!(g0 && g0.orderly && (g0.layers || 1) === 1) };
     it[9] = { act: 'layers_3', name: '3 層', desc: '整齊排列時排成 3 層（上下也等距）', ok: has, why: none, on: !!(g0 && g0.orderly && g0.layers === 3) };

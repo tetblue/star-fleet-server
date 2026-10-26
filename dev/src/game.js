@@ -304,8 +304,10 @@ function aiMove(f, S, P, H, minD = 60) {
   S.goal = { x: P.x, z: P.z, H };
   aiCmd(f, 'move', { x: P.x, z: P.z, H, pivot: false, width: null, uturn: 'auto', y: Math.round(P.y) });
 }
+// 船頭還在轉：不要再下轉向命令（否則陣型一直重組、永遠排不好）
+function hullsTurning(g) { const t = U.uTime.value; return g.sqs.some((q) => q.alive > 0 && q.tDur > 0 && t < q.tStart + q.tDur); }
 function aiFace(f, S, E) {
-  const g = fleetGroup(f); if (!g || g.plan) return;
+  const g = fleetGroup(f); if (!g || g.plan || hullsTurning(g)) return;
   const H = Math.atan2(E.x - g.ax, E.z - g.az);
   if (Math.abs(wrapAngle(H - g.to)) > 0.45) { S.goal = null; aiCmd(f, 'face', { x: E.x, z: E.z }); }
 }
@@ -386,7 +388,7 @@ function aiThink0(f) {
   // ── 反制（難度 2 以上）──
   if (lv >= 2) {
     if ((flanked || lossRate > 0.12) && d < far) aiSkill(f, 'wall');
-    if (flanked && S.phase !== 'swing' && t > (S.turnT || 0)) { S.turnT = t + 6; S.goal = null; S.note = '反制：被繞到側背，轉向迎擊'; aiCmd(f, 'face', { x: E.x, z: E.z }); return; }
+    if (flanked && S.phase !== 'swing' && t > (S.turnT || 0) && !(fleetGroup(f) && hullsTurning(fleetGroup(f)))) { S.turnT = t + 6; S.goal = null; S.note = '反制：被繞到側背，轉向迎擊'; aiCmd(f, 'face', { x: E.x, z: E.z }); return; }
     if (d < far * 1.05) {
       // 集中火力：射程內存活最少的玩家分艦隊
       let best = null, ba = 0; for (const q of squadrons) { const v = seenSq(f.side, q); if (q.side !== f.side && v && !v.bg && v.alive > 0 && q.alive > 0 && !(fowOn() && v.stale) && Math.hypot(v.x - C.x, v.z - C.z) < far) if (!best || v.alive < ba) { best = q; ba = v.alive; } }

@@ -479,6 +479,20 @@ function hitMul(asp, aq, tq) {
   return m;
 }
 const MORPH_DUR = 7;
+// 轉向與補位的物理限制：
+//   repos＝補位（變陣、轉向、迴轉後重組）時船的最高速度是巡航速度的幾倍（速度曲線是緩入緩出，所以平均約 2/3）
+//   hull＝各艦種原地轉船頭的最高角速度（度／秒）；stand＝停著時轉向超過這個角度就「先轉船頭、再慢慢重組」
+//   follow＝長陣（紡錘、縱陣、圓錐）移動中轉向超過這個角度＝艦首帶路、後面的船沿同一條路跟上
+const TURN_RULE = { repos: 2, hull: { carrier: 12, battleship: 12, supply: 12, cruiser: 16, destroyer: 20, escort: 24 }, stand: 8 * Math.PI / 180, follow: 20 * Math.PI / 180 };
+const LONG_FORMS = { spindle: 1, column: 1, wedge: 1, hcone: 1 };
+// 補位 dist 要幾秒（最高速度＝巡航 × repos；ease 的最高速度是平均的 1.5 倍）
+function reposDur(v, dist) { return dist * 1.5 / (Math.max(1, v) * TURN_RULE.repos); }
+// 分艦隊轉船頭的角速度（弧度／秒）：最慢的艦種決定
+function hullRate(q) {
+  let r = 99; for (let k = 0; k < NT; k++) if (q.typeAlive[k] > 0) r = Math.min(r, TURN_RULE.hull[SHIP_TYPES[k].key] || 12);
+  return (r > 98 ? 12 : r) * Math.PI / 180;
+}
+function hullTurnDur(q, d) { return Math.max(1, Math.abs(d) * 1.5 / hullRate(q)); }
 
 function formationRegion(kind, total, opt) {
   const area = total * SHIP_AREA;
@@ -1048,8 +1062,12 @@ function changeFormation(g, kind, orderly, opt) {
     sq.W0 = lerpNum(sq.W0, sq.W1, eNow); sq.D0 = lerpNum(sq.D0, sq.D1, eNow);
     measureSquadron(sq);
     // 換陣的移動距離很遠（例如把分散的艦隊編在一起）：依距離拉長時間，不准瞬間滑過去
-    const far = Math.hypot(sq.off1[0] - sq.off0[0], sq.off1[1] - sq.off0[1], sq.off1[2] - (sq.off0[2] || 0));
-    sq.mStart = t; sq.mDur = Math.max(MORPH_DUR * morphMul, far / (vMorph * 5));   // 換陣最快是巡航速度的 5 倍
+    //   距離＝分艦隊中心的位移＋船在分艦隊裡移動最遠的那一艘；最快是巡航速度的 TURN_RULE.repos 倍
+    let shipFar = 0; list.forEach((i, j) => { shipFar = Math.max(shipFar, Math.hypot(newL[j][0] - oldL[j][0], newL[j][2] - oldL[j][2])); });
+    const far = Math.hypot(sq.off1[0] - sq.off0[0], sq.off1[1] - sq.off0[1], sq.off1[2] - (sq.off0[2] || 0)) + shipFar;
+    // 原地轉向：船頭先轉，轉到一半多才開始重組（g.reformAt）
+    const t0 = Math.max(t, g.reformAt || 0);
+    sq.mStart = t0; sq.mDur = Math.max(MORPH_DUR, reposDur(vMorph, far)) * morphMul;
     sq.oFrom = omNow; sq.oTo = orderly ? 1 : 0;
   });
   aL.needsUpdate = true; aL2.needsUpdate = true;
@@ -1345,6 +1363,7 @@ function formGroup(list) {
   g.ayT = g.ay;
   const B = basis3(H, P);
   const aL = shipGeo.getAttribute('aLocal'), aL2 = shipGeo.getAttribute('aLocal2');
+  const vNew = groupBaseSpeed({ sqs: list, formation: g.formation });
   for (const q of list) {
     if (q.group) q.group.sqs = q.group.sqs.filter((o) => o !== q);
     const dx = q.x - g.ax, dy = (q.y || 0) - g.ay, dz = q.z - g.az;
@@ -1364,9 +1383,9 @@ function formGroup(list) {
         aL2.array.set([ships.lx1[i], ships.ly1[i], ships.lz1[i]], i * 3);
       }
       measureFrom(q);
-      q.mStart = t; q.mDur = 3 + Math.abs(d) / Math.PI * 4; q.oFrom = omNow;
+      q.mStart = t; q.mDur = Math.max(3 + Math.abs(d) / Math.PI * 4, reposDur(vNew, Math.max(Math.abs(d), Math.abs(dp)) * Math.hypot(q.W0 || 0, q.D0 || 0) / 2)); q.oFrom = omNow;
     }
-    visTurnTo(q, H, t, Math.max(1.5, Math.abs(wrapAngle(H - sqHeadingNow(q, t))) / (Math.PI / 4) * 2.5));
+    visTurnTo(q, H, t, hullTurnDur(q, wrapAngle(H - sqHeadingNow(q, t))));
     q.group = g; g.sqs.push(q);
   }
   aL.needsUpdate = true; aL2.needsUpdate = true;
@@ -1376,12 +1395,14 @@ function formGroup(list) {
   return g;
 }
 // 剛性轉向：整個陣型繞部隊中心轉（小角度用）
-function turnGroupTo(g, Ht) {
+function turnGroupTo(g, Ht, moving = !!(g.plan && g.plan.segs && g.plan.segs.length)) {
   const t = U.uTime.value, cur = groupHeading(g, t), d = wrapAngle(Ht - cur);
   if (Math.abs(d) < 0.01) return;
-  // 部隊散得很開時，外圍繞中心轉的線速度不能超過部隊速度的 5 倍（否則遠處的分艦隊會「飛」過去）
-  let rMax = 0; for (const q of g.sqs) if (q.alive > 0) rMax = Math.max(rMax, Math.hypot(q.off1[0], q.off1[1]) + Math.max(q.W1 || 0, q.D1 || 0) / 2);
-  const dur = Math.max(2, Math.abs(d) / (Math.PI / 4) * 3, Math.abs(d) * rMax / Math.max(1, groupSpeed(g, t) * 5));
+  // 整個陣型繞中心旋回：外圍的船繞一圈的線速度不能超過巡航速度的 TURN_RULE.repos 倍，船頭也不能比艦種的轉向速度快
+  let rMax = 0, hd = 1; for (const q of g.sqs) if (q.alive > 0) { rMax = Math.max(rMax, Math.hypot(q.off1[0], q.off1[1]) + Math.hypot(q.W1 || 0, q.D1 || 0) / 2); hd = Math.max(hd, hullTurnDur(q, d)); }
+  //   邊走邊轉：外翼的速度＝部隊前進＋繞中心，所以繞中心的部分只能用剩下的 (repos − 1) 倍
+  const kR = moving ? TURN_RULE.repos / Math.max(0.5, TURN_RULE.repos - 1) : 1;
+  const dur = Math.max(2, hd, reposDur(groupBaseSpeed(g), Math.abs(d) * rMax * kR) * fleetMods(g.sqs[0] && g.sqs[0].fleet).morph);
   g.from = cur; g.to = cur + d; g.start = t; g.dur = dur;
   for (const q of g.sqs) { const c = sqHeadingNow(q, t); q.tFrom = c; q.tTo = c + wrapAngle(cur + d - c); q.tStart = t; q.tDur = dur; }
 }
@@ -1401,7 +1422,7 @@ function reframeGroup(g, Hn) {
       aL2.array.set([ships.lx1[i], ships.ly1[i], ships.lz1[i]], i * 3);
     }
     measureFrom(sq); measureSquadron(sq);
-    visTurnTo(sq, Hn, t, Math.max(2, Math.abs(d) / (Math.PI / 4) * 2.2));
+    visTurnTo(sq, Hn, t, hullTurnDur(sq, d));   // 船頭依艦種的轉向速度轉
   }
   aL.needsUpdate = true; aL2.needsUpdate = true;
   g.from = g.to = Hn; g.dur = 0;
@@ -1460,14 +1481,23 @@ function planMove(g, P, H1, pivot, ext, uturn = opts.uturn) {
   const ax = g.ax, az = g.az, dx = P.x - ax, dz = P.z - az, d = Math.hypot(dx, dz);
   const R = arcRadius(ext.W);
   const plan = { H0, H1, P: { x: P.x, z: P.z }, R, segs: [] };
-  if (adH <= 60 * DEG) { plan.kind = 'translate'; if (d > 0.5) plan.segs.push(lineSeg(ax, az, P.x, P.z)); return plan; }
-  if (pivot || adH < 120 * DEG || d < Math.max(20, R * 1.5)) { plan.kind = 'pivot'; if (d > 0.5) plan.segs.push(lineSeg(ax, az, P.x, P.z)); return plan; }
+  const standing = d < Math.max(20, R * 1.5);
+  // 停著（或只挪一點）轉向：小角度直接旋回；其餘＝船頭先轉、陣型之後慢慢重組
+  if (standing) { plan.kind = adH <= TURN_RULE.stand ? 'translate' : 'pivot'; if (d > 0.5) plan.segs.push(lineSeg(ax, az, P.x, P.z)); return plan; }
+  // 長陣（紡錘、縱陣、圓錐）移動中轉向：艦首帶路、後面的船沿同一條軌跡跟上（不是整根棍子甩過去）
+  //   路程要夠長才排得出軌跡：至少陣型縱深＋兩個轉彎半徑
+  const follow = LONG_FORMS[g.formation] && !pivot && adH > TURN_RULE.follow && adH < 120 * DEG && d > ext.D + 2 * R && Math.abs(g.p || 0) <= 0.08;
+  if (!follow) {
+    // 寬陣：60° 以內邊走邊旋回（外圍速度有上限）；更大＝邊走邊轉船頭、重組
+    if (adH <= 60 * DEG) { plan.kind = 'translate'; if (d > 0.5) plan.segs.push(lineSeg(ax, az, P.x, P.z)); return plan; }
+    if (pivot || uturn === 'pivot' || adH < 120 * DEG) { plan.kind = 'pivot'; if (d > 0.5) plan.segs.push(lineSeg(ax, az, P.x, P.z)); return plan; }
+  }
   // 蛇行：軌跡是「艦首中心」走的路。出發後兩翼放慢、往中線靠攏，整支艦隊拉成一條艦流跟著艦首轉彎；
   // 出彎後在最後一段直線上重新展開。所以軌跡前後各留一段直線
   const kA = Math.min(1, 0.8 * R / Math.max(1, ext.W / 2));
-  const mode = uturn === 'snake' || uturn === 'scatter' ? uturn : (kA >= 0.3 ? 'snake' : 'scatter');
-  if (mode === 'scatter') return planScatter(plan, ax, az, H0, H1, dH, d, R, dx, dz);
-  plan.kind = 'snake';
+  const mode = follow ? 'snake' : uturn === 'snake' || uturn === 'scatter' ? uturn : (kA >= 0.3 ? 'snake' : 'scatter');
+  if (mode === 'scatter') return planScatter(plan, ax, az, H0, H1, dH, d, R, dx, dz, groupBaseSpeed(g));
+  plan.kind = 'snake'; plan.follow = follow;
   const halfW = ext.W / 2, vF = ext.cv + ext.D / 2, D = ext.D;
   const kArc = Math.min(1, 0.8 * R / Math.max(1, halfW)), c = kArc < 1 ? 0.5 : 0;
   const Lm = Math.max(35, 1.2 * halfW * (1 - kArc), 1.65 * c * halfW);
@@ -1476,6 +1506,12 @@ function planMove(g, P, H1, pivot, ext, uturn = opts.uturn) {
   const lead = lineDir(Ax, Az, H0, Lm);
   const Lf = Lm + D + c * halfW + 10, Gx = Px - Math.sin(H1) * Lf, Gz = Pz - Math.cos(H1) * Lf;
   const mid = dubins(lead.ex, lead.ez, H0, Gx, Gz, H1, R);
+  // 艦首帶路的路程不夠（目的地比陣型還近）：軌跡會繞一大圈，改成邊走邊旋回／轉船頭
+  if (follow && mid[0].phi + mid[2].phi > adH + Math.PI / 3) {
+    plan.kind = adH <= 60 * DEG ? 'translate' : 'pivot'; plan.follow = false; delete plan.sn;
+    plan.segs = d > 0.5 ? [lineSeg(ax, az, P.x, P.z)] : [];
+    return plan;
+  }
   const tail = lineDir(Gx, Gz, mid[2].h1, Lf);
   plan.segs = [lead, ...mid, tail].filter((s) => s.len > 0.01);
   plan.sn = { vF, D, cu: ext.cu, kArc, c, Lm };
@@ -1569,7 +1605,7 @@ function endSnake(g, arrived) {
   if (arrived) { g.ax = pl.P.x; g.az = pl.P.z; }
   const fx = Math.sin(H), fz = Math.cos(H), rx = Math.cos(H), rz = -Math.sin(H);
   const toU = (dx, dz) => dx * rx + dz * rz, toV = (dx, dz) => dx * fx + dz * fz;
-  const aL = shipGeo.getAttribute('aLocal'), aL2 = shipGeo.getAttribute('aLocal2'), aP = shipGeo.getAttribute('aPath');
+  const aL = shipGeo.getAttribute('aLocal'), aL2 = shipGeo.getAttribute('aLocal2'), aP = shipGeo.getAttribute('aPath'), vRe = groupBaseSpeed(g);
   for (const sq of g.sqs) {
     const sv = sq.snSave || { off1: sq.off1, oTo: sq.oTo, W1: sq.W1, D1: sq.D1 };
     const ou = toU(sq.x - g.ax, sq.z - g.az), ovv = toV(sq.x - g.ax, sq.z - g.az);
@@ -1585,10 +1621,10 @@ function endSnake(g, arrived) {
       ships.snOn[i] = 0; aP.array[i * 4 + 3] = 0;
     }
     measureFrom(sq); sq.W1 = sv.W1; sq.D1 = sv.D1; sq.oTo = sv.oTo; sq.snSave = null;
-    sq.mStart = t; sq.mDur = dmax > 0.3 ? Math.min(6, 2 + dmax / 25) : 0;
+    sq.mStart = t; sq.mDur = dmax > 0.3 ? Math.max(2, reposDur(vRe, dmax)) : 0;
     // 船身：從軌跡上的朝向轉到部隊朝向
     const c = sq.h, d = wrapAngle(H - c);
-    sq.tFrom = c; sq.tTo = c + d; sq.tStart = t; sq.tDur = Math.abs(d) > 0.01 ? 2.5 : 0;
+    sq.tFrom = c; sq.tTo = c + d; sq.tStart = t; sq.tDur = Math.abs(d) > 0.01 ? hullTurnDur(sq, d) : 0;
   }
   aL.needsUpdate = true; aL2.needsUpdate = true; aP.needsUpdate = true;
   g.from = g.to = H; g.dur = 0;
@@ -1617,7 +1653,7 @@ function bezTau(sg, s) {
   let k = 1; while (k < n && L[k] < s) k++;
   return (k - 1 + (s - L[k - 1]) / Math.max(1e-6, L[k] - L[k - 1])) / n;
 }
-function planScatter(plan, ax, az, H0, H1, dH, d, R, dx, dz) {
+function planScatter(plan, ax, az, H0, H1, dH, d, R, dx, dz, v) {
   const [r0x, r0z] = rVec(H0), ut = dx * r0x + dz * r0z;
   const side = Math.abs(ut) > 0.15 * d ? Math.sign(ut) : (dH >= 0 ? 1 : -1);
   const b = R * 1.6 + d * 0.1;
@@ -1627,7 +1663,7 @@ function planScatter(plan, ax, az, H0, H1, dH, d, R, dx, dz) {
   for (let k = 1; k <= 48; k++) { bezAt(sc, ax, az, sg.ex, sg.ez, k / 48, p); L += Math.hypot(p.x - px, p.z - pz); px = p.x; pz = p.z; sg.lut.push(L); }
   sg.len = L;
   plan.kind = 'scatter'; plan.segs = [sg];
-  plan.T = Math.max(12, L / (BASE_SPEED * 1.5));
+  plan.T = Math.max(12, reposDur(v, L * 1.3));   // 每艘船的弧線最長約 1.3 倍：最快也是巡航的 TURN_RULE.repos 倍
   return plan;
 }
 const SCATTER_LAG = 1.3;
@@ -1692,20 +1728,22 @@ function endScatter(g, arrived) {
     // 中途改命令：目前位置換成以「目前朝向」為準的陣型座標，再流回同一個陣型
     const H = g.to, d = H - (g.to + wrapAngle(pl.H1 - g.to));
     const fx = Math.sin(H), fz = Math.cos(H), rx = Math.cos(H), rz = -Math.sin(H);
-    const toU = (dx, dz) => dx * rx + dz * rz, toV = (dx, dz) => dx * fx + dz * fz;
+    const toU = (dx, dz) => dx * rx + dz * rz, toV = (dx, dz) => dx * fx + dz * fz, vRe = groupBaseSpeed(g);
     for (const sq of g.sqs) {
       const e = ease((t - sq.mStart) / sq.mDur), om = sq.oFrom + (sq.oTo - sq.oFrom) * e;
       const ys = sq.list.map((i) => shipLocalCPU(i, t, [0, 0, 0])[1]);
       sq.off0 = [toU(sq.x - g.ax, sq.z - g.az), toV(sq.x - g.ax, sq.z - g.az), sq.off1[2] || 0]; sq.off1 = [...rotUV(sq.off1[0], sq.off1[1], d), sq.off1[2] || 0];
+      let dmax = Math.hypot(sq.off1[0] - sq.off0[0], sq.off1[1] - sq.off0[1]);
       sq.list.forEach((i, k) => {
         ships.lx0[i] = toU(ships.snX[i] - sq.x, ships.snZ[i] - sq.z); ships.lz0[i] = toV(ships.snX[i] - sq.x, ships.snZ[i] - sq.z); ships.ly0[i] = ys[k];
         const [x1, z1] = rotUV(ships.lx1[i], ships.lz1[i], d); ships.lx1[i] = x1; ships.lz1[i] = z1;
+        dmax = Math.max(dmax, Math.hypot(sq.off1[0] - sq.off0[0], sq.off1[1] - sq.off0[1]) + Math.hypot(x1 - ships.lx0[i], z1 - ships.lz0[i]));
         aL.array.set([ships.lx0[i], ships.ly0[i], ships.lz0[i]], i * 3); aL2.array.set([ships.lx1[i], ships.ly1[i], ships.lz1[i]], i * 3);
         ships.snOn[i] = 0; aP.array[i * 4 + 3] = 0;
       });
       measureFrom(sq); measureSquadron(sq);
-      sq.mStart = t; sq.mDur = 4; sq.oFrom = om;
-      const c = sq.h, dd = wrapAngle(H - c); sq.tFrom = c; sq.tTo = c + dd; sq.tStart = t; sq.tDur = Math.abs(dd) > 0.01 ? 2.5 : 0;
+      sq.mStart = t; sq.mDur = Math.max(4, reposDur(vRe, dmax)); sq.oFrom = om;
+      const c = sq.h, dd = wrapAngle(H - c); sq.tFrom = c; sq.tTo = c + dd; sq.tStart = t; sq.tDur = Math.abs(dd) > 0.01 ? hullTurnDur(sq, dd) : 0;
     }
     g.from = g.to = H;
   }
@@ -1723,10 +1761,16 @@ function maneuvering(g) { return !!g.plan && (g.plan.kind === 'snake' || g.plan.
 function startPlan(g, plan, width) {
   endManeuver(g, false);
   const keepV = g.plan ? g.plan.v : (g.lastV || 0); g.lastV = 0;
-  if (plan.kind === 'translate') turnGroupTo(g, plan.H1);
-  else if (plan.kind === 'pivot') { reframeGroup(g, plan.H1); if (width == null) issueFormation(g, g.formation, g.orderly); }   // 重排也算變陣：被干擾時一樣要等
+  if (plan.kind === 'translate') turnGroupTo(g, plan.H1, plan.segs.length > 0);
+  else if (plan.kind === 'pivot') {
+    reframeGroup(g, plan.H1);
+    // 船頭先轉：轉到六成才開始重組（陣型暫時是「橫著的」，這段時間最容易被打）
+    let at = 0; for (const q of g.sqs) if (q.alive > 0 && q.tDur > 0) at = Math.max(at, q.tStart + q.tDur * 0.6);
+    g.reformAt = at;
+    if (width == null) issueFormation(g, g.formation, g.orderly);   // 重排也算變陣：被干擾時一樣要等
+  }
   if (plan.segs.length) {
-    g.plan = { segs: plan.segs, i: 0, s: 0, v: keepV, kind: plan.kind, sn: plan.sn, H1: plan.H1, P: plan.P };
+    g.plan = { segs: plan.segs, i: 0, s: 0, v: keepV, kind: plan.kind, sn: plan.sn, H1: plan.H1, P: plan.P, follow: !!plan.follow };
     g.goal = { x: plan.P.x, z: plan.P.z, H: plan.H1 };
     if (plan.kind === 'snake') startSnake(g, g.plan);
   } else { g.plan = null; g.goal = null; }
@@ -1784,7 +1828,7 @@ function updateGroups(dt) {
       if (t >= pl.t0 + pl.T + SCATTER_LAG * 4.3) endScatter(g, true);
     } else if (pl) {
       const sg = pl.segs[pl.i], snake = pl.kind === 'snake';
-      let mul = snake ? 1.8 * groupFwd(g) : sg.type === 'L' ? lineMul(sg, groupHeading(g, t)) : 1;
+      let mul = snake ? (pl.follow ? 1 : 1.8) * groupFwd(g) : sg.type === 'L' ? lineMul(sg, groupHeading(g, t)) : 1;
       if (!snake && sg.type === 'L' && mul >= 0.9) mul *= groupFwd(g);
       const vt = Math.min(groupSpeed(g, t) * mul, Math.sqrt(2 * MOVE_ACC * planRemain(pl)) + 0.3);
       pl.v += Math.max(-MOVE_ACC * 1.5 * dt, Math.min(MOVE_ACC * dt, vt - pl.v));
@@ -1824,9 +1868,9 @@ function altitudeStep(g, dt, t) {
   }
   const vh = pl && pl.kind !== 'scatter' ? Math.max(0, pl.v || 0) : 0, man = maneuvering(g);
   const want = man ? 0 : Math.abs(vy) > 0.3 && vh > 0.8 ? Math.max(-0.55, Math.min(0.55, Math.atan2(vy, vh))) : (g.pCmd || 0);
-  // 轉動速度：散得越開越慢（外圍線速度不超過部隊速度的 5 倍）
+  // 轉動速度：散得越開越慢（外圍線速度不超過部隊速度的 TURN_RULE.repos 倍）
   let rMax = 40; for (const q of g.sqs) if (q.alive > 0) rMax = Math.max(rMax, Math.hypot(q.off1[0], q.off1[1]) + Math.max(q.W1 || 0, q.D1 || 0) / 2);
-  const rate = Math.min(0.3, v * 5 / rMax), d = want - (g.p || 0);
+  const rate = Math.min(0.3, v * TURN_RULE.repos / rMax), d = want - (g.p || 0);
   g.p = (g.p || 0) + Math.max(-rate * dt, Math.min(rate * dt, d));
 }
 // 繞開實體障礙：部隊中心太靠近時往外偏（水平），船艦本身再由 rockPush 推到障礙表面
@@ -3551,7 +3595,7 @@ function autoFace() {
     if (!T && g.area && g.area.until > t) T = g.area;   // 區域攻擊：轉向那一點
     if (!T) return;
     const H = Math.atan2(T.x - cx, T.z - cz), cur = groupHeading(g, t);
-    if (Math.abs(wrapAngle(H - cur)) > AUTO_FACE.tol) turnGroupTo(g, H);
+    if (Math.abs(wrapAngle(H - cur)) > AUTO_FACE.tol) faceGroup(g, H);   // 停著＝船頭先轉、陣型再慢慢重組
   });
 }
 function continuousFire(dt) {
@@ -4496,8 +4540,8 @@ function drawPreview(pg, P, H1, pivot, W, D, cu, cv, stroke) {
   return plan;
 }
 function planLabel(plan) {
-  if (plan.kind === 'pivot') return plan.segs.length ? '原地轉向＋移動' : '原地轉向';
-  if (plan.kind === 'snake') return '蛇行迴轉';
+  if (plan.kind === 'pivot') return plan.segs.length ? '轉船頭＋移動、重組' : '原地轉船頭、重組';
+  if (plan.kind === 'snake') return plan.follow ? '艦首帶路轉向' : '蛇行迴轉';
   if (plan.kind === 'scatter') return '打散迴轉、到點重組';
   if (!plan.segs.length) return '轉向';
   const c = lineMul(plan.segs[0], plan.H0);
@@ -5125,7 +5169,8 @@ $('n-detail3').addEventListener('change', (e) => (opts3.detail = e.target.value)
 $('n-lod3').addEventListener('input', (e) => { opts3.lodScale = +e.target.value; $('n-lod3-v').textContent = '×' + opts3.lodScale.toFixed(2); });
 if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch', 'panel-hidden');
 
-function turn(g, delta) { if (g) turnGroupTo(g, groupHeading(g, U.uTime.value) + delta); }
+// 轉向鍵：移動中＝邊走邊旋回；停著＝船頭先轉、陣型再重組
+function turn(g, delta) { if (!g) return; const H = groupHeading(g, U.uTime.value) + delta; if (g.plan) turnGroupTo(g, H); else faceGroup(g, H); }
 
 // ───────────────────────── 主迴圈 ─────────────────────────
 const clock = new THREE.Clock();
@@ -6434,8 +6479,10 @@ function aiMove(f, S, P, H, minD = 60) {
   S.goal = { x: P.x, z: P.z, H };
   aiCmd(f, 'move', { x: P.x, z: P.z, H, pivot: false, width: null, uturn: 'auto', y: Math.round(P.y) });
 }
+// 船頭還在轉：不要再下轉向命令（否則陣型一直重組、永遠排不好）
+function hullsTurning(g) { const t = U.uTime.value; return g.sqs.some((q) => q.alive > 0 && q.tDur > 0 && t < q.tStart + q.tDur); }
 function aiFace(f, S, E) {
-  const g = fleetGroup(f); if (!g || g.plan) return;
+  const g = fleetGroup(f); if (!g || g.plan || hullsTurning(g)) return;
   const H = Math.atan2(E.x - g.ax, E.z - g.az);
   if (Math.abs(wrapAngle(H - g.to)) > 0.45) { S.goal = null; aiCmd(f, 'face', { x: E.x, z: E.z }); }
 }
@@ -6516,7 +6563,7 @@ function aiThink0(f) {
   // ── 反制（難度 2 以上）──
   if (lv >= 2) {
     if ((flanked || lossRate > 0.12) && d < far) aiSkill(f, 'wall');
-    if (flanked && S.phase !== 'swing' && t > (S.turnT || 0)) { S.turnT = t + 6; S.goal = null; S.note = '反制：被繞到側背，轉向迎擊'; aiCmd(f, 'face', { x: E.x, z: E.z }); return; }
+    if (flanked && S.phase !== 'swing' && t > (S.turnT || 0) && !(fleetGroup(f) && hullsTurning(fleetGroup(f)))) { S.turnT = t + 6; S.goal = null; S.note = '反制：被繞到側背，轉向迎擊'; aiCmd(f, 'face', { x: E.x, z: E.z }); return; }
     if (d < far * 1.05) {
       // 集中火力：射程內存活最少的玩家分艦隊
       let best = null, ba = 0; for (const q of squadrons) { const v = seenSq(f.side, q); if (q.side !== f.side && v && !v.bg && v.alive > 0 && q.alive > 0 && !(fowOn() && v.stale) && Math.hypot(v.x - C.x, v.z - C.z) < far) if (!best || v.alive < ba) { best = q; ba = v.alive; } }
@@ -9494,7 +9541,7 @@ function manBody(id) {
         P('<b>射線</b>：光束沿射線判定，擋在前面的敵艦先挨打、打偏的可能打中後方的敵艦；巨大小行星會擋住光束與飛彈。') +
         P(`<b>指定攻擊</b>（${tutK('attack')}＋點敵軍）不加傷害、沒有次數限制；<b>集中火力</b>（技能）全軍 +20%。<b>全艦齊射</b>（${tutK('volley')}）、<b>飛彈齊射</b>（${tutK('missile')}）讓冷卻好的武器一起發射，適合爆發。`);
     case 'forms':
-      return tutFormTable() + P(`<b>變陣</b>約需 ${MORPH_DUR} 秒（天賦「陣型演練」縮短），變陣中陣形散亂。<b>防空</b>欄是對空命中倍率（基本 ${AIR_RULE.formBase}＋陣型）。`) +
+      return tutFormTable() + P(`<b>變陣</b>至少 ${MORPH_DUR} 秒，艦隊越大越久（船補位最快是巡航速度的 ${TURN_RULE.repos} 倍；天賦「陣型演練」縮短），變陣中陣形散亂。<b>防空</b>欄是對空命中倍率（基本 ${AIR_RULE.formBase}＋陣型）。`) +
         P('<b>陣形混亂</b>：被紡錘陣、圓錐陣的前端衝進陣中，會混亂幾秒：開火速度 ×' + DISORDER.fire + '、受到傷害 ×' + DISORDER.taken + '。') +
         P(`<b>整齊排列</b>（${tutK('orderly')}）：船排成規則格子；編成時可以選 1 層或 3 層。<b>選陣型的原則</b>：行軍用縱陣、對射用橫陣、怕包抄或空襲用圓陣、突破用紡錘陣、繞側用圓錐陣、擬真難度下正面火力用空心錐陣。`);
     case 'aspect':
@@ -13668,7 +13715,7 @@ function ccItems() {
   const back = { act: 'back', name: '返回', sub: 'Esc', desc: '回到主頁', ok: true, nav: true };
   const none = '沒有可以指揮的艦隊';
   if (CH.page === 'form') {
-    CC_FORMS.forEach((k, i) => { const F = FORMATIONS[k]; it[i] = { act: 'form_' + k, name: F.name, desc: `${F.note}<br><small>火力 ×${F.fire}　變陣約 ${MORPH_DUR} 秒，變陣中比較脆弱</small>`, ok: has, why: none, on: !!(g0 && g0.formation === k) }; });
+    CC_FORMS.forEach((k, i) => { const F = FORMATIONS[k]; it[i] = { act: 'form_' + k, name: F.name, desc: `${F.note}<br><small>火力 ×${F.fire}　變陣至少 ${MORPH_DUR} 秒（艦隊越大越久），變陣中比較脆弱</small>`, ok: has, why: none, on: !!(g0 && g0.formation === k) }; });
     it[7] = { act: 'orderly', name: '整齊排列', sub: g0 ? (g0.orderly ? '開' : '關') : '', desc: '切換整齊排列：等距網格，射界比較好預測（關＝自然、較鬆散）', ok: has, why: none, on: !!(g0 && g0.orderly) };
     it[8] = { act: 'layers_1', name: '1 層', desc: '整齊排列時排成 1 層（畫面最整齊）', ok: has, why: none, on: !!(g0 && g0.orderly && (g0.layers || 1) === 1) };
     it[9] = { act: 'layers_3', name: '3 層', desc: '整齊排列時排成 3 層（上下也等距）', ok: has, why: none, on: !!(g0 && g0.orderly && g0.layers === 3) };
