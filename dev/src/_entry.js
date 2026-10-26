@@ -507,10 +507,14 @@ function formationRegion(kind, total, opt) {
     return { bbox: [-W / 2, W / 2, off - D / 2, off + D / 2], inside: (u, v) => se(u, v - off, W / 2, D / 2), key: (u, v) => -v, alt: 0.8 };
   }
   if (kind === 'spindle') {
-    const Wm = Math.sqrt(area / (3 * 0.67)), L = 3 * Wm, off = -L * 0.15;
+    // 紡錘：前後尖、中間粗的立體旋轉體，截面是圓（半徑 rad(v)）；長度＝最大直徑的 3 倍
+    // 體積 ＝ π·Rm²·L·∫sin(πs)^1.6 ds ≈ π·Rm²·6Rm·0.5437，每艘船佔 CONE_VOL
+    const Rm = Math.cbrt(total * CONE_VOL / (Math.PI * 6 * 0.5437)), L = 6 * Rm, off = -L * 0.15;
+    const rad = (v) => { const s = (v - off + L / 2) / L; return s > 0 && s < 1 ? Rm * Math.pow(Math.sin(Math.PI * s), 0.8) : -1; };
     return {
-      bbox: [-Wm / 2, Wm / 2, off - L / 2, off + L / 2],
-      inside: (u, v) => { const s = (v - off + L / 2) / L; return s > 0 && s < 1 && Math.abs(u) <= Wm / 2 * Math.pow(Math.sin(Math.PI * s), 0.8); },
+      bbox: [-Rm, Rm, off - L / 2, off + L / 2], L, Rb: Rm, rad, cone: true,
+      inside: (u, v) => Math.abs(u) <= rad(v),
+      inside3: (u, y, v) => Math.hypot(u, y) <= rad(v),
       key: (u, v) => -v, alt: 1.1,
     };
   }
@@ -629,10 +633,10 @@ function polarLattice(kind, total, M, s, layers) {
   }
   return pts;
 }
-// 圓錐的 3D 等距網格：放大錐體直到格點夠用，多的從錐面（離軸最遠的）拿掉
-function coneLattice(total, s) {
+// 圓錐／紡錘的 3D 等距網格：放大形體直到格點夠用，多的從表面（離軸最遠的）拿掉
+function coneLattice(total, s, kind = 'wedge') {
   for (let f = 0.3; f < 8; f *= 1.015) {
-    const reg = formationRegion('wedge', total * f), [u0, u1, v0, v1] = reg.bbox, pts = [];
+    const reg = formationRegion(kind, total * f), [u0, u1, v0, v1] = reg.bbox, pts = [];
     for (let j = Math.ceil(v0 / s); j * s <= v1; j++) for (let k = Math.ceil(-reg.Rb / s); k * s <= reg.Rb; k++) for (let i = Math.ceil(u0 / s); i * s <= u1; i++)
       if (reg.inside3(i * s, k * s, j * s)) pts.push([i * s, j * s, k * s]);
     if (pts.length >= total) {
@@ -648,7 +652,7 @@ function genOrderly(kind, counts, order, layers = 1, opt) {
   const total = counts.reduce((a, b) => a + b, 0), s = ORDER_SPACING[layers];
   if (kind === 'hcone') return hollowConeLayout(counts, order, null, s);   // 空心錐本身就是立體的，不另外疊層
   let p3;
-  if (kind === 'wedge') p3 = coneLattice(total, s);   // 圓錐本身就是立體的，不另外疊層
+  if (kind === 'wedge' || kind === 'spindle') p3 = coneLattice(total, s, kind);   // 圓錐、紡錘本身就是立體的，不另外疊層
   else {
     const M = Math.ceil(total / layers);
     const pts = (kind === 'ring' || kind === 'crescent') ? polarLattice(kind, total, M, s, layers) : squareLattice(kind, total, M, s, opt);
