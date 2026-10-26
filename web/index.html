@@ -152,10 +152,18 @@
   .mm-note { min-height: 18px; font-size: calc(12px * var(--ui)); color: var(--dim); margin-top: calc(-2px * var(--sp)); }
   @media (max-width: 640px) { .sp-grid, .sp-row { grid-template-columns: 1fr; } .sp-mode { min-height: 0; } }
   /* 劇情戰役：星圖選關 */
-  .st-wrap { max-width: calc(1400px * var(--ui)); --neu: #8fd9b6; }
-  .st-main { display: grid; grid-template-columns: 1fr calc(320px * var(--ui)); gap: calc(12px * var(--sp)); align-items: start; }
-  .st-map { position: relative; border: 1px solid var(--line); border-radius: 6px; background: radial-gradient(ellipse at 50% 45%, #0a1020, #03050b 75%); overflow: auto; }
-  .st-svg { display: block; width: 100%; height: auto; min-width: 760px; font-family: inherit; user-select: none; }
+  .g-wrap.st-wrap { max-width: none; --neu: #8fd9b6; padding-top: calc(16px * var(--sp)); padding-bottom: calc(16px * var(--sp)); }
+  .st-main { display: grid; grid-template-columns: 1fr calc(340px * var(--ui)); gap: calc(12px * var(--sp)); align-items: start; }
+  .st-map { position: relative; border: 1px solid var(--line); border-radius: 6px; background: radial-gradient(ellipse at 50% 45%, #0a1020, #03050b 75%); overflow: hidden; width: 100%; aspect-ratio: 16 / 9; max-height: calc(100vh - 90px * var(--ui)); min-height: 360px; }   /* 星圖框：寬度為準的 16:9，太高才壓低（只會更寬，不會更窄） */
+  .st-zoom { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; } .st-zoom .g-btn { min-width: calc(30px * var(--ui)); }
+  .st-svg { cursor: grab; touch-action: none; } .st-svg.drag { cursor: grabbing; }
+  .st-map.edge { box-shadow: inset 0 0 28px rgba(201,211,230,.18); }   /* 邊緣捲動中 */
+  .st-svg { display: block; width: 100%; height: 100%; font-family: inherit; user-select: none; }
+  .st-help { position: absolute; left: 10px; bottom: 8px; font-size: calc(11.5px * var(--ui)); color: var(--dim); letter-spacing: .08em; background: rgba(3,5,11,.6); padding: 3px 8px; border-radius: 3px; pointer-events: none; }
+  .st-node.far, .st-link.far { opacity: .38; } .st-node.far:hover { opacity: .8; }
+  .st-next { fill: var(--c); font-size: 15px; font-weight: 700; text-anchor: middle; letter-spacing: .1em; paint-order: stroke; stroke: #03050b; stroke-width: 4px; pointer-events: none; animation: st-bob 1.4s ease-in-out infinite; } .st-next.sub { font-size: 12px; font-weight: 500; animation: none; }
+  @keyframes st-bob { 50% { transform: translateY(-4px); } }
+  .st-cht { fill: #e6ecf7; font-size: 13px; text-anchor: middle; letter-spacing: .25em; opacity: .85; paint-order: stroke; stroke: #03050b; stroke-width: 4px; pointer-events: none; }
   .st-stars circle { fill: #cfd8ea; }
   .st-dust ellipse { fill: #07050e; opacity: .92; } .st-dust2 ellipse { fill: #5b3f96; opacity: .3; }
   .st-region { font-size: 40px; letter-spacing: .5em; text-anchor: middle; font-weight: 600; opacity: .42; }
@@ -187,7 +195,7 @@
   @keyframes st-pulse { from { transform: scale(1); opacity: .9; } to { transform: scale(2.1); opacity: 0; } }
   .st-node:hover .st-ring, .st-node:focus-visible .st-ring { stroke-width: 3.5; }
   .st-node.sel .st-ring { stroke-width: 3.5; filter: drop-shadow(0 0 6px var(--c)); } .st-node.sel .st-lb { fill: var(--c); font-weight: 600; }
-  .st-panel { position: sticky; top: 12px; border-top: 3px solid #c9d3e6; } .st-panel.emp { border-top-color: var(--emp); } .st-panel.all { border-top-color: var(--all); }
+  .st-panel { position: sticky; top: 12px; border-top: 3px solid #c9d3e6; max-height: calc(100vh - 90px * var(--ui)); overflow-y: auto; } .st-panel.emp { border-top-color: var(--emp); } .st-panel.all { border-top-color: var(--all); }
   .st-panel p { line-height: 1.7; margin: calc(10px * var(--sp)) 0; }
   .st-ch { color: var(--dim); font-size: calc(12px * var(--ui)); letter-spacing: .14em; }
   .st-panel h3.st-h { color: var(--text); font-size: calc(22px * var(--ui)); letter-spacing: .16em; margin: calc(6px * var(--sp)) 0 calc(4px * var(--sp)); }
@@ -196,10 +204,10 @@
   .st-pick.emp { border-left-color: var(--emp); } .st-pick.all { border-left-color: var(--all); } .st-pick.emp b { color: var(--emp); } .st-pick.all b { color: var(--all); }
   .st-pick span { font-size: calc(12.5px * var(--ui)); color: var(--dim); line-height: 1.6; } .st-pick .g-btn { align-self: flex-end; }
   .st-end { margin-top: calc(10px * var(--sp)); padding: calc(10px * var(--sp)); border: 1px solid var(--line); border-radius: 4px; background: rgba(255,255,255,.03); } .st-end b { letter-spacing: .3em; }
-  .st-chs { display: grid; grid-template-columns: repeat(6, 1fr); gap: calc(6px * var(--sp)); margin-top: calc(12px * var(--sp)); }
-  .st-chb { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: calc(8px * var(--sp)) calc(10px * var(--sp)); font: inherit; color: var(--text); text-align: left; cursor: pointer; background: rgba(12,19,33,.85); border: 1px solid var(--line); border-radius: 4px; }
+  .st-chs { display: flex; flex-direction: column; gap: calc(4px * var(--sp)); margin-top: calc(14px * var(--sp)); padding-top: calc(12px * var(--sp)); border-top: 1px solid var(--line); } .st-chs-h { font-size: calc(11px * var(--ui)); color: var(--dim); letter-spacing: .3em; margin-bottom: 2px; }
+  .st-chb { display: grid; grid-template-columns: calc(52px * var(--ui)) 1fr auto; align-items: baseline; gap: calc(8px * var(--sp)); padding: calc(6px * var(--sp)) calc(10px * var(--sp)); font: inherit; color: var(--text); text-align: left; cursor: pointer; background: rgba(12,19,33,.85); border: 1px solid var(--line); border-radius: 4px; }
   .st-chb span { font-size: calc(11px * var(--ui)); color: var(--dim); letter-spacing: .12em; } .st-chb b { letter-spacing: .2em; } .st-chb i { font-style: normal; font-size: calc(11px * var(--ui)); color: var(--dim); }
-  .st-chb.on { border-color: rgba(201,211,230,.45); } .st-chb.done i { color: #8fe3a5; } .st-chb:hover { border-color: var(--pc); }
+  .st-chb.on { border-color: rgba(201,211,230,.45); } .st-chb.cur { border-color: var(--pc); background: rgba(22,32,52,.92); } .st-chb.done i { color: #8fe3a5; } .st-chb:hover { border-color: var(--pc); }
   .st-brief p, .st-after p { line-height: 1.75; margin: 0 0 calc(10px * var(--sp)); } .st-after { border-left: 3px solid #c9d3e6; } .st-after.emp { border-left-color: var(--emp); } .st-after.all { border-left-color: var(--all); }
   .st-diffs { display: grid; grid-template-columns: repeat(3, 1fr); gap: calc(12px * var(--sp)); } .st-diffs .sp-mode.on { border-color: var(--pc); background: rgba(22,32,52,.92); }
   .st-recs { display: flex; flex-wrap: wrap; gap: 2px calc(10px * var(--sp)); margin-top: 4px; font-size: calc(11.5px * var(--ui)); color: var(--dim); } .st-diffs .st-recs b { color: var(--text); font-weight: 600; font-size: inherit; letter-spacing: 0; }
@@ -210,7 +218,7 @@
   .st-inter { border-left: 3px solid #c9d3e6; opacity: .92; } .st-inter.emp { border-left-color: var(--emp); } .st-inter.all { border-left-color: var(--all); } .st-inter p { line-height: 1.75; margin: 0; color: var(--dim); }
   @media (max-width: 760px) { .st-diffs, .st-lines { grid-template-columns: 1fr; } }
   .toast.story { border-left: 3px solid var(--pc); font-weight: 500; }
-  @media (max-width: 900px) { .st-main { grid-template-columns: 1fr; } .st-panel { position: static; } .st-chs { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 900px) { .st-main { grid-template-columns: 1fr; } .st-panel { position: static; max-height: none; } .st-map { min-height: 0; } }
   /* ═════ 遊戲畫面（選單、簡報、編成、部署、戰鬥、報告） ═════ */
   #game { position: fixed; inset: 0; z-index: 30; overflow: auto; background: radial-gradient(ellipse at 50% 0%, rgba(30,44,80,.55), rgba(2,4,10,.94) 70%); backdrop-filter: blur(3px); }
   #game[hidden], #battlehud[hidden], #skillbar[hidden], #deploybar[hidden] { display: none !important; }
@@ -1012,7 +1020,7 @@
 
 <div id="boot"><div class="boot-card"><h1>星海艦隊戰</h1><div class="sub">FLEET TACTICS · 內網伺服器</div><div id="boot-body"><p class="boot-st">連線中…</p></div></div></div>
 <div id="save-badge" hidden>⚠ 存檔還沒同步到伺服器，重試中…</div>
-<script>window.__BUILD = "20261026164610"; window.__ASSETS = { ships: "assets/ships.webp", fx: "assets/fx.webp", fighters: "assets/fighters.webp" };</script>
+<script>window.__BUILD = "20261026223541"; window.__ASSETS = { ships: "assets/ships.webp", fx: "assets/fx.webp", fighters: "assets/fighters.webp" };</script>
 <script>// ═══ 啟動前：登入伺服器、取得存檔、提供 STORE（取代 localStorage，寫入會自動同步到伺服器）═══
 (() => {
   'use strict';

@@ -4415,8 +4415,17 @@ function updateSelBar() {
 // ── 指令：UI 只負責把操作轉成命令 ──
 function sqIds(list = actOn()) { return list.map((q) => squadrons.indexOf(q)); }
 // 按住 Shift（觸控：「隊列」按鈕）＝排進戰術隊列，等前面的動作完成才執行
-let queueToggle = false;
-function queueMode() { const m = SETTINGS.queueMod; return queueToggle || keysDown.has(m + 'Left') || keysDown.has(m + 'Right'); }
+let queueToggle = false;   // 觸控工具列的「隊列」：只在用手指操作時有效（觸控沒有 Shift）
+// 修飾鍵的狀態：每個鍵盤、滑鼠事件都直接讀 e.shiftKey 等，放開就一定是「沒按」（不靠 keysDown，漏收 keyup 也不會卡住）
+const modHeld = { Shift: false, Control: false, Alt: false };
+let lastPtr = 'mouse';
+for (const ev of ['keydown', 'keyup', 'pointerdown', 'pointermove', 'pointerup', 'mousedown', 'mouseup', 'click', 'wheel']) addEventListener(ev, (e) => {
+  modHeld.Shift = !!e.shiftKey; modHeld.Control = !!e.ctrlKey; modHeld.Alt = !!e.altKey;
+  if (e.pointerType) lastPtr = e.pointerType;
+}, true);
+addEventListener('blur', () => { modHeld.Shift = modHeld.Control = modHeld.Alt = false; });
+// 隊列指令：只有按住設定的修飾鍵（預設 Shift）時才排進隊列，放開就是一般指令
+function queueMode() { return !!modHeld[SETTINGS.queueMod] || (queueToggle && lastPtr === 'touch'); }
 function sendCmd(type, args) {
   if (args.sqs && !args.sqs.length) return;   // 沒有選取：不下令
   if (queueMode()) { const { sqs, ...item } = args; return issue('queue', { sqs, item: { type, ...item } }); }
@@ -4622,6 +4631,8 @@ function altPreview(m) {
   hint(`${altText(m)} · 放開移動（${altHelp()}）`);
 }
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+// 整個遊戲封鎖瀏覽器的右鍵選單（右鍵是遊戲的操作）；只留文字輸入框，方便複製貼上
+addEventListener('contextmenu', (e) => { if (!(e.target.closest && e.target.closest('input, textarea'))) e.preventDefault(); }, true);
 
 // ── 滑鼠 ──
 // 右鍵點：移動（朝向不變）；右鍵拖曳：按下處＝目的地，拖曳方向＝到達後的朝向

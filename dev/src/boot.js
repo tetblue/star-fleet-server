@@ -36,3 +36,37 @@ Object.assign(window.__demo, { MOUNTS: () => MOUNTS, mountsOf, openWeaponEditor,
   window.__ready = true;
 })();
 Object.assign(window.__demo, { frame, setPaused(v) { paused = v; }, pilotLayout, PILOT_MIS, shipPos(i) { const o = {}; bridgePose(i, o); return o; }, getModel, hullKey, pilotHullMesh, pilotHullCollide, pilotCredit, pilotMisTick, pilotHurt, PL, showPilot, pilotGo, pilotPickTarget, pilotLoad, pilotSave, fP: () => fP, PILOT_WEAPONS, pilotEcmHides, pilotEcmLeft });   // 王牌飛行員（除錯）
+// 測試用：劇情關卡自動代打（玩家那一邊也交給 AI）。不畫畫面，直接跑模擬到分出勝負
+// o：diff 難度序號（預設普通）、lv 玩家指揮官等級（預設＝建議等級）、ai 玩家 AI 難度 1～5（預設 3）、tactic 玩家 AI 打法（預設照關卡目標挑）
+//    like：玩家的特性加成改成跟敵方一樣照等級算（對照組，大約是「天賦有點」的強度）
+// 玩家指揮官預設不點天賦（只有固定 +8% 的特性加成、固有技能），也不帶增援、傭兵支援
+async function autoStory(id, o = {}) {
+  const di = o.diff != null ? o.diff : 1; GAME.storyDiffForce = di;
+  const toast0 = toast, paused0 = paused, said = []; toast = (m, c) => { if (o.log && (c === 'story' || c === 'bad')) said.push(`${Math.round(U.uTime.value)}s ${m}`); }; paused = true;   // o.log：記下戰鬥中的台詞與警告
+  try {
+    const s = STORY_BY[id]; storyEnsureCast(s.cast);
+    const sc = storyScenario(id), lo = storyLoadout(sc), rec = storyRec(id);
+    if (o.formation) lo.fleets.forEach((f) => { f.formation = o.formation; });   // 起始陣型（預設橫陣）
+    GAME.sc = sc; GAME.loadout = lo; GAME.playerSide = 0; GAME.attempt = 1;
+    const G = sc.goal && sc.goal.type, tac = o.tactic || (G === 'survive' || G === 'escort' ? 'kite' : 'push'), lv = o.lv != null ? o.lv : rec;
+    const setup = makeSetup(sc, lo, 1); setup.op = 0;
+    setup.fleets = setup.fleets.filter((f) => f.mercOf == null && f.reinfOf == null);
+    for (const f of setup.fleets) if (f.side === 0 && !f.ally && f.commander && f.commander.id) {
+      const c = COMMANDERS.find((x) => x.id === f.commander.id);
+      f.commander.level = lv; if (o.like) delete f.commander.tal; else f.commander.tal = {}; f.commander.skills = c.skills.slice();
+      f.ai = { tactic: tac, level: o.ai || 3 };
+    }
+    GAME.watch = true; GAME.replaying = false; GAME.result = null; GAME.lineK = 0; GAME.dlineK = 0; GAME.log = []; GAME.simCtl = null; GAME.phase = 'battle';
+    newBattle(sc.seed + 1, setup); setRule('fire', true); setRule('advance', false);
+    GAME.init = [sideAlive(0), sideAlive(1)];
+    const cap = (sc.timeLimit + 30) * SIM_HZ, t0 = performance.now();
+    while (!GAME.result && simTick < cap) { for (let k = 0; k < 600 && !GAME.result; k++) stepSim(); await new Promise((r) => { const ch = new MessageChannel(); ch.port1.onmessage = r; ch.port2.postMessage(0); }); }   // 不用 setTimeout：背景分頁會被降速
+    const R = GAME.result || { kind: 'none', why: '沒有分出勝負', t: U.uTime.value, ratio: [sideAlive(0) / GAME.init[0], sideAlive(1) / GAME.init[1]] };
+    const vip = fleets.find((f) => f.vip), vipLeft = vip ? vip.sqs.reduce((a, x) => a + x.alive, 0) / vip.initial : null;
+    return { id, name: s.name, line: s.line, diff: STORY_DIFF[di].name, lv, ai: o.ai || 3, like: !!o.like, formation: o.formation || 'line', tac, goal: G || 'kill', kind: R.kind, why: R.why, t: Math.round(R.t), limit: sc.timeLimit,
+      me: Math.round(R.ratio[0] * 100), foe: Math.round(R.ratio[1] * 100), vip: vipLeft != null ? Math.round(vipLeft * 100) : null, init: GAME.init.slice(), defT: (fleets.find((f) => f.defSched) || {}).defT, ...(o.log ? { said } : {}), wall: Math.round((performance.now() - t0) / 1000) };
+  } finally {
+    toast = toast0; paused = paused0; GAME.watch = false; GAME.phase = 'menu'; GAME.storyDiffForce = null;
+  }
+}
+Object.assign(window.__demo, { autoStory, queueMode });

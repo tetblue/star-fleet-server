@@ -165,7 +165,7 @@ function makeSetup(sc, lo, attempt) {
     fleetsS.push({ side: 1, name: ev.name, ax: sx * 800, az: -140 + R() * 200, ay: Math.round((R() - 0.5) * 240), h: sx < 0 ? Math.PI / 2 : -Math.PI / 2, formation: ev.formation, comp: ev.comp.slice(),
       commander: ev.commander ? { ...ev.commander } : reinforceCmdr(sc), reserve: true, activateAt: at, ai: { tactic: 'push', level: sc.level } });
   }
-  return { bg: false, terrain: sc.terrain, fleets: fleetsS, scenario: sc.id, timeLimit: sc.timeLimit, level: sc.level, factions: sc.enemyFac != null ? [lo.faction || 0, sc.enemyFac] : (lo.faction || 0) === 1 ? [1, 0] : [0, 1], ...(sc.goal ? { goal: sc.goal } : {}), ...(sc.lines ? { lines: sc.lines } : {}), ...(sc.aiOmni ? { omni: [false, true] } : {}) };   // aiOmni：這一關的 AI 不受戰爭迷霧限制
+  return { bg: false, terrain: sc.terrain, fleets: fleetsS, scenario: sc.id, timeLimit: sc.timeLimit, level: sc.level, factions: sc.enemyFac != null ? [lo.faction || 0, sc.enemyFac] : (lo.faction || 0) === 1 ? [1, 0] : [0, 1], ...(sc.goal ? { goal: sc.goal } : {}), ...(sc.lines ? { lines: sc.lines } : {}), ...(sc.dlines ? { dlines: sc.dlines } : {}), ...(sc.defect ? { defect: sc.defect } : {}), ...(sc.aiOmni ? { omni: [false, true] } : {}) };   // aiOmni：這一關的 AI 不受戰爭迷霧限制
 }
 
 // ───── 技能（命令 'skill'） ─────
@@ -522,8 +522,9 @@ function checkVictory() {
   const t = U.uTime.value, tl = battleSetup.timeLimit, G = battleSetup.goal;
   const a0 = sideAlive(0), a1 = sideAlive(1), p = a0 / Math.max(1, GAME.init[0]), e = a1 / Math.max(1, GAME.init[1]);
   let r = null;
-  if (a1 === 0) r = ['win', '殲滅敵軍'];
-  else if (e < ROUT_AT && !noRout(1)) r = ['win', '敵軍潰走'];
+  const pend = fleets.some((f) => f.ally && f.defectAt != null && !f.reserve);   // 還有友軍沒倒戈（劇情的倒戈）：先不判勝利，等倒戈發生
+  if (a1 === 0 && !pend) r = ['win', '殲滅敵軍'];
+  else if (e < ROUT_AT && !noRout(1) && !pend) r = ['win', '敵軍潰走'];
   else if (a0 === 0) r = ['lose', '我軍全滅'];
   else if (p < ROUT_AT && !noRout(0)) r = ['lose', '我軍潰走'];
   else if (G && G.type === 'escort' && vipLost()) r = ['lose', `${G.name}損失過重`];
@@ -553,6 +554,9 @@ function gameTick() {
   if (end && simTick >= end.tick) { GAME.result = battleResult(end.kind, end.why, { retreat: !!end.retreat }); return; }
   const t = U.uTime.value;
   for (const f of fleets) if (f.reserve && f.activateAt != null && t >= f.activateAt) activateReserve(f);
+  // 倒戈的觸發（劇情）：敵軍剩下的比例夠低、或快到原本的倒戈秒數，就排定 lead 秒後倒戈（defT＝倒戈的時間，台詞跟著它走）
+  const DF = battleSetup.defect;
+  if (DF) for (const f of fleets) if (f.ally && f.defectAt != null && !f.defSched && (sideAlive(1) <= GAME.init[1] * DF.left || t >= f.defectAt - DF.lead)) { f.defSched = true; f.defT = f.defectAt = Math.min(f.defectAt, t + DF.lead); }
   for (const f of fleets) if (f.ally && f.defectAt != null && t >= f.defectAt) defectFleet(f);
   if (simTick % 30 === 0) for (const f of fleets) if (f.ai && !f.reserve && f.side !== GAME.simCtl) aiThink(f);
   if (simTick % 30 === 7) for (const f of fleets) if (f.supply && f.follow >= 0 && !f.reserve) supplyFollow(f);
@@ -1033,7 +1037,7 @@ function startBattle() {
   newBattle(GAME.sc.seed + GAME.attempt, setup);
   setRule('fire', true); setRule('advance', false);
   GAME.init = [sideAlive(0), sideAlive(1)];
-  GAME.result = null; GAME.reportShown = false; GAME.replaying = false; GAME.replayEnd = null; GAME.skillArm = null; GAME.xp = null; GAME.log = []; GAME.simCtl = null; GAME.lineK = 0;
+  GAME.result = null; GAME.reportShown = false; GAME.replaying = false; GAME.replayEnd = null; GAME.skillArm = null; GAME.xp = null; GAME.log = []; GAME.simCtl = null; GAME.lineK = 0; GAME.dlineK = 0;
   gEl('battlehud').innerHTML = '';
   drawField(false);
   setPhase('battle'); setCmdSide(GAME.playerSide, false); clearSelection();
@@ -1192,7 +1196,7 @@ function showReport() {
 function startReplay(rec) {
   overlay(null);
   if (GAME.result) GAME.lastResult = GAME.result;   // 提早結束回放時，戰報用原本的結果
-  GAME.replaying = true; GAME.result = null; GAME.reportShown = false; GAME.log = []; GAME.simCtl = null; GAME.lineK = 0;   // 模擬室的接管紀錄會在回放裡重新執行
+  GAME.replaying = true; GAME.result = null; GAME.reportShown = false; GAME.log = []; GAME.simCtl = null; GAME.lineK = 0; GAME.dlineK = 0;   // 模擬室的接管紀錄會在回放裡重新執行
   gEl('battlehud').innerHTML = '';
   const LR = GAME.lastResult;   // 撤退結束的戰鬥：回放停在撤退那一刻
   GAME.replayEnd = rec && rec.replay ? rec.replay.end || null : LR && LR.retreat ? replayEndOf(LR) : null;

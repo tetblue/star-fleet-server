@@ -5,6 +5,8 @@
 // intel：[準確度, 看不到的項目]；decoy：假情報（簡報只顯示第一支艦隊，兵力 × decoy，也看不到增援）；enemyFac：敵軍外觀的陣營（2＝灰鴉傭兵團；不要設成跟玩家同陣營：標籤顏色和船型會分不出來）
 // allies：AI 友軍 [艦隊名, 指揮官, 特性, 等級, 技能, 艦隊類型, 兵力, 陣型, 打法, x, 倒戈秒數（省略／null＝不倒戈）, 外觀的陣營（省略＝2 傭兵）]
 // lines：戰鬥中的通訊 [秒, 誰, 台詞]；after：打贏後的結語；supply：敵方補給艦隊（預算的倍數，跟著第一支艦隊）
+// defect：倒戈的觸發 { left: 敵軍剩下的比例, lead: 觸發後幾秒才倒戈 }：敵軍剩到 left 以下、或到了友軍的倒戈秒數減 lead，就排定 lead 秒後倒戈（取先到的）
+// dlines：跟著倒戈時間走的通訊 [相對倒戈的秒數（負數＝倒戈前）, 誰, 台詞]
 const stT = (type, x, z, r, y = 0) => ({ type, x, y, z, r });
 const STORY_DEATH = { kas: '10', grace: '16', duran: 'm7' };   // 劇情中退場：打完這一關之後就不能再派（只看自己篇章的關卡順序；杜蘭是離開灰鴉）
 const STORY_WAR = {
@@ -261,8 +263,9 @@ const STORY_WAR = {
     terrain: [stT('nebula', 280, -120, 200), stT('rock', -240, 40, 65, 30)],
     foes: [['帝國護航艦隊', '馮・霍爾', 'shield', 3, ['wall'], 'balanced', 0.5, 'line', 'push']],
     allies: [['聯盟第七艦隊', '葛瑞絲・卡特萊', 'dmg', 3, ['focus', 'rapid'], 'heavy', 0.5, 'wedge', 'push', -380, 115, 1]],
-    lines: [[3, '葛瑞絲', '（通訊）傭兵，跟緊。別讓我在背後擔心你們。'], [6, '賽隆', '放心，准將。灰鴉從不背棄雇主，在雇主付得起的時候。'], [100, '通訊官', '團長，洛珊的加密頻道。新報價……是現在這份的三倍。'], [109, '賽隆', '……全艦轉向。目標，聯盟艦隊。'],
-      [117, '賽隆', '（通訊）抱歉，准將。有人出了更好的價錢。這是生意。'], [220, '葛瑞絲', '（通訊）我記住你了，賽隆。']],
+    defect: { left: 0.5, lead: 15 },
+    lines: [[3, '葛瑞絲', '（通訊）傭兵，跟緊。別讓我在背後擔心你們。'], [6, '賽隆', '放心，准將。灰鴉從不背棄雇主，在雇主付得起的時候。']],
+    dlines: [[-15, '通訊官', '團長，洛珊的加密頻道。新報價……是現在這份的三倍。'], [-6, '賽隆', '……全艦轉向。目標，聯盟艦隊。'], [2, '賽隆', '（通訊）抱歉，准將。有人出了更好的價錢。這是生意。'], [30, '葛瑞絲', '（通訊）我記住你了，賽隆。']],
     after: '灰鴉拿到了三倍的報酬。付款帳戶在洛珊，戶名是一間沒人聽過的貨運公司。賽隆沒有問，他從來不問。' },
   'm3': { budget: 3600, time: 300, fleets: 2, lv: 3, enemyFac: 0, goal: 'survive', intel: [0.7, ['events']],
     terrain: [stT('nebula', -320, -120, 220), stT('nebula', 340, -60, 200), stT('asteroid', 0, -80, 150), stT('rock', -380, 120, 60, 30)],
@@ -319,7 +322,9 @@ const STORY_WAR = {
     terrain: [stT('nebula', 280, -120, 200), stT('rock', -240, 40, 65, 30)],
     foes: [['帝國護航艦隊', '馮・霍爾', 'shield', 3, ['wall'], 'balanced', 0.55, 'line', 'push']],
     allies: [['灰鴉傭兵團', '賽隆', 'speed', 4, ['charge', 'evade'], 'raider', 0.45, 'wedge', 'flank', 380, 115]],
-    lines: [[3, '葛瑞絲', '傭兵？……收錢打仗的人，我不信任。'], [6, '賽隆', '（通訊）放心，准將。灰鴉從不背棄雇主，在雇主付得起的時候。'], [113, '通訊官', '灰鴉艦隊轉向了！他們……把砲口對準我們！'], [117, '賽隆', '（通訊）抱歉，有人出了更好的價錢。這是生意。'], [220, '葛瑞絲', '我記住你了，賽隆。']],
+    defect: { left: 0.5, lead: 15 },
+    lines: [[3, '葛瑞絲', '傭兵？……收錢打仗的人，我不信任。'], [6, '賽隆', '（通訊）放心，准將。灰鴉從不背棄雇主，在雇主付得起的時候。']],
+    dlines: [[-15, '通訊官', '灰鴉艦隊的通訊頻道……剛剛切換成加密模式了。'], [-2, '通訊官', '灰鴉艦隊轉向了！他們……把砲口對準我們！'], [2, '賽隆', '（通訊）抱歉，有人出了更好的價錢。這是生意。'], [30, '葛瑞絲', '我記住你了，賽隆。']],
     after: '葛瑞絲撐住了戰線。事後調查發現，出更高價的不是帝國，付款帳戶在洛珊。' },
   's3': { budget: 3600, time: 420, fleets: 2, lv: 3, enemyFac: 2, intel: [0.55, ['comp', 'events']], supply: 0.8,
     terrain: [stT('rock', 0, -330, 115, 0), stT('nebula', -320, -120, 220), stT('nebula', 340, -60, 200), stT('asteroid', 0, -80, 150)],
@@ -336,7 +341,7 @@ const STORY_DIFF = [
   { key: 'normal', en: 'NORMAL', name: '普通', lv: 0, pow: 1, ai: 0, desc: '照劇本設計的強度。要讀情報、選陣型，才打得順。' },
   { key: 'hard', en: 'HARD', name: '困難', lv: 2, pow: 1.15, ai: 1, desc: '敵方指揮官高 2 級、兵力多 15%、AI 更會打。給熟悉戰術、指揮官練得夠高的玩家。' },
 ];
-const storyDiffOf = (p) => STORY_DIFF[p && p.diff != null ? p.diff : 1] || STORY_DIFF[1];
+const storyDiffOf = (p) => STORY_DIFF[GAME.storyDiffForce != null ? GAME.storyDiffForce : p && p.diff != null ? p.diff : 1] || STORY_DIFF[1];   // storyDiffForce：測試用（自動代打），不寫進存檔
 // 建議等級：這一關敵方指揮官的平均等級（套用難度）減 1
 function storyRec(id, D = storyDiffOf(storyLoad())) {
   const lv = STORY_WAR[id].foes.map((f) => Math.max(1, f[3] + D.lv));
@@ -360,7 +365,7 @@ function storyScenario(id) {
       ...(cm ? { commander: { name: cm[0], trait: cm[1], level: Math.max(1, cm[2] + D.lv), skills: cm[3].slice() } } : {}) })),
     intel: { accuracy: W.intel ? W.intel[0] : 0.8, hide: W.intel ? W.intel[1].slice() : [] },
     enemySupply: W.supply ? { comp: aiSupplyComp(B * W.supply), formation: 'ring', x: enemy[0].x, z: enemy[0].z - 230, h: 0, follow: 0 } : null,
-    goal: W.goal ? { type: W.goal, ...(W.vip ? { name: W.vip.name } : {}) } : null, lines: W.lines ? W.lines.map(([t, who, msg]) => [t, who, storyText(msg)]) : null, after: storyText(W.after || ''), decoy: W.decoy || 0 };
+    goal: W.goal ? { type: W.goal, ...(W.vip ? { name: W.vip.name } : {}) } : null, lines: W.lines ? W.lines.map(([t, who, msg]) => [t, who, storyText(msg)]) : null, dlines: W.dlines ? W.dlines.map(([t, who, msg]) => [t, who, storyText(msg)]) : null, defect: W.defect || null, after: storyText(W.after || ''), decoy: W.decoy || 0 };
   if (W.enemyFac != null) sc.enemyFac = W.enemyFac;
   if (W.allies) sc.allies = W.allies.map(([name, cn, trait, level, skills, arch, pow, formation, tactic, x, defect, fac]) => ({ name, commander: { name: cn, trait, level: Math.max(1, level + D.lv), skills: skills.slice() },
     comp: comp(arch, pow), formation, tactic, x, z: 300 + ZONE_SHIFT - 40, h: Math.PI, fac: fac != null ? fac : 2, defectAt: defect != null ? defect : null }));
@@ -427,6 +432,7 @@ function storyResult(R) {
   const p = storyLoad(), s = STORY_BY[sc.stageId];
   p.done[sc.stageId] = Date.now();
   storySave(p);
+  const V = GAME.storyView; if (V) { V.sel = null; V.vb = null; if (V.selBy) delete V.selBy[s.line]; }   // 回到星圖時聚焦到下一場
   // 傭兵：第一次打完跟傭兵有關的任務 → 酒館出現傭兵指揮官；打下灰鴉的基地 → 可以買傭兵支援
   GAME.storyGains = [];
   for (const id of s.joins || []) if (storyJoin(id)) { const c = STORY_CMDRS.find((o) => o.id === id); GAME.storyGains.push(`${c.title} ${c.name}加入了${STORY_SIDE[c.faction].name}（Lv ${c.lv}，之後各模式都能派）`); }
@@ -449,6 +455,10 @@ function storyAgain(R) {
 function storyLines(t) {
   const L = battleSetup.lines;
   while ((GAME.lineK || 0) < L.length && L[GAME.lineK || 0][0] <= t) { const [, who, msg] = L[GAME.lineK || 0]; GAME.lineK = (GAME.lineK || 0) + 1; toast(`${who}：${msg}`, 'story'); }
+  // 跟著倒戈時間走的台詞：倒戈排定之後才知道時間
+  const DL = battleSetup.dlines, f = DL && fleets.find((o) => o.defSched);
+  if (!f) return;
+  while ((GAME.dlineK || 0) < DL.length && f.defT + DL[GAME.dlineK || 0][0] <= t) { const [, who, msg] = DL[GAME.dlineK || 0]; GAME.dlineK = (GAME.dlineK || 0) + 1; toast(`${who}：${msg}`, 'story'); }
 }
 // 測試用：直接把某一篇的進度設成打完前 n 場（console：__demo.storyUnlock(15) 或 __demo.storyUnlock(14, 'a')）；另一篇的進度保留
 function storyUnlock(n, line = 'e') {

@@ -1,7 +1,7 @@
 // ═══════════════════════ 劇情戰役〈雙星記〉：星圖選關（每一關的戰鬥資料在 story_war.js） ═══════════════════════
 // 兩條獨立的篇章：進劇情時選帝國篇（line 'e'）或聯盟篇（line 'a'），玩家從頭到尾只操作同一個陣營，結局跟著陣營走
 // 原本屬於對方視角的關卡改成「同一場戰役的另一邊」（鏡像關，id 加 e／a 後綴）；對方的劇情用簡報裡的幕間（inter）交代
-// 星圖座標：viewBox 1600×900；西邊帝國、東邊聯盟，中間是暗黑星雲帶（阿刻戎走廊從中間穿過），南邊是洛珊自治領
+// 星圖座標：關卡、地標的 x、y 以 1600×900 為準（畫的時候放大 STORY_K 倍，見 storyLayoutAll）；西邊帝國、東邊聯盟，中間是暗黑星雲帶（阿刻戎走廊從中間穿過），南邊是洛珊自治領
 const STORY_STORE = 'fleet.story';
 const STORY_CH = [
   { no: '序章', name: '邊境' }, { no: '第一章', name: '星雲' }, { no: '第二章', name: '要塞' },
@@ -186,10 +186,122 @@ function storyState(p, id) {
 }
 const storyNodeStage = (p, node) => STORY_BY[node.ids[0]];
 const storyNodeState = (p, node) => storyState(p, node.ids[0]);
-const storyPos = (key) => { const s = STORY_BY[key]; return [s.x, s.y]; };
+// 星圖上的位置：STORY_STAGES 的 x、y 是 1600×900 的原始座標，放大 STORY_K 倍成星圖世界座標（字的大小不變，各關之間就拉開了），
+// 再用 storyLayoutAll 把「星系＋名稱＋上方標籤（下一場、章名）」當成一個方框互相推開，連首都、要塞的名稱也不會被擋住
+const STORY_K = 1.5, STORY_W = 1600 * STORY_K, STORY_H = 900 * STORY_K;
+let STORY_POS = null;
+function storyMarkBox(m) {   // 地標（首都、要塞）的圖示＋名稱佔的範圍（世界座標）
+  const x = m.x * STORY_K, y = m.y * STORY_K, w = Math.max([...m.name].length * 26, [...m.sub].length * 17);
+  if (m.lp === 'up') return { l: x - w / 2, r: x + w / 2, t: y - 70, b: y + 16 };
+  if (m.lp === 'down') return { l: x - w / 2, r: x + w / 2, t: y - 18, b: y + 66 };
+  if (m.lp === 'right') return { l: x - 16, r: x + 24 + w, t: y - 26, b: y + 24 };
+  return { l: x - 24 - w, r: x + 16, t: y - 26, b: y + 24 };
+}
+function storyLayoutAll() {
+  if (STORY_POS) return STORY_POS;
+  STORY_POS = {};
+  const tw = (t, px) => [...t].length * px, PAD = 10, obs = STORY_MARKS.map(storyMarkBox);
+  for (const line of Object.keys(STORY_LINE)) {
+    const seq = storySeq(line);
+    const it = storyNodes(line).map((n) => {
+      const s = STORY_BY[n.key], r = n.sub ? 16 : 22, ch = STORY_CH[s.ch], first = !n.sub && seq.find((id) => STORY_BY[id].ch === s.ch) === n.key;
+      const w = Math.max(70, tw(s.name, 21) + 8, first ? tw(ch.no + ch.name, 17) + 34 : 0) * 1.3;   // 節點群組放大 1.3 倍畫
+      return { id: n.key, x: s.x * STORY_K, y: s.y * STORY_K, x0: s.x * STORY_K, y0: s.y * STORY_K, w, top: (r + 30 + (first ? 24 : 0)) * 1.3, bot: (r + 32) * 1.3 };
+    });
+    const box = (a) => ({ l: a.x - a.w / 2, r: a.x + a.w / 2, t: a.y - a.top, b: a.y + a.bot });
+    const push = (a, B, k) => {   // 把 a 推出方框 B；k＝a 負擔的比例（兩個都能動就各一半）
+      const A = box(a), ox = Math.min(A.r, B.r) - Math.max(A.l, B.l) + PAD, oy = Math.min(A.b, B.b) - Math.max(A.t, B.t) + PAD;
+      if (ox <= 0 || oy <= 0) return 0;
+      if (ox < oy) a.x += (A.l + A.r < B.l + B.r ? -1 : 1) * ox * k; else a.y += (A.t + A.b < B.t + B.b ? -1 : 1) * oy * k;
+      return Math.min(ox, oy);
+    };
+    for (let iter = 0; iter < 400; iter++) {
+      let worst = 0;
+      for (let i = 0; i < it.length; i++) for (let j = i + 1; j < it.length; j++) {
+        const a = it[i], b = it[j], Bb = box(b), d = push(a, Bb, 0.5);
+        if (d) push(b, box(a), 1);   // a 已經讓出一半，剩下的由 b 讓
+        worst = Math.max(worst, d);
+      }
+      for (const a of it) for (const B of obs) worst = Math.max(worst, push(a, B, 1));
+      for (const a of it) {   // 往原本的位置拉一點（地理位置不要跑太遠），並留在星圖裡
+        a.x += (a.x0 - a.x) * 0.01; a.y += (a.y0 - a.y) * 0.01;
+        a.x = Math.max(a.w / 2 + 12, Math.min(STORY_W - a.w / 2 - 12, a.x)); a.y = Math.max(a.top + 12, Math.min(STORY_H - a.bot - 12, a.y));
+      }
+      if (!worst && iter > 20) break;
+    }
+    for (const a of it) STORY_POS[a.id] = [Math.round(a.x), Math.round(a.y)];
+  }
+  return STORY_POS;
+}
+const storyPos = (key) => storyLayoutAll()[key];
 
 // ───── 星圖（SVG） ─────
-function storyMapSVG(p, sel) {
+const STORY_VB = [0, 0, STORY_W, STORY_H], STORY_ZOOM_MIN = 560;   // 整張星圖；最多放大到寬 560
+const STORY_EDGE = 40;   // 邊緣捲動的感應範圍（px）
+// 星圖的縮放與拖曳：滾輪縮放（以游標為中心）、左鍵拖曳平移、雙擊或「⟲」回到整張；縮放狀態存在 V.vb，重畫之後保留
+// 可視範圍的長寬比跟著星圖框（框至少是 16:9）：整張時看到全寬，上下超出的部分用拖的
+// V.focus＝要聚焦的關卡 id（打開星圖、打完一場、點章節時）：縮放到剛好框住它們
+function storyMapBind(V) {
+  const svg = document.querySelector('.st-svg'); if (!svg) return;
+  const cur = () => V.vb || STORY_VB;
+  const aspect = () => { const r = svg.getBoundingClientRect(); return r.width > 0 && r.height > 0 ? r.height / r.width : STORY_H / STORY_W; };
+  const set = (vb) => {
+    const a = aspect(), w = Math.max(STORY_ZOOM_MIN, Math.min(STORY_W, STORY_H / a, vb[2])), h = Math.min(STORY_H, w * a);
+    const cx = vb[0] + vb[2] / 2, cy = vb[1] + (vb[3] || vb[2] * a) / 2;   // 換比例時以中心為準
+    V.vb = [Math.max(0, Math.min(STORY_W - w, cx - w / 2)), Math.max(0, Math.min(STORY_H - h, cy - h / 2)), w, h];
+    svg.setAttribute('viewBox', V.vb.map((v) => v.toFixed(1)).join(' '));
+  };
+  if (V.focus) {
+    const pts = V.focus.filter((id) => STORY_BY[id]).map(storyPos), a = aspect();
+    const x0 = Math.min(...pts.map((q) => q[0])) - 180, x1 = Math.max(...pts.map((q) => q[0])) + 180, y0 = Math.min(...pts.map((q) => q[1])) - 150, y1 = Math.max(...pts.map((q) => q[1])) + 140;
+    const w = Math.max(1400, x1 - x0, (y1 - y0) / a);   // 最少看到星圖寬度的六成左右，前後關卡都還在畫面裡   // 最少看到星圖寬度的六成多，前後關卡都還在畫面裡
+    set([(x0 + x1) / 2 - w / 2, (y0 + y1) / 2 - w * a / 2, w, w * a]); V.focus = null;
+  } else set(cur());
+  addEventListener('resize', function rs() { if (!svg.isConnected) { removeEventListener('resize', rs); return; } set(cur()); });
+  const scale = () => { const r = svg.getBoundingClientRect(), vb = cur(); return { r, s: Math.min(r.width / vb[2], r.height / vb[3]), vb }; };
+  const toMap = (cx, cy) => { const { r, s, vb } = scale(); return [vb[0] + (cx - r.left - (r.width - vb[2] * s) / 2) / s, vb[1] + (cy - r.top - (r.height - vb[3] * s) / 2) / s]; };
+  const zoomAt = (f, mx, my) => { const vb = cur(), w = Math.max(STORY_ZOOM_MIN, Math.min(STORY_W, vb[2] * f)), k = w / vb[2]; set([mx - (mx - vb[0]) * k, my - (my - vb[1]) * k, w, vb[3] * k]); };
+  svg.addEventListener('wheel', (e) => { e.preventDefault(); const [mx, my] = toMap(e.clientX, e.clientY); zoomAt(e.deltaY > 0 ? 1.2 : 1 / 1.2, mx, my); }, { passive: false });
+  let drag = null;
+  svg.addEventListener('pointerdown', (e) => { if (e.button === 0) drag = { x: e.clientX, y: e.clientY, vb: cur().slice(), id: e.pointerId, moved: false }; });
+  svg.addEventListener('pointermove', (e) => {
+    edge.x = e.clientX; edge.y = e.clientY; edge.on = true;
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!drag.moved && Math.hypot(dx, dy) < 5) return;
+    if (!drag.moved) { drag.moved = true; svg.setPointerCapture(drag.id); svg.classList.add('drag'); }   // 真的拖了才接管指標（不然點節點會失效）
+    const { s } = scale(); set([drag.vb[0] - dx / s, drag.vb[1] - dy / s, drag.vb[2], drag.vb[3]]);
+  });
+  const up = () => { if (drag && drag.moved) { V.dragged = performance.now(); svg.classList.remove('drag'); } drag = null; };
+  svg.addEventListener('pointerup', up); svg.addEventListener('pointercancel', up);
+  svg.addEventListener('dblclick', () => set(STORY_VB));
+  // 邊緣捲動：滑鼠停在星圖邊緣 STORY_EDGE px 內超過 0.15 秒，就往那個方向移動（越靠邊越快）；拖曳中、滑鼠離開星圖就停
+  const edge = { x: 0, y: 0, on: false, since: 0, last: 0 };
+  svg.addEventListener('pointerleave', () => { edge.on = false; svg.parentElement.classList.remove('edge'); });
+  const tick = (now) => {
+    if (!svg.isConnected) return;   // 星圖重畫了：舊的迴圈結束
+    requestAnimationFrame(tick);
+    const dt = Math.min(0.05, (now - (edge.last || now)) / 1000); edge.last = now;
+    const vb = cur(), r = svg.getBoundingClientRect();
+    let vx = 0, vy = 0;
+    if (edge.on && !drag && (vb[2] < STORY_W - 0.5 || vb[3] < STORY_H - 0.5)) {
+      const k = (d) => (d < STORY_EDGE ? 1 - Math.max(0, d) / STORY_EDGE : 0);
+      vx = k(r.right - edge.x) - k(edge.x - r.left); vy = k(r.bottom - edge.y) - k(edge.y - r.top);
+    }
+    if (!vx && !vy) { edge.since = 0; svg.parentElement.classList.remove('edge'); return; }
+    if (!edge.since) edge.since = now;
+    if (now - edge.since < 150) return;   // 只是滑過邊緣（例如移到右邊面板）：不動
+    svg.parentElement.classList.add('edge');
+    const sp = vb[2] * 0.6 * dt;   // 每秒最多移動可視寬度的六成
+    set([vb[0] + vx * sp, vb[1] + vy * sp, vb[2], vb[3]]);
+  };
+  requestAnimationFrame(tick);
+  document.querySelectorAll('.st-zoom [data-z]').forEach((b) => { b.onclick = () => {
+    const z = b.dataset.z, vb = cur();
+    if (z === 'reset') set(STORY_VB); else zoomAt(z === 'in' ? 1 / 1.4 : 1.4, vb[0] + vb[2] / 2, vb[1] + vb[3] / 2);
+  }; });
+}
+function storyMapSVG(p, sel, vb = STORY_VB, curCh = -1) {
   const R = mulberry32(20261020), line = storyLineOf(p), ended = p.done['21' + line] ? STORY_LINE[line].side : -1;
   const stars = Array.from({ length: 260 }, () => `<circle cx="${(R() * 1600).toFixed(0)}" cy="${(R() * 900).toFixed(0)}" r="${(0.4 + R() * R() * 1.6).toFixed(2)}" opacity="${(0.25 + R() * 0.6).toFixed(2)}"/>`).join('');
   // 勢力範圍：結局後輸的一方染成贏家的顏色
@@ -205,10 +317,11 @@ function storyMapSVG(p, sel) {
     .map(([t, x, y, c]) => `<text class="st-region ${c}" x="${x}" y="${y}">${t}</text>`).join('');
   const marks = STORY_MARKS.map((m) => {
     const side = m.flip && m.flip.some((id) => p.done[id]) ? 1 : ended >= 0 && m.side < 2 ? ended : m.side, c = ['emp', 'all', 'neu'][side];
-    const icon = m.kind === 'fortress' ? `<path class="st-mk ${c}" d="M${m.x} ${m.y - 16}l14 8v16l-14 8l-14-8v-16z"/>`
-      : `<circle class="st-mk ${c}" cx="${m.x}" cy="${m.y}" r="12"/><circle class="st-mk-c ${c}" cx="${m.x}" cy="${m.y}" r="5"/>`;
+    const mx = m.x * STORY_K, my = m.y * STORY_K;
+    const icon = m.kind === 'fortress' ? `<path class="st-mk ${c}" d="M${mx} ${my - 16}l14 8v16l-14 8l-14-8v-16z"/>`
+      : `<circle class="st-mk ${c}" cx="${mx}" cy="${my}" r="12"/><circle class="st-mk-c ${c}" cx="${mx}" cy="${my}" r="5"/>`;
     const [dx, dy, an] = { up: [0, -44, 'middle'], down: [0, 40, 'middle'], right: [22, -2, 'start'], left: [-22, -2, 'end'] }[m.lp];
-    return `<g class="st-mark" text-anchor="${an}">${icon}<text class="st-mk-t" x="${m.x + dx}" y="${m.y + dy}">${m.name}</text><text class="st-mk-s" x="${m.x + dx}" y="${m.y + dy + 19}">${m.sub}</text></g>`;
+    return `<g class="st-mark" text-anchor="${an}">${icon}<text class="st-mk-t" x="${mx + dx}" y="${my + dy}">${m.name}</text><text class="st-mk-s" x="${mx + dx}" y="${my + dy + 19}">${m.sub}</text></g>`;
   }).join('');
   // 航線：依目的地的狀態畫實線（已走過）、亮虛線（下一步）、淡虛線（未來）
   const NODES = storyNodes(line);
@@ -216,19 +329,24 @@ function storyMapSVG(p, sel) {
     const nb = NODES.find((o) => o.key === b), st = storyNodeState(p, nb), s = storyNodeStage(p, nb);
     const c = STORY_SIDE[s.side].cls, [x1, y1] = storyPos(a), [x2, y2] = storyPos(b);
     const mx = (x1 + x2) / 2 + (y2 - y1) * 0.12, my = (y1 + y2) / 2 - (x2 - x1) * 0.12;   // 稍微彎曲
-    return `<path class="st-link ${st} ${c} ${nb.sub ? 'sub' : ''}" d="M${x1} ${y1}Q${mx.toFixed(0)} ${my.toFixed(0)} ${x2} ${y2}"/>`;
+    const far = curCh >= 0 && s.ch !== curCh ? 'far' : '';
+    return `<path class="st-link ${st} ${c} ${nb.sub ? 'sub' : ''} ${far}" d="M${x1} ${y1}Q${mx.toFixed(0)} ${my.toFixed(0)} ${x2} ${y2}"/>`;
   }).join('');
   const nodes = NODES.map((n) => {
     const s = storyNodeStage(p, n), st = storyNodeState(p, n), [x, y] = storyPos(n.key);
     const c = STORY_SIDE[s.side].cls, label = st === 'locked' ? '' : s.name;
     const no = n.sub ? '支' : storySeq(line).indexOf(n.key) + 1, r = n.sub ? 16 : 22;   // 支線：小一號的節點
-    return `<g class="st-node ${st} ${c} ${n.sub ? 'sub' : ''} ${sel === n.key ? 'sel' : ''}" data-k="${n.key}" transform="translate(${x} ${y})" tabindex="0">
-      <circle class="st-hit" r="34"/>${st === 'avail' ? `<circle class="st-pulse" r="${r}"/>` : ''}
+    const seq = storySeq(line), ch = STORY_CH[s.ch], first = !n.sub && seq.find((id) => STORY_BY[id].ch === s.ch) === n.key;   // 這一章的第一關：標出章名
+    const next = st === 'avail' && !n.sub, far = curCh >= 0 && s.ch !== curCh ? 'far' : '';
+    const tip = `${storyNo(s)}${st === 'locked' ? '・？？？' : `〈${s.name}〉`}　${ch.no} ${ch.name}　${{ done: '已完成（可以重打）', avail: n.sub ? '可以打的支線（不打也能繼續主線）' : '下一場作戰：點選查看', locked: '還沒開放' }[st]}`;
+    const tags = [next ? `<text class="st-next" y="${-r - 12}">▼ 下一場</text>` : st === 'avail' ? `<text class="st-next sub" y="${-r - 10}">支線</text>` : '', first ? `<text class="st-cht" y="${-r - (next ? 34 : 12)}">${ch.no}　${ch.name}</text>` : ''].join('');
+    return `<g class="st-node ${st} ${c} ${n.sub ? 'sub' : ''} ${sel === n.key ? 'sel' : ''} ${far}" data-k="${n.key}" transform="translate(${x} ${y}) scale(1.3)" tabindex="0" aria-label="${tip}">
+      <title>${tip}</title>${tags}<circle class="st-hit" r="34"/>${st === 'avail' ? `<circle class="st-pulse" r="${r}"/>` : ''}
       <circle class="st-ring" r="${r}"/><circle class="st-core" r="${r - 5}"/>
       <text class="st-no" y="6">${st === 'done' ? '✓' : no}</text>
       ${label ? `<text class="st-lb" y="${r + 26}">${label}</text>` : ''}</g>`;
   }).join('');
-  return `<svg class="st-svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid meet" role="img" aria-label="雙星記星圖">
+  return `<svg class="st-svg" viewBox="${vb.join(' ')}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="雙星記星圖">
     <defs>
       <radialGradient id="stg-emp"><stop offset="0" stop-color="#f2b35a" stop-opacity=".16"/><stop offset="1" stop-color="#f2b35a" stop-opacity="0"/></radialGradient>
       <radialGradient id="stg-all"><stop offset="0" stop-color="#7cc4ff" stop-opacity=".16"/><stop offset="1" stop-color="#7cc4ff" stop-opacity="0"/></radialGradient>
@@ -236,6 +354,7 @@ function storyMapSVG(p, sel) {
       <radialGradient id="stg-ame"><stop offset="0" stop-color="#b48cff" stop-opacity=".35"/><stop offset="1" stop-color="#b48cff" stop-opacity="0"/></radialGradient>
       <filter id="stf-blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="28"/></filter>
     </defs>
+    <g transform="scale(${STORY_K})">
     <g class="st-stars">${stars}</g>
     ${blobs}
     <g class="st-dust2" filter="url(#stf-blur)">${dust(mulberry32(11))}</g>
@@ -243,14 +362,16 @@ function storyMapSVG(p, sel) {
     <ellipse cx="835" cy="290" rx="120" ry="80" fill="url(#stg-ame)"/>
     <path class="st-lane" d="M590 380C680 395 720 430 800 420S940 400 1010 410"/><text class="st-lane-t" x="920" y="455">阿刻戎走廊</text>
     <path class="st-lane" d="M470 560C520 690 660 790 830 820S1100 720 1180 560"/><text class="st-lane-t" x="1110" y="700">洛珊航道</text>
-    ${regions}${links}${marks}${nodes}
+    ${regions}</g>
+    ${links}${marks}${nodes}
   </svg>`;
 }
 
 // ───── 畫面 ─────
-function storyPanel(p, key) {
-  const s = STORY_BY[key];
-  if (!s || s.line !== storyLineOf(p)) return `<div class="st-panel g-card"><div class="g-dim">點選星圖上的星系查看作戰。</div></div>`;
+// chs：章節列表（放在面板最下面，點了跳到那一章）
+function storyPanel(p, key, chs = '') {
+  const s = STORY_BY[key], chBox = chs ? `<div class="st-chs"><div class="st-chs-h">章節</div>${chs}</div>` : '';
+  if (!s || s.line !== storyLineOf(p)) return `<div class="st-panel g-card"><div class="g-dim">點選星圖上的星系查看作戰。</div>${chBox}</div>`;
   const st = storyState(p, s.id);
   const side = STORY_SIDE[s.side], ch = STORY_CH[s.ch], open = st !== 'locked';
   const cast = s.cast.map((id) => { const c = storyCmdrDef(id); return c ? `${c.title} ${c.name}` : id; }).join('、');
@@ -263,6 +384,7 @@ function storyPanel(p, key) {
       : `<p class="g-dim">${s.sub ? `完成${s.req.map((q) => (STORY_BY[q].sub ? `支線「${STORY_BY[q].name}」` : storyNo(STORY_BY[q]))).join('、')}後開放。支線不打也能繼續主線。` : '完成前一場作戰後開放。'}</p>`}
     ${st === 'done' && s.ending ? `<div class="st-end"><b>結局</b><p>${storyText(s.ending)}</p></div>` : ''}
     <div class="g-row" style="margin-top:12px"><span class="g-sp"></span>${open ? `<button class="g-btn ${st === 'done' ? '' : 'pri'}" data-go="${s.id}">${st === 'done' ? '重打這一關' : '出擊 →'}</button>` : ''}</div>
+    ${chBox}
   </div>`;
 }
 function showStory() {
@@ -271,18 +393,24 @@ function showStory() {
   if (!STORY_LINE[p.line]) { showStoryLine(); return; }   // 第一次進來：先選篇章（陣營）
   if (p.diff == null) { showStoryDiff(); return; }        // 再選難度
   const line = p.line, L = STORY_LINE[line], NODES = storyNodes(line);
+  V.selBy = V.selBy || {};
+  if (!V.sel && V.selBy[line]) V.sel = V.selBy[line];   // 切換篇章回來：停在上次看的那一關
+  const fresh = !V.sel || !V.vb;   // 剛打開星圖、打完一場回來：聚焦到目前這一章
   if (!V.sel || !NODES.some((n) => n.key === V.sel)) { const nx = NODES.find((n) => !n.sub && storyNodeState(p, n) === 'avail'); V.sel = nx ? nx.key : storySeq(line)[0]; }
+  V.selBy[line] = V.sel;
   setPhase('briefing');
+  const curCh = STORY_BY[V.sel] ? STORY_BY[V.sel].ch : -1;
+  const chIds = (k) => NODES.map((n) => n.key).filter((id) => STORY_BY[id].ch === k);
+  if (fresh) V.focus = chIds(curCh).concat([V.sel]);
   const chs = STORY_CH.map((c, k) => {
     const ids = storySeq(line).filter((id) => STORY_BY[id].ch === k), d = ids.filter((id) => p.done[id]).length;
     const subs = STORY_SUBS.filter((s) => s.ch === k && s.line === line), sd = subs.filter((s) => p.done[s.id]).length;
     if (!ids.length) return '';   // 番外篇：沒有關卡的章節不顯示
-    return `<button class="st-chb ${d === ids.length ? 'done' : d ? 'on' : ''}" data-ch="${k}"><span>${c.no}</span><b>${c.name}</b><i>${d}／${ids.length}${subs.length ? `・支線 ${sd}／${subs.length}` : ''}</i></button>`;
+    return `<button class="st-chb ${d === ids.length ? 'done' : d ? 'on' : ''} ${k === curCh ? 'cur' : ''}" data-ch="${k}"><span>${c.no}</span><b>${c.name}</b><i>${d}／${ids.length}${subs.length ? `・支線 ${sd}／${subs.length}` : ''}</i></button>`;
   }).join('');
   overlay(`<div class="g-wrap st-wrap">
     <div class="g-head"><h2>雙星記</h2><span class="crumb"><span class="g-${STORY_SIDE[L.side].cls}">${L.name}</span>・${storyCount(p, line)}／${storySeq(line).length} 場作戰</span><span class="g-sp"></span><button class="g-btn sm" id="st-line" title="換到另一個篇章（兩篇的進度分開保存）">切換篇章</button><button class="g-btn sm" id="st-diff" title="更改難度（進度不會重置）">難度：${storyDiffOf(p).name}</button><button class="g-btn sm" id="st-reset">重新開始${L.name}</button><button class="g-btn" id="st-back">← 單人戰鬥</button></div>
-    <div class="st-main"><div class="st-map">${storyMapSVG(p, V.sel)}</div>${storyPanel(p, V.sel)}</div>
-    <div class="st-chs">${chs}</div>
+    <div class="st-main"><div class="st-map">${storyMapSVG(p, V.sel, V.vb || STORY_VB, curCh)}<div class="st-help">點選星系查看作戰・滾輪縮放・拖曳移動・雙擊看整張</div><div class="st-zoom"><button class="g-btn sm" data-z="in" title="放大（滾輪也可以）">＋</button><button class="g-btn sm" data-z="out" title="縮小">－</button><button class="g-btn sm" data-z="reset" title="整張星圖（雙擊星圖也可以）">⟲</button></div></div>${storyPanel(p, V.sel, chs)}</div>
   </div>`);
   gEl('st-back').onclick = showSingle;
   document.querySelectorAll('.st-panel [data-go]').forEach((b) => { b.onclick = () => storyBriefing(b.dataset.go); });
@@ -292,14 +420,15 @@ function showStory() {
   };
   gEl('st-diff').onclick = () => showStoryDiff(true);
   gEl('st-line').onclick = () => showStoryLine(true);
-  const pick = (k) => { V.sel = k; const y = gEl('game').scrollTop; showStory(); gEl('game').scrollTop = y; };
+  storyMapBind(V);
+  const pick = (k) => { if (performance.now() - (V.dragged || 0) < 250) return; V.sel = k; const y = gEl('game').scrollTop; showStory(); gEl('game').scrollTop = y; };   // 剛拖完星圖：不算點選
   document.querySelectorAll('.st-node').forEach((g) => {
     g.onclick = () => pick(g.dataset.k);
     g.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(g.dataset.k); } };
   });
   document.querySelectorAll('.st-chb').forEach((b) => { b.onclick = () => {
     const k = +b.dataset.ch, ids = storySeq(line).filter((id) => STORY_BY[id].ch === k);
-    pick(ids.find((id) => storyState(p, id) === 'avail') || ids[0]);
+    V.focus = chIds(k); V.sel = ids.find((id) => storyState(p, id) === 'avail') || ids[0]; showStory();   // 章節：星圖帶到那一章
   }; });
 }
 // 選篇章：帝國篇或聯盟篇。整篇只操作這個陣營；兩篇的進度分開保存，隨時可以回來換
@@ -308,19 +437,20 @@ function showStoryLine(change) {
   setPhase('briefing');
   const card = (k) => {
     const L = STORY_LINE[k], cls = STORY_SIDE[L.side].cls, n = storyCount(p, k), all = storySeq(k).length, cur = change && p.line === k;
+    const nx = STORY_BY[storySeq(k).find((id) => !p.done[id])];
     return `<button class="sp-mode st-linepick ${cls} ${cur ? 'on' : ''}" data-l="${k}"><span class="sp-en">${L.extra ? '番外篇・' : ''}${STORY_SIDE[L.side].name}${cur ? '・目前' : ''}</span><b class="g-${cls}">${L.name}</b><span class="sp-desc">${L.blurb}</span>
-      ${L.note ? `<span class="sp-desc st-note">${L.note}</span>` : ''}<span class="sp-st"><span class="g-dim">主要人物</span>　${L.cast}</span><span class="sp-st"><span class="g-dim">進度</span>　${n ? `${n}／${all} 場作戰${p.done[storySeq(k)[all - 1]] ? `・已看過結局〈${L.ending}〉` : ''}` : `尚未開始・共 ${all} 場作戰`}</span></button>`;
+      ${L.note ? `<span class="sp-desc st-note">${L.note}</span>` : ''}<span class="sp-st"><span class="g-dim">主要人物</span>　${L.cast}</span><span class="sp-st"><span class="g-dim">進度</span>　${n ? `${n}／${all} 場作戰${p.done[storySeq(k)[all - 1]] ? `・已看過結局〈${L.ending}〉` : nx ? `・下一場：${storyNo(nx)}〈${nx.name}〉` : ''}` : `尚未開始・共 ${all} 場作戰`}</span></button>`;
   };
   overlay(`<div class="g-wrap sp-wrap">
     <div class="g-head"><h2>雙星記</h2><span class="crumb">${change ? '切換篇章' : '選擇你要追隨的陣營'}</span><span class="g-sp"></span><button class="g-btn" id="sl-back">${change ? '← 星圖' : '← 單人戰鬥'}</button></div>
-    <p class="g-dim" style="margin-top:0">帝國與聯盟的戰爭，從兩邊看是兩個不同的故事。選定之後，整篇都只指揮這一方的艦隊；另一方的動向會在作戰簡報裡交代。各篇的進度分開保存，打完一篇可以再回來看另一篇。</p>
+    <p class="g-dim" style="margin-top:0">帝國與聯盟的戰爭，從兩邊看是兩個不同的故事。選定之後，整篇都只指揮這一方的艦隊；另一方的動向會在作戰簡報裡交代。<b>各篇的進度分開保存，切換篇章不會清除玩到一半的進度</b>，隨時可以回來接著打。</p>
     <div class="st-lines">${card('e')}${card('a')}</div>
     <h3 class="st-xh">番外篇</h3>
     <div class="st-lines one">${card('m')}</div>
   </div>`);
   gEl('sl-back').onclick = change ? () => showStory() : showSingle;
   document.querySelectorAll('.st-lines [data-l]').forEach((b) => { b.onclick = () => {
-    const q = storyLoad(); q.line = b.dataset.l; storySave(q); if (GAME.storyView) GAME.storyView.sel = null; showStory();
+    const q = storyLoad(); q.line = b.dataset.l; storySave(q); if (GAME.storyView) { GAME.storyView.sel = null; GAME.storyView.vb = null; } showStory();
   }; });
 }
 // 難度選擇：第一次進劇情（或重新開始）時一定會先到這裡；之後可以從星圖再進來改（進度保留）
