@@ -177,6 +177,12 @@ const COMMANDERS = [
   { id: 'aaron', name: '亞倫・楊森', title: '少將', trait: 'shield', skills: ['wall', 'jam'], faction: 1, base: true, bio: '守勢型。擅長以干擾打亂敵軍節奏。' },
   { id: 'grace', name: '葛瑞絲・卡特萊', title: '准將', trait: 'dmg', skills: ['focus', 'rapid'], faction: 1, base: true, bio: '攻勢型。相信火力集中就是一切。' },
 ];
+// 劇情加入的指揮官：在雙星記打完指定的關卡後加入（tavern.js 的 storyJoin），之後跟招募來的指揮官一樣能在各模式派出；lv＝加入時的等級
+const STORY_CMDRS = [
+  { id: 'pele', name: '佩蕾', title: '准將', trait: 'speed', skills: ['charge', 'evade'], faction: 1, lv: 2, bio: '機動型。聯盟動作最快的艦隊指揮官，擅長襲擾與追擊。' },
+  { id: 'horst', name: '霍斯特', title: '少將', trait: 'shield', skills: ['wall', 'jam'], faction: 1, lv: 3, bio: '守勢型。消耗戰的專家，相信戰爭最後是一道算術題。' },
+  { id: 'glen', name: '格倫', title: '中將', trait: 'dmg', skills: ['charge', 'focus'], faction: 0, lv: 5, bio: '攻勢型。原本替攝政派作戰的猛將。他服從的是帝國，不是公爵。' },
+];
 const FACTION_NAME = ['帝國軍', '聯盟軍', '灰鴉傭兵團', '機械改造人類', '機械智慧族', '蟲族感染人類', '蟲族'];   // 2＝傭兵：不能當玩家的陣營，傭兵指揮官可以替兩個陣營出擊；3～6 目前只當敵軍外觀
 const FACTION_CLS = ['emp', 'all', 'mer', 'cyb', 'mai', 'inf', 'bug'];
 // 指揮官能不能替這個陣營出擊（傭兵兩邊都行）

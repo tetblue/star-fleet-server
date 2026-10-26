@@ -707,7 +707,7 @@ function showSingle() {
     <div class="g-head"><h2>單人戰鬥</h2><span class="crumb">選擇作戰模式</span><span class="g-sp"></span><button class="g-btn" id="sp-back">← 主選單</button></div>
     <div class="sp-op"><span class="g-dim">操作難度</span>${opSeg('sp-op')}<span class="sp-opd">${OP_LEVELS[opLevel()].desc}</span></div>
     <div class="sp-grid">
-      <button class="sp-mode wide" id="sp-story"><span class="sp-en">CAMPAIGN</span><b>雙星記</b><span class="sp-desc">劇情戰役：帝國與聯盟兩條戰線交替推進，最後選擇一方迎接決戰。贏的一方將掌握大部分的人類星域</span><span class="sp-st">${storySeq(sp.route || 'e').filter((id) => sp.done[id]).length}／${storySeq('e').length} 場作戰</span></button>
+      <button class="sp-mode wide" id="sp-story"><span class="sp-en">CAMPAIGN</span><b>雙星記</b><span class="sp-desc">劇情戰役：選擇帝國篇或聯盟篇，從頭到尾指揮同一個陣營，打到這場戰爭的結局。兩篇的進度分開保存</span><span class="sp-st">${STORY_LINE[sp.line] ? `${STORY_LINE[sp.line].name} ${storyCount(sp, sp.line)}／${storySeq(sp.line).length} 場作戰` : '尚未開始'}</span></button>
       ${mode('sp-train', 'TRAINING', '訓練作戰', '從零開始的教學課程與戰術手冊，以及固定的作戰關卡：讀情報、編成、部署，熟悉各種戰況', `教學 ${TUT_LESSONS.filter((L) => tutLoad().done[L.id]).length}／${TUT_LESSONS.length}・${SCENARIOS.length} 場作戰`)}
       ${mode('sp-rand', 'SKIRMISH', '隨機戰役', '自選規模與敵軍強度，敵軍和地形每次隨機生成', `${RAND_SIZES[ro.size].name}・敵軍${RAND_DIFF[ro.diff].name}・地形${RAND_TERR[ro.terr].name}`)}
       ${mode('sp-camp', 'ENDLESS', '無限戰場', '無限關卡：敵軍依你的指揮官等級生成，一關比一關大', `目前第 ${c.stage} 關・最高第 ${c.best} 關`)}
@@ -1267,7 +1267,7 @@ const SAVE_FMT = 'starfleet-save';
 function saveSummary(d) {
   const j = (k) => { try { return JSON.parse(d[k] || 'null'); } catch (e) { return null; } };
   const st = j(STORY_STORE), tu = j(TUT_STORE), ca = j(CAMP_STORE), out = [];
-  if (st && st.done) out.push(`雙星記 ${storySeq(st.route || 'e').filter((id) => st.done[id]).length}／${storySeq('e').length}`);
+  if (st && st.done) for (const k of ['e', 'a']) if (storyCount(st, k)) out.push(`雙星記${STORY_LINE[k].name} ${storyCount(st, k)}／${storySeq(k).length}`);
   if (tu && tu.done) out.push(`教學 ${TUT_LESSONS.filter((L) => tu.done[L.id]).length}／${TUT_LESSONS.length}`);
   if (ca && ca.seed) out.push(`隨機戰役 第 ${ca.stage || 1} 關`);
   return out.join('・') || '（沒有進度）';

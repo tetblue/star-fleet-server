@@ -6,7 +6,7 @@
 // allies：AI 友軍 [艦隊名, 指揮官, 特性, 等級, 技能, 艦隊類型, 兵力, 陣型, 打法, x, 倒戈秒數（省略＝不倒戈）]，外觀是傭兵
 // lines：戰鬥中的通訊 [秒, 誰, 台詞]；after：打贏後的結語；supply：敵方補給艦隊（預算的倍數，跟著第一支艦隊）
 const stT = (type, x, z, r, y = 0) => ({ type, x, y, z, r });
-const STORY_DEATH = { kas: '10', grace: '16' };   // 劇情中退場：打完這一關之後就不能再派
+const STORY_DEATH = { kas: '10', grace: '16' };   // 劇情中退場：打完這一關之後就不能再派（只看自己篇章的關卡順序）
 const STORY_WAR = {
   '1': { budget: 2400, time: 240, fleets: 1, lv: 1, intel: [0.9, []],
     terrain: [stT('rock', -280, -60, 60, 40), stT('rock', 260, 20, 48, -70)],
@@ -171,6 +171,84 @@ const STORY_WAR = {
     ev: [['赫爾墨斯預備艦隊', null, 0.25, 'missile', 'crescent', 'right', [140, 200], 0.8]],
     lines: [[3, '亞倫', '葛瑞絲，還有兩邊所有回不了家的人……這一仗是為了他們。'], [250, '沃斯總裁', '（通訊）楊森元帥，聯盟的議會需要我們的資金，您應該很清楚——'], [254, '亞倫', '我很清楚。所以才要在這裡結束。']],
     after: '赫爾墨斯的私兵艦隊潰散，沃斯總裁在港口被捕。' },
+  // ── 鏡像關：同一場戰役的另一邊（帝國篇 e、聯盟篇 a）──
+  '2e': { budget: 2400, time: 210, fleets: 1, lv: 1, intel: [0.8, []],
+    terrain: [stT('asteroid', -300, -40, 170), stT('asteroid', 320, 60, 150), stT('rock', 0, 120, 55, 30)],
+    foes: [['聯盟撤退艦隊', '亞倫・楊森', 'shield', 2, ['wall', 'jam'], 'balanced', 0.75, 'line', 'kite'],
+      ['聯盟巡邏隊殘部', '巴爾克', 'dmg', 1, ['focus'], 'balanced', 0.3, 'line', 'push']],
+    lines: [[3, '雷恩', '追。但是別讓陣形散掉。'], [60, '副官', '敵方指揮官確認……亞倫・楊森少將。'], [150, '雷恩', '他在用撤退引我們深入。……有意思。']],
+    after: '亞倫帶著大部分的艦艇撤回了國境。雷恩在報告上寫道：「聯盟有一位值得注意的將領。」' },
+  '9e': { budget: 4400, time: 300, fleets: 2, lv: 3, goal: 'survive', intel: [0.6, ['events']],
+    terrain: [stT('rock', 0, -300, 110, 0), stT('asteroid', -340, -120, 170), stT('asteroid', 340, -120, 170), stT('rock', -380, 100, 55, 60)],
+    foes: [['聯盟主力艦隊', '亞倫・楊森', 'shield', 5, ['wall', 'jam'], 'balanced', 0.5, 'crescent', 'push'],
+      ['聯盟突擊艦隊', '葛瑞絲・卡特萊', 'dmg', 4, ['focus', 'rapid'], 'heavy', 0.45, 'wedge', 'breakthrough']],
+    ev: [['聯盟增援艦隊', null, 0.25, 'raider', 'wedge', 'right', [90, 140], 0.7]],
+    lines: [[3, '雷恩', '要塞保不住了。我們的任務是把人帶出去。'], [50, '奧德', '（通訊）瓦爾特，要塞的砲台全被干擾了……拜託你。'], [200, '雷恩', '再撐一下，最後一批運輸艦還沒出來。']],
+    after: '埃吉斯要塞陷落，帝國的門戶落入聯盟手中。雷恩救出了大半的守軍，戰報上卻只寫著「要塞失守」。' },
+  '12e': { budget: 4600, time: 360, fleets: 2, lv: 4, enemyFac: 2, intel: [0.9, []], decoy: 0.45,
+    terrain: [stT('rock', -300, -100, 70, 40), stT('rock', 260, 60, 60, -30), stT('asteroid', 0, -200, 160)],
+    foes: [['聯盟艦隊？', '？？？', 'shield', 5, ['wall', 'focus'], 'heavy', 0.55, 'line', 'push'],
+      ['身分不明的艦隊', '？？？', 'dmg', 5, ['charge', 'focus'], 'raider', 0.45, 'wedge', 'breakthrough']],
+    ev: [['身分不明的增援', null, 0.3, 'balanced', 'crescent', 'right', [60, 100]]],
+    lines: [[3, '艾琳', '港口管制說附近只有一支聯盟的小艦隊……'], [40, '副官', '敵艦數量是報告的兩倍！他們打著聯盟的識別碼！'], [46, '艾琳', '聯盟的識別碼，傭兵的船。……有人想讓我們互相開火。'], [200, '艾琳', '留一艘完整的殘骸。我要知道是誰付的錢。']],
+    after: '襲擊艦隊被擊潰了，談判卻已經破局，兩國互指對方背信。艾琳把敵艦的殘骸帶回帝國，交給了雷恩。' },
+  '14e': { budget: 5000, time: 360, fleets: 3, lv: 4, goal: 'survive', intel: [0.65, ['events']],
+    terrain: [stT('asteroid', -280, -60, 180), stT('asteroid', 300, 0, 160), stT('rock', 0, -220, 70)],
+    foes: [['聯盟遠征艦隊', '亞倫・楊森', 'shield', 6, ['wall', 'jam'], 'balanced', 0.5, 'crescent', 'push'],
+      ['聯盟突擊艦隊', '葛瑞絲・卡特萊', 'dmg', 6, ['focus', 'rapid'], 'heavy', 0.45, 'wedge', 'breakthrough']],
+    ev: [['遠征軍後續部隊', ['霍斯特', 'shield', 5, ['wall']], 0.25, 'missile', 'line', 'left', [120, 180], 0.7]],
+    lines: [[3, '艾琳', '不必守住涅瓦。只要讓他們每前進一步，都付出代價。'], [8, '格倫', '（通訊）撤退作戰？……我還以為妳會叫我衝。'], [12, '艾琳', '你會有機會的。'], [260, '艾琳', '差不多了。讓他們進來吧，後面的星系什麼都不會留給他們。']],
+    after: '帝國軍放棄了涅瓦星系。遠征軍站穩了腳步，卻不知道艾琳早已撤走了沿途每一座補給站。' },
+  '16e': { budget: 5400, time: 420, fleets: 3, lv: 5, intel: [0.7, ['events']],
+    terrain: [stT('rock', -180, 40, 60, 20), stT('rock', 200, -80, 55, -40)],
+    foes: [['聯盟突擊艦隊', '葛瑞絲・卡特萊', 'dmg', 7, ['charge', 'focus', 'rapid'], 'raider', 0.5, 'spindle', 'breakthrough'],
+      ['聯盟遠征艦隊', '亞倫・楊森', 'shield', 7, ['wall', 'jam'], 'balanced', 0.45, 'ring', 'kite']],
+    lines: [[3, '雷恩', '包圍網只有一個弱點。他們也知道。'], [30, '副官', '敵方前鋒以紡錘陣衝向我軍正面！是葛瑞絲・卡特萊！'], [34, '格倫', '（通訊）讓我去接。'], [38, '雷恩', '不。她是來替主力開路的……讓她過來，然後別讓她回去。'],
+      [240, '通訊官', '敵突擊艦隊旗艦……訊號消失。'], [244, '艾琳', '（通訊）她替亞倫開了缺口。敵軍主力正在脫離。']],
+    after: '葛瑞絲・卡特萊戰死，遠征軍主力從她撕開的缺口逃了出去。雷恩下令，以將官之禮送還她的遺體。' },
+  '18e': { budget: 5600, time: 420, fleets: 3, lv: 5, intel: [0.7, ['events']],
+    terrain: [stT('rock', 0, -250, 110, 0), stT('asteroid', -320, 0, 170), stT('asteroid', 320, 0, 170)],
+    foes: [['要塞守備艦隊', '亞倫・楊森', 'shield', 8, ['wall', 'jam', 'focus'], 'heavy', 0.5, 'line', 'kite'],
+      ['聯盟飛彈艦隊', '霍斯特', 'shield', 8, ['wall', 'jam'], 'missile', 0.35, 'crescent', 'kite'],
+      ['聯盟機動艦隊', '佩蕾', 'speed', 7, ['charge', 'evade'], 'raider', 0.3, 'column', 'flank']],
+    lines: [[3, '雷恩', '他不會出來決戰。他只會讓我們打不下來。'], [150, '艾琳', '（通訊）要塞的火網太密了。再這樣下去，我們會先流乾。'], [300, '雷恩', '……亞倫・楊森。你也累了吧。']],
+    after: '埃吉斯沒有陷落，但守軍再也打不起下一場了。洛珊自治領宣布：誰贏下阿刻戎走廊的決戰，就歸順誰。' },
+  '5a': { budget: 3000, time: 300, fleets: 2, lv: 2, goal: 'cut', intel: [0.75, ['events']], supply: 0.9,
+    terrain: [stT('asteroid', -260, 0, 160), stT('asteroid', 300, -120, 140), stT('rock', 60, 160, 50, -40)],
+    foes: [['帝國護航艦隊', '卡斯・莫德', 'speed', 3, ['charge', 'wall'], 'raider', 0.55, 'line', 'push']],
+    lines: [[3, '佩蕾', '護衛只有一支機動艦隊？帝國的司令部在想什麼……'], [60, '通訊官', '敵護航艦隊的反應很快，正在擋住船團的正面！'], [200, '佩蕾', '打船，不要跟護衛纏鬥。']],
+    after: '帝國的補給船團損失過半。佩蕾回報時說：「那個護衛指揮官，一個人擋了我們整場。」' },
+  '8a': { budget: 4000, time: 300, fleets: 2, lv: 3, goal: 'survive', intel: [0.7, ['events']],
+    terrain: [stT('rock', -200, -120, 75, 30), stT('rock', 220, -60, 60, -50), stT('nebula', 0, 200, 160)],
+    foes: [['帝國援軍艦隊', '雷恩・瓦爾特', 'dmg', 4, ['focus', 'charge'], 'raider', 0.65, 'spindle', 'breakthrough'],
+      ['帝國援軍後衛', '卡斯・莫德', 'speed', 3, ['charge'], 'raider', 0.3, 'column', 'flank']],
+    lines: [[3, '葛瑞絲', '援軍只有一支？要塞司令沒有出來接應？'], [10, '霍斯特', '（通訊）看來帝國內部也不怎麼團結。'], [90, '通訊官', '敵艦隊正在突破包圍網的一翼！'], [220, '葛瑞絲', '這個指揮官……打法跟我很像。']],
+    after: '帝國援軍撕開了包圍網的一翼，卻始終沒能和要塞會合。三天後，亞倫發動了總攻。' },
+  '10a': { budget: 4200, time: 300, fleets: 3, lv: 3, intel: [0.7, ['events']],
+    terrain: [stT('asteroid', -200, 80, 180), stT('asteroid', 260, -60, 160), stT('rock', 40, -40, 60)],
+    foes: [['帝國殿後艦隊', '卡斯・莫德', 'speed', 5, ['charge', 'wall'], 'raider', 0.6, 'wedge', 'flank'],
+      ['帝國殿後分隊', '霍克', 'dmg', 4, ['focus'], 'balanced', 0.35, 'line', 'push']],
+    lines: [[3, '亞倫', '不用追太深，讓他們走。'], [6, '葛瑞絲', '（通訊）議會要的是全殲，亞倫。'], [120, '通訊官', '敵殿後艦隊的指揮官是卡斯・莫德准將。他一步也沒退。'], [230, '亞倫', '……向他致意。然後，結束這一戰。']],
+    after: '帝國主力撤出了歐倫星系。殿後的卡斯・莫德准將戰死，他的艦隊直到最後都沒有投降。亞倫在戰報裡，替敵將寫了一段悼詞。' },
+  '11a': { budget: 4200, time: 300, fleets: 2, lv: 4, enemyFac: 2, goal: 'escort', vip: { name: '聯盟使節艦', comp: [0, 0, 0, 0, 50, 20] }, intel: [0.4, ['comp', 'tactic', 'events']],
+    terrain: [stT('nebula', -320, -60, 200), stT('nebula', 340, -20, 180), stT('rock', 0, 60, 60, 30)],
+    foes: [['身分不明的艦隊', '？？？', 'dmg', 5, ['focus', 'charge'], 'raider', 0.45, 'wedge', 'flank'],
+      ['身分不明的艦隊', '？？？', 'speed', 5, ['charge'], 'missile', 0.35, 'crescent', 'kite']],
+    lines: [[3, '葛瑞絲', '停戰？那些回不了家的人，帳就這樣算了？'], [45, '副官', '不明艦隊接近！沒有識別信號！'], [52, '葛瑞絲', '帝國的？……不對，帝國的船不是這樣打的。'], [200, '葛瑞絲', '我不喜歡談判。但我更不喜歡有人在背後開槍。']],
+    after: '使節艦平安抵達洛珊。被擊沉的敵艦上什麼標誌都沒有，只有東拼西湊的改裝艦體，看起來像傭兵的船。' },
+  '15a': { budget: 5000, time: 360, fleets: 2, lv: 4, goal: 'escort', vip: { name: '遠征軍補給船團', comp: [0, 0, 0, 0, 40, 60] }, intel: [0.7, ['events']],
+    terrain: [stT('nebula', -280, -120, 190), stT('nebula', 300, 40, 170), stT('rock', 0, -60, 65)],
+    foes: [['帝國第三艦隊', '艾琳・索拉', 'shield', 6, ['wall', 'focus'], 'balanced', 0.45, 'crescent', 'kite'],
+      ['帝國襲擊艦隊', '赫克', 'speed', 5, ['charge'], 'raider', 0.4, 'wedge', 'flank']],
+    lines: [[3, '霍斯特', '消耗戰？……原來被別人消耗是這種感覺。'], [80, '通訊官', '敵艦隊從側面接近船團！'], [250, '霍斯特', '對面有個比我更會打消耗戰的人。']],
+    after: '船團抵達了前線，但只剩一半。霍斯特在報告最後寫道：「遠征軍撐不過下一個月。」' },
+  's3a': { budget: 3600, time: 420, fleets: 2, lv: 3, enemyFac: 2, intel: [0.55, ['comp', 'events']], supply: 0.8,
+    terrain: [stT('rock', 0, -330, 115, 0), stT('nebula', -320, -120, 220), stT('nebula', 340, -60, 200), stT('asteroid', 0, -80, 150)],
+    foes: [['灰鴉主力艦隊', '賽隆', 'speed', 5, ['charge', 'evade', 'focus'], 'carrier', 0.4, 'ring', 'kite'],
+      ['巢穴守備隊', '「鐵顎」柯爾', 'shield', 4, ['wall'], 'heavy', 0.35, 'line', 'push']],
+    ev: [['灰鴉巡邏隊', ['「鏽牙」杜蘭', 'dmg', 4, ['charge']], 0.2, 'raider', 'wedge', 'left', [90, 140], 0.8]],
+    lines: [[3, '葛瑞絲', '賽隆，我說過我記住你了。'], [200, '賽隆', '（通訊）准將，別這麼記仇。灰鴉可以替聯盟工作，價錢好說。'], [205, '葛瑞絲', '……我考慮看看。不過今天，先把帳算清。']],
+    after: '灰鴉的基地失守，賽隆帶著殘部逃走了。臨走前他留下一個聯絡頻道：「需要人手的時候，付錢就行。」' },
   // ── 支線：灰鴉傭兵團（敵軍外觀＝傭兵 enemyFac 2）──
   's1': { budget: 3000, time: 300, fleets: 2, lv: 2, enemyFac: 2, intel: [0.6, ['tactic', 'events']],
     terrain: [stT('asteroid', -220, -80, 190), stT('asteroid', 260, 40, 150), stT('rock', 40, -160, 60, 40)],
@@ -208,7 +286,7 @@ function storyRec(id, D = storyDiffOf(storyLoad())) {
 }
 // 劇情關卡 → 作戰（跟 SCENARIOS 同一個格式，再加上 saga、goal、lines 等劇情欄位）
 function storyScenario(id) {
-  const s = STORY_BY[id], W = STORY_WAR[id], seq = storySeq(s.route), k = s.sub ? seq.indexOf(s.at) + 1 : seq.indexOf(id), B = W.budget, D = storyDiffOf(storyLoad());
+  const s = STORY_BY[id], W = STORY_WAR[id], seq = storySeq(s.line), k = s.sub ? seq.indexOf(s.at) + 1 : seq.indexOf(id), B = W.budget, D = storyDiffOf(storyLoad());
   const comp = (arch, pow) => {
     const A = CAMP_ARCHETYPES.find((a) => a.key === arch), per = A.mix.reduce((t, m, i) => t + m * SHIP_TYPES[i].cost, 0), n = B * pow * D.pow / per;
     return A.mix.map((m) => Math.round(n * m / 10) * 10);
@@ -219,7 +297,7 @@ function storyScenario(id) {
   const sc = { id: 'story-' + id, saga: true, stageId: id, side: s.side, cast: s.cast.slice(),
     dead: Object.keys(STORY_DEATH).filter((c) => { const d = seq.indexOf(STORY_DEATH[c]); return d >= 0 && d < k; }),
     name: `雙星記・${s.name}`, size: B < 3400 ? '小型' : B < 4800 ? '中型' : '大型', timeLimit: W.time, budget: B, maxFleets: Math.max(W.fleets, s.cast.length), level: Math.max(1, Math.min(5, W.lv + D.ai)), diff: D.key,
-    seed: 5000 + k * 37 + (s.route === 'a' ? 7 : 0) + (s.sub ? 900 + STORY_SUBS.indexOf(s) * 53 : 0), terrain: W.terrain || [], enemy, story: s.story,
+    seed: 5000 + k * 37 + (s.line === 'a' ? 7 : 0) + (s.sub ? 900 + STORY_SUBS.indexOf(s) * 53 : 0), terrain: W.terrain || [], enemy, story: s.story,
     events: (W.ev || []).map(([name, cm, pow, arch, formation, edge, at, chance]) => ({ type: 'reinforce', chance: chance == null ? 1 : chance, at, name, comp: comp(arch, pow), formation, edge,
       ...(cm ? { commander: { name: cm[0], trait: cm[1], level: Math.max(1, cm[2] + D.lv), skills: cm[3].slice() } } : {}) })),
     intel: { accuracy: W.intel ? W.intel[0] : 0.8, hide: W.intel ? W.intel[1].slice() : [] },
@@ -232,8 +310,19 @@ function storyScenario(id) {
   return sc;
 }
 function storySave(p) { try { STORE.setItem(STORY_STORE, JSON.stringify(p)); } catch (e) { /* 只在本次有效 */ } }
-// 下一關（照路線順序；第 18 關之後是選邊，回星圖）
-function storyNext(id) { const s = STORY_BY[id]; if (s.sub) return null; const seq = storySeq(s.route || null), k = seq.indexOf(id); return k >= 0 && k + 1 < seq.length ? seq[k + 1] : null; }
+// 下一關（照篇章順序；支線打完回星圖）
+function storyNext(id) { const s = STORY_BY[id]; if (s.sub) return null; const seq = storySeq(s.line), k = seq.indexOf(id); return k >= 0 && k + 1 < seq.length ? seq[k + 1] : null; }
+// 劇情指定的指揮官：還不在名單裡（還沒加入、被解雇了）就補回來，劇情才打得下去
+function storyCmdrDef(id) { return COMMANDERS.find((o) => o.id === id) || COMMANDERS_BASE.find((o) => o.id === id) || STORY_CMDRS.find((o) => o.id === id); }
+function storyEnsureCast(cast) {
+  let ch = false;
+  for (const id of cast) {
+    if (COMMANDERS.some((o) => o.id === id)) continue;
+    if (STORY_CMDRS.some((o) => o.id === id)) { storyJoin(id); continue; }
+    const k = ROSTER.fired.indexOf(id); if (k >= 0) { ROSTER.fired.splice(k, 1); ch = true; }
+  }
+  if (ch) { rosterApply(); rosterSave(); }
+}
 function storyLoadout(sc) {
   const n = sc.cast.length;
   return { sc: sc.id, faction: sc.side, fleets: sc.cast.map((cmdr, k) => ({ cmdr, comp: defaultComp(sc.budget / n), formation: 'line', x: n === 1 ? 0 : Math.round(-220 + 440 * k / (n - 1)), z: 300 + ZONE_SHIFT, h: Math.PI })) };
@@ -249,7 +338,8 @@ function storyGoalRows(sc) {
 }
 // 作戰簡報
 function storyBriefing(id) {
-  const s = STORY_BY[id], sc = storyScenario(id), ch = STORY_CH[s.ch], side = STORY_SIDE[s.side];
+  const s = STORY_BY[id], sc = storyScenario(id), ch = STORY_CH[s.ch], side = STORY_SIDE[s.side], other = STORY_SIDE[1 - s.side];
+  storyEnsureCast(s.cast);
   GAME.sc = sc;
   // 假情報：只看得到第一支艦隊，而且兵力被低估，也看不到增援
   GAME.intel = makeIntel(sc.decoy ? { ...sc, enemy: sc.enemy.slice(0, 1).map((e) => ({ ...e, comp: e.comp.map((n) => Math.round(n * sc.decoy / 10) * 10) })), events: [] } : sc);
@@ -261,6 +351,7 @@ function storyBriefing(id) {
   overlay(`<div class="g-wrap">
     <div class="g-head"><h2>${s.name}</h2><span class="crumb">雙星記　·　${ch.no}　${ch.name}・${storyNo(s)}　·　<span class="g-${side.cls}">${side.name}</span>　·　${s.place}　·　難度${D.name}</span><span class="g-sp"></span><button class="g-btn" id="sb-back">← 星圖</button></div>
     <div style="display:flex;flex-direction:column;gap:12px">
+      ${s.inter ? `<div class="g-card st-inter ${other.cls}"><h3>與此同時・<span class="g-${other.cls}">${other.name}</span></h3><p>${s.inter}</p></div>` : ''}
       <div class="g-card st-brief ${side.cls}"><h3>狀況</h3><p>${s.story}</p>
         <dl class="kv"><dt>出擊指揮官</dt><dd>${cast}</dd><dt>作戰目標</dt><dd><b>${s.goal}</b></dd>${storyGoalRows(sc)}
         <dt>編成預算</dt><dd>${fmtN(sc.budget)} 點　最多 ${sc.maxFleets} 支艦隊</dd><dt>建議等級</dt><dd>Lv ${rec} 以上（${D.name}）${low.length ? `　<span class="g-warn">${low.map((c) => `${c.name} 只有 Lv ${cmdrLevel(c.id)}`).join('、')}：可以先到無限戰場或隨機戰役練等，或在星圖上調低難度</span>` : '　<span class="g-good">出擊指揮官都達到了</span>'}</dd>
@@ -271,18 +362,18 @@ function storyBriefing(id) {
   gEl('sb-back').onclick = () => showStory();
   gEl('sb-next').onclick = showLoadout;
 }
-// 打完一場（只在第一次產生戰報時呼叫）：打贏就記進度；第 19 關打贏就鎖定路線
+// 打完一場（只在第一次產生戰報時呼叫）：打贏就記進度；有人加入就放進指揮官名單
 function storyResult(R) {
   const sc = GAME.sc; if (!sc || !sc.saga || GAME.replaying) return;
   if (R.kind !== 'win') return;
   const p = storyLoad(), s = STORY_BY[sc.stageId];
-  if (s.route && p.route && p.route !== s.route) return;
-  p.done[sc.stageId] = Date.now(); if (s.route) p.route = s.route;
+  p.done[sc.stageId] = Date.now();
   storySave(p);
   // 傭兵：第一次打完跟傭兵有關的任務 → 酒館出現傭兵指揮官；打下灰鴉的基地 → 可以買傭兵支援
   GAME.storyGains = [];
+  for (const id of s.joins || []) if (storyJoin(id)) { const c = STORY_CMDRS.find((o) => o.id === id); GAME.storyGains.push(`${c.title} ${c.name}加入了${STORY_SIDE[c.faction].name}（Lv ${c.lv}，之後各模式都能派）`); }
   if (s.merc && !ROSTER.mercs) { ROSTER.mercs = true; GAME.storyGains.push('星際酒館開始出現灰鴉傭兵團的指揮官（兩個陣營都能派）'); tavernRefresh(); }
-  if (sc.stageId === 's3' && !ROSTER.mercSup) { ROSTER.mercSup = true; GAME.storyGains.push('傭兵支援：之後每場戰鬥可以花功勳呼叫一次灰鴉的艦隊'); }
+  if ((sc.stageId === 's3' || sc.stageId === 's3a') && !ROSTER.mercSup) { ROSTER.mercSup = true; GAME.storyGains.push('傭兵支援：之後每場戰鬥可以花功勳呼叫一次灰鴉的艦隊'); }
   rosterSave();
 }
 function storyAfterHTML(R) {
@@ -301,5 +392,9 @@ function storyLines(t) {
   const L = battleSetup.lines;
   while ((GAME.lineK || 0) < L.length && L[GAME.lineK || 0][0] <= t) { const [, who, msg] = L[GAME.lineK || 0]; GAME.lineK = (GAME.lineK || 0) + 1; toast(`${who}：${msg}`, 'story'); }
 }
-// 測試用：直接把進度設成打完前 n 場（console：__demo.storyUnlock(18) 或 __demo.storyUnlock(20, 'a')）
-function storyUnlock(n, route = 'e') { const done = {}; storySeq(route).slice(0, n).forEach((id) => { done[id] = Date.now(); }); storySave({ done, route: n > 18 ? route : null, diff: storyLoad().diff }); if (GAME.storyView) GAME.storyView.sel = null; }
+// 測試用：直接把某一篇的進度設成打完前 n 場（console：__demo.storyUnlock(15) 或 __demo.storyUnlock(14, 'a')）；另一篇的進度保留
+function storyUnlock(n, line = 'e') {
+  const p = storyLoad(); STORY_STAGES.filter((s) => s.line === line && !s.sub).forEach((s) => { delete p.done[s.id]; });
+  storySeq(line).slice(0, n).forEach((id) => { p.done[id] = Date.now(); (STORY_BY[id].joins || []).forEach(storyJoin); });
+  p.line = line; storySave(p); if (GAME.storyView) GAME.storyView.sel = null;
+}
