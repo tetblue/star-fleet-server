@@ -69,6 +69,44 @@ function defaultComp(budget) {
   const n = budget / per;
   return mix.map((m) => Math.floor(n * m / 10) * 10);
 }
+// 自動分配的偏好：mix＝艘數比例 [航母, 戰列, 巡洋, 驅逐, 護衛]（null＝照艦隊目前的比例）；hangar＝航母艦載機配置（攔截、攻擊、飛彈、光束），沒有就不動
+const AUTO_PREFS = {
+  keep:    { name: '保持目前比例', desc: '照每支艦隊現在的艦種比例放大縮小（沒有船的艦隊用均衡比例）', mix: null },
+  balance: { name: '均衡', desc: '各艦種都有，跟新艦隊的預設比例一樣', mix: [0.04, 0.14, 0.27, 0.3, 0.25], hangar: [2, 2, 1, 1] },
+  front:   { name: '正面火力優先', desc: '戰列艦、巡洋艦為主：主砲射程遠、正面最硬；轉向慢，怕被包抄', mix: [0.02, 0.3, 0.38, 0.2, 0.1] },
+  carrier: { name: '多艦載機', desc: '航母多、攻擊機為主，靠艦載機打遠；航母本身脆弱，要有護衛', mix: [0.14, 0.1, 0.22, 0.2, 0.34], hangar: [1, 3, 1, 1] },
+  aa:      { name: '多防空', desc: '護衛艦多、航母改裝攔截機：對付敵方飛彈與艦載機（如蟲族、航母多的敵軍）', mix: [0.04, 0.1, 0.3, 0.16, 0.4], hangar: [4, 1, 1, 0] },
+  missile: { name: '飛彈齊射', desc: '巡洋艦、驅逐艦為主，遠距離飛彈輸出；帶補給艦隊效果更好', mix: [0.02, 0.08, 0.38, 0.42, 0.1] },
+  mobile:  { name: '高機動', desc: '不帶航母、戰列艦也少，整支艦隊速度快：適合包抄、追擊', mix: [0, 0.04, 0.2, 0.46, 0.3] },
+};
+// 自動分配：補給艦隊不動，剩下的預算平均分給每支艦隊，各艦隊照自己的偏好（f.autoPref）決定艦種比例
+// （保持目前比例：艦隊現在的比例，沒船就用均衡）；以 10 艘為單位，零頭再一次補 10 艘給離目標最遠、還買得起的艦種
+const fleetPref = (f) => AUTO_PREFS[f.autoPref] || AUTO_PREFS.keep;
+function autoAllocate(lo, budget) {
+  const FL = lo.fleets; if (!FL.length) return;
+  const avail = Math.max(0, budget - sumA(supplyList(lo).map((s) => compCost(s.comp)))), share = avail / FL.length;
+  const ideal = FL.map((f) => {
+    const P = fleetPref(f), mix0 = P.mix || AUTO_PREFS.balance.mix;
+    const r = SHIP_TYPES.map((_, t) => (t < N_COMBAT ? f.comp[t] || 0 : 0));
+    const mix = P.mix || sumA(r) <= 0 ? SHIP_TYPES.map((_, t) => mix0[t] || 0) : r, k = share / (compCost(mix) || 1);
+    if (P.hangar) f.hangar = P.hangar.slice();
+    return mix.map((n) => n * k);
+  });
+  // 每支艦隊只用自己那一份（不跨艦隊補零頭），重按幾次結果才不會漂移
+  FL.forEach((f, i) => {
+    f.comp = ideal[i].map((n) => Math.floor(n / 10 + 1e-6) * 10);   // 1e-6：29.9999… 不要被捨成 20
+    let left = share - compCost(f.comp);
+    for (;;) {
+      let best = -1, gap = 0;
+      ideal[i].forEach((n, t) => {
+        const g = n - f.comp[t], c = SHIP_TYPES[t].cost * 10;
+        if (t < N_COMBAT && n > 0 && c <= left + 1e-6 && g / c > gap) { gap = g / c; best = t; }
+      });
+      if (best < 0) break;
+      f.comp[best] += 10; left -= SHIP_TYPES[best].cost * 10;
+    }
+  });
+}
 function defaultLoadout(sc, faction = GAME.faction || 0) {
   const pool = cmdrsOf(faction).length ? cmdrsOf(faction) : COMMANDERS;
   const nF = Math.max(1, Math.min(2, sc.maxFleets, pool.length)), share = sc.budget / nF;
@@ -862,13 +900,15 @@ function showLoadout() {
       ${lo.fleets.length ? '' : '<div class="g-warn" style="margin-bottom:8px">這個陣營沒有可派的指揮官，先到星際酒館招募。</div>'}
       <div class="g-row"><span>已用 <b class="${over ? 'g-warn' : 'g-emp'}">${fmtN(used)}</b> / ${fmtN(sc.budget)} 點</span>
       <span class="g-dim">總兵力 ${ships5(sumA(lo.fleets.map((f) => sumA(f.comp))) + sumA(SPS.map((s) => sumA(s.comp))))} 艘</span><span class="g-sp"></span>${SPS.length < Math.max(1, lo.fleets.length) ? `<button class="g-btn sm" id="l-sup" title="補給艦＋護衛艦，不佔艦隊數、沒有指揮官；最多跟艦隊數一樣多支">＋ 補給艦隊（${SPS.length}／${Math.max(1, lo.fleets.length)}）</button>` : ''}
-      ${lo.fleets.length < sc.maxFleets && lo.fleets.length < pool.length ? '<button class="g-btn sm" id="l-add">＋ 增加艦隊</button>' : ''}</div>
+      ${lo.fleets.length < sc.maxFleets && lo.fleets.length < pool.length ? '<button class="g-btn sm" id="l-add">＋ 增加艦隊</button>' : ''}
+      ${lo.fleets.length ? '<button class="g-btn sm" id="l-auto" title="補給艦隊不動；剩下的預算平均分給每支艦隊，各艦隊照卡片上選的「自動分配偏好」決定艦種比例，盡量用完預算">⚖ 自動分配</button>' : ''}</div>
       <div class="budget ${over ? 'over' : ''}" style="margin-top:6px"><i style="width:${Math.min(100, used / sc.budget * 100)}%"></i></div>
       ${over ? '<div class="g-warn" style="margin-top:6px">超出預算，請減少艦艇。</div>' : ''}</div>
     <div class="ld-fleets">${lo.fleets.map((f, k) => { const c = COMMANDERS.find((o) => o.id === f.cmdr); return `<div class="g-card ld-fleet">
       <h4><span class="g-emp">第${'一二三四'[k]}艦隊</span><span class="g-dim" style="font-size:calc(12px * var(--ui))">${ships5(sumA(f.comp))} 艘・${fmtN(compCost(f.comp))} 點</span><span class="g-sp"></span>${lo.fleets.length > 1 && !locked(k) ? `<button class="g-btn sm" data-del="${k}">移除</button>` : ''}</h4>
       <div class="ld-row"><span>指揮官</span><select class="g-sel" data-cm="${k}" ${locked(k) ? 'disabled' : ''}>${cmdrOpts(f.cmdr, k)}</select><span></span></div>
       <div class="g-dim" style="font-size:calc(12px * var(--ui));margin:2px 0 6px">${c ? `${c.bio}　技能：${c.skills.map((s) => `<b title="${SKILLS[s].desc}">${SKILLS[s].name}</b>`).join('、')}` : ''}</div>
+      <div class="ld-row"><span>自動分配偏好</span><select class="g-sel" data-pref="${k}" title="${fleetPref(f).desc}">${Object.entries(AUTO_PREFS).map(([key, P]) => `<option value="${key}" ${P === fleetPref(f) ? 'selected' : ''} title="${P.desc}">${P.name}</option>`).join('')}</select><small class="g-dim">${fleetPref(f).desc}</small></div>
       ${typeRows(f, k)}
       ${f.comp[0] > 0 ? hangarRow(f, k) : ''}
       <div class="ld-row"><span>起始陣型</span><select class="g-sel" data-fm="${k}">${Object.keys(FORMATIONS).map((fk) => `<option value="${fk}" ${fk === f.formation ? 'selected' : ''}>${FORMATIONS[fk].name}</option>`).join('')}</select><span></span></div>
@@ -894,6 +934,8 @@ function showLoadout() {
     lo.fleets.forEach((f, k) => { f.x = lo.fleets.length === 1 ? 0 : -300 + 600 * k / (lo.fleets.length - 1); });
     redraw();
   };
+  if (gEl('l-auto')) gEl('l-auto').onclick = () => { autoAllocate(lo, sc.budget); redraw(); };
+  document.querySelectorAll('[data-pref]').forEach((el) => (el.onchange = () => { lo.fleets[+el.dataset.pref].autoPref = el.value; redraw(); }));
   gEl('l-fac').onclick = (e) => {
     const f = e.target.dataset.f; if (f == null || +f === fac || sc.saga) return;
     lo.faction = +f; if (sc.mp) mpFaction(+f); else GAME.faction = +f;
