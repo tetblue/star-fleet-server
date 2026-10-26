@@ -4378,7 +4378,8 @@ function clickSelect(q, add, dbl) {
 }
 function selectAllUnits() { setSelection(sideSquadrons(GAME.phase === 'battle' || GAME.phase === 'deploy' ? GAME.playerSide : cmdSide)); }
 // 指令對象：有選取就用選取，沒有就是整支艦隊
-function actOn() { const l = [...selected].filter((q) => q.alive > 0); return l.length ? l : sideSquadrons(cmdSide); }
+// 指令只對選取的分艦隊有效；沒有選取＝任何艦隊指令都不做事（不再預設全軍）
+function actOn() { return [...selected].filter((q) => q.alive > 0); }
 function actSet() { return new Set(actOn()); }
 function selectionChanged() {
   for (const q of squadrons) q.label && q.label.classList.toggle('sel', selected.has(q));
@@ -4394,7 +4395,7 @@ function setCmdSide(sd, selectAll = true) {
 function updateSelBar() {
   const l = [...selected];
   const el = $('selbar');
-  if (!l.length) { el.innerHTML = `<span class="dim">未選取 · 指令會套用到整支${FACTION[SIDE_FAC[cmdSide]].name}</span>`; return; }
+  if (!l.length) { el.innerHTML = `<span class="dim">未選取 · 先選取艦隊才能下令（右鍵拖曳＝轉動視角）</span>`; return; }
   const n = l.reduce((s, q) => s + q.alive, 0) * opts.rep;
   const g = l[0].group, same = l.every((q) => q.group === g);
   const names = l.length <= 3 ? l.map((q) => q.name).join('、') : `${l.length} 支分艦隊`;
@@ -4412,6 +4413,7 @@ function sqIds(list = actOn()) { return list.map((q) => squadrons.indexOf(q)); }
 let queueToggle = false;
 function queueMode() { const m = SETTINGS.queueMod; return queueToggle || keysDown.has(m + 'Left') || keysDown.has(m + 'Right'); }
 function sendCmd(type, args) {
+  if (args.sqs && !args.sqs.length) return;   // 沒有選取：不下令
   if (queueMode()) { const { sqs, ...item } = args; return issue('queue', { sqs, item: { type, ...item } }); }
   return issue(type, args);
 }
@@ -4428,9 +4430,9 @@ function cmdAttack(target) { sendCmd('attack', { sqs: sqIds(), target: squadrons
 function cmdTurn(d) { sendCmd('turn', { sqs: sqIds(), d }); }
 function cmdVolley() { sendCmd('volley', { sqs: sqIds() }); }
 function cmdMissile() { sendCmd('missile', { sqs: sqIds() }); }   // 層數、轉向、齊射都可以排進隊列（按住隊列鍵）
-function cmdFighter() { issue('fighter', { sqs: sqIds(), n: 8 }); }
+function cmdFighter() { if (!actOn().length) return; issue('fighter', { sqs: sqIds(), n: 8 }); }
 function cmdArea(p) { sendCmd('area', { sqs: sqIds(), x: Math.round(p.x), y: Math.round(p.y != null ? p.y : selAlt()), z: Math.round(p.z) }); updateSelBar(); }
-// 區域掃描：選取的（沒選＝任一支）有航母、冷卻好的艦隊；接著點地圖上的位置（高度＝選取部隊的高度）
+// 區域掃描：選取的（沒選＝不能下令）有航母、冷卻好的艦隊；接著點地圖上的位置（高度＝選取部隊的高度）
 function reconFleet(f) {
   if (f) return f;
   const ok = (o) => o && o.side === cmdSide && !o.reserve && fowHasCarrier(o);
@@ -4439,6 +4441,7 @@ function reconFleet(f) {
 }
 function armRecon(f) {
   if (GAME.phase !== 'battle') return;
+  if (!f && !actOn().length) return;   // 沒有選取：不下令
   if (!fowOn()) { toast('只有擬真難度開啟戰爭迷霧時才需要掃描', 'hint'); return; }
   f = reconFleet(f);
   if (!f) { toast('沒有航母：區域掃描要由航母派出偵察機', 'hint'); return; }
@@ -4767,6 +4770,7 @@ function mouseDown(e) {
     m.timer = setTimeout(() => { if (ms === m && m.mode === 'lpress') openRadial(m); }, RADIAL_HOLD);
   }
   else if (e.button === 1) { ms = { mode: mode3D && !e.shiftKey ? 'orbit' : 'pan', x: e.clientX, y: e.clientY }; e.preventDefault(); }
+  else if (e.button === 2 && !actOn().length) ms = { mode: 'vpress', btn: 2, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY };   // 沒有選取：右鍵拖曳＝轉動視角，點一下不做事
   else if (e.button === 2) { const y0 = selAlt(); ms = { mode: 'rpress', x0: e.clientX, y0: e.clientY, alt0: y0, dy: 0, dp: 0, A: groundAt(e.clientX, e.clientY, y0) }; }
 }
 function mouseMove(e) {
@@ -6420,21 +6424,23 @@ function armSkill(f, id) {
 // A 鍵（觸控：「攻擊」按鈕）：接著左鍵點敵方分艦隊＝選取的艦隊集中攻擊它（不加傷害、沒有次數限制）
 function armAttack() {
   if (GAME.phase !== 'battle' && GAME.phase !== 'sandbox') return;
+  if (!actOn().length) return;
   GAME.skillArm = { attack: true };
-  hint(`攻擊：${selected.size ? '選取的艦隊' : '全軍'}要打哪一支？左鍵點敵方分艦隊（右鍵或 Esc 取消）`);
+  hint(`攻擊：選取的艦隊要打哪一支？左鍵點敵方分艦隊（右鍵或 Esc 取消）`);
 }
 // D 鍵（輪盤「攻擊」頁）：接著左鍵點地圖上的一點＝選取的艦隊對那裡開火（光束、飛彈、艦載機；射程內才打）
 function armArea() {
   if (GAME.phase !== 'battle' && GAME.phase !== 'sandbox') return;
   if (!actOn().length) return;
   GAME.skillArm = { area: true, point: true };
-  hint(`區域攻擊：${selected.size ? '選取的艦隊' : '全軍'}要打哪裡？左鍵點地圖上的位置（${FOW_RULE.area.dur} 秒；射程內的光束、飛彈、艦載機會打那裡，看不到目標＝盲射）（右鍵或 Esc 取消）`);
+  hint(`區域攻擊：選取的艦隊要打哪裡？左鍵點地圖上的位置（${FOW_RULE.area.dur} 秒；射程內的光束、飛彈、艦載機會打那裡，看不到目標＝盲射）（右鍵或 Esc 取消）`);
 }
 function skillEsc() { if (!GAME.skillArm) return false; GAME.skillArm = null; hideHint(); return true; }
 function skillKey(id) {
   if (GAME.phase !== 'battle') return false;
   if (!SKILLS[id]) return false;
-  const sel = [...selected].map((q) => q.fleet).filter(Boolean);
+  const sel = [...selected].filter((q) => q.alive > 0).map((q) => q.fleet).filter(Boolean);
+  if (!sel.length) return true;   // 沒有選取：技能鍵不做事
   const pool = [...sel, ...fleets.filter((f) => f.side === GAME.playerSide && !f.ally)];
   const f = pool.find((o) => o.skills[id] && o.skills[id].left > 0 && U.uTime.value >= o.skills[id].ready);
   if (f) armSkill(f, id);
@@ -9049,7 +9055,7 @@ const TUT_LESSONS = [
         goal: '只選取一支艦隊', check: () => tutSelFleets().size === 1 },
       { title: '加選', text: '按住 <kbd>Shift</kbd>（或 <kbd>Ctrl</kbd>）再左鍵點<b>另一支</b>艦隊（連點兩下＝加選整支艦隊），兩支就會一起被選取。之後下的命令會同時給它們。',
         goal: '同時選取兩支艦隊', check: () => tutSelFleets().size >= 2 },
-      { title: '取消選取', text: '按 <kbd>Esc</kbd> 取消選取。沒有選取任何東西時下命令＝<b>對全軍下令</b>，要小心。',
+      { title: '取消選取', text: '按 <kbd>Esc</kbd> 取消選取。沒有選取任何東西時<b>不能下命令</b>，右鍵拖曳＝轉動視角。',
         goal: '取消所有選取', check: () => selected.size === 0 },
       { title: '框選與全選', text: () => `按住<b>左鍵拖曳</b>可以框選；按 ${tutK('select_all')}（或 <kbd>Ctrl</kbd>＋<kbd>A</kbd>）選取全軍。`,
         goal: '選取全軍', check: () => { const all = sideSquadrons(0); return all.length > 0 && all.every((q) => selected.has(q)); } },
@@ -9117,7 +9123,7 @@ const TUT_LESSONS = [
         <small>主砲只能打正前方 ±${SHIP_TYPES[1].guns.main.arc}° 左右、射程最遠、單發最重，但打小船命中率差；副砲射角大；防空砲全方向、優先打飛彈和艦載機。<br>距離越遠命中率越低（最大射程剩 ${Math.round(HIT_RULE.farMul * 100)}%）、傷害越低（剩 ${Math.round(BEAM_FALLOFF_MIN * 100)}%）。</small>` },
       { title: '進入射程', text: '前方有兩支不會動的標靶艦隊（藍色）。把第一艦隊往前移動、<b>船頭對著它們</b>，進入射程後就會開火。',
         goal: '第一次命中敵艦', check: () => dmgDealt[0] > 0 },
-      { title: '指定攻擊', text: () => `平常每艘船會自己挑目標。按 ${tutK('attack')} 再<b>左鍵點一支敵方分艦隊</b>＝選取的艦隊集中攻擊它（沒有選取＝全軍）。集中打一個目標，讓它更快失去戰力。<br><small>觸控：「攻擊」按鈕。</small>`,
+      { title: '指定攻擊', text: () => `平常每艘船會自己挑目標。按 ${tutK('attack')} 再<b>左鍵點一支敵方分艦隊</b>＝選取的艦隊集中攻擊它。集中打一個目標，讓它更快失去戰力。<br><small>觸控：「攻擊」按鈕。</small>`,
         goal: '指定攻擊一個目標', check: (S) => S.cmds('attack').length > 0 },
       { title: '飛彈齊射', text: () => `巡洋艦與驅逐艦帶飛彈：射程比副砲遠、比主砲短（巡洋 ${SHIP_TYPES[2].missile.range}、驅逐 ${SHIP_TYPES[3].missile.range}），不衰減，平常自動發射。按 ${tutK('missile')} 讓選取的艦隊<b>立刻一起發射</b>——同時到達的飛彈比較容易突破防空。<br><small>飛彈打完要回補給艦隊補充；護盾還在時飛彈的傷害主要被護盾吃掉（×${MISSILE_RULE.shield}），護盾打光後直擊船體 ×${MISSILE_RULE.direct}。</small>`,
         goal: '飛彈齊射一次', check: (S) => S.cmds('missile').length > 0 },
@@ -13688,7 +13694,7 @@ function keyText(id) {
 }
 
 // ── 指令卡內容 ──
-// 選取（沒選＝全軍）裡有指揮官的艦隊的技能，依 SKILLS 的順序；all＝選取裡沒有就看全軍（教學說明用）
+// 選取裡有指揮官的艦隊的技能，依 SKILLS 的順序；all＝選取裡沒有就看全軍（教學說明用）
 function ccSkills(all = false) {
   const own = (f) => f && f.side === GAME.playerSide && f.commander && !f.ally && f.skills;
   let fl = [...new Set(actOn().map((q) => q.fleet))].filter(own);
@@ -13713,7 +13719,7 @@ function ccItems() {
   const L = actOn(), has = L.length > 0, A = GAME.skillArm;
   const g0 = has && L.every((q) => q.group === L[0].group) ? L[0].group : null;
   const back = { act: 'back', name: '返回', sub: 'Esc', desc: '回到主頁', ok: true, nav: true };
-  const none = '沒有可以指揮的艦隊';
+  const none = '先選取要指揮的艦隊';
   if (CH.page === 'form') {
     CC_FORMS.forEach((k, i) => { const F = FORMATIONS[k]; it[i] = { act: 'form_' + k, name: F.name, desc: `${F.note}<br><small>火力 ×${F.fire}　變陣至少 ${MORPH_DUR} 秒（艦隊越大越久），變陣中比較脆弱</small>`, ok: has, why: none, on: !!(g0 && g0.formation === k) }; });
     it[7] = { act: 'orderly', name: '整齊排列', sub: g0 ? (g0.orderly ? '開' : '關') : '', desc: '切換整齊排列：等距網格，射界比較好預測（關＝自然、較鬆散）', ok: has, why: none, on: !!(g0 && g0.orderly) };
@@ -13784,7 +13790,7 @@ function ccSkill(id) {
 function armMove() {
   if (!actOn().length) return;
   GAME.skillArm = { move: true, point: true };
-  hint(`移動：${selected.size ? '選取的艦隊' : '全軍'}要去哪裡？左鍵點地圖上的位置（右鍵或 Esc 取消）`);
+  hint(`移動：選取的艦隊要去哪裡？左鍵點地圖上的位置（右鍵或 Esc 取消）`);
 }
 function cmdStop() { if (!actOn().length) return; issue('stop', { sqs: sqIds() }); updateSelBar(); }   // 停止不排進隊列
 
@@ -13885,7 +13891,7 @@ function ccRefresh(force) {
   if (!CH.el || !CH.card) return;
   if (force) CH.acc = 0;
   const items = ccItems();
-  gEl('ch-page').textContent = CH.page === 'form' ? '陣型' : CH.page === 'skill' ? '技能' : `${selected.size ? '選取的艦隊' : '全軍'}　按鍵＝格子位置`;
+  gEl('ch-page').textContent = CH.page === 'form' ? '陣型' : CH.page === 'skill' ? '技能' : `${selected.size ? '選取的艦隊' : '未選取（先選艦隊才能下令）'}　按鍵＝格子位置`;
   items.forEach((it, i) => {
     const b = CH.btns[i], set = (sel, v) => { const el = b.querySelector(sel); if (el.textContent !== v) el.textContent = v; };
     set('.cc-k', keyLabel(keyOf('cc_' + i)));
@@ -13924,7 +13930,7 @@ function chOrder(L) {
 }
 function chSelList() {
   const L = [...selected].filter((q) => q.alive > 0 && !q.bg);
-  return { L: L.length ? L : actOn().filter((q) => q.alive > 0), all: !L.length };
+  return { L: L.length ? L : sideSquadrons(cmdSide).filter((q) => q.alive > 0), all: !L.length };   // 沒選時只顯示全軍狀態（不能下令）
 }
 function chSelRefresh() {
   const el = gEl('ch-sel'); if (!el) return;
@@ -13939,8 +13945,8 @@ function chSelRefresh() {
     let head;
     if (one && F[0][0]) {
       const f = F[0][0], c = f.commander;
-      head = `<div class="cs-h"><b class="cs-fn">${f.name}</b>${c ? `<span>${c.name}${c.title ? ' ' + c.title : ''} Lv ${c.level}</span>` : ''}${all ? '<span class="g-dim">（未選取＝全軍）</span>' : ''}</div>`;
-    } else head = `<div class="cs-h"><b class="cs-fn">${all ? '全軍' : '選取'}</b><span>${F.length} 支艦隊・${L.length} 支分艦隊</span>${all ? '<span class="g-dim">（未選取：指令套用到全軍）</span>' : ''}</div>`;
+      head = `<div class="cs-h"><b class="cs-fn">${f.name}</b>${c ? `<span>${c.name}${c.title ? ' ' + c.title : ''} Lv ${c.level}</span>` : ''}${all ? '<span class="g-dim">（未選取：不能下令）</span>' : ''}</div>`;
+    } else head = `<div class="cs-h"><b class="cs-fn">${all ? '全軍' : '選取'}</b><span>${F.length} 支艦隊・${L.length} 支分艦隊</span>${all ? '<span class="g-dim">（未選取：先選艦隊才能下令）</span>' : ''}</div>`;
     const tiles = one
       ? L.map((q) => `<button class="cs-t" data-sq="${squadrons.indexOf(q)}" title="點＝只選這支分艦隊；Shift＋點＝從選取中移除"><span class="cs-tn">${q.name}</span><span class="cs-tc"></span><i class="cs-bar"><i></i></i></button>`).join('')
       : F.map(([f]) => `<button class="cs-t" data-fl="${f ? f.id : -1}" title="點＝只選這支艦隊；Shift＋點＝從選取中移除"><span class="cs-tn">${f ? f.name : '—'}</span><span class="cs-tc"></span><i class="cs-bar"><i></i></i></button>`).join('');

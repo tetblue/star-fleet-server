@@ -30,7 +30,7 @@ function keyText(id) {
 }
 
 // ── 指令卡內容 ──
-// 選取（沒選＝全軍）裡有指揮官的艦隊的技能，依 SKILLS 的順序；all＝選取裡沒有就看全軍（教學說明用）
+// 選取裡有指揮官的艦隊的技能，依 SKILLS 的順序；all＝選取裡沒有就看全軍（教學說明用）
 function ccSkills(all = false) {
   const own = (f) => f && f.side === GAME.playerSide && f.commander && !f.ally && f.skills;
   let fl = [...new Set(actOn().map((q) => q.fleet))].filter(own);
@@ -55,7 +55,7 @@ function ccItems() {
   const L = actOn(), has = L.length > 0, A = GAME.skillArm;
   const g0 = has && L.every((q) => q.group === L[0].group) ? L[0].group : null;
   const back = { act: 'back', name: '返回', sub: 'Esc', desc: '回到主頁', ok: true, nav: true };
-  const none = '沒有可以指揮的艦隊';
+  const none = '先選取要指揮的艦隊';
   if (CH.page === 'form') {
     CC_FORMS.forEach((k, i) => { const F = FORMATIONS[k]; it[i] = { act: 'form_' + k, name: F.name, desc: `${F.note}<br><small>火力 ×${F.fire}　變陣至少 ${MORPH_DUR} 秒（艦隊越大越久），變陣中比較脆弱</small>`, ok: has, why: none, on: !!(g0 && g0.formation === k) }; });
     it[7] = { act: 'orderly', name: '整齊排列', sub: g0 ? (g0.orderly ? '開' : '關') : '', desc: '切換整齊排列：等距網格，射界比較好預測（關＝自然、較鬆散）', ok: has, why: none, on: !!(g0 && g0.orderly) };
@@ -126,7 +126,7 @@ function ccSkill(id) {
 function armMove() {
   if (!actOn().length) return;
   GAME.skillArm = { move: true, point: true };
-  hint(`移動：${selected.size ? '選取的艦隊' : '全軍'}要去哪裡？左鍵點地圖上的位置（右鍵或 Esc 取消）`);
+  hint(`移動：選取的艦隊要去哪裡？左鍵點地圖上的位置（右鍵或 Esc 取消）`);
 }
 function cmdStop() { if (!actOn().length) return; issue('stop', { sqs: sqIds() }); updateSelBar(); }   // 停止不排進隊列
 
@@ -227,7 +227,7 @@ function ccRefresh(force) {
   if (!CH.el || !CH.card) return;
   if (force) CH.acc = 0;
   const items = ccItems();
-  gEl('ch-page').textContent = CH.page === 'form' ? '陣型' : CH.page === 'skill' ? '技能' : `${selected.size ? '選取的艦隊' : '全軍'}　按鍵＝格子位置`;
+  gEl('ch-page').textContent = CH.page === 'form' ? '陣型' : CH.page === 'skill' ? '技能' : `${selected.size ? '選取的艦隊' : '未選取（先選艦隊才能下令）'}　按鍵＝格子位置`;
   items.forEach((it, i) => {
     const b = CH.btns[i], set = (sel, v) => { const el = b.querySelector(sel); if (el.textContent !== v) el.textContent = v; };
     set('.cc-k', keyLabel(keyOf('cc_' + i)));
@@ -266,7 +266,7 @@ function chOrder(L) {
 }
 function chSelList() {
   const L = [...selected].filter((q) => q.alive > 0 && !q.bg);
-  return { L: L.length ? L : actOn().filter((q) => q.alive > 0), all: !L.length };
+  return { L: L.length ? L : sideSquadrons(cmdSide).filter((q) => q.alive > 0), all: !L.length };   // 沒選時只顯示全軍狀態（不能下令）
 }
 function chSelRefresh() {
   const el = gEl('ch-sel'); if (!el) return;
@@ -281,8 +281,8 @@ function chSelRefresh() {
     let head;
     if (one && F[0][0]) {
       const f = F[0][0], c = f.commander;
-      head = `<div class="cs-h"><b class="cs-fn">${f.name}</b>${c ? `<span>${c.name}${c.title ? ' ' + c.title : ''} Lv ${c.level}</span>` : ''}${all ? '<span class="g-dim">（未選取＝全軍）</span>' : ''}</div>`;
-    } else head = `<div class="cs-h"><b class="cs-fn">${all ? '全軍' : '選取'}</b><span>${F.length} 支艦隊・${L.length} 支分艦隊</span>${all ? '<span class="g-dim">（未選取：指令套用到全軍）</span>' : ''}</div>`;
+      head = `<div class="cs-h"><b class="cs-fn">${f.name}</b>${c ? `<span>${c.name}${c.title ? ' ' + c.title : ''} Lv ${c.level}</span>` : ''}${all ? '<span class="g-dim">（未選取：不能下令）</span>' : ''}</div>`;
+    } else head = `<div class="cs-h"><b class="cs-fn">${all ? '全軍' : '選取'}</b><span>${F.length} 支艦隊・${L.length} 支分艦隊</span>${all ? '<span class="g-dim">（未選取：先選艦隊才能下令）</span>' : ''}</div>`;
     const tiles = one
       ? L.map((q) => `<button class="cs-t" data-sq="${squadrons.indexOf(q)}" title="點＝只選這支分艦隊；Shift＋點＝從選取中移除"><span class="cs-tn">${q.name}</span><span class="cs-tc"></span><i class="cs-bar"><i></i></i></button>`).join('')
       : F.map(([f]) => `<button class="cs-t" data-fl="${f ? f.id : -1}" title="點＝只選這支艦隊；Shift＋點＝從選取中移除"><span class="cs-tn">${f ? f.name : '—'}</span><span class="cs-tc"></span><i class="cs-bar"><i></i></i></button>`).join('');

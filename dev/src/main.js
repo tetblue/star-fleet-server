@@ -4378,7 +4378,8 @@ function clickSelect(q, add, dbl) {
 }
 function selectAllUnits() { setSelection(sideSquadrons(GAME.phase === 'battle' || GAME.phase === 'deploy' ? GAME.playerSide : cmdSide)); }
 // 指令對象：有選取就用選取，沒有就是整支艦隊
-function actOn() { const l = [...selected].filter((q) => q.alive > 0); return l.length ? l : sideSquadrons(cmdSide); }
+// 指令只對選取的分艦隊有效；沒有選取＝任何艦隊指令都不做事（不再預設全軍）
+function actOn() { return [...selected].filter((q) => q.alive > 0); }
 function actSet() { return new Set(actOn()); }
 function selectionChanged() {
   for (const q of squadrons) q.label && q.label.classList.toggle('sel', selected.has(q));
@@ -4394,7 +4395,7 @@ function setCmdSide(sd, selectAll = true) {
 function updateSelBar() {
   const l = [...selected];
   const el = $('selbar');
-  if (!l.length) { el.innerHTML = `<span class="dim">未選取 · 指令會套用到整支${FACTION[SIDE_FAC[cmdSide]].name}</span>`; return; }
+  if (!l.length) { el.innerHTML = `<span class="dim">未選取 · 先選取艦隊才能下令（右鍵拖曳＝轉動視角）</span>`; return; }
   const n = l.reduce((s, q) => s + q.alive, 0) * opts.rep;
   const g = l[0].group, same = l.every((q) => q.group === g);
   const names = l.length <= 3 ? l.map((q) => q.name).join('、') : `${l.length} 支分艦隊`;
@@ -4412,6 +4413,7 @@ function sqIds(list = actOn()) { return list.map((q) => squadrons.indexOf(q)); }
 let queueToggle = false;
 function queueMode() { const m = SETTINGS.queueMod; return queueToggle || keysDown.has(m + 'Left') || keysDown.has(m + 'Right'); }
 function sendCmd(type, args) {
+  if (args.sqs && !args.sqs.length) return;   // 沒有選取：不下令
   if (queueMode()) { const { sqs, ...item } = args; return issue('queue', { sqs, item: { type, ...item } }); }
   return issue(type, args);
 }
@@ -4428,9 +4430,9 @@ function cmdAttack(target) { sendCmd('attack', { sqs: sqIds(), target: squadrons
 function cmdTurn(d) { sendCmd('turn', { sqs: sqIds(), d }); }
 function cmdVolley() { sendCmd('volley', { sqs: sqIds() }); }
 function cmdMissile() { sendCmd('missile', { sqs: sqIds() }); }   // 層數、轉向、齊射都可以排進隊列（按住隊列鍵）
-function cmdFighter() { issue('fighter', { sqs: sqIds(), n: 8 }); }
+function cmdFighter() { if (!actOn().length) return; issue('fighter', { sqs: sqIds(), n: 8 }); }
 function cmdArea(p) { sendCmd('area', { sqs: sqIds(), x: Math.round(p.x), y: Math.round(p.y != null ? p.y : selAlt()), z: Math.round(p.z) }); updateSelBar(); }
-// 區域掃描：選取的（沒選＝任一支）有航母、冷卻好的艦隊；接著點地圖上的位置（高度＝選取部隊的高度）
+// 區域掃描：選取的（沒選＝不能下令）有航母、冷卻好的艦隊；接著點地圖上的位置（高度＝選取部隊的高度）
 function reconFleet(f) {
   if (f) return f;
   const ok = (o) => o && o.side === cmdSide && !o.reserve && fowHasCarrier(o);
@@ -4439,6 +4441,7 @@ function reconFleet(f) {
 }
 function armRecon(f) {
   if (GAME.phase !== 'battle') return;
+  if (!f && !actOn().length) return;   // 沒有選取：不下令
   if (!fowOn()) { toast('只有擬真難度開啟戰爭迷霧時才需要掃描', 'hint'); return; }
   f = reconFleet(f);
   if (!f) { toast('沒有航母：區域掃描要由航母派出偵察機', 'hint'); return; }
@@ -4767,6 +4770,7 @@ function mouseDown(e) {
     m.timer = setTimeout(() => { if (ms === m && m.mode === 'lpress') openRadial(m); }, RADIAL_HOLD);
   }
   else if (e.button === 1) { ms = { mode: mode3D && !e.shiftKey ? 'orbit' : 'pan', x: e.clientX, y: e.clientY }; e.preventDefault(); }
+  else if (e.button === 2 && !actOn().length) ms = { mode: 'vpress', btn: 2, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY };   // 沒有選取：右鍵拖曳＝轉動視角，點一下不做事
   else if (e.button === 2) { const y0 = selAlt(); ms = { mode: 'rpress', x0: e.clientX, y0: e.clientY, alt0: y0, dy: 0, dp: 0, A: groundAt(e.clientX, e.clientY, y0) }; }
 }
 function mouseMove(e) {

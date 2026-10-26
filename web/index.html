@@ -870,13 +870,14 @@
       <tr><td>Tab</td><td>作戰中：戰術面板（簡化俯視圖，可下令；打開時自動暫停）</td></tr>
       <tr><td>左鍵按住不動</td><td>指令輪盤：滑向指令後放開＝下令；停在中間放開＝取消。輪盤出現時按 Q／E 切換「陣型／攻擊」兩頁（選取後按任何地方都可以）</td></tr>
       <tr><td>左鍵點技能</td><td>施放；集中火力再用左鍵點敵方分艦隊（右鍵或 Esc 取消）</td></tr>
-      <tr><td>右鍵點地面</td><td>移動到該點，朝向不變</td></tr>
+      <tr><td>右鍵點地面</td><td>選取的艦隊移動到該點，朝向不變（沒有選取＝不下令）</td></tr>
+      <tr><td>沒選取時右鍵拖曳</td><td>3D：轉動視角（沒有選取任何艦隊時，所有艦隊指令都無效）</td></tr>
       <tr><td>右鍵按住拖曳</td><td>按下處＝目的地，拖曳方向＝到達後的朝向</td></tr>
       <tr><td>右鍵按住＋滾輪</td><td>3D：調整目的地高度（每格 20）；按住 Z 轉滾輪＝到達後的仰角（每格 5°）。戰術面板下方的側視圖：右鍵上下拖＝把選取的部隊升降到那個高度</td></tr>
       <tr><td>下令時減速</td><td>沒有暫停時，按住右鍵、打開輪盤、選攻擊／技能目標的期間，遊戲自動降到 ×0.2，下完恢復（設定 → 遊戲可以調整或關閉）</td></tr>
       <tr><td>Shift＋命令</td><td>排進戰術隊列：前一個動作完成（抵達、變陣結束）才執行下一個。例：Shift＋右鍵移動 → Shift＋輪盤換陣型 → Shift＋技能。不按 Shift 直接下令＝取消隊列</td></tr>
       <tr><td>指令卡（右下角）</td><td>所有命令都是按鈕，滑鼠移上去會說明。按鍵＝格子的位置：第一排 Q 移動、W 停止、E 攻擊、R 區域攻擊、T 轉向 45°；第二排 A 陣型頁、S 整齊排列、D 全艦齊射、F 飛彈齊射、G 區域掃描；第三排 Z X C V B＝選取艦隊的技能。陣型頁：Q～T、A、S＝七種陣型，Esc 返回</td></tr>
-      <tr><td>E（攻擊）＋左鍵點敵軍</td><td>選取的艦隊集中攻擊該分艦隊（沒選＝全軍）</td></tr>
+      <tr><td>E（攻擊）＋左鍵點敵軍</td><td>選取的艦隊集中攻擊該分艦隊（沒選＝無效）</td></tr>
       <tr><td>數字鍵</td><td>編隊：Ctrl＋數字＝把選取編成那一隊、數字＝選取、連按兩下＝鏡頭跳過去、Shift＋數字＝加入。開戰時每支艦隊自動編成 1、2、3…</td></tr>
       <tr><td>小地圖（左下角）</td><td>左鍵點／拖曳＝移動鏡頭；右鍵＝選取的艦隊移動過去</td></tr>
       <tr><td>選取面板（下方中間）</td><td>點分艦隊＝只選它、Shift＋點＝從選取移除、連點兩下＝鏡頭跳過去</td></tr>
@@ -1006,7 +1007,7 @@
 
 <div id="boot"><div class="boot-card"><h1>星海艦隊戰</h1><div class="sub">FLEET TACTICS · 內網伺服器</div><div id="boot-body"><p class="boot-st">連線中…</p></div></div></div>
 <div id="save-badge" hidden>⚠ 存檔還沒同步到伺服器，重試中…</div>
-<script>window.__BUILD = "20261026081047"; window.__ASSETS = { ships: "assets/ships.webp", fx: "assets/fx.webp", fighters: "assets/fighters.webp" };</script>
+<script>window.__BUILD = "20261026134533"; window.__ASSETS = { ships: "assets/ships.webp", fx: "assets/fx.webp", fighters: "assets/fighters.webp" };</script>
 <script>// ═══ 啟動前：登入伺服器、取得存檔、提供 STORE（取代 localStorage，寫入會自動同步到伺服器）═══
 (() => {
   'use strict';

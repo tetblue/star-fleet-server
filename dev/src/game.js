@@ -245,21 +245,23 @@ function armSkill(f, id) {
 // A 鍵（觸控：「攻擊」按鈕）：接著左鍵點敵方分艦隊＝選取的艦隊集中攻擊它（不加傷害、沒有次數限制）
 function armAttack() {
   if (GAME.phase !== 'battle' && GAME.phase !== 'sandbox') return;
+  if (!actOn().length) return;
   GAME.skillArm = { attack: true };
-  hint(`攻擊：${selected.size ? '選取的艦隊' : '全軍'}要打哪一支？左鍵點敵方分艦隊（右鍵或 Esc 取消）`);
+  hint(`攻擊：選取的艦隊要打哪一支？左鍵點敵方分艦隊（右鍵或 Esc 取消）`);
 }
 // D 鍵（輪盤「攻擊」頁）：接著左鍵點地圖上的一點＝選取的艦隊對那裡開火（光束、飛彈、艦載機；射程內才打）
 function armArea() {
   if (GAME.phase !== 'battle' && GAME.phase !== 'sandbox') return;
   if (!actOn().length) return;
   GAME.skillArm = { area: true, point: true };
-  hint(`區域攻擊：${selected.size ? '選取的艦隊' : '全軍'}要打哪裡？左鍵點地圖上的位置（${FOW_RULE.area.dur} 秒；射程內的光束、飛彈、艦載機會打那裡，看不到目標＝盲射）（右鍵或 Esc 取消）`);
+  hint(`區域攻擊：選取的艦隊要打哪裡？左鍵點地圖上的位置（${FOW_RULE.area.dur} 秒；射程內的光束、飛彈、艦載機會打那裡，看不到目標＝盲射）（右鍵或 Esc 取消）`);
 }
 function skillEsc() { if (!GAME.skillArm) return false; GAME.skillArm = null; hideHint(); return true; }
 function skillKey(id) {
   if (GAME.phase !== 'battle') return false;
   if (!SKILLS[id]) return false;
-  const sel = [...selected].map((q) => q.fleet).filter(Boolean);
+  const sel = [...selected].filter((q) => q.alive > 0).map((q) => q.fleet).filter(Boolean);
+  if (!sel.length) return true;   // 沒有選取：技能鍵不做事
   const pool = [...sel, ...fleets.filter((f) => f.side === GAME.playerSide && !f.ally)];
   const f = pool.find((o) => o.skills[id] && o.skills[id].left > 0 && U.uTime.value >= o.skills[id].ready);
   if (f) armSkill(f, id);
