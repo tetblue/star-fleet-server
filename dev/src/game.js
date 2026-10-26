@@ -142,7 +142,7 @@ function makeSetup(sc, lo, attempt) {
       commander: null, reserve: true, activateAt: null, reinfOf: k });
   });
   // 傭兵支援：打下灰鴉的基地、功勳夠才準備（第一艦隊的指揮官多一個技能）；對手就是灰鴉的關卡不能叫
-  if (ROSTER.mercSup && !sc.sim && !sc.tut && !sc.mp && sc.enemyFac !== 2 && lo.fleets.length && (ROSTER.merit || 0) >= MERC_RULE.cost) {
+  if (ROSTER.mercSup && !sc.sim && !sc.tut && !sc.mp && sc.enemyFac !== 2 && lo.faction !== 2 && lo.fleets.length && (ROSTER.merit || 0) >= MERC_RULE.cost) {
     const A = CAMP_ARCHETYPES.find((a) => a.key === 'raider'), per = A.mix.reduce((t, m, i) => t + m * SHIP_TYPES[i].cost, 0), n = sc.budget * MERC_RULE.share / per;
     fleetsS[0].commander.skills = fleetsS[0].commander.skills.concat('merc');
     fleetsS.push({ side: 0, fac: 2, name: '灰鴉傭兵團', ax: 0, az: MAP_BOUNDS.z1 + 900, ay: 0, h: Math.PI, formation: 'wedge', comp: A.mix.map((m) => Math.round(n * m / 10) * 10),
@@ -229,7 +229,8 @@ function defectFleet(f) {
   for (let j = 0; j < FT.side.length; j++) if (FT.state[j] && sqSet.has(squadrons[ships.sq[FT.carrier[j]]])) FT.side[j] = f.side;
   let n = 0; for (const q of f.sqs) n += q.alive;
   GAME.init[f.side] += n;
-  toast(`警告：${f.name}倒戈了！`, 'bad');
+  // 番外篇：玩家就是傭兵，倒戈的是自己這一邊
+  toast(SIDE_FAC[GAME.playerSide || 0] === 2 ? `灰鴉傭兵團轉向攻擊${f.name}！` : `警告：${f.name}倒戈了！`, 'bad');
 }
 function skillCmd(f, id, target, pt) {
   const args = { fleet: f.id, skill: id, target: target ? squadrons.indexOf(target) : null, ...(pt ? { x: Math.round(pt.x), z: Math.round(pt.z) } : {}) };
@@ -707,7 +708,7 @@ function showSingle() {
     <div class="g-head"><h2>單人戰鬥</h2><span class="crumb">選擇作戰模式</span><span class="g-sp"></span><button class="g-btn" id="sp-back">← 主選單</button></div>
     <div class="sp-op"><span class="g-dim">操作難度</span>${opSeg('sp-op')}<span class="sp-opd">${OP_LEVELS[opLevel()].desc}</span></div>
     <div class="sp-grid">
-      <button class="sp-mode wide" id="sp-story"><span class="sp-en">CAMPAIGN</span><b>雙星記</b><span class="sp-desc">劇情戰役：選擇帝國篇或聯盟篇，從頭到尾指揮同一個陣營，打到這場戰爭的結局。兩篇的進度分開保存</span><span class="sp-st">${STORY_LINE[sp.line] ? `${STORY_LINE[sp.line].name} ${storyCount(sp, sp.line)}／${storySeq(sp.line).length} 場作戰` : '尚未開始'}</span></button>
+      <button class="sp-mode wide" id="sp-story"><span class="sp-en">CAMPAIGN</span><b>雙星記</b><span class="sp-desc">劇情戰役：選擇帝國篇或聯盟篇，從頭到尾指揮同一個陣營，打到這場戰爭的結局；番外篇〈雙星之外〉是灰鴉傭兵團的故事</span><span class="sp-st">${STORY_LINE[sp.line] ? `${STORY_LINE[sp.line].name} ${storyCount(sp, sp.line)}／${storySeq(sp.line).length} 場作戰` : '尚未開始'}</span></button>
       ${mode('sp-train', 'TRAINING', '訓練作戰', '從零開始的教學課程與戰術手冊，以及固定的作戰關卡：讀情報、編成、部署，熟悉各種戰況', `教學 ${TUT_LESSONS.filter((L) => tutLoad().done[L.id]).length}／${TUT_LESSONS.length}・${SCENARIOS.length} 場作戰`)}
       ${mode('sp-rand', 'SKIRMISH', '隨機戰役', '自選規模與敵軍強度，敵軍和地形每次隨機生成', `${RAND_SIZES[ro.size].name}・敵軍${RAND_DIFF[ro.diff].name}・地形${RAND_TERR[ro.terr].name}`)}
       ${mode('sp-camp', 'ENDLESS', '無限戰場', '無限關卡：敵軍依你的指揮官等級生成，一關比一關大', `目前第 ${c.stage} 關・最高第 ${c.best} 關`)}
@@ -851,7 +852,7 @@ function showLoadout() {
   overlay(`<div class="g-wrap">
     <div class="g-head"><h2>編成</h2><span class="crumb">${sc.name}　·　預算 ${fmtN(sc.budget)} 點</span><span class="g-sp"></span><button class="g-btn" id="l-back">${sc.mp ? '← 房間' : sc.tut ? '← 訓練作戰' : '← 簡報'}</button></div>
     <div class="g-card" style="margin-bottom:12px"><div class="g-row" style="margin-bottom:8px"><span class="g-dim">陣營</span>
-      ${sc.saga ? `<b class="g-${fac ? 'all' : 'emp'}">${FACTION_NAME[fac]}</b><span class="g-dim" style="font-size:calc(12px * var(--ui))">（劇情固定）劇情指定的指揮官不能更換；還有空的艦隊欄位可以派同陣營的其他指揮官</span>` : ''}<div class="wed-seg" id="l-fac" ${sc.saga ? 'hidden' : ''}><button data-f="0" class="${fac === 0 ? 'on emp' : ''}">帝國軍</button><button data-f="1" class="${fac === 1 ? 'on all' : ''}">聯盟軍</button></div>
+      ${sc.saga ? `<b class="g-${FACTION_CLS[fac]}">${FACTION_NAME[fac]}</b><span class="g-dim" style="font-size:calc(12px * var(--ui))">（劇情固定）劇情指定的指揮官不能更換；還有空的艦隊欄位可以派同陣營的其他指揮官</span>` : ''}<div class="wed-seg" id="l-fac" ${sc.saga ? 'hidden' : ''}><button data-f="0" class="${fac === 0 ? 'on emp' : ''}">帝國軍</button><button data-f="1" class="${fac === 1 ? 'on all' : ''}">聯盟軍</button></div>
       <span class="g-dim" style="font-size:calc(12px * var(--ui))" ${sc.saga ? 'hidden' : ''}>${sc.mp ? `只能派該陣營的初始指揮官（${cmdrsOf(fac).length} 位），等級與天賦是多人專用的；換陣營會通知房間` : `只能派該陣營的指揮官（${cmdrsOf(fac).length} 位）；敵軍是另一個陣營。指揮官不夠可以到「星際酒館」招募`}</span></div>
       <div class="g-row" style="margin-bottom:8px"><span class="g-dim">操作難度</span>${sc.tut ? `<b>${OP_LEVELS[sc.op].name}</b><span class="g-dim" style="font-size:calc(12px * var(--ui))">（教學固定）${OP_LEVELS[sc.op].desc}</span>` : sc.mp ? `<b>${OP_LEVELS[sc.op].name}</b><span class="g-dim" style="font-size:calc(12px * var(--ui))">（房主決定）${OP_LEVELS[sc.op].desc}</span>` : `${opSeg('l-op')}<span class="g-dim" style="font-size:calc(12px * var(--ui))">${OP_LEVELS[opLevel()].desc}</span>`}</div>
       ${lo.fleets.length ? '' : '<div class="g-warn" style="margin-bottom:8px">這個陣營沒有可派的指揮官，先到星際酒館招募。</div>'}
@@ -1267,7 +1268,7 @@ const SAVE_FMT = 'starfleet-save';
 function saveSummary(d) {
   const j = (k) => { try { return JSON.parse(d[k] || 'null'); } catch (e) { return null; } };
   const st = j(STORY_STORE), tu = j(TUT_STORE), ca = j(CAMP_STORE), out = [];
-  if (st && st.done) for (const k of ['e', 'a']) if (storyCount(st, k)) out.push(`雙星記${STORY_LINE[k].name} ${storyCount(st, k)}／${storySeq(k).length}`);
+  if (st && st.done) for (const k of ['e', 'a', 'm']) if (storyCount(st, k)) out.push(`雙星記${STORY_LINE[k].name} ${storyCount(st, k)}／${storySeq(k).length}`);
   if (tu && tu.done) out.push(`教學 ${TUT_LESSONS.filter((L) => tu.done[L.id]).length}／${TUT_LESSONS.length}`);
   if (ca && ca.seed) out.push(`隨機戰役 第 ${ca.stage || 1} 關`);
   return out.join('・') || '（沒有進度）';

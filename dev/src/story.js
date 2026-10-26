@@ -7,13 +7,19 @@ const STORY_CH = [
   { no: '序章', name: '邊境' }, { no: '第一章', name: '星雲' }, { no: '第二章', name: '要塞' },
   { no: '第三章', name: '停戰' }, { no: '第四章', name: '遠征' }, { no: '終章', name: '雙星' },
 ];
-const STORY_SIDE = [{ name: '帝國軍', cls: 'emp' }, { name: '聯盟軍', cls: 'all' }];
+const STORY_SIDE = [{ name: '帝國軍', cls: 'emp' }, { name: '聯盟軍', cls: 'all' }, { name: '灰鴉傭兵團', cls: 'mer' }];
 const STORY_LINE = {
   e: { side: 0, name: '帝國篇', ending: '新王朝', cast: '雷恩・瓦爾特、艾琳・索拉、卡斯・莫德',
     blurb: '平民出身的天才雷恩，在貴族的猜忌與攝政派的陰謀之間，一路打到帝國的頂點。' },
   a: { side: 1, name: '聯盟篇', ending: '共和之星', cast: '亞倫・楊森、葛瑞絲・卡特萊',
     blurb: '不想打仗的名將亞倫，替腐敗的議會守住共和國，也替戰友們把帳算清。' },
+  m: { side: 2, name: '番外・雙星之外', ending: '雙星之外', cast: '賽隆、「鏽牙」杜蘭、「快手」莎夏、「鐵顎」柯爾', extra: true,
+    blurb: '帝國和聯盟都雇用過他們，也都追殺過他們。收錢辦事的灰鴉傭兵團，看見了這場戰爭帳本的另一面。',
+    note: '番外篇的前半段跟主線第一、二章的事件（包括灰鴉的支線）是同一批事件，後半段會揭露主線第三章以後的內幕。沒玩過主線也能直接玩，但建議先玩過主線的第一、二章。' },
 };
+// 番外篇的 {V}：贏得戰爭的一方（玩家打過的結局；兩個都打過就看最近的那一個，都沒打過就是「新政府」）
+function storyVictor() { const p = storyLoad(), e = p.done['21e'] || 0, a = p.done['21a'] || 0; return !e && !a ? '新政府' : e >= a ? '帝國' : '聯盟'; }
+const storyText = (t) => (t ? t.split('{V}').join(storyVictor()) : t);
 // 地標（不是關卡）：首都、要塞
 const STORY_MARKS = [
   { name: '維斯特拉', sub: '奧瑞利安帝國　帝都', x: 150, y: 455, side: 0, kind: 'capital', lp: 'up' },
@@ -111,6 +117,37 @@ const STORY_STAGES = [
   { id: '21a', ch: 5, merc: true, line: 'a', name: '共和之星', place: '洛珊', x: 760, y: 800, cast: ['aaron', 'horst', 'pele'], goal: '擊潰赫爾墨斯私兵艦隊',
     story: '赫爾墨斯軍需集團不打算交出洛珊，私兵艦隊封鎖了港口。這是這場戰爭的最後一筆帳。',
     ending: '洛珊與帝國各星區以加盟國的身分併入聯盟，自由星系聯盟擁有約八成五的人類星域。議會依然腐敗，而亞倫成了不得不從政的英雄。' },
+  // ── 番外篇〈雙星之外〉：灰鴉傭兵團（玩家是傭兵陣營）。when＝對應主線的時間點；{V}＝贏得戰爭的一方（看玩家打過的結局）──
+  { id: 'm1', ch: 1, merc: true, line: 'm', name: '鏽色的生意', place: '卡德倫星系', x: 340, y: 170, cast: ['ceron', 'duran'], goal: '擊沉帝國的補給船團',
+    when: '主線第一章〈無人護航〉前後，支線〈鏽色的海盜〉的另一邊',
+    story: '一筆來自洛珊的匿名訂單：劫掠帝國的補給線，但要打扮成海盜。賽隆把灰鴉的旗子收了起來。',
+    inter: '帝國前線缺補給，司令部卻不派護衛。帝國的補給船團只能自己上路。' },
+  { id: 'm2', ch: 1, merc: true, line: 'm', name: '價碼', place: '費茲外緣', x: 1200, y: 240, cast: ['ceron'], goal: '倒戈之後撐到時限',
+    when: '主線第一章〈數字的戰爭〉之後，支線〈價碼〉的另一邊',
+    story: '聯盟議會雇用灰鴉協同作戰，帶隊的是葛瑞絲・卡特萊准將。開戰前，賽隆收到洛珊的加密頻道：價錢待會兒再談。' },
+  { id: 'm3', ch: 1, merc: true, line: 'm', name: '巢穴', place: '暗黑星雲北段', x: 690, y: 232, cast: ['ceron', 'kol'], goal: '守住巢穴，讓補給船全部出港（撐到時限）',
+    when: '主線第一章的尾聲，支線〈渡鴉之巢〉的另一邊',
+    story: '帝國的卡斯・莫德順著補給船找到了灰鴉的巢穴。巢穴守不住，但灰鴉的家當都還在港裡。' },
+  { id: 'm4', ch: 3, merc: true, line: 'm', name: '無名的艦隊', place: '洛珊航道', x: 570, y: 700, cast: ['ceron', 'sasha'], goal: '重創護衛艦隊，然後撤走',
+    when: '主線第三章〈和平的使者〉',
+    story: '兩國要在洛珊停戰談判。新的訂單寫著：讓帝國的使節艦「遇到一點麻煩」。識別信號全關，今天的灰鴉沒有名字。',
+    inter: '埃吉斯要塞陷落，帝國艦隊撤出了歐倫星系。兩國的國庫都見了底，停戰談判終於排上了日程。' },
+  { id: 'm5', ch: 3, merc: true, line: 'm', name: '破局', place: '洛珊港外', x: 960, y: 760, cast: ['ceron', 'duran'], goal: '擊退亞倫的艦隊',
+    when: '主線第三章〈破局〉',
+    story: '假情報已經送到亞倫・楊森手上：港外只有一支小型艦隊。雇主還派來一支掛著帝國識別碼的「友軍」，一起等他進來。' },
+  { id: 'm6', ch: 4, merc: true, line: 'm', name: '滅口', place: '暗黑星雲南段', x: 820, y: 560, cast: ['ceron', 'duran', 'kol'], goal: '從獵殺中脫身（撐到時限）',
+    when: '主線第四章到終章之間',
+    story: '赫爾墨斯約灰鴉在星雲南段交接最後一筆款項。來的不是運鈔船，是赫爾墨斯自己的私兵艦隊。',
+    inter: '帝國的內戰結束了，聯盟的遠征也失敗了。戰爭接近尾聲，打贏的一方遲早會追查：是誰讓這場仗打了這麼久。' },
+  { id: 'm7', ch: 5, merc: true, line: 'm', name: '最後一筆帳', place: '洛珊', x: 760, y: 800, cast: ['ceron', 'duran', 'sasha'], goal: '擊潰赫爾墨斯私兵艦隊',
+    when: '主線最後一關〈新王朝〉／〈共和之星〉',
+    story: '{V}的艦隊封鎖了洛珊。沃斯總裁要灰鴉守在最前面當擋箭牌。賽隆接下了命令，然後把砲口轉了過去。',
+    inter: '阿刻戎走廊的決戰分出了勝負。{V}的大軍南下，赫爾墨斯軍需集團是最後一個不肯低頭的對手。' },
+  { id: 'm8', ch: 5, merc: true, line: 'm', name: '雙星之外', place: '星圖邊緣・未知星域', x: 1480, y: 830, cast: ['ceron', 'sasha', 'kol'], goal: '跟杜蘭會合，撐到時限',
+    when: '主線結局之後',
+    story: '灰鴉的一半成了{V}的傭兵編隊，另一半跟著杜蘭當了宇宙海盜。第一份任務就是追捕杜蘭。賽隆追著他的訊號，一路追出了星圖。',
+    inter: '戰爭結束了。{V}的星圖上，人類星域第一次只剩下一種顏色。',
+    ending: '帝國與聯盟的戰爭結束了，人類以為星空終於屬於自己。灰鴉的一半成了{V}的傭兵編隊，另一半成了被通緝的宇宙海盜。而在星圖的邊緣，那些沒有活人的船，還在朝這裡航行。' },
   // ── 支線：灰鴉傭兵團（第一章；不打也能繼續主線）。req＝要先打完的關、at＝劇情時間點（在哪一關之後：決定誰已經退場）、merc＝跟傭兵有關的任務 ──
   { id: 's1', sub: true, merc: true, req: ['5'], at: '5', ch: 1, line: 'e', name: '鏽色的海盜', place: '卡德倫外緣', x: 340, y: 170, cast: ['kas'], goal: '擊退海盜艦隊',
     story: '卡德倫的補給線接連被「海盜」劫掠。卡斯追了上去，才發現對方的陣形和裝備都不像海盜。',
@@ -129,7 +166,7 @@ STORY_STAGES.forEach((s) => { s.side = STORY_LINE[s.line].side; });
 const STORY_BY = Object.fromEntries(STORY_STAGES.map((s) => [s.id, s]));
 const STORY_SUBS = STORY_STAGES.filter((s) => s.sub);
 // 主線的關卡順序（照 STORY_STAGES 的排列）
-const STORY_SEQ = { e: STORY_STAGES.filter((s) => s.line === 'e' && !s.sub).map((s) => s.id), a: STORY_STAGES.filter((s) => s.line === 'a' && !s.sub).map((s) => s.id) };
+const STORY_SEQ = Object.fromEntries(Object.keys(STORY_LINE).map((k) => [k, STORY_STAGES.filter((s) => s.line === k && !s.sub).map((s) => s.id)]));
 const storySeq = (line) => STORY_SEQ[line] || STORY_SEQ.e;
 const storyLineOf = (p) => (p && STORY_LINE[p.line] ? p.line : 'e');
 // 星圖上的節點與航線：只畫目前篇章的關卡
@@ -221,9 +258,10 @@ function storyPanel(p, key) {
     <div class="st-ch">${ch.no}　${ch.name}・${storyNo(s)}</div>
     <h3 class="st-h">${open ? s.name : '？？？'}</h3>
     <div class="st-meta"><span class="g-${side.cls}">${side.name}</span>・${s.place}</div>
-    ${open ? `<p>${s.story}</p><dl class="kv"><dt>出擊指揮官</dt><dd>${cast}</dd><dt>作戰目標</dt><dd>${s.goal}</dd><dt>建議等級</dt><dd>Lv ${storyRec(s.id)} 以上</dd>${s.reward ? `<dt>獎勵</dt><dd>${s.reward}</dd>` : ''}</dl>`
+    ${open && s.when ? `<div class="st-when">時間點：${s.when}</div>` : ''}
+    ${open ? `<p>${storyText(s.story)}</p><dl class="kv"><dt>出擊指揮官</dt><dd>${cast}</dd><dt>作戰目標</dt><dd>${s.goal}</dd><dt>建議等級</dt><dd>Lv ${storyRec(s.id)} 以上</dd>${s.reward ? `<dt>獎勵</dt><dd>${s.reward}</dd>` : ''}</dl>`
       : `<p class="g-dim">${s.sub ? `完成${s.req.map((q) => (STORY_BY[q].sub ? `支線「${STORY_BY[q].name}」` : storyNo(STORY_BY[q]))).join('、')}後開放。支線不打也能繼續主線。` : '完成前一場作戰後開放。'}</p>`}
-    ${st === 'done' && s.ending ? `<div class="st-end"><b>結局</b><p>${s.ending}</p></div>` : ''}
+    ${st === 'done' && s.ending ? `<div class="st-end"><b>結局</b><p>${storyText(s.ending)}</p></div>` : ''}
     <div class="g-row" style="margin-top:12px"><span class="g-sp"></span>${open ? `<button class="g-btn ${st === 'done' ? '' : 'pri'}" data-go="${s.id}">${st === 'done' ? '重打這一關' : '出擊 →'}</button>` : ''}</div>
   </div>`;
 }
@@ -238,6 +276,7 @@ function showStory() {
   const chs = STORY_CH.map((c, k) => {
     const ids = storySeq(line).filter((id) => STORY_BY[id].ch === k), d = ids.filter((id) => p.done[id]).length;
     const subs = STORY_SUBS.filter((s) => s.ch === k && s.line === line), sd = subs.filter((s) => p.done[s.id]).length;
+    if (!ids.length) return '';   // 番外篇：沒有關卡的章節不顯示
     return `<button class="st-chb ${d === ids.length ? 'done' : d ? 'on' : ''}" data-ch="${k}"><span>${c.no}</span><b>${c.name}</b><i>${d}／${ids.length}${subs.length ? `・支線 ${sd}／${subs.length}` : ''}</i></button>`;
   }).join('');
   overlay(`<div class="g-wrap st-wrap">
@@ -269,13 +308,15 @@ function showStoryLine(change) {
   setPhase('briefing');
   const card = (k) => {
     const L = STORY_LINE[k], cls = STORY_SIDE[L.side].cls, n = storyCount(p, k), all = storySeq(k).length, cur = change && p.line === k;
-    return `<button class="sp-mode st-linepick ${cls} ${cur ? 'on' : ''}" data-l="${k}"><span class="sp-en">${STORY_SIDE[L.side].name}${cur ? '・目前' : ''}</span><b class="g-${cls}">${L.name}</b><span class="sp-desc">${L.blurb}</span>
-      <span class="sp-st"><span class="g-dim">主要人物</span>　${L.cast}</span><span class="sp-st"><span class="g-dim">進度</span>　${n ? `${n}／${all} 場作戰${p.done['21' + k] ? `・已看過結局〈${L.ending}〉` : ''}` : `尚未開始・共 ${all} 場作戰`}</span></button>`;
+    return `<button class="sp-mode st-linepick ${cls} ${cur ? 'on' : ''}" data-l="${k}"><span class="sp-en">${L.extra ? '番外篇・' : ''}${STORY_SIDE[L.side].name}${cur ? '・目前' : ''}</span><b class="g-${cls}">${L.name}</b><span class="sp-desc">${L.blurb}</span>
+      ${L.note ? `<span class="sp-desc st-note">${L.note}</span>` : ''}<span class="sp-st"><span class="g-dim">主要人物</span>　${L.cast}</span><span class="sp-st"><span class="g-dim">進度</span>　${n ? `${n}／${all} 場作戰${p.done[storySeq(k)[all - 1]] ? `・已看過結局〈${L.ending}〉` : ''}` : `尚未開始・共 ${all} 場作戰`}</span></button>`;
   };
   overlay(`<div class="g-wrap sp-wrap">
     <div class="g-head"><h2>雙星記</h2><span class="crumb">${change ? '切換篇章' : '選擇你要追隨的陣營'}</span><span class="g-sp"></span><button class="g-btn" id="sl-back">${change ? '← 星圖' : '← 單人戰鬥'}</button></div>
-    <p class="g-dim" style="margin-top:0">帝國與聯盟的戰爭，從兩邊看是兩個不同的故事。選定之後，整篇都只指揮這一方的艦隊；另一方的動向會在作戰簡報裡交代。兩篇的進度分開保存，打完一篇可以再回來看另一篇。</p>
+    <p class="g-dim" style="margin-top:0">帝國與聯盟的戰爭，從兩邊看是兩個不同的故事。選定之後，整篇都只指揮這一方的艦隊；另一方的動向會在作戰簡報裡交代。各篇的進度分開保存，打完一篇可以再回來看另一篇。</p>
     <div class="st-lines">${card('e')}${card('a')}</div>
+    <h3 class="st-xh">番外篇</h3>
+    <div class="st-lines one">${card('m')}</div>
   </div>`);
   gEl('sl-back').onclick = change ? () => showStory() : showSingle;
   document.querySelectorAll('.st-lines [data-l]').forEach((b) => { b.onclick = () => {
@@ -288,7 +329,9 @@ function showStoryDiff(change) {
   setPhase('briefing');
   // 各章的建議等級（同一章取最低～最高；只算目前篇章）
   const recs = (D) => STORY_CH.map((c, k) => {
-    const v = STORY_STAGES.filter((s) => s.ch === k && s.line === line).map((s) => storyRec(s.id, D)), lo = Math.min(...v), hi = Math.max(...v);
+    const v = STORY_STAGES.filter((s) => s.ch === k && s.line === line).map((s) => storyRec(s.id, D));
+    if (!v.length) return '';
+    const lo = Math.min(...v), hi = Math.max(...v);
     return `<span>${c.no} <b>Lv ${lo === hi ? lo : `${lo}～${hi}`}</b></span>`;
   }).join('');
   const lv = cmdrsIn(L.side).map((c) => `${c.name} Lv ${cmdrLevel(c.id)}`).join('、');

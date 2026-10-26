@@ -182,8 +182,14 @@ const STORY_CMDRS = [
   { id: 'pele', name: '佩蕾', title: '准將', trait: 'speed', skills: ['charge', 'evade'], faction: 1, lv: 2, bio: '機動型。聯盟動作最快的艦隊指揮官，擅長襲擾與追擊。' },
   { id: 'horst', name: '霍斯特', title: '少將', trait: 'shield', skills: ['wall', 'jam'], faction: 1, lv: 3, bio: '守勢型。消耗戰的專家，相信戰爭最後是一道算術題。' },
   { id: 'glen', name: '格倫', title: '中將', trait: 'dmg', skills: ['charge', 'focus'], faction: 0, lv: 5, bio: '攻勢型。原本替攝政派作戰的猛將。他服從的是帝國，不是公爵。' },
+  // 番外篇〈雙星之外〉的灰鴉傭兵團：第一次在番外篇出擊時加入；帝國篇、聯盟篇裡他們是敵人，不能派
+  { id: 'ceron', name: '賽隆', title: '團長', trait: 'speed', skills: ['charge', 'evade'], faction: 2, lv: 3, bio: '灰鴉傭兵團團長。收錢辦事，從不問雇主是誰，直到他不得不問。' },
+  { id: 'duran', name: '「鏽牙」杜蘭', title: '傭兵', trait: 'dmg', skills: ['charge', 'focus'], faction: 2, lv: 3, bio: '灰鴉的突擊隊長。打法粗暴，最討厭跟商人做生意。' },
+  { id: 'sasha', name: '「快手」莎夏', title: '傭兵', trait: 'speed', skills: ['charge', 'rapid'], faction: 2, lv: 2, bio: '灰鴉的游擊隊長。飛彈艦隊用得最好的人。' },
+  { id: 'kol', name: '「鐵顎」柯爾', title: '傭兵', trait: 'shield', skills: ['wall', 'focus'], faction: 2, lv: 3, bio: '灰鴉的守備隊長。話不多，守住的地方從來沒丟過。' },
 ];
-const FACTION_NAME = ['帝國軍', '聯盟軍', '灰鴉傭兵團', '機械改造人類', '機械智慧族', '蟲族感染人類', '蟲族'];   // 2＝傭兵：不能當玩家的陣營，傭兵指揮官可以替兩個陣營出擊；3～6 目前只當敵軍外觀
+const STORY_MERCS = STORY_CMDRS.filter((c) => c.faction === 2).map((c) => c.id);
+const FACTION_NAME = ['帝國軍', '聯盟軍', '灰鴉傭兵團', '機械改造人類', '機械智慧族', '蟲族感染人類', '蟲族'];   // 2＝傭兵：只有劇情番外篇〈雙星之外〉是玩家的陣營，傭兵指揮官可以替兩個陣營出擊；3～6 目前只當敵軍外觀
 const FACTION_CLS = ['emp', 'all', 'mer', 'cyb', 'mai', 'inf', 'bug'];
 // 指揮官能不能替這個陣營出擊（傭兵兩邊都行）
 const canLead = (c, faction) => (c.faction || 0) === faction || (c.faction === 2 && faction < 2);

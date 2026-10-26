@@ -3,10 +3,10 @@
 // goal：省略＝殲滅或潰走；survive＝撐到時限；escort＝護送目標（vip）撐到時限；cut＝擊沉敵方所有補給艦（要有 supply）
 // ev：增援 [名稱, 指揮官 [名, 特性, 等級, 技能] 或 null, 兵力, 艦隊類型, 陣型, 進場邊 left/right, 進場時間 [a, b], 機率（省略＝1）]
 // intel：[準確度, 看不到的項目]；decoy：假情報（簡報只顯示第一支艦隊，兵力 × decoy，也看不到增援）；enemyFac：敵軍外觀的陣營（2＝灰鴉傭兵團；不要設成跟玩家同陣營：標籤顏色和船型會分不出來）
-// allies：AI 友軍 [艦隊名, 指揮官, 特性, 等級, 技能, 艦隊類型, 兵力, 陣型, 打法, x, 倒戈秒數（省略＝不倒戈）]，外觀是傭兵
+// allies：AI 友軍 [艦隊名, 指揮官, 特性, 等級, 技能, 艦隊類型, 兵力, 陣型, 打法, x, 倒戈秒數（省略／null＝不倒戈）, 外觀的陣營（省略＝2 傭兵）]
 // lines：戰鬥中的通訊 [秒, 誰, 台詞]；after：打贏後的結語；supply：敵方補給艦隊（預算的倍數，跟著第一支艦隊）
 const stT = (type, x, z, r, y = 0) => ({ type, x, y, z, r });
-const STORY_DEATH = { kas: '10', grace: '16' };   // 劇情中退場：打完這一關之後就不能再派（只看自己篇章的關卡順序）
+const STORY_DEATH = { kas: '10', grace: '16', duran: 'm7' };   // 劇情中退場：打完這一關之後就不能再派（只看自己篇章的關卡順序；杜蘭是離開灰鴉）
 const STORY_WAR = {
   '1': { budget: 2400, time: 240, fleets: 1, lv: 1, intel: [0.9, []],
     terrain: [stT('rock', -280, -60, 60, 40), stT('rock', 260, 20, 48, -70)],
@@ -249,6 +249,64 @@ const STORY_WAR = {
     ev: [['灰鴉巡邏隊', ['「鏽牙」杜蘭', 'dmg', 4, ['charge']], 0.2, 'raider', 'wedge', 'left', [90, 140], 0.8]],
     lines: [[3, '葛瑞絲', '賽隆，我說過我記住你了。'], [200, '賽隆', '（通訊）准將，別這麼記仇。灰鴉可以替聯盟工作，價錢好說。'], [205, '葛瑞絲', '……我考慮看看。不過今天，先把帳算清。']],
     after: '灰鴉的基地失守，賽隆帶著殘部逃走了。臨走前他留下一個聯絡頻道：「需要人手的時候，付錢就行。」' },
+  // ── 番外篇〈雙星之外〉：玩家是灰鴉傭兵團，一定要設 enemyFac（赫爾墨斯的私兵用聯盟型的船：赫爾墨斯替兩國造艦）──
+  'm1': { budget: 3000, time: 300, fleets: 2, lv: 2, enemyFac: 0, goal: 'cut', intel: [0.75, ['events']], supply: 0.9,
+    terrain: [stT('asteroid', -220, -80, 190), stT('asteroid', 260, 40, 150), stT('rock', 40, -160, 60, 40)],
+    foes: [['帝國補給護衛隊', '馮・艾克', 'shield', 2, ['wall'], 'balanced', 0.45, 'line', 'push']],
+    ev: [['卡斯的機動艦隊', ['卡斯・莫德', 'speed', 3, ['charge', 'wall']], 0.4, 'raider', 'wedge', 'right', [100, 140]]],
+    lines: [[3, '賽隆', '記住，我們今天是海盜。旗子收起來，打法也收著點。'], [6, '杜蘭', '（通訊）團長，海盜不收著打的。'], [100, '莎夏', '（通訊）帝國的機動艦隊來了！速度很快！'], [106, '賽隆', '卡斯・莫德……不在報價單上。打完船團就走。']],
+    after: '帝國的補給船團損失過半。撤退時杜蘭被卡斯咬住，多打了一場不該打的仗。賽隆在帳本上記下：「帝國機動艦隊，難纏，下次加價。」' },
+  // 時敵時友（這次是玩家倒戈）：葛瑞絲一開始是 AI 友軍，第 115 秒「倒戈」＝灰鴉轉向攻擊她
+  'm2': { budget: 3200, time: 300, fleets: 2, lv: 2, enemyFac: 0, goal: 'survive', intel: [0.8, ['events']],
+    terrain: [stT('nebula', 280, -120, 200), stT('rock', -240, 40, 65, 30)],
+    foes: [['帝國護航艦隊', '馮・霍爾', 'shield', 3, ['wall'], 'balanced', 0.5, 'line', 'push']],
+    allies: [['聯盟第七艦隊', '葛瑞絲・卡特萊', 'dmg', 3, ['focus', 'rapid'], 'heavy', 0.5, 'wedge', 'push', -380, 115, 1]],
+    lines: [[3, '葛瑞絲', '（通訊）傭兵，跟緊。別讓我在背後擔心你們。'], [6, '賽隆', '放心，准將。灰鴉從不背棄雇主，在雇主付得起的時候。'], [100, '通訊官', '團長，洛珊的加密頻道。新報價……是現在這份的三倍。'], [109, '賽隆', '……全艦轉向。目標，聯盟艦隊。'],
+      [117, '賽隆', '（通訊）抱歉，准將。有人出了更好的價錢。這是生意。'], [220, '葛瑞絲', '（通訊）我記住你了，賽隆。']],
+    after: '灰鴉拿到了三倍的報酬。付款帳戶在洛珊，戶名是一間沒人聽過的貨運公司。賽隆沒有問，他從來不問。' },
+  'm3': { budget: 3600, time: 300, fleets: 2, lv: 3, enemyFac: 0, goal: 'survive', intel: [0.7, ['events']],
+    terrain: [stT('nebula', -320, -120, 220), stT('nebula', 340, -60, 200), stT('asteroid', 0, -80, 150), stT('rock', -380, 120, 60, 30)],
+    foes: [['帝國機動艦隊', '卡斯・莫德', 'speed', 4, ['charge', 'wall'], 'raider', 0.5, 'wedge', 'flank'],
+      ['帝國突擊隊', '霍克', 'dmg', 3, ['focus'], 'balanced', 0.4, 'line', 'push']],
+    ev: [['帝國增援', null, 0.2, 'balanced', 'line', 'left', [110, 160], 0.7]],
+    lines: [[3, '柯爾', '團長，巢穴守不住的。'], [6, '賽隆', '我知道。守到補給船全部出港就好。'], [150, '賽隆', '（通訊）帝國的，我們談談？灰鴉可以替你們工作，價錢好說。'], [155, '卡斯', '（通訊）……我考慮看看。'], [250, '柯爾', '最後一艘出港了。']],
+    after: '灰鴉放棄了巢穴，船隊散進暗黑星雲。三天後，洛珊的貨運公司又來了一筆訂單，附言只有一句：「我們知道你們的新座標。」' },
+  'm4': { budget: 4200, time: 300, fleets: 2, lv: 4, enemyFac: 0, intel: [0.8, ['events']],
+    terrain: [stT('nebula', -320, -60, 200), stT('nebula', 340, -20, 180), stT('rock', 0, 60, 60, 30)],
+    foes: [['帝國使節護衛艦隊', '艾琳・索拉', 'shield', 5, ['wall', 'focus'], 'balanced', 0.55, 'line', 'kite'],
+      ['使節艦直屬隊', '雷曼', 'dmg', 4, ['focus'], 'heavy', 0.3, 'ring', 'push']],
+    lines: [[3, '賽隆', '識別信號全關。今天的灰鴉沒有名字。'], [8, '莎夏', '（通訊）只要打？不用擊沉使節艦？'], [11, '賽隆', '雇主要的是「事件」，不是屍體。'], [52, '艾琳', '（通訊）聯盟的？……不，聯盟沒有理由在這裡破壞談判。'], [220, '賽隆', '夠了，撤。讓她把故事帶回去。']],
+    after: '使節艦平安抵達洛珊，艾琳查不出襲擊者的來歷。賽隆把報酬分給團員時，第一次覺得這筆錢有點重。' },
+  'm5': { budget: 4400, time: 300, fleets: 2, lv: 4, enemyFac: 1, intel: [0.85, []],
+    terrain: [stT('rock', -300, -100, 70, 40), stT('rock', 260, 60, 60, -30), stT('asteroid', 0, -200, 160)],
+    foes: [['聯盟艦隊', '亞倫・楊森', 'shield', 5, ['wall', 'jam'], 'balanced', 0.6, 'crescent', 'kite'],
+      ['聯盟護衛隊', '佩蕾', 'speed', 4, ['charge', 'evade'], 'raider', 0.35, 'column', 'flank']],
+    allies: [['「帝國艦隊」', '？？？', 'shield', 5, ['wall', 'focus'], 'heavy', 0.4, 'line', 'push', 380, null, 0]],
+    lines: [[3, '賽隆', '假情報送出去了。亞倫・楊森以為這裡只有一支小艦隊。'], [6, '杜蘭', '（通訊）旁邊那支「帝國艦隊」是誰的？'], [9, '賽隆', '雇主的。別問。'], [43, '亞倫', '（通訊）情報是假的。全艦，準備突圍。'], [200, '賽隆', '他看穿了，比預想的快。讓他走吧，他會替我們把「帝國背信」的消息帶回去。']],
+    after: '談判破局，兩國互指對方背信。那支「帝國艦隊」撤回洛珊時，賽隆看見它的艦體上印著赫爾墨斯軍需集團的出廠編號。' },
+  'm6': { budget: 5000, time: 330, fleets: 3, lv: 4, enemyFac: 1, goal: 'survive', intel: [0.5, ['comp', 'events']],
+    terrain: [stT('nebula', -300, -80, 220), stT('nebula', 320, -40, 200), stT('rock', 0, 40, 70, 20), stT('asteroid', 0, -260, 170)],
+    foes: [['赫爾墨斯私兵艦隊', '黛菈', 'shield', 7, ['wall', 'focus'], 'heavy', 0.5, 'line', 'push'],
+      ['赫爾墨斯獵殺艦隊', '馬洛', 'dmg', 6, ['focus', 'rapid'], 'carrier', 0.4, 'ring', 'kite']],
+    ev: [['赫爾墨斯增援', null, 0.25, 'raider', 'wedge', 'left', [120, 170]]],
+    lines: [[3, '柯爾', '團長，那是……赫爾墨斯的船。'], [6, '黛菈', '（通訊）賽隆團長，總裁感謝你多年的服務。這是最後一筆款項。'], [10, '賽隆', '用砲彈付款？沃斯總裁真是節省。'], [150, '杜蘭', '（通訊）我早說過，跟商人做生意，最後總會被算進成本裡。'], [280, '賽隆', '……這筆帳記下了。我會親自去收。']],
+    after: '灰鴉從獵殺中脫身，損失了將近三成的船。賽隆把帳本上「赫爾墨斯」那一頁撕了下來。' },
+  'm7': { budget: 5600, time: 480, fleets: 3, lv: 5, enemyFac: 1, intel: [0.75, ['events']], supply: 0.6,
+    terrain: [stT('rock', 0, -280, 120, 0), stT('asteroid', -340, -40, 170), stT('asteroid', 340, -40, 170)],
+    foes: [['赫爾墨斯私兵艦隊', '沃斯總裁', 'dmg', 8, ['focus', 'rapid', 'jam'], 'carrier', 0.45, 'ring', 'kite'],
+      ['港口防衛隊', '黛菈', 'shield', 7, ['wall', 'focus'], 'heavy', 0.35, 'line', 'push']],
+    lines: [[3, '賽隆', '全艦，轉向一百八十度。目標，赫爾墨斯旗艦。'], [6, '沃斯總裁', '（通訊）賽隆！你的報酬我加倍——不，三倍！'], [10, '賽隆', '抱歉，總裁。有人出了更好的價錢。'], [13, '莎夏', '（通訊）誰出的？'], [15, '賽隆', '我們自己。'], [300, '通訊官', '{V}的艦隊從正面突入了！赫爾墨斯的防線崩了！']],
+    after: '赫爾墨斯的私兵艦隊潰散，沃斯總裁在港口被捕。戰後，{V}向灰鴉開出條件：解散，或者編入正規軍替新秩序工作。賽隆選了後者。那天夜裡，杜蘭帶著一半的人和船離開了。' },
+  // 最後一關：被感染的廢棄艦隊（蟲族感染人類的外觀）；杜蘭的海盜團是 AI 友軍
+  'm8': { budget: 5600, time: 360, fleets: 3, lv: 5, enemyFac: 5, goal: 'survive', intel: [0.3, ['comp', 'tactic', 'events']],
+    terrain: [stT('nebula', -360, -120, 230), stT('nebula', 380, -60, 210), stT('rock', -120, -40, 75, 30), stT('rock', 200, 120, 60, -50)],
+    foes: [['廢棄艦隊', '？？？', 'dmg', 9, ['charge'], 'balanced', 0.5, 'line', 'push'],
+      ['廢棄艦隊', '？？？', 'shield', 9, ['wall'], 'heavy', 0.4, 'crescent', 'push']],
+    ev: [['廢棄艦隊', null, 0.3, 'balanced', 'line', 'left', [120, 180]], ['廢棄艦隊', null, 0.3, 'raider', 'wedge', 'right', [190, 240], 0.8]],
+    allies: [['鏽牙海盜團', '「鏽牙」杜蘭', 'dmg', 7, ['charge', 'focus'], 'raider', 0.35, 'wedge', 'flank', 380, null, 2]],
+    lines: [[3, '賽隆', '杜蘭的訊號就在前面……這裡已經是星圖的邊緣了。'], [30, '莎夏', '（通訊）前方有艦隊！很多……識別碼是三十年前失蹤的殖民船團？'], [36, '杜蘭', '（通訊）賽隆！別過來，這些船不對勁——裡面沒有活人，可是它們在動！'],
+      [42, '賽隆', '全艦跟杜蘭會合。我們的帳，等一下再算。'], [200, '柯爾', '（通訊）被擊沉的船……殘骸在長東西。'], [330, '賽隆', '撤。把看到的一切都記下來。這件事，比{V}的通緝令重要。']],
+    after: '灰鴉帶著杜蘭的殘部退回了人類星域。分手前，杜蘭只說了一句：「下次見面，我們還是敵人。」賽隆的報告被{V}列為最高機密。' },
   // ── 支線：灰鴉傭兵團（敵軍外觀＝傭兵 enemyFac 2）──
   's1': { budget: 3000, time: 300, fleets: 2, lv: 2, enemyFac: 2, intel: [0.6, ['tactic', 'events']],
     terrain: [stT('asteroid', -220, -80, 190), stT('asteroid', 260, 40, 150), stT('rock', 40, -160, 60, 40)],
@@ -295,17 +353,17 @@ function storyScenario(id) {
   const enemy = W.foes.map(([name, cn, trait, level, skills, arch, pow, formation, tactic, x], i) => ({ name, commander: { name: cn, trait, level: Math.max(1, level + D.lv), skills: skills.slice() },
     comp: comp(arch, pow), formation, tactic, x: x != null ? x : nF === 1 ? 0 : Math.round(-380 + 760 * i / (nF - 1)), y: 0, z: -660 - (i % 2) * 60, h: 0 }));
   const sc = { id: 'story-' + id, saga: true, stageId: id, side: s.side, cast: s.cast.slice(),
-    dead: Object.keys(STORY_DEATH).filter((c) => { const d = seq.indexOf(STORY_DEATH[c]); return d >= 0 && d < k; }),
+    dead: Object.keys(STORY_DEATH).filter((c) => { const d = seq.indexOf(STORY_DEATH[c]); return d >= 0 && d < k; }).concat(s.line === 'm' ? [] : STORY_MERCS),   // 帝國篇、聯盟篇裡灰鴉的人是敵人
     name: `雙星記・${s.name}`, size: B < 3400 ? '小型' : B < 4800 ? '中型' : '大型', timeLimit: W.time, budget: B, maxFleets: Math.max(W.fleets, s.cast.length), level: Math.max(1, Math.min(5, W.lv + D.ai)), diff: D.key,
-    seed: 5000 + k * 37 + (s.line === 'a' ? 7 : 0) + (s.sub ? 900 + STORY_SUBS.indexOf(s) * 53 : 0), terrain: W.terrain || [], enemy, story: s.story,
+    seed: 5000 + k * 37 + (s.line === 'a' ? 7 : s.line === 'm' ? 13 : 0) + (s.sub ? 900 + STORY_SUBS.indexOf(s) * 53 : 0), terrain: W.terrain || [], enemy, story: storyText(s.story),
     events: (W.ev || []).map(([name, cm, pow, arch, formation, edge, at, chance]) => ({ type: 'reinforce', chance: chance == null ? 1 : chance, at, name, comp: comp(arch, pow), formation, edge,
       ...(cm ? { commander: { name: cm[0], trait: cm[1], level: Math.max(1, cm[2] + D.lv), skills: cm[3].slice() } } : {}) })),
     intel: { accuracy: W.intel ? W.intel[0] : 0.8, hide: W.intel ? W.intel[1].slice() : [] },
     enemySupply: W.supply ? { comp: aiSupplyComp(B * W.supply), formation: 'ring', x: enemy[0].x, z: enemy[0].z - 230, h: 0, follow: 0 } : null,
-    goal: W.goal ? { type: W.goal, ...(W.vip ? { name: W.vip.name } : {}) } : null, lines: W.lines || null, after: W.after || '', decoy: W.decoy || 0 };
+    goal: W.goal ? { type: W.goal, ...(W.vip ? { name: W.vip.name } : {}) } : null, lines: W.lines ? W.lines.map(([t, who, msg]) => [t, who, storyText(msg)]) : null, after: storyText(W.after || ''), decoy: W.decoy || 0 };
   if (W.enemyFac != null) sc.enemyFac = W.enemyFac;
-  if (W.allies) sc.allies = W.allies.map(([name, cn, trait, level, skills, arch, pow, formation, tactic, x, defect]) => ({ name, commander: { name: cn, trait, level: Math.max(1, level + D.lv), skills: skills.slice() },
-    comp: comp(arch, pow), formation, tactic, x, z: 300 + ZONE_SHIFT - 40, h: Math.PI, fac: 2, defectAt: defect != null ? defect : null }));
+  if (W.allies) sc.allies = W.allies.map(([name, cn, trait, level, skills, arch, pow, formation, tactic, x, defect, fac]) => ({ name, commander: { name: cn, trait, level: Math.max(1, level + D.lv), skills: skills.slice() },
+    comp: comp(arch, pow), formation, tactic, x, z: 300 + ZONE_SHIFT - 40, h: Math.PI, fac: fac != null ? fac : 2, defectAt: defect != null ? defect : null }));
   if (W.vip) sc.vip = { name: W.vip.name, comp: W.vip.comp.slice(), formation: 'ring', x: 0, z: DEPLOY_ZONE.z1 - 40, h: Math.PI };
   return sc;
 }
@@ -349,10 +407,10 @@ function storyBriefing(id) {
   const D = storyDiffOf(storyLoad()), rec = storyRec(id, D);
   const low = s.cast.map((cid) => COMMANDERS.find((o) => o.id === cid)).filter((c) => c && cmdrLevel(c.id) < rec);
   overlay(`<div class="g-wrap">
-    <div class="g-head"><h2>${s.name}</h2><span class="crumb">雙星記　·　${ch.no}　${ch.name}・${storyNo(s)}　·　<span class="g-${side.cls}">${side.name}</span>　·　${s.place}　·　難度${D.name}</span><span class="g-sp"></span><button class="g-btn" id="sb-back">← 星圖</button></div>
+    <div class="g-head"><h2>${s.name}</h2><span class="crumb">雙星記${s.line === 'm' ? '番外' : ''}　·　${ch.no}　${ch.name}・${storyNo(s)}　·　<span class="g-${side.cls}">${side.name}</span>　·　${s.place}　·　難度${D.name}</span><span class="g-sp"></span><button class="g-btn" id="sb-back">← 星圖</button></div>
     <div style="display:flex;flex-direction:column;gap:12px">
-      ${s.inter ? `<div class="g-card st-inter ${other.cls}"><h3>與此同時・<span class="g-${other.cls}">${other.name}</span></h3><p>${s.inter}</p></div>` : ''}
-      <div class="g-card st-brief ${side.cls}"><h3>狀況</h3><p>${s.story}</p>
+      ${s.inter ? `<div class="g-card st-inter ${s.line === 'm' ? '' : other.cls}"><h3>與此同時${s.line === 'm' ? '' : `・<span class="g-${other.cls}">${other.name}</span>`}</h3><p>${storyText(s.inter)}</p></div>` : ''}
+      <div class="g-card st-brief ${side.cls}"><h3>狀況</h3>${s.when ? `<div class="st-when">時間點：${s.when}</div>` : ''}<p>${sc.story}</p>
         <dl class="kv"><dt>出擊指揮官</dt><dd>${cast}</dd><dt>作戰目標</dt><dd><b>${s.goal}</b></dd>${storyGoalRows(sc)}
         <dt>編成預算</dt><dd>${fmtN(sc.budget)} 點　最多 ${sc.maxFleets} 支艦隊</dd><dt>建議等級</dt><dd>Lv ${rec} 以上（${D.name}）${low.length ? `　<span class="g-warn">${low.map((c) => `${c.name} 只有 Lv ${cmdrLevel(c.id)}`).join('、')}：可以先到無限戰場或隨機戰役練等，或在星圖上調低難度</span>` : '　<span class="g-good">出擊指揮官都達到了</span>'}</dd>
         <dt>情報準確度</dt><dd>${Math.round(GAME.intel.acc * 100)}%${GAME.intel.acc < 0.7 ? '　<span class="g-warn">情報可能有誤</span>' : ''}</dd></dl></div>
@@ -379,7 +437,7 @@ function storyResult(R) {
 function storyAfterHTML(R) {
   const s = STORY_BY[GAME.sc.stageId]; if (R.kind !== 'win') return '';
   const U = GAME.storyGains || [];
-  return `<div class="g-card st-after ${STORY_SIDE[s.side].cls}" style="margin-bottom:12px"><p>${GAME.sc.after}</p>${U.length ? `<div class="st-end"><b>解鎖</b><p>${U.join('<br>')}</p></div>` : ''}${s.ending ? `<div class="st-end"><b>結局</b><p>${s.ending}</p></div>` : ''}</div>`;
+  return `<div class="g-card st-after ${STORY_SIDE[s.side].cls}" style="margin-bottom:12px"><p>${GAME.sc.after}</p>${U.length ? `<div class="st-end"><b>解鎖</b><p>${U.join('<br>')}</p></div>` : ''}${s.ending ? `<div class="st-end"><b>結局</b><p>${storyText(s.ending)}</p></div>` : ''}</div>`;
 }
 function storyAgainLabel(R) { const nx = R.kind === 'win' && storyNext(GAME.sc.stageId); return R.kind !== 'win' ? '重打這一關（回到編成）' : nx ? `下一場作戰：${STORY_BY[nx].name} →` : '回到星圖 →'; }
 function storyAgain(R) {

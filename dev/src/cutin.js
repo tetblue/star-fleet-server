@@ -99,6 +99,7 @@ class ApngWriter {
 const CUT_FAC = [
   { font: '"Noto Serif TC", "PMingLiU", "Songti TC", serif', main: '#ffe2b0', edge: '#7a4a12', glow: '#f2b35a', deco: '#f2b35a' },
   { font: '"Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif', main: '#e6f6ff', edge: '#123a5a', glow: '#7cc4ff', deco: '#7cc4ff' },
+  { font: '"Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif', main: '#ffe0d6', edge: '#4a1a10', glow: '#e2735a', deco: '#e2735a' },   // 傭兵（番外篇的玩家）：鏽紅
 ];
 const CUT_STYLES = {
   start: { name: '開戰', inFx: 'slam', outFx: 'spread', deco: 'band', inDur: 0.42, stagger: 0.07, hold: 1.0, outDur: 0.45, spacing: 0.5 },
@@ -312,7 +313,7 @@ function cutPlay(spec) {
   return ms;
 }
 // 遊戲用的幾種切入
-const playerFac = () => SIDE_FAC[GAME.playerSide || 0] || 0;
+const playerFac = () => { const f = SIDE_FAC[GAME.playerSide || 0] || 0; return CUT_FAC[f] ? f : 0; };
 function cutSpecStart(sc) { return { main: '開戰', sub: sc && sc.name ? sc.name : '', style: 'start', fac: playerFac() }; }
 function cutSpecResult(kind, why) {
   const main = { win: '勝利', lose: '敗北', draw: '平手' }[kind];

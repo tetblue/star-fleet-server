@@ -15,7 +15,7 @@ function tacDockSize() { if (typeof TAC === 'undefined' || !TAC.open || BR.on) r
 const ELEV = 30 * Math.PI / 180;
 const BR = { on: false };
 const PL = { on: false, spec: false, j: -1 };   // 王牌飛行員：玩家駕駛的艦載機（內容在 pilot.js）；spec＝母艦全滅後改為觀戰
-// 陣營（外觀）與模擬的「邊」分開：邊 0＝玩家（畫面下方）、邊 1＝對手；SIDE_FAC[邊]＝那一邊用哪個陣營（0 帝國、1 聯盟、2 傭兵、3 機械改造人類、4 機械智慧族、5 蟲族感染人類、6 蟲族；玩家只能是 0、1）
+// 陣營（外觀）與模擬的「邊」分開：邊 0＝玩家（畫面下方）、邊 1＝對手；SIDE_FAC[邊]＝那一邊用哪個陣營（0 帝國、1 聯盟、2 傭兵、3 機械改造人類、4 機械智慧族、5 蟲族感染人類、6 蟲族；玩家只能是 0、1，劇情番外篇是 2）
 // 單一艦隊也可以有自己的外觀（fleet.fac，例如友軍傭兵、傭兵支援）；畫船、光束、飛彈、艦載機都用 sqFac／shipFac
 let SIDE_FAC = [0, 1];
 // 作戰介面跟著玩家的陣營換主題（顏色、紋飾）
@@ -23,6 +23,7 @@ function applyPlayerTheme() {   // 傭兵等不是玩家陣營：對手是這些
   const sd = typeof cmdSide === 'number' ? cmdSide : 0, f = SIDE_FAC[sd] || 0, ef = SIDE_FAC[1 - sd];
   document.body.classList.toggle('pf-0', f !== 1); document.body.classList.toggle('pf-1', f === 1);
   if (ef >= 2 && FACTION[ef]) document.body.style.setProperty('--ec', FACTION[ef].ui); else document.body.style.removeProperty('--ec');
+  if (f >= 2 && FACTION[f]) document.body.style.setProperty('--pc', FACTION[f].ui); else document.body.style.removeProperty('--pc');   // 番外篇：玩家是傭兵
 }
 const FAC_KEY = ['e', 'a', 'm', 'c', 'r', 'i', 'b'];   // 模型鍵的字首（依陣營編號）
 const sqFac = (sq) => (sq.fleet && sq.fleet.fac != null ? sq.fleet.fac : SIDE_FAC[sq.side]);
