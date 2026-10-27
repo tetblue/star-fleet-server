@@ -788,6 +788,13 @@
   .wed-seg button + button { border-left: 1px solid var(--line); }
   .wed-seg button.on { background: rgba(255,255,255,.1); color: var(--text); } .wed-seg button:disabled { opacity: .35; cursor: default; }
   .wed-seg button.on.emp { background: rgba(242,179,90,.18); color: var(--emp); } .wed-seg button.on.all { background: rgba(124,196,255,.18); color: var(--all); } .wed-seg button.on.mer { background: rgba(226,115,90,.18); color: var(--mer); } .wed-seg button.on.cyb { background: rgba(255,106,126,.18); color: var(--cyb); } .wed-seg button.on.mai { background: rgba(79,240,216,.18); color: var(--mai); } .wed-seg button.on.inf { background: rgba(196,124,255,.18); color: var(--inf); } .wed-seg button.on.bug { background: rgba(155,227,90,.18); color: var(--bug); }
+  .wed-theme { display: flex; flex-wrap: wrap; gap: calc(6px * var(--sp)); margin-bottom: calc(6px * var(--sp)); }
+  .wed-sw { display: flex; flex-direction: column; align-items: center; gap: 2px; border: 0; background: none; padding: 0; color: var(--dim); font: inherit; font-size: calc(11px * var(--ui)); cursor: pointer; position: relative; }
+  .wed-sw i { width: calc(24px * var(--ui)); height: calc(24px * var(--ui)); border-radius: 50%; background: var(--c); border: 2px solid rgba(255,255,255,.18); box-sizing: border-box; }
+  .wed-sw.org i { background: conic-gradient(#f2b35a, #7cc4ff, #e2735a, #4ff0d8, #c47cff, #9be35a, #f2b35a); }
+  .wed-sw.pick i { background: var(--c); } .wed-sw.pick i[style*="transparent"] { background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); }
+  .wed-sw.pick input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  .wed-sw:hover i { border-color: rgba(255,255,255,.5); } .wed-sw.on i { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.25); } .wed-sw.on { color: var(--text); }
   /* 操作難度 */
   .sp-op { display: flex; align-items: center; gap: calc(10px * var(--sp)); margin-bottom: calc(12px * var(--sp)); flex-wrap: wrap; } .sp-opd { color: var(--dim); font-size: calc(12px * var(--ui)); }
   body.op-flat .tac-svbox { display: none; }

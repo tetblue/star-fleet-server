@@ -220,7 +220,7 @@ function dockMakeShip(t, fac) {
   const mt = t === 'F' ? 1 : t, fk = FAC_KEY[fac] || 'e', key = fk + (mt === SUPPLY_T ? SHIP_TYPES[SUPPLY_T].look : mt);
   const M = getModel(key) || getModel('e' + (mt === SUPPLY_T ? 2 : mt)); if (!M) return null;
   let mat = M.mat;
-  if (mt === SUPPLY_T) mat = DOCK_SUPPLY_MAT[key] || (DOCK_SUPPLY_MAT[key] = (() => { const m = M.mat.clone(); m.color = new THREE.Color(0x9fc49a); m.emissiveIntensity = 0.08; return m; })());   // 補給艦：借巡洋艦外觀、偏綠的灰
+  if (mt === SUPPLY_T) mat = DOCK_SUPPLY_MAT[key] || (DOCK_SUPPLY_MAT[key] = (() => { const m = themeMat(M.mat.clone()); m.color = new THREE.Color(0x9fc49a); m.emissiveIntensity = 0.08; return m; })());   // 補給艦：借巡洋艦外觀、偏綠的灰
   const g = new THREE.Group(), body = new THREE.Group(), L = dockLen(t);
   body.add(new THREE.Mesh(M.lods[0], mat));
   if (mt !== SUPPLY_T) for (const m of mountsOf(key)) {

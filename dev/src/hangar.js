@@ -276,7 +276,7 @@ function hgBuildFighter(fac, frame) {
   const M = getModel(hgFighterKey(fac)) || getModel('ef'); if (!M) return false;
   const look = HG_LOOK[frame] || HG_LOOK[1], S = HG_FL * look.s, geo = M.lods[0];
   geo.computeBoundingBox(); const bb = geo.boundingBox;
-  const g = new THREE.Group(), mat = M.mat.clone(); mat.color = new THREE.Color(look.c);
+  const g = new THREE.Group(), mat = themeMat(M.mat.clone()); mat.color = new THREE.Color(look.c);
   const body = new THREE.Mesh(geo, mat); body.scale.setScalar(S); g.add(body);
   g.position.y = HG_GEAR_H - bb.min.y * S;
   // 起落架

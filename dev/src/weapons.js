@@ -47,6 +47,38 @@ function saveMounts() { try { STORE.setItem(MOUNT_STORE, JSON.stringify({ v: 3, 
 function mountsOf(hk) { return (MOUNTS[hk] || []).map((m) => ({ ...m, hk })); }
 function mountsChanged(hk) { saveMounts(); R3.version = -1; scheduleWeaponAtlas(hk); }
 
+// ───── 主題色：每個風格一個顏色，船體、武器（3D 與 2D）一起換色（著色器在 main.js 的 THEME_GLSL）─────
+const THEME_STORE = 'fleet.theme';
+const THEME_SW = [['', '原色'], ['#d8413a', '紅'], ['#ee8a2a', '橙'], ['#e8c04a', '金'], ['#5cc45a', '綠'], ['#3ec8c0', '青'], ['#3f86e8', '藍'], ['#8a5ae0', '紫'], ['#e070b0', '粉'], ['#e8ecf2', '白'], ['#3a3f4a', '黑']];
+const validHex = (h) => typeof h === 'string' && /^#[0-9a-f]{6}$/i.test(h);
+let THEME = (() => { try { const o = JSON.parse(STORE.getItem(THEME_STORE) || '{}'); return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; } })();
+function themeOf(f) { const h = THEME[FAC_KEY[f]]; return validHex(h) ? h.toLowerCase() : ''; }
+function applyThemeU(f) { const h = themeOf(f), v = THEME_V[f]; if (!h) { v.set(0, 0, 0, 0); return; } const c = new THREE.Color(h); v.set(c.r, c.g, c.b, 1); }   // Color 會把 sRGB 轉成線性
+for (let f = 0; f < FAC_N; f++) applyThemeU(f);
+// save＝false：取色器拖曳中，只更新畫面
+function setTheme(f, h, save = true) {
+  if (validHex(h)) THEME[FAC_KEY[f]] = h.toLowerCase(); else delete THEME[FAC_KEY[f]];
+  applyThemeU(f);
+  if (!save) return;
+  try { STORE.setItem(THEME_STORE, JSON.stringify(THEME)); } catch (e) { /* 只在本次有效 */ }
+  HULL_KEYS.filter((k) => k[0] === FAC_KEY[f]).forEach((k) => scheduleWeaponAtlas(k));   // 2D 的武器疊圖是 3D 材質畫的：重畫
+}
+// 同一套換色給畫布用（2D 預覽）：d＝RGBA 位元組（sRGB），t＝THEME_V 的一項
+const S2L = Array.from({ length: 256 }, (_, i) => { const v = i / 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+const l2s = (v) => 255 * (v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055);
+function themePixels(d, t) {
+  if (t.w < 0.5) return;
+  const tx = Math.max(t.x, t.y, t.z), tn = Math.min(t.x, t.y, t.z), ts = tx > 1e-4 ? (tx - tn) / tx : 0;
+  const hue = tx - tn > 1e-4 ? [t.x, t.y, t.z].map((v) => (v - tn) / (tx - tn)) : [1, 1, 1];
+  const ks = Math.min(1, ts * 1.6), kv = 1 + (Math.pow(tx, 0.4545) - 1) * 0.55;
+  for (let i = 0; i < d.length; i += 4) {
+    if (!d[i + 3]) continue;
+    const r = S2L[d[i]], g = S2L[d[i + 1]], b = S2L[d[i + 2]], mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    const s = mx > 1e-4 ? (mx - mn) / mx : 0, s2 = (s + (1 - s) * 0.18) * ks, v2 = mx * kv;
+    for (let k = 0; k < 3; k++) d[i + k] = l2s(Math.min(1, v2 * (1 + (hue[k] - 1) * s2)));
+  }
+}
+
 // ───── 武器疊圖（2D）─────
 const WA = { scene: null, cam: null, rt: null, pool: [], hull: null, ship: null, timer: 0, dirty: new Set(), busy: false };
 function weaponScene() {
@@ -157,6 +189,7 @@ function buildWeaponEditor() {
         <div class="wed-cams"><button class="g-btn sm" data-cam="iso">斜視</button><button class="g-btn sm" data-cam="top">俯視</button><button class="g-btn sm" data-cam="side">側視</button><button class="g-btn sm" data-cam="front">正面</button><button class="g-btn sm" data-cam="game">遊戲角度</button></div>
         <div class="wed-hint" id="wed-hint"></div></div>
       <div class="wed-side">
+        <h4>主題色 <small id="wed-thn"></small></h4><div class="wed-theme" id="wed-theme"></div>
         <h4>新增武器 <small>點選後在船身上點一下放置；按住 Shift 可連續放</small></h4><div class="wed-pal" id="wed-pal"></div>
         <h4>掛點 <small id="wed-n"></small></h4><div class="wed-list" id="wed-list"></div>
         <h4>選取的掛點</h4><div id="wed-prop"></div>
@@ -201,6 +234,9 @@ function buildWeaponEditor() {
     catch (e) { $('wed-iomsg').textContent = '格式不對：' + e.message; }
   };
   el.querySelector('.wed-cams').onclick = (e) => { const c = e.target.dataset.cam; if (c) weCamPreset(c); };
+  $('wed-theme').onclick = (e) => { const b = e.target.closest('[data-th]'); if (!b) return; setTheme(facOfKey(WE.hk), b.dataset.th); weThemeUI(); weDraw2DSoon(); };
+  $('wed-theme').oninput = (e) => { if (e.target.type === 'color') { setTheme(facOfKey(WE.hk), e.target.value, false); weDraw2DSoon(); } };   // 拖曳中只換畫面
+  $('wed-theme').onchange = (e) => { if (e.target.type === 'color') { setTheme(facOfKey(WE.hk), e.target.value); weThemeUI(); weDraw2DSoon(); } };
   $('wed-pal').onclick = (e) => { const b = e.target.closest('[data-w]'); if (!b) return; const w = +b.dataset.w; WE.place = WE.place === w ? -1 : w; weUI(); };
   $('wed-list').onclick = (e) => { const b = e.target.closest('[data-i]'); if (!b) return; WE.sel = +b.dataset.i; WE.place = -1; weUI(); weSync(); };
   // 3D 視窗操作
@@ -271,6 +307,7 @@ function weUI() {
   const el = WE.el, fac = facOfKey(WE.hk), list = weMounts(), names = WEAPON_NAMES[fac], cls = FACTION_CLS[fac] || '';
   el.querySelectorAll('#wed-fac button').forEach((b) => b.className = b.dataset.f === WE.hk[0] ? 'on ' + cls : '');
   el.querySelectorAll('#wed-type button, #wed-st button').forEach((b) => { b.className = b.dataset.t === WE.hk.slice(1) ? 'on ' + cls : ''; b.disabled = !weHas(WE.hk[0] + b.dataset.t); });
+  weThemeUI();
   el.querySelector('#wed-pal').innerHTML = names.map((n, w) => `<button class="g-btn sm ${WE.place === w ? 'pri' : ''}" data-w="${w}">${n}</button>`).join('');
   el.querySelector('#wed-n').textContent = `（${list.length}）`;
   el.querySelector('#wed-list').innerHTML = list.length ? list.map((m, i) => `<button class="wed-it ${i === WE.sel ? 'on' : ''}" data-i="${i}"><b>${i + 1}</b>${names[m.w]}<span>${m.p[0] < -0.01 ? '左' : m.p[0] > 0.01 ? '右' : '中'}・${m.p[2] > 0.15 ? '前' : m.p[2] < -0.15 ? '後' : '中段'}</span></button>`).join('') : '<p class="g-dim">還沒有武器，從上面挑一個放上去。</p>';
@@ -291,6 +328,13 @@ function weUI() {
   prop.querySelector('#wp-mir').onclick = () => weMirror();
   prop.querySelector('#wp-dup').onclick = () => { weSnap(); const c = cloneMounts(m); c.p[2] -= 0.04; list.push(c); WE.sel = list.length - 1; weChanged(); };
   prop.querySelector('#wp-del').onclick = () => weDelete();
+}
+// 主題色：目前風格的色票＋自訂取色器
+function weThemeUI() {
+  const f = facOfKey(WE.hk), cur = themeOf(f), el = WE.el.querySelector('#wed-theme'), sw = THEME_SW.some(([h]) => h === cur);
+  WE.el.querySelector('#wed-thn').textContent = `${STYLES[f][1]}・船體與武器一起換色`;
+  el.innerHTML = THEME_SW.map(([h, n]) => `<button class="wed-sw${h === cur ? ' on' : ''}${h ? '' : ' org'}" data-th="${h}" title="${n}" style="--c:${h || 'transparent'}"><i></i><span>${n}</span></button>`).join('')
+    + `<label class="wed-sw pick${cur && !sw ? ' on' : ''}" title="自訂顏色"><input type="color" value="${cur || '#7fa8d8'}"><i style="--c:${cur && !sw ? cur : 'transparent'}"></i><span>自訂</span></label>`;
 }
 // 左右對稱編輯：找另一側的對應武器（同種類、同尺寸、位置鏡像）
 function wePartner(i) {
@@ -431,6 +475,7 @@ function weDraw2D() {
   }
   const c = WE.c2.getContext('2d'); c.clearRect(0, 0, 2048, 192);
   c.drawImage(WE.shipImg, sx, sy, 2048, 192, 0, 0, 2048, 192);
+  if (THEME_V[fac].w > 0.5) { const sh = c.getImageData(0, 0, 2048, 192); themePixels(sh.data, THEME_V[fac]); c.putImageData(sh, 0, 0); }
   const tmp = document.createElement('canvas'); tmp.width = 2048; tmp.height = 192; tmp.getContext('2d').putImageData(img, 0, 0);
   c.drawImage(tmp, 0, 0);
 }

@@ -52,6 +52,36 @@ const facRGBA = (f, al) => { const h = (FACTION[f] || FACTION[0]).ui; return 'rg
 
 let simAlt = 1;
 const opts = {
+// 各風格的主題色（在武器配置裡選，內容在 weapons.js）：xyz＝線性色、w＝1 才換色。2D 貼圖的著色器、3D 船體與武器的材質共用
+const THEME_V = Array.from({ length: FAC_N }, () => new THREE.Vector4(0, 0, 0, 0));
+// 換色：保留貼圖的明暗與飽和度，色相換成主題色（白、黑等無彩色的主題色會變成灰階）
+const THEME_GLSL = /* glsl */`
+  vec3 themeCol(vec3 c, vec4 t){
+    if (t.w < 0.5) return c;
+    float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b));
+    float s = mx > 1e-4 ? (mx - mn) / mx : 0.;
+    float tx = max(t.r, max(t.g, t.b)), tn = min(t.r, min(t.g, t.b));
+    float ts = tx > 1e-4 ? (tx - tn) / tx : 0.;
+    vec3 hue = tx - tn > 1e-4 ? (t.rgb - tn) / (tx - tn) : vec3(1.);
+    float s2 = mix(s, 1., 0.18) * clamp(ts * 1.6, 0., 1.);   // 灰色的金屬也帶一點主題色
+    float v2 = mx * mix(1., pow(tx, 0.4545), 0.55);           // 深色的主題色讓船身變暗
+    return v2 * mix(vec3(1.), hue, s2);
+  }
+`;
+// 船體、武器、艦載機的材質套上主題色（clone 出來的材質要再套一次：onBeforeCompile 不會跟著複製）
+function themeOBC(shader) {
+  shader.uniforms.uTheme = { value: THEME_V[this.userData.themeF] || THEME_V[0] };
+  shader.fragmentShader = shader.fragmentShader
+    .replace('void main() {', 'uniform vec4 uTheme;\n' + THEME_GLSL + '\nvoid main() {')
+    .replace('#include <map_fragment>', THREE.ShaderChunk.map_fragment.replace('diffuseColor *= sampledDiffuseColor;', 'sampledDiffuseColor.rgb = themeCol(sampledDiffuseColor.rgb, uTheme);\n\tdiffuseColor *= sampledDiffuseColor;'))
+    .replace('#include <emissivemap_fragment>', THREE.ShaderChunk.emissivemap_fragment.replace('totalEmissiveRadiance *= emissiveColor.rgb;', 'totalEmissiveRadiance *= themeCol(emissiveColor.rgb, uTheme);'));
+}
+const themeKey = () => 'fleet-theme';
+function themeMat(mat, f) {
+  if (f != null) mat.userData.themeF = f;
+  mat.onBeforeCompile = themeOBC; mat.customProgramCacheKey = themeKey; mat.needsUpdate = true;
+  return mat;
+}
   rangeMul: 1,
   uturn: 'auto',
   autoFace: true,               // 停著的部隊自動把船頭轉向敵人（主砲有射角）
@@ -195,7 +225,7 @@ let shipGeo = null, shipMesh = null, glowMesh = null;
 // 武器疊圖（與船體貼圖同排列；由 weapons.js 依掛點即時算出來）
 const NO_WTEX = new THREE.DataTexture(new Uint8Array(4), 1, 1); NO_WTEX.needsUpdate = true;
 const shipMat = new THREE.ShaderMaterial({
-  uniforms: { ...U, uTex: { value: shipTex }, uWTex: { value: NO_WTEX } },
+  uniforms: { ...U, uTex: { value: shipTex }, uWTex: { value: NO_WTEX }, uTheme: { value: THEME_V } },
   vertexShader: COMMON_GLSL + /* glsl */`
     varying vec2 vUv; varying float vFog; varying float vBright; varying float vDeath; varying float vFac; varying float vAlt;
     void main(){
@@ -224,7 +254,7 @@ const shipMat = new THREE.ShaderMaterial({
       vFac = aInfo.z;
     }`,
   fragmentShader: /* glsl */`
-    uniform sampler2D uTex; uniform sampler2D uWTex; uniform float uSpriteFade;
+    uniform sampler2D uTex; uniform sampler2D uWTex; uniform float uSpriteFade; uniform vec4 uTheme[${FAC_N}];
     varying vec2 vUv; varying float vFog; varying float vBright; varying float vDeath; varying float vFac; varying float vAlt;
     void main(){
       vec4 c = texture2D(uTex, vUv);
@@ -234,8 +264,10 @@ const shipMat = new THREE.ShaderMaterial({
       vec3 col = c.rgb * vBright;
       if (vAlt > 0.25) col = mix(col, vec3(dot(col, vec3(0.3, 0.55, 0.15))) * vec3(0.75, 1.15, 0.85), 0.7);   // 補給艦：偏綠的灰色
       vec3 fogCol = vFac < 0.5 ? vec3(0.05,0.06,0.12) : vec3(0.04,0.07,0.13);
+    ${THEME_GLSL}
       col = mix(col, fogCol, vFog);
       if (vDeath > 0.) {             // 被擊沉：閃白後淡出
+      c.rgb = themeCol(c.rgb, uTheme[int(clamp(floor(vFac + 0.5), 0., ${FAC_N - 1}.))]);   // 武器疊圖是 3D 材質畫的，已經換過色
         col = mix(col, vec3(3.0, 2.2, 1.4), smoothstep(0.0, 0.08, vDeath) * (1. - smoothstep(0.1, 0.5, vDeath)));
         col *= 1. - smoothstep(0.4, 0.9, vDeath);
       }
@@ -4027,7 +4059,7 @@ function getModel(key) {
   if (MODEL_CACHE[key]) return MODEL_CACHE[key];
   const m = MODEL_SRC[key]; if (!m) return null;
   const tex = m.tex || NO_MODEL_TEX, weapon = m.kind === 'weapon';
-  const mat = new THREE.MeshStandardMaterial({ map: tex, metalness: 0.35, roughness: 0.6, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: weapon ? 0.18 : 0.14 });
+  const mat = themeMat(new THREE.MeshStandardMaterial({ map: tex, metalness: 0.35, roughness: 0.6, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: weapon ? 0.18 : 0.14 }), Math.max(0, FAC_KEY.indexOf(key[0])));
   return (MODEL_CACHE[key] = { lods: m.lods, mat, weapon, min: m.min, max: m.max, ready: Promise.resolve() });
 }
 function init3D() {
