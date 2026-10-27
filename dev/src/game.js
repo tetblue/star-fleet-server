@@ -606,7 +606,7 @@ function gameTick() {
 function toast(msg, cls = '') {
   if ((GAME.phase === 'battle' || GAME.phase === 'replay') && cls !== 'hint') { (GAME.log || (GAME.log = [])).push({ t: U.uTime.value, msg, cls }); if (GAME.log.length > 40) GAME.log.shift(); }   // 艦橋的通訊紀錄
   if (!uiOn('toasts')) return;
-  if (PL.on && !PL.spec && cls !== 'pilot' && cls !== 'bad') return;   // 駕駛中：AI 指揮官的通知只記在紀錄裡，不擋畫面
+  if (((PL.on && !PL.spec) || CAP.on) && cls !== 'pilot' && cls !== 'bad') return;   // 駕駛中、艦長：AI 指揮官的通知只記在紀錄裡，不擋畫面
   const el = document.createElement('div'); el.className = 'toast ' + cls; el.textContent = msg;
   const box = gEl('toasts'); box.appendChild(el);
   while (box.children.length > 4) box.firstChild.remove();
@@ -685,6 +685,7 @@ function force3D() { if (opNow() >= 1 && !mode3D) { setRenderMode('3d', false); 
 // ═════ 畫面 ═════
 function setPhase(ph) {
   if (PL.on && ph !== 'battle') pilotEnd();   // 離開作戰＝結束駕駛
+  if (CAP.on && ph !== 'battle') capEnd();   // 離開作戰＝結束艦長模式
   if (BR.on && ph !== 'battle' && ph !== 'replay') exitBridge();   // 離開作戰＝離開艦橋
   GAME.phase = ph;
   if (GAME.forced3D && ph !== 'battle' && ph !== 'deploy' && ph !== 'simedit') { GAME.forced3D = false; if (mode3D) setRenderMode('2d', false); }   // 離開作戰：回到原本的 2D
@@ -707,7 +708,7 @@ function setPhase(ph) {
 function overlay(html) { const g = gEl('game'); g.hidden = !html; gEl('g-screen').innerHTML = html || ''; g.scrollTop = 0; }
 
 function menuBg() {
-  GAME.recView = false; GAME.watch = false; GAME.pilot = null; opts.flat = opts.ff = opts.fow = false; GAME.op = 0;
+  GAME.recView = false; GAME.watch = false; GAME.pilot = null; GAME.captain = null; opts.flat = opts.ff = opts.fow = false; GAME.op = 0;
   if (!battleSetup || !battleSetup.bg) { newBattle(12345); setRule('fire', true); }
   paused = false; updateTimeUI();
 }
@@ -723,6 +724,7 @@ const MENU_ICONS = {
   test: '<path d="M9 3h6M10 3v6l-5 10a1.5 1.5 0 0 0 1.3 2h11.4a1.5 1.5 0 0 0 1.3-2L14 9V3"/><path d="M7.5 15h9"/>',
   cmd: '<path d="M12 2.5l3.2 7.5H8.8zM6 12l3.2 7.5H2.8zM18 12l3.2 7.5h-6.4z"/>',
   pilot: '<path d="M12 2l1.6 6.2L21 13v2l-7.3-2-.5 5 3 2.2V22L12 21l-4.2 1v-1.8l3-2.2-.5-5L3 15v-2l7.4-4.8z"/>',
+  captain: '<path d="M12 3 6 8v7l6 6 6-6V8z"/><path d="M12 3v18M6 12h12"/>',
   story: '<path d="M12 6C10 4.5 7 4 3 4v15c4 0 7 .5 9 2 2-1.5 5-2 9-2V4c-4 0-7 .5-9 2z"/><path d="M12 6v15"/>',
   rand: '<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="8.5" cy="8.5" r="1.2" fill="currentColor"/><circle cx="15.5" cy="8.5" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="8.5" cy="15.5" r="1.2" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1.2" fill="currentColor"/>',
   endless: '<path d="M12 12c-2-3-4-4.5-6-4.5a4.5 4.5 0 0 0 0 9c2 0 4-1.5 6-4.5s4-4.5 6-4.5a4.5 4.5 0 0 1 0 9c-2 0-4-1.5-6-4.5z"/>',
@@ -784,6 +786,8 @@ const SP_MODES = [
     st: () => { const pts = COMMANDERS.reduce((s, o) => s + Math.max(0, cmdrPoints(o.id)), 0); return `${COMMANDERS.length} 位指揮官${pts ? `・可分配天賦 ${pts} 點` : ''}・功勳 ${fmtN(ROSTER.merit)}`; } },
   { key: 'pilot', icon: 'pilot', en: 'ACE PILOT', name: '王牌飛行員', desc: '不指揮艦隊：以一名飛行員的身分駕駛特殊改裝的艦載機加入戰場。背後或座艙視角、滑鼠瞄準，靠自己的任務決定成敗',
     st: () => pilotSummary() },
+  { key: 'captain', icon: 'captain', en: 'CAPTAIN', name: '艦長', desc: '特種部隊隊長：帶 1～5 艘特製戰艦執行敵後作戰。直接操控戰艦的上下左右，潛入、破壞、斬首，再撤離',
+    st: () => capSummary() },
 ];
 function showSingle() {
   const M = SP_MODES.find((m) => m.key === GAME.spMode);
@@ -817,6 +821,8 @@ function showSpHub(M) {
       { id: 'sp-watch', icon: 'watch', name: 'AI 對戰', desc: `看 AI 互打並即時解說・${watchSummary()}`, tag: own },
       { id: 'sp-tav', icon: 'tav', name: '星際酒館', desc: `功勳 ${fmtN(ROSTER.merit)}・招募兩個陣營的指揮官`, tag: own },
     ];
+  } else if (M.key === 'captain') {
+    ({ ops, subs } = capHubItems(own));
   } else {
     const p = pilotLoad(), free = pilotTalFree(p), L = pilotLevel(p.xp);
     ops = [
@@ -849,7 +855,8 @@ function showSpHub(M) {
     gEl('sp-watch').onclick = () => showWatch();
     gEl('sp-tal').onclick = () => showCommanders(showSingle);
     gEl('sp-tav').onclick = () => showTavern();
-  } else {
+  } else if (M.key === 'captain') capHubBind();
+  else {
     gEl('sp-rand').onclick = () => showPilot('rand');
     gEl('sp-hang').onclick = () => showPilot('hangar');
     gEl('sp-tal').onclick = () => showPilot('tal');
@@ -1171,7 +1178,7 @@ function gamePointer(type, e) {
 
 // ───── 戰鬥 ─────
 function startBattle() {
-  GAME.attempt++; GAME.recView = false; GAME.watch = false; GAME.pilot = null;
+  GAME.attempt++; GAME.recView = false; GAME.watch = false; GAME.pilot = null; GAME.captain = null;
   const setup = makeSetup(GAME.sc, GAME.loadout, GAME.attempt);
   applyOp(); setup.op = GAME.op;
   newBattle(GAME.sc.seed + GAME.attempt, setup);
@@ -1254,7 +1261,7 @@ function buildBattleHud() {
   };
   watchHud();   // 觀摩：雙方 AI 的解說面板
   buildCmdHud();   // 小地圖、選取面板、指令卡（hud.js）
-  const mine = GAME.watch || NET.spec || GAME.pilot ? [] : fleets.filter((f) => f.side === GAME.playerSide && f.commander && !f.ally);   // 觀摩：不能放技能；友軍傭兵的技能由 AI 自己用
+  const mine = GAME.watch || NET.spec || GAME.pilot || GAME.captain ? [] : fleets.filter((f) => f.side === GAME.playerSide && f.commander && !f.ally);   // 觀摩：不能放技能；友軍傭兵的技能由 AI 自己用
   gEl('skillbar').innerHTML = mine.map((f) => `<div class="sk-fleet"><div class="nm"><b>${f.name}</b>　${f.commander.name} Lv ${f.commander.level}</div>${Object.keys(f.skills).map((id) =>
     `<button class="g-btn sk-btn" data-f="${f.id}" data-s="${id}" title="${SKILLS[id].desc}">${SKILLS[id].name}<small></small><i class="cdv"></i></button>`).join('')}</div>`).join('');
   document.querySelectorAll('#skillbar .sk-btn').forEach((b) => (b.onclick = () => armSkill(fleets[+b.dataset.f], b.dataset.s)));
@@ -1277,7 +1284,7 @@ function gameFrame(dt) {
   const t = U.uTime.value, tl = battleSetup.timeLimit;
   const a0 = sideAlive(0), a1 = sideAlive(1), p = a0 / Math.max(1, GAME.init[0]), e = a1 / Math.max(1, GAME.init[1]);
   if (!gEl('bh-tm')) buildBattleHud();
-  const sim = GAME.sc && GAME.sc.sim, nm = (s) => (NET.on ? mpSideName(s) : sim ? simSideName(SIM.m, s) + (s === GAME.playerSide && !GAME.watch ? (GAME.pilot ? '（我軍）' : '（指揮中）') : '') : s === GAME.playerSide ? '我軍' : '敵軍');
+  const sim = GAME.sc && GAME.sc.sim, nm = (s) => (NET.on ? mpSideName(s) : sim ? simSideName(SIM.m, s) + (s === GAME.playerSide && !GAME.watch ? (GAME.pilot || GAME.captain ? '（我軍）' : '（指揮中）') : '') : s === GAME.playerSide ? '我軍' : '敵軍');
   if (GAME.watch) watchFrame();
   // 兵力只顯示百分比，艘數放在滑鼠提示裡
   const setT = (s, txt, tip) => { const el = gEl('bh-t' + s); el.textContent = txt; el.parentElement.title = tip; };
@@ -1300,7 +1307,7 @@ function gameFrame(dt) {
   pb.title = NET.on ? '多人對戰不能暫停' : `${paused ? '繼續' : '暫停'}（${keyText('pause')}）`;
   gEl('bh-speed').textContent = NET.on ? `×${NET.speed}${NET.lag ? ' …' : ''}` : cmdSlowOn ? `×${effSpeed()}` : '×' + SPEEDS[speedIdx]; gEl('bh-speed').classList.toggle('slow', cmdSlowOn);
   gEl('bh-speed').title = NET.on ? (NET.lag ? '等待連線…' : '遊戲速度（房主決定）') : cmdSlowOn ? '下令中：自動放慢' : `遊戲速度（${keyText('speed_up')}／${keyText('speed_down')}）`;
-  if (!gEl('bh-quit').dataset.sure) gEl('bh-quit').textContent = GAME.replaying ? '結束回放' : NET.on ? (NET.spec ? '離開觀戰' : '投降') : GAME.watch ? '結束觀摩' : GAME.pilot ? '結束出擊' : sim ? '結束模擬' : GAME.sc && GAME.sc.tut ? '結束教學' : '撤退';
+  if (!gEl('bh-quit').dataset.sure) gEl('bh-quit').textContent = GAME.replaying ? '結束回放' : NET.on ? (NET.spec ? '離開觀戰' : '投降') : GAME.watch ? '結束觀摩' : GAME.pilot ? '結束出擊' : GAME.captain ? '結束任務' : sim ? '結束模擬' : GAME.sc && GAME.sc.tut ? '結束教學' : '撤退';
   if (gEl('bh-ctl')) gEl('bh-ctl').textContent = `切換 → ${simSideName(SIM.m, 1 - GAME.playerSide)}`;
   gEl('bh-3d').textContent = mode3D ? '2D' : '3D';
   gEl('bh-br').title = `${BR.on ? '離開艦橋' : '艦橋視角'}（${keyText('bridge')}）`; gEl('bh-br').classList.toggle('on', BR.on);

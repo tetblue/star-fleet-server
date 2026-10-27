@@ -1017,6 +1017,16 @@
   #pilothud { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 6; }
   #pilotpause { position: fixed; left: 50%; top: 42%; transform: translate(-50%, -50%); z-index: 60; min-width: min(420px, calc(100vw - 32px)); }
   #pilotpause[hidden], #pilothud[hidden] { display: none; }
+  #caphud { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 6; }
+  #cappause { position: fixed; left: 50%; top: 42%; transform: translate(-50%, -50%); z-index: 60; min-width: min(460px, calc(100vw - 32px)); max-width: calc(100vw - 32px); }
+  #cappause[hidden], #caphud[hidden] { display: none; }
+  .cap-ship { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 8px 10px; border: 1px solid var(--line, #2a3550); border-radius: 8px; margin-bottom: 6px; background: rgba(255,255,255,.02); }
+  .cap-ship.on { border-color: var(--pc, #6fb4ff); }
+  .cap-slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .cap-slot { text-align: left; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line, #2a3550); background: rgba(255,255,255,.03); color: inherit; cursor: pointer; font: inherit; }
+  .cap-slot.on { border-color: var(--pc, #6fb4ff); background: rgba(111,180,255,.08); }
+  .cap-slot.empty { opacity: .55; }
+  .cap-slot small { display: block; opacity: .7; }
   body.pilot-on:not(.pilot-spec) #bh-tac, body.pilot-on:not(.pilot-spec) #bh-3d, body.pilot-on:not(.pilot-spec) #bh-br, body.pilot-on #bh-speed, body.pilot-on #bh-pause,
   body.pilot-on #bh-ctl, body.pilot-on #bh-edit, body.pilot-on #skillbar, body.pilot-on #selbar, body.pilot-on:not(.pilot-spec) #touchbar, body.pilot-on #help-btn, body.pilot-on #set-btn, body.pilot-on #hud, body.pilot-on #panel, body.pilot-on #panel-toggle, body.pilot-on #watchbar { display: none !important; }
   body.pilot-on.pilot-spec #bh-speed { display: inline-block !important; }

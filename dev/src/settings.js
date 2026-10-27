@@ -106,7 +106,7 @@ addEventListener('keydown', (e) => {
   const id = SET.capture, code = e.code;
   if (code === 'Escape') { SET.capture = null; renderSettings(); return; }
   if (code === 'Backspace' || code === 'Delete') { SETTINGS.keys[id] = ''; SET.capture = null; SET.msg = '已清除綁定。'; saveSettings(); renderSettings(); return; }
-  if (/^(Shift|Control|Alt|Meta)/.test(code) && KEY_CTX(id) !== 'pilot') return;   // 修飾鍵不能單獨綁（駕駛的加速可以）
+  if (/^(Shift|Control|Alt|Meta)/.test(code) && KEY_CTX(id) !== 'pilot' && KEY_CTX(id) !== 'cap') return;   // 修飾鍵不能單獨綁（駕駛、艦長的加速可以）
   // 同一情境裡重複的鍵：原本的動作解除綁定
   const clash = KEY_ACTIONS.filter((a) => a[0] !== id && KEY_CTX(a[0]) === KEY_CTX(id) && SETTINGS.keys[a[0]] === code);
   for (const a of clash) SETTINGS.keys[a[0]] = '';

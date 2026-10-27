@@ -111,6 +111,7 @@ function groundTargetHit(e) {
     if (big || plRnd() < 0.3) groundPlume(g.x, g.z, U.uTime.value, big ? 120 : 40, big ? 9 : 3, big ? 1.4 : 0.8);
   }
   if (e.pl) groundTargetCredit(g, e.dmg, kill, e.pl);
+  if (CAP.on) capCreditG(g, e.dmg, kill);   // 艦長：戰果、任務進度
 }
 function groundTargetCredit(g, dmg, kill, wid) {
   const S = PL.stats; if (!S) return;
@@ -234,6 +235,7 @@ function groundTargetMesh(g) {
   if (g.sub === 'tank') { box(0, 0, 0.06, 0.11, 0.025, 0, [0.16, 0.18, 0.12]); box(0, -0.005, 0.042, 0.048, 0.02, 0.025, [0.18, 0.2, 0.13]); box(0, 0.045, 0.008, 0.06, 0.008, 0.032, [0.12, 0.13, 0.1]); box(0, -0.03, 0.062, 0.012, 0.004, 0.045, ac); }
   else if (g.sub === 'sam') { box(0, 0, 0.06, 0.12, 0.028, 0, [0.16, 0.18, 0.12]); box(-0.012, -0.01, 0.016, 0.08, 0.016, 0.034, [0.3, 0.3, 0.28]); box(0.012, -0.01, 0.016, 0.08, 0.016, 0.034, [0.3, 0.3, 0.28]); box(0, 0.045, 0.062, 0.012, 0.004, 0.028, ac); }
   else if (g.sub === 'plane') { box(0, 0, 0.012, 0.1, 0.012, 0.004, [0.42, 0.44, 0.47]); box(0, -0.005, 0.09, 0.028, 0.004, 0.008, [0.38, 0.4, 0.43]); box(0, -0.045, 0.035, 0.012, 0.004, 0.01, [0.38, 0.4, 0.43]); box(0, -0.045, 0.004, 0.012, 0.022, 0.01, ac); }
+  else if (capTargetGeo(G, g, box, ac)) { /* 艦長模式的單位（captain.js） */ }
   else if (g.sub === 'ship') {
     box(0, 0, 0.2, 1.1, 0.1, -0.05, [0.24, 0.26, 0.29]); box(0, 0.48, 0.1, 0.14, 0.1, -0.05, [0.24, 0.26, 0.29]);
     box(0, -0.12, 0.13, 0.28, 0.12, 0.05, [0.33, 0.35, 0.38], 5); box(0, -0.12, 0.08, 0.12, 0.08, 0.17, [0.33, 0.35, 0.38]);
@@ -264,7 +266,7 @@ function groundTargetsFrame() {
   const t = U.uTime.value;
   GRD.gts.forEach((g, i) => {
     const m = GV.gtMeshes[i]; if (!m) return;
-    if (!gtDead(g)) { m.visible = true; return; }
+    if (!gtDead(g)) { m.visible = true; if (g.mv) { m.position.set(g.x, g.y, g.z); m.rotation.y = g.hd || 0; } return; }
     if (g.kind === 'navy') { const a = Math.min(1, (t - g.deadT) / 25); m.visible = a < 1; m.position.y = g.y - a * 0.4; m.rotation.z = a * 0.35; return; }   // 軍艦：慢慢傾斜下沉
     m.visible = false;
   });

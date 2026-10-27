@@ -90,7 +90,7 @@ function setGround() {
   }
   const def = g.def == null ? 1 : g.def, S = GROUND_SCENES[g.scene];
   const spots = def === 0 ? D.spotsP : def === 1 ? D.spotsN : [];
-  GRD = { ...D, key, def, S, atmo: S.atmo, grav: S.grav,
+  GRD = { ...D, key, def, S, atmo: S.atmo, grav: S.grav, H: D.H.slice(), pil: D.pil.slice(), rocks: D.rocks.slice(), ms: D.ms.map((m) => ({ ...m, hpNow: m.hp, dead: false, deadT: -1 })),
     tur: spots.map((p, k) => ({ k, x: p.x, y: p.y, z: p.z, side: def, hp: TURRET_RULE.hp, cd: 1 + k * 0.37, aim: def === 1 ? 0 : Math.PI, deadT: -1 })), live: spots.length, gts: null };
   if (g.pilot) GRD.gts = groundTargetsInit(D, def);   // 駕駛模式：地面目標
   U.uGrdTex.value = GRD_CACHE.tex; U.uGrd.value.set(GROUND_EXT, GROUND_CELL, GROUND_N, 1);
@@ -280,8 +280,9 @@ function gAdd(B, x, z, w, d, h, y0, col, win = 0) { B.a.push(x, z, w, d, h, y0, 
 
 function groundGen(scene, seed) {
   const R = mulberry32((seed ^ 0x6a09e667) >>> 0 || 1), H = new Float32Array(GROUND_N * GROUND_N).fill(GROUND_Y);
-  const D = { scene, seed, boxes: [], cyl: [], domes: [], pil: [], rocks: [], spotsN: [], spotsP: [], hf: null, far: 0, extra: {}, bld: { a: [], n: 0 }, title: GROUND_SCENES[scene].name, obst: '' };
+  const D = { scene, seed, boxes: [], cyl: [], domes: [], pil: [], rocks: [], ms: [], spotsN: [], spotsP: [], hf: null, far: 0, extra: {}, bld: { a: [], n: 0 }, title: GROUND_SCENES[scene].name, obst: '' };
   GROUND_GEN[scene](D, R, H);
+  D.H0 = H.slice();   // 壓入碰撞箱之前的高度（巨型結構被摧毀時還原用）
   for (const b of D.boxes) if (b.coll) gRaster(H, b);
   groundTargetGen(D, H);   // 駕駛模式的地面目標（ground_pilot.js）
   D.H = H; D.C = gRamp(H);
@@ -298,12 +299,15 @@ function groundGen(scene, seed) {
   return D;
 }
 // 巨型高塔：分段收窄的圓柱＋尖塔；碰撞＝一根柱子
-function gTower(D, x, z, r, h, col, win = 0, y0 = GROUND_Y) {
+function gTower(D, x, z, r, h, col, win = 0, y0 = GROUND_Y, msDef = null) {
   let y = y0;
-  for (const [k, f] of [[1, 0.45], [0.72, 0.3], [0.48, 0.17], [0.16, 0.08]]) { D.cyl.push({ x, z, r: r * k, h: h * f, y0: y, col, win: k > 0.2 ? win : 0 }); y += h * f; }
-  D.cyl.push({ x, z, r: 0.25, h: 0.5, y0: y, col, beacon: 1 });
-  D.pil.push({ x, z, r, top: y0 + h });
+  const ms = gMs(D, msDef || { name: '巨型高塔', hp: 1400 }, x, z, r, y0 + h);
+  for (const [k, f] of [[1, 0.45], [0.72, 0.3], [0.48, 0.17], [0.16, 0.08]]) { D.cyl.push({ x, z, r: r * k, h: h * f, y0: y, col, win: k > 0.2 ? win : 0, ms }); y += h * f; }
+  D.cyl.push({ x, z, r: 0.25, h: 0.5, y0: y, col, beacon: 1, ms });
+  D.pil.push({ x, z, r, top: y0 + h, ms });
 }
+// 巨型結構（可以被摧毀）：名稱、耐久、中心、半徑、頂端高度；組成的零件（圓柱、方塊、穹頂、柱子、球形障礙）帶 ms＝編號
+function gMs(D, o, x, z, r, top) { const id = D.ms.length; D.ms.push({ id, name: o.name, hp: o.hp, x, z, r, top }); return id; }
 const GROUND_GEN = {
   // 都市：街區（5.5 單位≈1 公里一格），幾個市中心越高（最高約 1 公里）；4～5 座生態巨塔
   city(D, R, H) {
@@ -331,7 +335,7 @@ const GROUND_GEN = {
     }
     // 生態巨塔（十幾公里高）：避開部署區、彼此相距 220 以上
     const pts = []; for (let k = 0; k < 200 && pts.length < 5; k++) { const x = (R() - 0.5) * 1100, z = (R() - 0.5) * 760; if (gZoneMask(x, z) < 0.05 && pts.every((p) => Math.hypot(p[0] - x, p[1] - z) > 220)) pts.push([x, z]); }
-    for (const [x, z] of pts) gTower(D, x, z, 6 + R() * 2, 62 + R() * 22, [0.14, 0.16, 0.2], 3 + R() * 40);
+    for (const [x, z] of pts) gTower(D, x, z, 6 + R() * 2, 62 + R() * 22, [0.14, 0.16, 0.2], 3 + R() * 40, GROUND_Y, { name: '生態巨塔', hp: 1600 });
     [D.spotsN, D.spotsP] = gGroundSpots(R, 5);
     D.obst = `${pts.length} 座生態巨塔（約 ${gKm(62)}～${gKm(84)} 公里高，穿過艦隊平面）。`;
     D.far = 0;
@@ -356,20 +360,20 @@ const GROUND_GEN = {
     for (let k = 0; k < 60; k++) gAdd(B, coast(0) + 60 + R() * 900, (R() - 0.5) * 2600, 1.4 + R() * 0.8, 0.3, 0.3, GROUND_Y - 0.1, gCol(0.16, 0.16, 0.17, R));   // 海上的船
     // 星艦船塢：海上的巨型乾塢（約 5 公里長），四角是龍門塔
     for (const z of [-480, 40, 520].map((v) => v + (R() - 0.5) * 120)) {
-      const x = coast(z) + 34;
-      D.boxes.push({ x, z: z - 7, w: 26, d: 2, h: 3, y0: GROUND_Y, col: [0.22, 0.22, 0.24] });
-      D.boxes.push({ x, z: z + 7, w: 26, d: 2, h: 3, y0: GROUND_Y, col: [0.22, 0.22, 0.24] });
-      D.boxes.push({ x: x + 13, z, w: 2, d: 16, h: 3, y0: GROUND_Y, col: [0.22, 0.22, 0.24] });
-      D.boxes.push({ x: x - 3, z, w: 18, d: 4.5, h: 2.4, y0: GROUND_Y + 0.4, col: [0.25, 0.27, 0.3], win: 7 });   // 船塢裡的星艦
-      for (const ox of [-9, 9]) { D.cyl.push({ x: x + ox, z: z - 9, r: 1.6, h: 24, y0: GROUND_Y, col: [0.5, 0.3, 0.1] }); D.cyl.push({ x: x + ox, z: z + 9, r: 1.6, h: 24, y0: GROUND_Y, col: [0.5, 0.3, 0.1] }); D.boxes.push({ x: x + ox, z, w: 2.4, d: 20, h: 2, y0: GROUND_Y + 24, col: [0.55, 0.32, 0.1] }); }
-      D.pil.push({ x, z, r: 13, top: GROUND_Y + 26 });
+      const x = coast(z) + 34, ms = gMs(D, { name: '星艦船塢', hp: 1000 }, x, z, 13, GROUND_Y + 26);
+      D.boxes.push({ x, z: z - 7, w: 26, d: 2, h: 3, y0: GROUND_Y, col: [0.22, 0.22, 0.24], ms });
+      D.boxes.push({ x, z: z + 7, w: 26, d: 2, h: 3, y0: GROUND_Y, col: [0.22, 0.22, 0.24], ms });
+      D.boxes.push({ x: x + 13, z, w: 2, d: 16, h: 3, y0: GROUND_Y, col: [0.22, 0.22, 0.24], ms });
+      D.boxes.push({ x: x - 3, z, w: 18, d: 4.5, h: 2.4, y0: GROUND_Y + 0.4, col: [0.25, 0.27, 0.3], win: 7, ms });   // 船塢裡的星艦
+      for (const ox of [-9, 9]) { D.cyl.push({ x: x + ox, z: z - 9, r: 1.6, h: 24, y0: GROUND_Y, col: [0.5, 0.3, 0.1], ms }); D.cyl.push({ x: x + ox, z: z + 9, r: 1.6, h: 24, y0: GROUND_Y, col: [0.5, 0.3, 0.1], ms }); D.boxes.push({ x: x + ox, z, w: 2.4, d: 20, h: 2, y0: GROUND_Y + 24, col: [0.55, 0.32, 0.1], ms }); }
+      D.pil.push({ x, z, r: 13, top: GROUND_Y + 26, ms });
     }
     // 兩座發射塔（約 14 公里高）
-    for (const z of [-200 + (R() - 0.5) * 100, 300 + (R() - 0.5) * 100]) gTower(D, coast(z) - 70, z, 5.5, 68 + R() * 10, [0.3, 0.3, 0.33], 11);
+    for (const z of [-200 + (R() - 0.5) * 100, 300 + (R() - 0.5) * 100]) gTower(D, coast(z) - 70, z, 5.5, 68 + R() * 10, [0.3, 0.3, 0.33], 11, GROUND_Y, { name: '發射塔', hp: 1400 });
     // 外海的巨型防波堤（約 2 公里高，中間有缺口）
     const bx = 330 + R() * 120;
-    for (const [z0, z1] of [[-1400, -150], [10, 1400]]) D.boxes.push({ x: bx, z: (z0 + z1) / 2, w: 8, d: z1 - z0, h: 10, y0: GROUND_Y, col: [0.2, 0.19, 0.18], coll: true });
-    D.cyl.push({ x: bx, z: -160, r: 1.5, h: 9, y0: GROUND_Y + 10, col: [0.55, 0.52, 0.5], beacon: 2 });
+    const walls = [[-1400, -150], [10, 1400]].map(([z0, z1]) => { const ms = gMs(D, { name: '巨型防波堤', hp: 1200 }, bx, (z0 + z1) / 2, 4, GROUND_Y + 10); D.boxes.push({ x: bx, z: (z0 + z1) / 2, w: 8, d: z1 - z0, h: 10, y0: GROUND_Y, col: [0.2, 0.19, 0.18], coll: true, ms }); return ms; });
+    D.cyl.push({ x: bx, z: -160, r: 1.5, h: 9, y0: GROUND_Y + 10, col: [0.55, 0.52, 0.5], beacon: 2, ms: walls[0] });
     [D.spotsN, D.spotsP] = gGroundSpots(R, 5, (x, z) => x < coast(z) - 10 && x > coast(z) - 300);
     if (D.spotsN.length < 5) D.spotsN.push({ x: bx, y: GROUND_Y + 10, z: -500 });
     if (D.spotsP.length < 5) D.spotsP.push({ x: bx, y: GROUND_Y + 10, z: 500 });
@@ -398,16 +402,18 @@ const GROUND_GEN = {
     // 行星防禦砲塔（約 12 公里高）：巨大的塔身＋砲管
     const pts = []; for (let k = 0; k < 200 && pts.length < 3; k++) { const x = (R() - 0.5) * 1000, z = (R() - 0.5) * 600; if (gZoneMask(x, z) < 0.05 && pts.every((p) => Math.hypot(p[0] - x, p[1] - z) > 300)) pts.push([x, z]); }
     for (const [x, z] of pts) {
-      D.cyl.push({ x, z, r: 7, h: 6, y0: GROUND_Y, col: [0.2, 0.2, 0.2] });
-      D.cyl.push({ x, z, r: 4.5, h: 46, y0: GROUND_Y + 6, col: [0.34, 0.35, 0.33], win: 5 });
-      D.domes.push({ x, z, r: 6, y0: GROUND_Y + 52, col: [0.3, 0.31, 0.3] });
-      D.boxes.push({ x, z: z + (z > 0 ? -10 : 10), w: 1.6, d: 20, h: 1.6, y0: GROUND_Y + 55, col: [0.18, 0.18, 0.18] });
-      D.pil.push({ x, z, r: 7, top: GROUND_Y + 58 });
+      const ms = gMs(D, { name: '行星防禦砲塔', hp: 1600 }, x, z, 7, GROUND_Y + 58);
+      D.cyl.push({ x, z, r: 7, h: 6, y0: GROUND_Y, col: [0.2, 0.2, 0.2], ms });
+      D.cyl.push({ x, z, r: 4.5, h: 46, y0: GROUND_Y + 6, col: [0.34, 0.35, 0.33], win: 5, ms });
+      D.domes.push({ x, z, r: 6, y0: GROUND_Y + 52, col: [0.3, 0.31, 0.3], ms });
+      D.boxes.push({ x, z: z + (z > 0 ? -10 : 10), w: 1.6, d: 20, h: 1.6, y0: GROUND_Y + 55, col: [0.18, 0.18, 0.18], ms });
+      D.pil.push({ x, z, r: 7, top: GROUND_Y + 58, ms });
     }
     // 護盾產生器：半球（約 4 公里高）
     const gx = (R() - 0.5) * 400, gz = (R() - 0.5) * 200;
-    D.domes.push({ x: gx, z: gz, r: 20, y0: GROUND_Y, col: [0.3, 0.4, 0.5] }); D.rocks.push({ x: gx, y: GROUND_Y, z: gz, r: 20 });
-    D.cyl.push({ x: gx, z: gz, r: 0.6, h: 6, y0: GROUND_Y + 20, col: [0.5, 0.6, 0.7], beacon: 2 });
+    const gms = gMs(D, { name: '護盾產生器', hp: 1800 }, gx, gz, 20, GROUND_Y + 20);
+    D.domes.push({ x: gx, z: gz, r: 20, y0: GROUND_Y, col: [0.3, 0.4, 0.5], ms: gms }); D.rocks.push({ x: gx, y: GROUND_Y, z: gz, r: 20, ms: gms });
+    D.cyl.push({ x: gx, z: gz, r: 0.6, h: 6, y0: GROUND_Y + 20, col: [0.5, 0.6, 0.7], beacon: 2, ms: gms });
     const near = sites.map(([x, z]) => ({ x: x + (R() - 0.5) * 40, y: GROUND_Y, z: z + (R() - 0.5) * 40 })).filter((p) => Math.abs(p.x) < 750 && Math.abs(p.z) > 100 && Math.abs(p.z) < 820);
     const [gn, gp] = gGroundSpots(R, 8);
     D.spotsN = gSpots(R, near.filter((p) => p.z < 0), 8, 140, gn); D.spotsP = gSpots(R, near.filter((p) => p.z > 0), 8, 140, gp);
@@ -416,18 +422,18 @@ const GROUND_GEN = {
   },
   // 軌道電梯：基座（約 6 公里見方），纜繩直通太空；中繼平台在約 34 公里高（球形障礙）；周圍是工業設施
   elevator(D, R, H) {
-    const X = 0, Z = -120, C = [0.16, 0.16, 0.18], B = D.bld, PY = 120;
-    D.boxes.push({ x: X, z: Z, w: 32, d: 32, h: 3, y0: GROUND_Y, col: C, win: 7, top: [0.13, 0.13, 0.15], coll: true });
-    D.boxes.push({ x: X, z: Z, w: 20, d: 20, h: 5, y0: GROUND_Y + 3, col: [0.2, 0.21, 0.24], win: 9, top: [0.15, 0.15, 0.17], coll: true });
-    D.boxes.push({ x: X, z: Z, w: 9, d: 9, h: 6, y0: GROUND_Y + 8, col: [0.24, 0.25, 0.28], win: 11, top: [0.18, 0.18, 0.2], coll: true });
-    D.pil.push({ x: X, z: Z, r: 4, top: 6000 });
-    D.extra.tether = { x: X, z: Z, y0: GROUND_Y + 14, plat: PY };
-    D.rocks.push({ x: X, y: PY, z: Z, r: 16 });
+    const X = 0, Z = -120, C = [0.16, 0.16, 0.18], B = D.bld, PY = 120, ms = gMs(D, { name: '軌道電梯', hp: 2500 }, X, Z, 16, PY + 8);
+    D.boxes.push({ x: X, z: Z, w: 32, d: 32, h: 3, y0: GROUND_Y, col: C, win: 7, top: [0.13, 0.13, 0.15], coll: true, ms });
+    D.boxes.push({ x: X, z: Z, w: 20, d: 20, h: 5, y0: GROUND_Y + 3, col: [0.2, 0.21, 0.24], win: 9, top: [0.15, 0.15, 0.17], coll: true, ms });
+    D.boxes.push({ x: X, z: Z, w: 9, d: 9, h: 6, y0: GROUND_Y + 8, col: [0.24, 0.25, 0.28], win: 11, top: [0.18, 0.18, 0.2], coll: true, ms });
+    D.pil.push({ x: X, z: Z, r: 4, top: 6000, ms });
+    D.extra.tether = { x: X, z: Z, y0: GROUND_Y + 14, plat: PY, ms };
+    D.rocks.push({ x: X, y: PY, z: Z, r: 16, ms });
     for (let k = 0; k < 1400; k++) {   // 工業設施、倉庫、宿舍
       const a = R() * TAU, r = 22 + Math.pow(R(), 1.6) * 700, x = X + Math.cos(a) * r, z = Z + Math.sin(a) * r;
       gAdd(B, x, z, 0.6 + R() * 1.6, 0.5 + R() * 1.2, 0.2 + R() * 0.8, GROUND_Y, gCol(0.15, 0.14, 0.13, R), R() < 0.5 ? 1 + R() * 40 : 0);
     }
-    for (let k = 0; k < 8; k++) { const a = k / 8 * TAU; D.cyl.push({ x: X + Math.cos(a) * 24, z: Z + Math.sin(a) * 24, r: 1, h: 10, y0: GROUND_Y, col: [0.35, 0.36, 0.4], beacon: k % 2 ? 0 : 1 }); }
+    for (let k = 0; k < 8; k++) { const a = k / 8 * TAU; D.cyl.push({ x: X + Math.cos(a) * 24, z: Z + Math.sin(a) * 24, r: 1, h: 10, y0: GROUND_Y, col: [0.35, 0.36, 0.4], beacon: k % 2 ? 0 : 1, ms }); }
     const cN = [], cP = [];
     for (const [dx, dz] of [[-14, -14], [14, -14], [-14, 14], [14, 14]]) (dz < 0 ? cN : cP).push({ x: X + dx, y: GROUND_Y + 3, z: Z + dz });
     cN.push({ x: X - 15, y: PY + 2, z: Z - 12 }); cP.push({ x: X + 15, y: PY + 2, z: Z + 12 });   // 平台上（在球形障礙外面）
@@ -597,25 +603,135 @@ function groundScarMesh(P) {
 // 炸毀地面上 (x, z) 半徑 r 內的建築、留下焦痕（只是畫面；由命中結算呼叫，回放也會重現）
 function groundScar(x, y, z, r = 2) {
   if (!GRD || GV.key !== GRD.key) return;
-  const gy = terrainHAt(x, z); if (y > gy + 4) return;   // 離地面太遠（打在空中或巨型結構高處）
+  const gy = terrainHAt(x, z), low = y <= gy + 4;   // 焦痕只畫在地面附近
   const B = GV.bld, t = U.uTime.value;
-  if (B) {
+  if (B && y <= GV.bldTop + r) {
     for (let a = Math.floor((x - r) / 10); a <= Math.floor((x + r) / 10); a++) for (let b = Math.floor((z - r) / 10); b <= Math.floor((z + r) / 10); b++) {
       const L = B.idx.get(a * 4099 + b); if (!L) continue;
       for (const i of L) {
         if (B.ic.array[i * 4 + 1] >= 0 || B.iB[i * 4] <= 0) continue;
+        const y0 = B.ic.array[i * 4 + 2]; if (y > y0 + B.iB[i * 4] + r || y < y0 - r) continue;   // 爆炸不在這棟建築的高度範圍內
         const dx = Math.max(0, Math.abs(B.iA[i * 4] - x) - B.iA[i * 4 + 2] / 2), dz = Math.max(0, Math.abs(B.iA[i * 4 + 1] - z) - B.iA[i * 4 + 3] / 2);
         if (dx * dx + dz * dz <= r * r) { B.ic.array[i * 4 + 1] = t; B.dirty.push(i); }
       }
     }
   }
   const S = GV.scars;
-  if (S) { const k = S.head; S.head = (S.head + 1) % SCAR_MAX; S.s.array[k * 4] = x; S.s.array[k * 4 + 1] = z; S.s.array[k * 4 + 2] = r * 1.2; S.s.array[k * 4 + 3] = t; S.y.array[k] = gy; S.dirty = true; }
+  if (S && low) { const k = S.head; S.head = (S.head + 1) % SCAR_MAX; S.s.array[k * 4] = x; S.s.array[k * 4 + 1] = z; S.s.array[k * 4 + 2] = r * 1.2; S.s.array[k * 4 + 3] = t; S.y.array[k] = gy; S.dirty = true; }
+}
+// 直接炸毀某一棟建築（武器打到它）；回傳有沒有炸掉
+function groundBldKill(i) {
+  const B = GV.bld; if (!B || !GRD || GV.key !== GRD.key || B.ic.array[i * 4 + 1] >= 0 || B.iB[i * 4] <= 0) return false;
+  B.ic.array[i * 4 + 1] = U.uTime.value; B.dirty.push(i); return true;
+}
+// (x, z) 半徑 r 內、高度範圍跟 [y0, y1] 重疊、還沒倒的建築：f(編號, 頂端高度)
+function groundBldEach(x, z, r, y0, y1, f) {
+  const B = GV.bld; if (!B || !GRD || GV.key !== GRD.key || y0 > GV.bldTop) return;
+  for (let a = Math.floor((x - r - 3) / 10); a <= Math.floor((x + r + 3) / 10); a++) for (let b = Math.floor((z - r - 3) / 10); b <= Math.floor((z + r + 3) / 10); b++) {
+    const L = B.idx.get(a * 4099 + b); if (!L) continue;
+    for (const i of L) {
+      if (B.ic.array[i * 4 + 1] >= 0 || B.iB[i * 4] <= 0) continue;
+      const by = B.ic.array[i * 4 + 2], top = by + B.iB[i * 4]; if (top < y0 || by > y1) continue;
+      const dx = Math.max(0, Math.abs(B.iA[i * 4] - x) - B.iA[i * 4 + 2] / 2), dz = Math.max(0, Math.abs(B.iA[i * 4 + 1] - z) - B.iA[i * 4 + 3] / 2);
+      if (dx * dx + dz * dz <= r * r) f(i, top);
+    }
+  }
+}
+// ═════ 巨型結構：耐久、被摧毀（倒塌、移除碰撞與遮蔽） ═════
+// 射線最先碰到的巨型結構（柱子＝直立圓柱、碰撞箱＝方塊、球形障礙＝球）：{ s, id }，沒有＝null
+function groundMsRay(ox, oy, oz, D, maxS) {
+  if (!GRD || !GRD.ms || !GRD.ms.length) return null;
+  let best = maxS, id = -1;
+  for (const p of GRD.pil) {
+    if (p.ms == null) continue;
+    const fx = ox - p.x, fz = oz - p.z, a = D[0] * D[0] + D[2] * D[2]; if (a < 1e-9) continue;
+    const b = 2 * (fx * D[0] + fz * D[2]), c = fx * fx + fz * fz - p.r * p.r, disc = b * b - 4 * a * c; if (disc < 0) continue;
+    const s = (-b - Math.sqrt(disc)) / (2 * a); if (s <= 0 || s >= best) continue;
+    const y = oy + D[1] * s; if (y < GROUND_Y - 1 || y > p.top) continue;
+    best = s; id = p.ms;
+  }
+  for (const b of GRD.boxes) {
+    if (!b.coll || b.ms == null || GRD.ms[b.ms].dead) continue;
+    let t0 = 0, t1 = best;
+    for (const [o, d, lo, hi] of [[ox, D[0], b.x - b.w / 2, b.x + b.w / 2], [oy, D[1], b.y0, b.y0 + b.h], [oz, D[2], b.z - b.d / 2, b.z + b.d / 2]]) {
+      if (Math.abs(d) < 1e-9) { if (o < lo || o > hi) { t0 = 1; t1 = 0; } continue; }
+      let a1 = (lo - o) / d, a2 = (hi - o) / d; if (a1 > a2) [a1, a2] = [a2, a1];
+      t0 = Math.max(t0, a1); t1 = Math.min(t1, a2);
+    }
+    if (t0 <= t1 && t0 > 0 && t0 < best) { best = t0; id = b.ms; }
+  }
+  for (const r of GRD.rocks) {
+    if (r.ms == null) continue;
+    const qx = ox - r.x, qy = oy - r.y, qz = oz - r.z, b = qx * D[0] + qy * D[1] + qz * D[2], c = qx * qx + qy * qy + qz * qz - r.r * r.r, disc = b * b - c; if (disc < 0) continue;
+    const s = -b - Math.sqrt(disc); if (s > 0 && s < best) { best = s; id = r.ms; }
+  }
+  return id >= 0 ? { s: best, id } : null;
+}
+// 巨型結構上離 (x, y, z) 最近的一點（飛彈、鎖定用）
+function groundMsPoint(id, x, y, z, out) {
+  let bd = 1e18;
+  const put = (px, py, pz) => { const d = (px - x) ** 2 + (py - y) ** 2 + (pz - z) ** 2; if (d < bd) { bd = d; out.set(px, py, pz); } };
+  for (const p of GRD.pil) if (p.ms === id) { const dx = x - p.x, dz = z - p.z, d = Math.hypot(dx, dz) || 1; put(p.x + dx / d * p.r, Math.max(GROUND_Y + 1, Math.min(Math.min(p.top, GROUND_Y + 80) - 1, y)), p.z + dz / d * p.r); }
+  for (const b of GRD.boxes) if (b.coll && b.ms === id) put(Math.max(b.x - b.w / 2, Math.min(b.x + b.w / 2, x)), Math.max(b.y0, Math.min(b.y0 + b.h, y)), Math.max(b.z - b.d / 2, Math.min(b.z + b.d / 2, z)));
+  for (const r of GRD.rocks) if (r.ms === id) { const dx = x - r.x, dy = y - r.y, dz = z - r.z, d = Math.hypot(dx, dy, dz) || 1; put(r.x + dx / d * r.r, r.y + dy / d * r.r, r.z + dz / d * r.r); }
+  if (bd > 1e17) { const M = GRD.ms[id]; out.set(M.x, Math.min(M.top, y), M.z); }
+  return out;
+}
+// 打中巨型結構（processHits 的 'ms'）
+function groundMsHit(e) {
+  const M = GRD && GRD.ms && GRD.ms[e.id]; if (!M || M.dead) return;
+  M.hpNow -= e.dmg;
+  if (Math.random() < 0.5) spawnFx(e.x, e.y, e.z, e.side, 2 + Math.random() * 1.5, 22);
+  const kill = M.hpNow <= 0;
+  if (kill) groundMsKill(M, e.side);
+  if (typeof CAP !== 'undefined' && CAP.on) capCreditMs(M, e.dmg, kill);
+}
+function groundMsKill(M, side) {
+  const t = U.uTime.value;
+  M.dead = true; M.hpNow = 0; M.deadT = t;
+  // 碰撞、遮蔽：柱子、球形障礙拿掉，碰撞箱壓入的高度還原
+  GRD.pil = GRD.pil.filter((p) => p.ms !== M.id);
+  U.uPilN.value = Math.min(PIL_MAX, GRD.pil.length); GRD.pil.slice(0, PIL_MAX).forEach((p, k) => U.uPil.value[k].set(p.x, p.z, p.r, p.top));
+  GRD.rocks = GRD.rocks.filter((r) => r.ms !== M.id); ROCKS = ROCKS.filter((r) => r.ms == null || r.ms !== M.id);
+  U.uRockN.value = ROCKS.length; ROCKS.forEach((r, k) => U.uRock.value[k].set(r.x, r.y, r.z, r.r)); SOLID = ROCKS.length > 0 || !!GRD;
+  const dead = GRD.boxes.filter((b) => b.coll && b.ms === M.id);
+  if (dead.length) {
+    for (const b of dead) gRasterCells(b, (i) => (GRD.H[i] = GRD.H0[i]));
+    for (const b of GRD.boxes) if (b.coll && !(b.ms != null && GRD.ms[b.ms].dead)) gRaster(GRD.H, b);
+  }
+  // 畫面：沿著高度一連串爆炸、濃煙、周圍的建築被壓垮
+  const h = Math.min(M.top - GROUND_Y, 70);
+  for (let k = 0; k < 14; k++) spawnFx(M.x + (Math.random() - 0.5) * M.r * 1.6, GROUND_Y + h * Math.random(), M.z + (Math.random() - 0.5) * M.r * 1.6, side, 5 + Math.random() * 6, 16 + Math.random() * 8);
+  groundPlume(M.x, M.z, t, 200, Math.max(10, M.r * 1.4), 2);
+  groundScar(M.x, GROUND_Y, M.z, M.r * 1.8);
+  if (GV.beacons) { const a = GV.beacons.pts.geometry.attributes.position; GV.beacons.list.forEach((b, k) => { if (b.ms === M.id) a.setY(k, -1e4); }); a.needsUpdate = true; }
+}
+// 照碰撞箱的範圍走過每一格（同 gRaster）
+function gRasterCells(b, f) {
+  let ix0 = Math.ceil((b.x - b.w / 2 + GROUND_EXT) / GROUND_CELL - 0.5), ix1 = Math.floor((b.x + b.w / 2 + GROUND_EXT) / GROUND_CELL - 0.5);
+  let iz0 = Math.ceil((b.z - b.d / 2 + GROUND_EXT) / GROUND_CELL - 0.5), iz1 = Math.floor((b.z + b.d / 2 + GROUND_EXT) / GROUND_CELL - 0.5);
+  if (ix0 > ix1) ix0 = ix1 = Math.floor((b.x + GROUND_EXT) / GROUND_CELL);
+  if (iz0 > iz1) iz0 = iz1 = Math.floor((b.z + GROUND_EXT) / GROUND_CELL);
+  for (let iz = Math.max(0, iz0); iz <= Math.min(GROUND_N - 1, iz1); iz++) for (let ix = Math.max(0, ix0); ix <= Math.min(GROUND_N - 1, ix1); ix++) f(iz * GROUND_N + ix);
+}
+// 每幀：倒塌（往下沉、慢慢傾斜，約 10 秒後消失）
+function groundMsFrame(t) {
+  if (!GRD || !GRD.ms || !GV.ms) return;
+  for (const M of GRD.ms) {
+    const g = GV.ms[M.id]; if (!g || !M.dead) continue;
+    const k = Math.min(1, (t - M.deadT) / 10), e = k * k * (3 - 2 * k);
+    g.visible = k < 1; g.position.y = GROUND_Y - e * Math.min(M.top - GROUND_Y, 90) * 0.95; g.rotation.z = e * 0.12 * (M.id % 2 ? 1 : -1); g.rotation.x = e * 0.08;
+    if (k < 1 && Math.random() < 0.15) spawnFx(M.x + (Math.random() - 0.5) * M.r * 2, GROUND_Y + Math.random() * 6, M.z + (Math.random() - 0.5) * M.r * 2, 1, 4, 18);
+  }
+  for (const c of GV.climb) if (c.ms != null && GRD.ms[c.ms] && GRD.ms[c.ms].dead) c.m.visible = false;
 }
 // 新的一場：建築復原、焦痕清掉
 function groundRestore() {
   const B = GV.bld; if (B) { for (let i = 1; i < B.ic.array.length; i += 4) B.ic.array[i] = -1; B.ic.clearUpdateRanges(); B.ic.needsUpdate = true; B.dirty.length = 0; }
   const S = GV.scars; if (S) { S.s.array.fill(0); S.s.clearUpdateRanges(); S.s.needsUpdate = true; S.head = 0; }
+  for (const [id, g] of (GV.ms || []).entries()) if (g && GRD && GRD.ms[id]) { g.visible = true; g.position.set(GRD.ms[id].x, GROUND_Y, GRD.ms[id].z); g.rotation.set(0, 0, 0); }
+  for (const c of GV.climb) c.m.visible = true;
+  if (GV.beacons) { const a = GV.beacons.pts.geometry.attributes.position; GV.beacons.list.forEach((b, k) => a.setY(k, b.y)); a.needsUpdate = true; }
   groundFxReset();
 }
 // ═════ 戰火：煙柱、流彈落地、墜落的殘骸（只是畫面，不影響戰鬥；用 Math.random，回放時細節可能不同） ═════
@@ -945,33 +1061,38 @@ function groundSync() {
     for (const m of GV.mats) m.dispose(); GV.mats = []; GV.tur = []; GV.climb = []; GV.defKey = ''; GV.tMat = GV.wMat = null; GV.bld = GV.scars = GV.smoke = null;
     if (GV.sky) { scene.remove(GV.sky); GV.sky.material.dispose(); GV.sky.geometry.dispose(); }
     GV.key = GRD.key;
-    const P = GRD.S.pal, D = GRD, mat = groundMat(P), G = gbNew(), beacons = [];
+    const P = GRD.S.pal, D = GRD, mat = groundMat(P), G = gbNew(), beacons = [], MG = new Map();
+    const gOf = (o) => { if (o.ms == null) return G; let g = MG.get(o.ms); if (!g) MG.set(o.ms, (g = gbNew())); return g; };
     GV.sky = groundSky(P); scene.add(GV.sky);
     if (D.scene === 'harbor') { GV.group.add(groundSea(P, GROUND_Y - 0.05)); GV.group.add(groundFloorMesh(P, 1, GROUND_Y + 0.15, D.extra.coastF)); }
     else GV.group.add(groundFloorMesh(P, P.plane, GROUND_Y - (D.hf ? 1 : 0)));
     if (D.far) GV.group.add(groundFar(P, D.far, D.seed, D.extra));
     if (D.hf) GV.group.add(groundHfMesh(P, D));
-    for (const b of D.boxes) gbBox(G, b);
-    for (const c of D.cyl) { gbCyl(G, c.x, c.y0, c.z, c.r, c.h, c.col, c.r > 2 ? 20 : 8, true, c.win || 0); if (c.beacon) beacons.push({ x: c.x, y: c.y0 + c.h + 0.3, z: c.z, kind: c.beacon }); }
-    for (const d of D.domes) gbDome(G, d.x, d.y0, d.z, d.r, d.col, d.r > 5 ? 24 : 10, d.r > 5 ? 8 : 4);
+    for (const b of D.boxes) gbBox(gOf(b), b);
+    for (const c of D.cyl) { gbCyl(gOf(c), c.x, c.y0, c.z, c.r, c.h, c.col, c.r > 2 ? 20 : 8, true, c.win || 0); if (c.beacon) beacons.push({ x: c.x, y: c.y0 + c.h + 0.3, z: c.z, kind: c.beacon, ms: c.ms }); }
+    for (const d of D.domes) gbDome(gOf(d), d.x, d.y0, d.z, d.r, d.col, d.r > 5 ? 24 : 10, d.r > 5 ? 8 : 4);
     const T = D.extra.tether;
     if (T) {   // 軌道電梯：纜繩、外層環、中繼平台、上下的車廂
-      gbCyl(G, T.x, T.y0, T.z, 1.2, 5800, [0.55, 0.57, 0.62], 10, false);
-      for (let y = T.y0 + 15; y < 2400; y += 40) gbCyl(G, T.x, y, T.z, 2.4, 1, [0.35, 0.36, 0.4], 12);
-      gbCyl(G, T.x, T.plat - 2, T.z, 20, 3, [0.24, 0.25, 0.3], 32, true, 13);
-      gbCyl(G, T.x, T.plat - 8, T.z, 8, 14, [0.3, 0.31, 0.36], 16, true, 17);
-      for (let k = 0; k < 6; k++) { const a = k / 6 * TAU; gbBox(G, { x: T.x + Math.cos(a) * 13, z: T.z + Math.sin(a) * 13, w: 2, d: 2, h: 5, y0: T.plat + 1, col: [0.3, 0.3, 0.34] }); }
-      for (let k = 0; k < 8; k++) { const a = k / 8 * TAU; beacons.push({ x: T.x + Math.cos(a) * 20, y: T.plat + 1.5, z: T.z + Math.sin(a) * 20, kind: k % 2 ? 1 : 2 }); }
+      const TG = gOf(T);
+      gbCyl(TG, T.x, T.y0, T.z, 1.2, 5800, [0.55, 0.57, 0.62], 10, false);
+      for (let y = T.y0 + 15; y < 2400; y += 40) gbCyl(TG, T.x, y, T.z, 2.4, 1, [0.35, 0.36, 0.4], 12);
+      gbCyl(TG, T.x, T.plat - 2, T.z, 20, 3, [0.24, 0.25, 0.3], 32, true, 13);
+      gbCyl(TG, T.x, T.plat - 8, T.z, 8, 14, [0.3, 0.31, 0.36], 16, true, 17);
+      for (let k = 0; k < 6; k++) { const a = k / 6 * TAU; gbBox(TG, { x: T.x + Math.cos(a) * 13, z: T.z + Math.sin(a) * 13, w: 2, d: 2, h: 5, y0: T.plat + 1, col: [0.3, 0.3, 0.34] }); }
+      for (let k = 0; k < 8; k++) { const a = k / 8 * TAU; beacons.push({ x: T.x + Math.cos(a) * 20, y: T.plat + 1.5, z: T.z + Math.sin(a) * 20, kind: k % 2 ? 1 : 2, ms: T.ms }); }
       for (let k = 0; k < 3; k++) {
         const cg = gbNew(); gbBox(cg, { x: 0, z: 0, w: 3.6, d: 3.6, h: 5, y0: -2.5, col: [0.4, 0.42, 0.48], win: 19 + k }); const cm = gbMesh(cg, mat);
-        cm.position.set(T.x, 0, T.z); GV.group.add(cm); GV.climb.push({ m: cm, ph: k / 3, T });
+        cm.position.set(T.x, 0, T.z); GV.group.add(cm); GV.climb.push({ m: cm, ph: k / 3, T, ms: T.ms });
       }
     }
     GV.group.add(gbMesh(G, mat));
+    GV.ms = [];   // 巨型結構：以底部中心為支點的群組（倒塌時往下沉、傾斜）
+    for (const [id, g] of MG) { const M = D.ms[id], grp = new THREE.Group(), m = gbMesh(g, mat); grp.position.set(M.x, GROUND_Y, M.z); m.position.set(-M.x, -GROUND_Y, -M.z); grp.add(m); GV.group.add(grp); GV.ms[id] = grp; }
     const bm = groundBldMesh(P, D); if (bm) GV.group.add(bm);
     GV.group.add(groundScarMesh(P));
     GV.group.add(groundSmokeMesh(P));   // 戰火的煙
     const bc = groundBeacons(beacons); if (bc) GV.group.add(bc);
+    GV.beacons = bc ? { pts: bc, list: beacons } : null;
     (P.low || []).forEach(([y, cov, op], k) => GV.group.add(groundClouds(P, y, cov, op, k)));   // 低空的雲、霧
   }
   groundRestore();
@@ -1017,6 +1138,7 @@ function groundFrame() {
   for (const c of GV.climb) { const u = (Math.sin((t * 0.02 + c.ph) * TAU) + 1) / 2; c.m.position.y = c.T.y0 + 10 + u * 1200; }
   groundFxStep();
   groundTargetsFrame();
+  groundMsFrame(t);
 }
 // 簡報的小地圖底圖：地形、建築密度、海、巨型結構（PNG data URL，同一個地形只畫一次）
 const GROUND_IMG = {};

@@ -89,7 +89,7 @@ function ccItems() {
   if (more) it[14] = { act: 'page_skill', name: '更多技能 ▸', desc: '打開技能頁：選取的艦隊所有的技能', ok: true, nav: true };
   return it;
 }
-function ccPhaseOK() { return (GAME.phase === 'battle' || GAME.phase === 'sandbox') && !GAME.replaying && !GAME.watch && !(NET.on && NET.spec) && !(PL.on && !PL.spec); }
+function ccPhaseOK() { return (GAME.phase === 'battle' || GAME.phase === 'sandbox') && !GAME.replaying && !GAME.watch && !(NET.on && NET.spec) && !(PL.on && !PL.spec) && !CAP.on; }
 // 按下第 i 格（按鍵或滑鼠）
 function ccPress(i) {
   if (!ccPhaseOK()) return false;
@@ -148,7 +148,7 @@ function cgName(n) {
 function camFocus(x, z) { camAnim = { from: { x: view.target.x, z: view.target.z, h: view.height, yaw: view.yaw, pitch: view.pitch }, to: { x, z, h: view.height, yaw: view.yaw, pitch: view.pitch }, t: 0 }; }
 function cgKey(e) {
   const m = /^(?:Digit|Numpad)(\d)$/.exec(e.code); if (!m) return false;
-  if ((GAME.phase !== 'battle' && GAME.phase !== 'sandbox') || (PL.on && !PL.spec) || (BR.on && bridgeConsoleK() < 0.9)) return false;   // 艦橋：看著戰術台時才能用
+  if ((GAME.phase !== 'battle' && GAME.phase !== 'sandbox') || (PL.on && !PL.spec) || CAP.on || (BR.on && bridgeConsoleK() < 0.9)) return false;   // 艦橋：看著戰術台時才能用
   e.preventDefault();
   const n = +m[1], now = performance.now();
   if (e.ctrlKey || e.metaKey || e.altKey) {
@@ -196,7 +196,7 @@ function buildCmdHud() {
 }
 function chVisible() {
   if (GAME.phase !== 'battle' && GAME.phase !== 'replay') return false;
-  if (BR.on || (PL.on) || GAME.pilot || (typeof TAC !== 'undefined' && TAC.open)) return false;
+  if (BR.on || (PL.on) || GAME.pilot || CAP.on || GAME.captain || (typeof TAC !== 'undefined' && TAC.open)) return false;
   return true;
 }
 // 指令卡只有一張：戰場畫面時在右下角，打開戰術面板（艦橋：戰術台）時搬到面板右側下方

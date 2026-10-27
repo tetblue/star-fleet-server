@@ -788,6 +788,13 @@
   .wed-seg button + button { border-left: 1px solid var(--line); }
   .wed-seg button.on { background: rgba(255,255,255,.1); color: var(--text); } .wed-seg button:disabled { opacity: .35; cursor: default; }
   .wed-seg button.on.emp { background: rgba(242,179,90,.18); color: var(--emp); } .wed-seg button.on.all { background: rgba(124,196,255,.18); color: var(--all); } .wed-seg button.on.mer { background: rgba(226,115,90,.18); color: var(--mer); } .wed-seg button.on.cyb { background: rgba(255,106,126,.18); color: var(--cyb); } .wed-seg button.on.mai { background: rgba(79,240,216,.18); color: var(--mai); } .wed-seg button.on.inf { background: rgba(196,124,255,.18); color: var(--inf); } .wed-seg button.on.bug { background: rgba(155,227,90,.18); color: var(--bug); }
+  .wed-theme { display: flex; flex-wrap: wrap; gap: calc(6px * var(--sp)); margin-bottom: calc(6px * var(--sp)); }
+  .wed-sw { display: flex; flex-direction: column; align-items: center; gap: 2px; border: 0; background: none; padding: 0; color: var(--dim); font: inherit; font-size: calc(11px * var(--ui)); cursor: pointer; position: relative; }
+  .wed-sw i { width: calc(24px * var(--ui)); height: calc(24px * var(--ui)); border-radius: 50%; background: var(--c); border: 2px solid rgba(255,255,255,.18); box-sizing: border-box; }
+  .wed-sw.org i { background: conic-gradient(#f2b35a, #7cc4ff, #e2735a, #4ff0d8, #c47cff, #9be35a, #f2b35a); }
+  .wed-sw.pick i { background: var(--c); } .wed-sw.pick i[style*="transparent"] { background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); }
+  .wed-sw.pick input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  .wed-sw:hover i { border-color: rgba(255,255,255,.5); } .wed-sw.on i { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.25); } .wed-sw.on { color: var(--text); }
   /* 操作難度 */
   .sp-op { display: flex; align-items: center; gap: calc(10px * var(--sp)); margin-bottom: calc(12px * var(--sp)); flex-wrap: wrap; } .sp-opd { color: var(--dim); font-size: calc(12px * var(--ui)); }
   body.op-flat .tac-svbox { display: none; }
@@ -1010,6 +1017,16 @@
   #pilothud { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 6; }
   #pilotpause { position: fixed; left: 50%; top: 42%; transform: translate(-50%, -50%); z-index: 60; min-width: min(420px, calc(100vw - 32px)); }
   #pilotpause[hidden], #pilothud[hidden] { display: none; }
+  #caphud { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 6; }
+  #cappause { position: fixed; left: 50%; top: 42%; transform: translate(-50%, -50%); z-index: 60; min-width: min(460px, calc(100vw - 32px)); max-width: calc(100vw - 32px); }
+  #cappause[hidden], #caphud[hidden] { display: none; }
+  .cap-ship { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 8px 10px; border: 1px solid var(--line, #2a3550); border-radius: 8px; margin-bottom: 6px; background: rgba(255,255,255,.02); }
+  .cap-ship.on { border-color: var(--pc, #6fb4ff); }
+  .cap-slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .cap-slot { text-align: left; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line, #2a3550); background: rgba(255,255,255,.03); color: inherit; cursor: pointer; font: inherit; }
+  .cap-slot.on { border-color: var(--pc, #6fb4ff); background: rgba(111,180,255,.08); }
+  .cap-slot.empty { opacity: .55; }
+  .cap-slot small { display: block; opacity: .7; }
   body.pilot-on:not(.pilot-spec) #bh-tac, body.pilot-on:not(.pilot-spec) #bh-3d, body.pilot-on:not(.pilot-spec) #bh-br, body.pilot-on #bh-speed, body.pilot-on #bh-pause,
   body.pilot-on #bh-ctl, body.pilot-on #bh-edit, body.pilot-on #skillbar, body.pilot-on #selbar, body.pilot-on:not(.pilot-spec) #touchbar, body.pilot-on #help-btn, body.pilot-on #set-btn, body.pilot-on #hud, body.pilot-on #panel, body.pilot-on #panel-toggle, body.pilot-on #watchbar { display: none !important; }
   body.pilot-on.pilot-spec #bh-speed { display: inline-block !important; }
@@ -1217,7 +1234,7 @@
 
 <div id="boot"><div class="boot-card"><h1>星海艦隊戰</h1><div class="sub">FLEET TACTICS · 內網伺服器</div><div id="boot-body"><p class="boot-st">連線中…</p></div></div></div>
 <div id="save-badge" hidden>⚠ 存檔還沒同步到伺服器，重試中…</div>
-<script>window.__BUILD = "20261027173303"; window.__ASSETS = { ships: "assets/ships.webp", fx: "assets/fx.webp", fighters: "assets/fighters.webp" };</script>
+<script>window.__BUILD = "20261027220936"; window.__ASSETS = { ships: "assets/ships.webp", fx: "assets/fx.webp", fighters: "assets/fighters.webp" };</script>
 <script>// ═══ 啟動前：登入伺服器、取得存檔、提供 STORE（取代 localStorage，寫入會自動同步到伺服器）═══
 (() => {
   'use strict';
