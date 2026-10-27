@@ -381,6 +381,62 @@
   .unk { color: #a0a8bc; font-style: italic; }
   .minimap { width: 100%; height: auto; background: #050913; border: 1px solid var(--line); border-radius: 4px; display: block; }
   .ld-fleets { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(320px * var(--ui)), 1fr)); gap: calc(12px * var(--sp)); }
+  /* 編成：背景是全螢幕 3D 太空港（dock.js），介面疊在上面；整頁不捲動 */
+  .dock-bg { position: fixed; inset: 0; z-index: 29; background: #02040a; }
+  .dock-bg[hidden], body:not(.ld-on) .dock-bg { display: none; }
+  .dock-bg canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+  .dock-bg canvas:active { cursor: grabbing; }
+  body.ld-on #game { background: linear-gradient(90deg, rgba(2,4,10,.6), rgba(2,4,10,0) 42%), linear-gradient(180deg, rgba(2,4,10,.55), rgba(2,4,10,0) 18%); backdrop-filter: none; pointer-events: none; overflow: hidden; }
+  .ld-screen { position: fixed; inset: 0; pointer-events: none; display: flex; flex-direction: column; }
+  .ld-screen .ld-top, .ld-screen .ld-side { pointer-events: auto; }
+  .ld-top { position: relative; flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: calc(8px * var(--sp)) calc(14px * var(--sp)); padding: calc(10px * var(--sp)) calc(16px * var(--sp)); background: linear-gradient(180deg, rgba(4,8,18,.92), rgba(4,8,18,.7)); border-bottom: 1px solid var(--line); }
+  @media (min-width: 761px) { body.tut-side .ld-top { margin-right: calc(380px * var(--ui)); } }
+  .ld-title { display: flex; align-items: baseline; gap: calc(10px * var(--sp)); }
+  .ld-title h2 { margin: 0; font-size: calc(20px * var(--ui)); letter-spacing: .14em; font-weight: 600; }
+  .ld-title .crumb { color: var(--dim); font-size: calc(12px * var(--ui)); letter-spacing: .08em; }
+  .ld-opt { display: flex; align-items: center; gap: calc(10px * var(--sp)); font-size: calc(12.5px * var(--ui)); }
+  .ld-bud { min-width: calc(250px * var(--ui)); font-size: calc(12.5px * var(--ui)); display: flex; flex-direction: column; gap: 4px; }
+  .ld-side { position: relative; flex: 0 1 auto; align-self: flex-start; min-height: 0; margin: calc(12px * var(--sp)); width: calc(400px * var(--ui)); max-width: calc(100vw - 24px); display: flex; flex-direction: column; gap: calc(6px * var(--sp)); padding: calc(10px * var(--sp)) calc(12px * var(--sp)); background: rgba(8,13,26,.86); overflow: hidden; }
+  .ld-side .ld-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: calc(5px * var(--sp)); }
+  .ld-side .ld-body > *, .ld-side > * { flex-shrink: 0; }
+  .ld-side > .ld-body { flex-shrink: 1; }
+  .ld-tabs { display: flex; flex-wrap: wrap; gap: calc(5px * var(--sp)); padding-bottom: calc(6px * var(--sp)); border-bottom: 1px solid var(--line); }
+  .ld-tabs .g-btn.on { border-color: var(--pc); color: var(--pc); background: rgba(242,179,90,.1); }
+  .ld-tabs .g-btn.add { border-style: dashed; color: var(--dim); }
+  .ld-over { font-size: calc(12px * var(--ui)); }
+  .ld-fh { display: flex; align-items: center; gap: calc(8px * var(--sp)); font-size: calc(14px * var(--ui)); }
+  .ld-fh .g-dim { font-size: calc(12px * var(--ui)); }
+  .ld-r { display: flex; align-items: center; gap: calc(6px * var(--sp)); font-size: calc(12.5px * var(--ui)); }
+  .ld-r label { width: calc(64px * var(--ui)); flex: none; color: var(--dim); }
+  .ld-r select { flex: 1; min-width: 0; }
+  .ld-bio { font-size: calc(11.5px * var(--ui)); color: var(--dim); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .ld-types { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 4px; background: rgba(4,8,18,.5); }
+  .ld-ty { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: calc(8px * var(--sp)); padding: calc(4px * var(--sp)) calc(8px * var(--sp)); font-size: calc(13px * var(--ui)); cursor: help; }
+  .ld-ty + .ld-ty { border-top: 1px solid rgba(120,140,175,.12); }
+  .ld-ty .nm small { display: block; color: var(--dim); font-size: calc(10.5px * var(--ui)); }
+  .ld-ty > b { color: var(--pc); font-weight: 600; text-align: right; min-width: calc(60px * var(--ui)); font-variant-numeric: tabular-nums; } .ld-ty > b small { color: var(--dim); font-weight: 400; }
+  .ld-side .ctl { display: flex; align-items: center; gap: calc(3px * var(--sp)); }
+  .ld-side input[type=number] { width: calc(54px * var(--ui)); background: #0b1222; color: var(--text); border: 1px solid var(--line); border-radius: 3px; padding: calc(2px * var(--sp)) calc(4px * var(--sp)); font: inherit; text-align: right; }
+  .ld-hang { border: 1px solid var(--line); border-radius: 4px; padding: calc(5px * var(--sp)) calc(8px * var(--sp)); background: rgba(4,8,18,.5); }
+  .ld-hh { font-size: calc(12px * var(--ui)); margin-bottom: 4px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; } .ld-hh small { color: var(--dim); }
+  .ld-hg { display: grid; grid-template-columns: 1fr 1fr; gap: calc(4px * var(--sp)) calc(10px * var(--sp)); }
+  .ld-hc { display: flex; align-items: center; justify-content: space-between; gap: 4px; font-size: calc(11.5px * var(--ui)); cursor: help; white-space: nowrap; }
+  .ld-hc input[type=number] { width: calc(38px * var(--ui)) !important; }
+  .ld-ca, .ld-cb { display: flex; flex-direction: column; gap: calc(5px * var(--sp)); } .ld-ca > *, .ld-cb > * { flex-shrink: 0; }
+  @media (max-height: 780px) and (min-width: 1000px) {   /* 矮螢幕：面板分兩欄，不用捲動 */
+    .ld-side { width: calc(760px * var(--ui)); max-width: 62vw; }
+    .ld-side .ld-body { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: calc(12px * var(--sp)); align-content: start; }
+    .ld-ty { padding-top: calc(3px * var(--sp)); padding-bottom: calc(3px * var(--sp)); }
+    .ld-cb .ld-hg { grid-template-columns: 1fr; } .ld-cb .ld-r { flex-wrap: wrap; } .ld-cb .ld-r select { min-width: calc(90px * var(--ui)); }
+  }
+  .ld-cap { position: absolute; right: calc(14px * var(--sp)); bottom: calc(10px * var(--sp)); color: var(--dim); font-size: calc(11.5px * var(--ui)); text-shadow: 0 1px 3px #000; pointer-events: none; }
+  @media (max-width: 760px) {
+    .ld-top { padding: 6px 10px; gap: 6px 8px; } .ld-top .g-btn { padding: 5px 10px; } .ld-title .crumb, .ld-bud .g-dim, .ld-top > .g-sp, .ld-cap, .ld-bio { display: none; }
+    .ld-bud { min-width: 0; order: 9; flex: 1 1 100%; } #l-next { margin-left: auto; }
+    .ld-side { flex: none; align-self: stretch; margin: auto 0 0; width: auto; max-width: none; max-height: 58vh; border-radius: 10px 10px 0 0; }
+    .ld-side input[type=number] { width: 46px; }
+    .ld-cap { top: auto; bottom: calc(56vh + 6px); }
+  }
   .ld-fleet h4 { margin: 0 0 calc(8px * var(--sp)); font-size: calc(14px * var(--ui)); display: flex; gap: calc(8px * var(--sp)); align-items: center; }
   .ld-row { display: grid; grid-template-columns: calc(70px * var(--ui)) 1fr auto; gap: calc(6px * var(--sp)); align-items: center; padding: calc(3px * var(--sp)) 0; font-size: calc(12.5px * var(--ui)); }
   .ld-row .ctl { display: flex; align-items: center; gap: calc(4px * var(--sp)); }
@@ -1123,7 +1179,7 @@
 
 <div id="boot"><div class="boot-card"><h1>星海艦隊戰</h1><div class="sub">FLEET TACTICS · 內網伺服器</div><div id="boot-body"><p class="boot-st">連線中…</p></div></div></div>
 <div id="save-badge" hidden>⚠ 存檔還沒同步到伺服器，重試中…</div>
-<script>window.__BUILD = "20261027101410"; window.__ASSETS = { ships: "assets/ships.webp", fx: "assets/fx.webp", fighters: "assets/fighters.webp" };</script>
+<script>window.__BUILD = "20261027115749"; window.__ASSETS = { ships: "assets/ships.webp", fx: "assets/fx.webp", fighters: "assets/fighters.webp" };</script>
 <script>// ═══ 啟動前：登入伺服器、取得存檔、提供 STORE（取代 localStorage，寫入會自動同步到伺服器）═══
 (() => {
   'use strict';

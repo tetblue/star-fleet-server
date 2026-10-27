@@ -693,6 +693,7 @@ function setPhase(ph) {
   document.body.classList.toggle('game-on', PHASE_ON.includes(ph) || ph === 'replay');
   document.body.classList.toggle('game-battle', ph === 'battle' || ph === 'replay');
   document.body.classList.toggle('game-deploy', ph === 'deploy');
+  document.body.classList.toggle('ld-on', ph === 'loadout');   // 編成：背景是 3D 太空港（dock.js）
   document.body.classList.toggle('game-sand', ph === 'sandbox');
   document.body.classList.toggle('game-simedit', ph === 'simedit');
   document.body.classList.toggle('game-watch', !!GAME.watch && (ph === 'battle' || ph === 'replay'));
@@ -951,9 +952,8 @@ function showBriefing(sc) {
 // 航母機庫比例（每個航母圖示的機庫合計 n 架）
 function hangarRow(f, k) {
   const n = SHIP_TYPES[0].fighters.n, h = f.hangar || (f.hangar = HANGAR_DEFAULT.slice()), sum = sumA(h);
-  return `<div class="ld-hang"><div class="ld-row"><span>艦載機配置<br><small>每艘航母 ${n} 架</small></span><span class="g-dim" style="font-size:calc(12px * var(--ui))">${sum === n ? '' : `<b class="g-warn">合計 ${sum}，會依比例換算成 ${n} 架</b>`}</span><span></span></div>
-    ${CRAFT.map((c, r) => `<div class="ld-row"><span>${c.name}</span><small title="${c.note}">${c.note}</small>
-      <span class="ctl"><button class="g-btn sm" data-hk="${k}" data-hr="${r}" data-hd="-1">−</button><input type="number" min="0" max="${n}" value="${h[r]}" data-hk="${k}" data-hr="${r}"><button class="g-btn sm" data-hk="${k}" data-hr="${r}" data-hd="1">＋</button></span></div>`).join('')}</div>`;
+  return `<div class="ld-hang"><div class="ld-hh">艦載機配置<small>每艘航母 ${n} 架</small>${sum === n ? '' : `<b class="g-warn">合計 ${sum}，會依比例換算成 ${n} 架</b>`}</div><div class="ld-hg">
+    ${CRAFT.map((c, r) => `<div class="ld-hc" title="${c.note}"><span>${c.name}</span><span class="ctl"><button class="g-btn sm" data-hk="${k}" data-hr="${r}" data-hd="-1">−</button><input type="number" min="0" max="${n}" value="${h[r]}" data-hk="${k}" data-hr="${r}"><button class="g-btn sm" data-hk="${k}" data-hr="${r}" data-hd="1">＋</button></span></div>`).join('')}</div></div>`;
 }
 function showLoadout() {
   const sc = GAME.sc, lo = GAME.loadout;
@@ -963,75 +963,92 @@ function showLoadout() {
   const fac = lo.faction;
   const SPS = supplyList(lo);
   const used = sumA(lo.fleets.map((f) => compCost(f.comp))) + sumA(SPS.map((s) => compCost(s.comp)));
-  const loF = (k) => (k[0] === 's' ? SPS[+k.slice(1)] : lo.fleets[+k]);   // 編成卡片：k＝艦隊序號，'s0'、's1'…＝補給艦隊
+  const loF = (k) => (k[0] === 's' ? SPS[+k.slice(1)] : lo.fleets[+k]);   // k＝艦隊序號，'s0'、's1'…＝補給艦隊
   const over = used > sc.budget;
   const pool = cmdrPool(sc, fac), locked = (k) => !!sc.saga && k < sc.cast.length;   // 劇情戰役：前幾支是劇情指定的指揮官
   const cmdrOpts = (sel, k) => pool.map((c) => { const taken = lo.fleets.some((f, j) => j !== k && f.cmdr === c.id); return `<option value="${c.id}" ${c.id === sel ? 'selected' : ''} ${taken ? 'disabled' : ''}>${c.name}（${TRAIT_NAME[c.trait]} Lv ${cmdrLevel(c.id)}${cmdrPoints(c.id) > 0 ? `，天賦 ${cmdrPoints(c.id)} 點未分配` : ''}）${taken ? '・已指派' : ''}</option>`; }).join('');
-  const typeRows = (f, k, types = SHIP_TYPES.map((_, t) => t).filter((t) => t < N_COMBAT)) => types.map((t) => [SHIP_TYPES[t], t]).map(([st, t]) => `<div class="ld-row"><span>${st.name}<br><small>${st.cost} 點／${opts.rep} 艘</small></span>
-      <small title="${st.note}">耐久 ${st.hp}・護盾 ${st.sh}・${GUN_KEYS.filter((k) => st.guns[k]).map((k) => `${GUN_NAME[k]} ${st.guns[k].far}`).join('／')}・速度 ${st.speed}${st.missile ? `・飛彈 ${st.missile.n} 發（每 ${st.missile.cd} 秒）` : ''}${st.supply ? `・補給存量 ${st.supply.stock} 發` : ''}${st.fighters ? `・艦載機 ${st.fighters.n} 架` : ''}${st.repair ? `・維修機 ${st.repair.n}` : ''}</small>
-      <span class="ctl"><button class="g-btn sm" data-k="${k}" data-t="${t}" data-d="-20">−</button><input type="number" min="0" step="10" value="${f.comp[t] || 0}" data-k="${k}" data-t="${t}"><button class="g-btn sm" data-k="${k}" data-t="${t}" data-d="20">＋</button></span></div>`).join('');
-  overlay(`<div class="g-wrap">
-    <div class="g-head"><h2>編成</h2><span class="crumb">${sc.name}　·　預算 ${fmtN(sc.budget)} 點</span><span class="g-sp"></span><button class="g-btn" id="l-back">${sc.mp ? '← 房間' : sc.tut ? '← 訓練作戰' : '← 簡報'}</button></div>
-    <div class="g-card" style="margin-bottom:12px"><div class="g-row" style="margin-bottom:8px"><span class="g-dim">陣營</span>
-      ${sc.saga ? `<b class="g-${FACTION_CLS[fac]}">${FACTION_NAME[fac]}</b><span class="g-dim" style="font-size:calc(12px * var(--ui))">（劇情固定）劇情指定的指揮官不能更換；還有空的艦隊欄位可以派同陣營的其他指揮官</span>` : ''}<div class="wed-seg" id="l-fac" ${sc.saga ? 'hidden' : ''}><button data-f="0" class="${fac === 0 ? 'on emp' : ''}">帝國軍</button><button data-f="1" class="${fac === 1 ? 'on all' : ''}">聯盟軍</button></div>
-      <span class="g-dim" style="font-size:calc(12px * var(--ui))" ${sc.saga ? 'hidden' : ''}>${sc.mp ? `只能派該陣營的初始指揮官（${cmdrsOf(fac).length} 位），等級與天賦是多人專用的；換陣營會通知房間` : `只能派該陣營的指揮官（${cmdrsOf(fac).length} 位）；敵軍是另一個陣營。指揮官不夠可以到「星際酒館」招募`}</span></div>
-      <div class="g-row" style="margin-bottom:8px"><span class="g-dim">操作難度</span>${sc.tut ? `<b>${OP_LEVELS[sc.op].name}</b><span class="g-dim" style="font-size:calc(12px * var(--ui))">（教學固定）${OP_LEVELS[sc.op].desc}</span>` : sc.mp ? `<b>${OP_LEVELS[sc.op].name}</b><span class="g-dim" style="font-size:calc(12px * var(--ui))">（房主決定）${OP_LEVELS[sc.op].desc}</span>` : `${opSeg('l-op')}<span class="g-dim" style="font-size:calc(12px * var(--ui))">${OP_LEVELS[opLevel()].desc}</span>`}</div>
-      ${lo.fleets.length ? '' : '<div class="g-warn" style="margin-bottom:8px">這個陣營沒有可派的指揮官，先到星際酒館招募。</div>'}
-      <div class="g-row"><span>已用 <b class="${over ? 'g-warn' : 'g-emp'}">${fmtN(used)}</b> / ${fmtN(sc.budget)} 點</span>
-      <span class="g-dim">總兵力 ${ships5(sumA(lo.fleets.map((f) => sumA(f.comp))) + sumA(SPS.map((s) => sumA(s.comp))))} 艘</span><span class="g-sp"></span>${SPS.length < Math.max(1, lo.fleets.length) ? `<button class="g-btn sm" id="l-sup" title="補給艦＋護衛艦，不佔艦隊數、沒有指揮官；最多跟艦隊數一樣多支">＋ 補給艦隊（${SPS.length}／${Math.max(1, lo.fleets.length)}）</button>` : ''}
-      ${lo.fleets.length < sc.maxFleets && lo.fleets.length < pool.length ? '<button class="g-btn sm" id="l-add">＋ 增加艦隊</button>' : ''}
-      ${lo.fleets.length ? '<button class="g-btn sm" id="l-auto" title="補給艦隊不動；剩下的預算平均分給每支艦隊，各艦隊照卡片上選的「自動分配偏好」決定艦種比例，盡量用完預算">⚖ 自動分配</button>' : ''}</div>
-      <div class="budget ${over ? 'over' : ''}" style="margin-top:6px"><i style="width:${Math.min(100, used / sc.budget * 100)}%"></i></div>
-      ${over ? '<div class="g-warn" style="margin-top:6px">超出預算，請減少艦艇。</div>' : ''}</div>
-    <div class="ld-fleets">${lo.fleets.map((f, k) => { const c = COMMANDERS.find((o) => o.id === f.cmdr); return `<div class="g-card ld-fleet">
-      <h4><span class="g-emp">第${'一二三四'[k]}艦隊</span><span class="g-dim" style="font-size:calc(12px * var(--ui))">${ships5(sumA(f.comp))} 艘・${fmtN(compCost(f.comp))} 點</span><span class="g-sp"></span>${lo.fleets.length > 1 && !locked(k) ? `<button class="g-btn sm" data-del="${k}">移除</button>` : ''}</h4>
-      <div class="ld-row"><span>指揮官</span><select class="g-sel" data-cm="${k}" ${locked(k) ? 'disabled' : ''}>${cmdrOpts(f.cmdr, k)}</select><span></span></div>
-      <div class="g-dim" style="font-size:calc(12px * var(--ui));margin:2px 0 6px">${c ? `${c.bio}　技能：${c.skills.map((s) => `<b title="${SKILLS[s].desc}">${SKILLS[s].name}</b>`).join('、')}` : ''}</div>
-      <div class="ld-row"><span>自動分配偏好</span><select class="g-sel" data-pref="${k}" title="${fleetPref(f).desc}">${Object.entries(AUTO_PREFS).map(([key, P]) => `<option value="${key}" ${P === fleetPref(f) ? 'selected' : ''} title="${P.desc}">${P.name}</option>`).join('')}</select><small class="g-dim">${fleetPref(f).desc}</small></div>
-      ${typeRows(f, k)}
-      ${f.comp[0] > 0 ? hangarRow(f, k) : ''}
-      <div class="ld-row"><span>起始陣型</span><select class="g-sel" data-fm="${k}">${Object.keys(FORMATIONS).map((fk) => `<option value="${fk}" ${fk === f.formation ? 'selected' : ''}>${FORMATIONS[fk].name}</option>`).join('')}</select><span></span></div>
-      <div class="ld-row"><span>排列</span><select class="g-sel" data-ar="${k}"><option value="0" ${!f.orderly ? 'selected' : ''}>自然</option><option value="1" ${f.orderly && (f.layers || 1) === 1 ? 'selected' : ''}>整齊・1 層</option><option value="3" ${f.orderly && f.layers === 3 ? 'selected' : ''}>整齊・3 層</option></select><span></span></div>
-    </div>`; }).join('')}${SPS.map((SP, i) => `<div class="g-card ld-fleet ld-sup">
-      <h4><span class="g-emp">${supplyName(i)}</span><span class="g-dim" style="font-size:calc(12px * var(--ui))">${ships5(sumA(SP.comp))} 艘・${fmtN(compCost(SP.comp))} 點</span><span class="g-sp"></span><button class="g-btn sm" data-sdel="${i}">移除</button></h4>
-      <div class="g-dim" style="font-size:calc(12px * var(--ui));margin:2px 0 6px">補給艦隊不佔艦隊數、沒有指揮官。任何友艦（不限跟隨的那支）待在補給艦 ${SUPPLY_RULE.range} 內，飛彈沒滿就每 ${SUPPLY_RULE.cd} 秒補 1 發，一直補到滿或存量用完；補給艦被擊沉，它帶的存量就沒了。</div>
-      ${typeRows(SP, 's' + i, [4, SUPPLY_T])}
-      <div class="ld-row"><span>跟隨</span><select class="g-sel" data-sfol="${i}"><option value="-1" ${SP.follow < 0 ? 'selected' : ''}>不跟隨（自己指揮）</option>${lo.fleets.map((f, k) => `<option value="${k}" ${SP.follow === k ? 'selected' : ''}>第${'一二三四'[k]}艦隊</option>`).join('')}</select><span class="g-dim" style="font-size:calc(11.5px * var(--ui))">跟在後方 ${SUPPLY_RULE.follow}；戰鬥中直接下移動命令會取消跟隨</span></div>
-      <div class="ld-row"><span>起始陣型</span><select class="g-sel" data-sfm="${i}">${Object.keys(FORMATIONS).map((fk) => `<option value="${fk}" ${fk === (SP.formation || 'ring') ? 'selected' : ''}>${FORMATIONS[fk].name}</option>`).join('')}</select><span></span></div>
-    </div>`).join('')}</div>
-    <div class="g-row" style="margin-top:14px"><span class="g-dim">技能：${Object.values(SKILLS).map((s) => `<b>${s.name}</b>（${s.desc}）`).join('　')}</span></div>
-    <div class="g-row" style="margin-top:12px"><span class="g-sp"></span><button class="g-btn pri" id="l-next" ${over || !used || !lo.fleets.length ? 'disabled' : ''}>下一步：部署 →</button></div>
+  // 一次只編一支（分頁）；選中的那一支也是背景太空港裡顯示的艦隊
+  const keys = [...lo.fleets.map((_, k) => String(k)), ...SPS.map((_, i) => 's' + i)];
+  if (!keys.includes(GAME.ldSel)) GAME.ldSel = keys[0] || '0';
+  const sel = GAME.ldSel, F = keys.length ? loF(sel) : null, isSup = sel[0] === 's', k = isSup ? -1 : +sel, si = isSup ? +sel.slice(1) : -1;
+  const tabName = (key) => (key[0] === 's' ? supplyName(+key.slice(1)) : `第${'一二三四'[+key]}艦隊`);
+  const typeRows = (f, kk, types) => types.map((t) => { const st = SHIP_TYPES[t];
+    const tip = `${st.note}\n耐久 ${st.hp}・護盾 ${st.sh}・速度 ${st.speed}${GUN_KEYS.filter((g) => st.guns[g]).map((g) => `・${GUN_NAME[g]} ${st.guns[g].far}`).join('')}${st.missile ? `・飛彈 ${st.missile.n} 發（每 ${st.missile.cd} 秒）` : ''}${st.supply ? `・補給存量 ${st.supply.stock} 發` : ''}${st.fighters ? `・艦載機 ${st.fighters.n} 架` : ''}${st.repair ? `・維修機 ${st.repair.n}` : ''}`;
+    return `<div class="ld-ty" title="${tip}"><span class="nm">${st.name}<small>${st.cost} 點／${opts.rep} 艘</small></span><b>${ships5(f.comp[t] || 0)}<small> 艘</small></b>
+      <span class="ctl"><button class="g-btn sm" data-k="${kk}" data-t="${t}" data-d="-20">−</button><input type="number" min="0" step="10" value="${f.comp[t] || 0}" data-k="${kk}" data-t="${t}"><button class="g-btn sm" data-k="${kk}" data-t="${t}" data-d="20">＋</button></span></div>`; }).join('');
+  const fmSel = (attr, cur) => `<select class="g-sel" ${attr}>${Object.keys(FORMATIONS).map((fk) => `<option value="${fk}" ${fk === cur ? 'selected' : ''}>${FORMATIONS[fk].name}</option>`).join('')}</select>`;
+  let body = '';
+  if (F && !isSup) {
+    const c = COMMANDERS.find((o) => o.id === F.cmdr);
+    body = `<div class="ld-ca"><div class="ld-fh"><b class="g-emp">${tabName(sel)}</b><span class="g-dim">${ships5(sumA(F.comp))} 艘・${fmtN(compCost(F.comp))} 點</span><span class="g-sp"></span>${lo.fleets.length > 1 && !locked(k) ? `<button class="g-btn sm" data-del="${k}">移除這支艦隊</button>` : ''}</div>
+      <div class="ld-r"><label>指揮官</label><select class="g-sel" data-cm="${k}" ${locked(k) ? 'disabled' : ''}>${cmdrOpts(F.cmdr, k)}</select></div>
+      <div class="ld-bio">${c ? `${c.bio}　技能：${c.skills.map((s) => `<b title="${SKILLS[s].desc}">${SKILLS[s].name}</b>`).join('、')}` : ''}</div>
+      <div class="ld-r"><label>分配偏好</label><select class="g-sel" data-pref="${k}" title="${fleetPref(F).desc}">${Object.entries(AUTO_PREFS).map(([key, P]) => `<option value="${key}" ${P === fleetPref(F) ? 'selected' : ''} title="${P.desc}">${P.name}</option>`).join('')}</select><button class="g-btn sm" id="l-auto" title="補給艦隊不動；剩下的預算平均分給每支艦隊，各艦隊照自己的「分配偏好」決定艦種比例，盡量用完預算">⚖ 自動分配</button></div>
+      <div class="ld-types">${typeRows(F, k, [0, 1, 2, 3, 4])}</div></div>
+      <div class="ld-cb">${F.comp[0] > 0 ? hangarRow(F, k) : ''}
+      <div class="ld-r"><label>起始陣型</label>${fmSel(`data-fm="${k}"`, F.formation)}<select class="g-sel" data-ar="${k}" title="排列"><option value="0" ${!F.orderly ? 'selected' : ''}>自然</option><option value="1" ${F.orderly && (F.layers || 1) === 1 ? 'selected' : ''}>整齊・1 層</option><option value="3" ${F.orderly && F.layers === 3 ? 'selected' : ''}>整齊・3 層</option></select></div></div>`;
+  } else if (F) {
+    body = `<div class="ld-ca"><div class="ld-fh"><b class="g-emp">${tabName(sel)}</b><span class="g-dim">${ships5(sumA(F.comp))} 艘・${fmtN(compCost(F.comp))} 點</span><span class="g-sp"></span><button class="g-btn sm" data-sdel="${si}">移除</button></div>
+      <div class="ld-bio" title="任何友艦（不限跟隨的那支）待在補給艦 ${SUPPLY_RULE.range} 內，飛彈沒滿就每 ${SUPPLY_RULE.cd} 秒補 1 發；補給艦被擊沉，它帶的存量就沒了。">補給艦隊不佔艦隊數、沒有指揮官。友艦在補給艦 ${SUPPLY_RULE.range} 內會自動補充飛彈；補給艦被擊沉，存量就沒了。</div>
+      <div class="ld-types">${typeRows(F, sel, [4, SUPPLY_T])}</div></div><div class="ld-cb">
+      <div class="ld-r"><label>跟隨</label><select class="g-sel" data-sfol="${si}" title="跟在後方 ${SUPPLY_RULE.follow}；戰鬥中直接下移動命令會取消跟隨"><option value="-1" ${F.follow < 0 ? 'selected' : ''}>不跟隨（自己指揮）</option>${lo.fleets.map((f, j) => `<option value="${j}" ${F.follow === j ? 'selected' : ''}>第${'一二三四'[j]}艦隊</option>`).join('')}</select></div>
+      <div class="ld-r"><label>起始陣型</label>${fmSel(`data-sfm="${si}"`, F.formation || 'ring')}</div></div>`;
+  }
+  const facTip = sc.mp ? `只能派該陣營的初始指揮官（${cmdrsOf(fac).length} 位），等級與天賦是多人專用的；換陣營會通知房間` : `只能派該陣營的指揮官（${cmdrsOf(fac).length} 位）；敵軍是另一個陣營。指揮官不夠可以到「星際酒館」招募`;
+  overlay(`<div class="ld-screen">
+    <div class="ld-top">
+      <button class="g-btn" id="l-back">${sc.mp ? '← 房間' : sc.tut ? '← 訓練作戰' : '← 簡報'}</button>
+      <div class="ld-title"><h2>編成</h2><span class="crumb">${sc.name}</span></div>
+      <div class="ld-opt">${sc.saga ? `<span class="g-dim">陣營</span><b class="g-${FACTION_CLS[fac]}" title="劇情固定；劇情指定的指揮官不能更換">${FACTION_NAME[fac]}</b>` : `<div class="wed-seg" id="l-fac" title="${facTip}"><button data-f="0" class="${fac === 0 ? 'on emp' : ''}">帝國軍</button><button data-f="1" class="${fac === 1 ? 'on all' : ''}">聯盟軍</button></div>`}
+        ${sc.tut || sc.mp ? `<span class="g-dim" title="${OP_LEVELS[sc.op].desc}">${sc.tut ? '教學固定' : '房主決定'}：<b>${OP_LEVELS[sc.op].name}</b></span>` : `<span title="${OP_LEVELS[opLevel()].desc}">${opSeg('l-op')}</span>`}</div>
+      <span class="g-sp"></span>
+      <div class="ld-bud ${over ? 'over' : ''}"><div>已用 <b class="${over ? 'g-warn' : 'g-emp'}">${fmtN(used)}</b> / ${fmtN(sc.budget)} 點<span class="g-dim">　總兵力 ${ships5(sumA(lo.fleets.map((f) => sumA(f.comp))) + sumA(SPS.map((s) => sumA(s.comp))))} 艘</span></div>
+        <div class="budget ${over ? 'over' : ''}"><i style="width:${Math.min(100, used / sc.budget * 100)}%"></i></div></div>
+      <button class="g-btn pri" id="l-next" ${over || !used || !lo.fleets.length ? 'disabled' : ''} title="${over ? '超出預算，請減少艦艇' : ''}">下一步：部署 →</button>
+    </div>
+    <div class="ld-side g-card">
+      <div class="ld-tabs">${keys.map((key) => `<button class="g-btn sm ${key === sel ? 'on' : ''}" data-tab="${key}">${tabName(key)}</button>`).join('')}
+        ${lo.fleets.length < sc.maxFleets && lo.fleets.length < pool.length ? '<button class="g-btn sm add" id="l-add" title="最多 ' + sc.maxFleets + ' 支艦隊">＋ 艦隊</button>' : ''}${SPS.length < Math.max(1, lo.fleets.length) ? `<button class="g-btn sm add" id="l-sup" title="補給艦＋護衛艦，不佔艦隊數、沒有指揮官；最多跟艦隊數一樣多支">＋ 補給（${SPS.length}／${Math.max(1, lo.fleets.length)}）</button>` : ''}</div>
+      ${lo.fleets.length ? '' : '<div class="g-warn">這個陣營沒有可派的指揮官，先到星際酒館招募。</div>'}
+      ${over ? `<div class="g-warn ld-over">超出預算 ${fmtN(used - sc.budget)} 點，請減少艦艇。</div>` : ''}
+      <div class="ld-body">${body}</div>
+    </div>
+    <div class="ld-cap" id="ld-cap"></div>
   </div>`);
+  dockAttach();   // 背景：3D 太空港（dock.js）
   const redraw = () => showLoadout();
   if (!sc.mp && !sc.tut) bindOpSeg('l-op', redraw);
   gEl('l-back').onclick = () => (sc.mp ? showRoom() : sc.tut ? (tutClose(), showTraining(sc.tut)) : sc.saga ? storyBriefing(sc.stageId) : sc.campaign ? showCampBriefing() : sc.random ? showRandom() : showBriefing(sc));
+  document.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => { GAME.ldSel = b.dataset.tab; redraw(); }));
   if (gEl('l-add')) gEl('l-add').onclick = () => {
     const free = pool.find((c) => !lo.fleets.some((f) => f.cmdr === c.id));
     if (!free) return;
     const left = Math.max(0, sc.budget - used);
     lo.fleets.push({ cmdr: free.id, comp: defaultComp(Math.max(600, left)), formation: 'line', x: 0, z: 300 + ZONE_SHIFT, h: Math.PI });
-    lo.fleets.forEach((f, k) => { f.x = lo.fleets.length === 1 ? 0 : -300 + 600 * k / (lo.fleets.length - 1); });
+    lo.fleets.forEach((f, j) => { f.x = lo.fleets.length === 1 ? 0 : -300 + 600 * j / (lo.fleets.length - 1); });
+    GAME.ldSel = String(lo.fleets.length - 1);
     redraw();
   };
   if (gEl('l-auto')) gEl('l-auto').onclick = () => { autoAllocate(lo, sc.budget); redraw(); };
   document.querySelectorAll('[data-pref]').forEach((el) => (el.onchange = () => { lo.fleets[+el.dataset.pref].autoPref = el.value; redraw(); }));
-  gEl('l-fac').onclick = (e) => {
+  if (gEl('l-fac')) gEl('l-fac').onclick = (e) => {
     const f = e.target.dataset.f; if (f == null || +f === fac || sc.saga) return;
     lo.faction = +f; if (sc.mp) mpFaction(+f); else GAME.faction = +f;
     if (!lo.fleets.length) { const d = defaultLoadout(sc, +f); lo.fleets = d.fleets; } else for (const fl of lo.fleets) fl.cmdr = null;   // 換陣營：重新分配指揮官
     redraw();
   };
   document.querySelectorAll('[data-del]').forEach((b) => (b.onclick = () => {
-    const k = +b.dataset.del; lo.fleets.splice(k, 1);
-    for (const S of SPS) S.follow = S.follow === k ? (lo.fleets.length ? 0 : -1) : S.follow > k ? S.follow - 1 : S.follow;   // 跟隨的艦隊被移除
+    const j = +b.dataset.del; lo.fleets.splice(j, 1);
+    for (const S of SPS) S.follow = S.follow === j ? (lo.fleets.length ? 0 : -1) : S.follow > j ? S.follow - 1 : S.follow;   // 跟隨的艦隊被移除
+    GAME.ldSel = String(Math.max(0, j - 1));
     redraw();
   }));
-  if (gEl('l-sup')) gEl('l-sup').onclick = () => { SPS.push(defaultSupply(lo, SPS.length)); redraw(); };
-  document.querySelectorAll('[data-sdel]').forEach((b) => (b.onclick = () => { SPS.splice(+b.dataset.sdel, 1); redraw(); }));
+  if (gEl('l-sup')) gEl('l-sup').onclick = () => { SPS.push(defaultSupply(lo, SPS.length)); GAME.ldSel = 's' + (SPS.length - 1); redraw(); };
+  document.querySelectorAll('[data-sdel]').forEach((b) => (b.onclick = () => { SPS.splice(+b.dataset.sdel, 1); GAME.ldSel = '0'; redraw(); }));
   document.querySelectorAll('[data-sfol]').forEach((el) => (el.onchange = () => { SPS[+el.dataset.sfol].follow = +el.value; }));
   document.querySelectorAll('[data-sfm]').forEach((el) => (el.onchange = () => { SPS[+el.dataset.sfm].formation = el.value; }));
   document.querySelectorAll('[data-d]').forEach((b) => (b.onclick = () => { const f = loF(b.dataset.k); f.comp[+b.dataset.t] = Math.max(0, f.comp[+b.dataset.t] + +b.dataset.d); redraw(); }));
-  document.querySelectorAll('.ld-row input[data-t]').forEach((el) => (el.onchange = () => { const f = loF(el.dataset.k); f.comp[+el.dataset.t] = Math.max(0, Math.round(+el.value || 0)); redraw(); }));
+  document.querySelectorAll('input[data-t]').forEach((el) => (el.onchange = () => { const f = loF(el.dataset.k); f.comp[+el.dataset.t] = Math.max(0, Math.round(+el.value || 0)); redraw(); }));
   document.querySelectorAll('[data-hd]').forEach((b) => (b.onclick = () => {
     const f = lo.fleets[+b.dataset.hk], h = f.hangar, r = +b.dataset.hr, d = +b.dataset.hd, n = SHIP_TYPES[0].fighters.n;
     if (d > 0 && sumA(h) >= n) { let o = -1; h.forEach((v, j) => { if (j !== r && v > 0 && (o < 0 || v > h[o])) o = j; }); if (o < 0) return; h[o]--; }   // 滿了：從最多的那種挪一架過來
