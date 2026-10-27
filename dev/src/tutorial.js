@@ -266,7 +266,7 @@ const TUT_LESSONS = [
       { phase: 'loadout', title: '編成畫面', text: () => `這是<b>編成</b>：用預算（這一課 3,000 點）決定每支艦隊帶什麼船、由哪位指揮官帶領。<br>${tutShipTable()}<small>數量以圖示計，1 個圖示＝${opts.rep} 艘；成本是每個圖示的點數。</small>` },
       { phase: 'loadout', title: '看敵情配隊', text: () => `情報：敵方是<b>航母＋飛彈巡洋艦</b>的航空艦隊，而這份起始編成<b>幾乎沒有護衛艦</b>。艦載機和飛彈都會被<b>防空</b>攔截——<b>護衛艦</b>防空最好（防空係數 ${SHIP_TYPES[4].aa}，其他艦種約 0.2），又便宜。<br>把全軍的護衛艦增加到 <b>150 個圖示以上</b>（在艦種那一列按 ＋ 或直接輸入數字）。`,
         goal: '護衛艦合計 ≥ 150', check: () => tutLoComp(4) >= 150, live: () => `目前護衛艦 ${tutLoComp(4)}／150` },
-      { phase: 'loadout', title: '補給艦隊', text: () => `巡洋艦（${SHIP_TYPES[2].missile.n} 發）與驅逐艦（${SHIP_TYPES[3].missile.n} 發）的飛彈打完就沒了。按「<b>＋ 補給艦隊</b>」：補給艦 ${SUPPLY_RULE.range} 範圍內的友艦每 ${SUPPLY_RULE.cd} 秒補 1 發。補給艦隊不佔艦隊數、沒有指揮官，預設跟在艦隊後方。<br><small>補給艦被擊沉，它帶的存量就沒了——別讓它跑到前線。</small>`,
+      { phase: 'loadout', title: '補給艦隊', text: () => `巡洋艦（${SHIP_TYPES[2].missile.n} 發）與驅逐艦（${SHIP_TYPES[3].missile.n} 發）的飛彈打完就沒了。按「<b>＋ 補給</b>」：補給艦 ${SUPPLY_RULE.range} 範圍內的友艦每 ${SUPPLY_RULE.cd} 秒補 1 發。補給艦隊不佔艦隊數、沒有指揮官，預設跟在艦隊後方。<br><small>補給艦被擊沉，它帶的存量就沒了——別讓它跑到前線。</small>`,
         goal: '加入一支補給艦隊', check: () => GAME.loadout && supplyList(GAME.loadout).length > 0 },
       { phase: 'loadout', title: '航母與艦載機（選讀）', text: () => `如果編了<b>航母</b>，下方會出現<b>艦載機配置</b>（每艘 ${SHIP_TYPES[0].fighters.n} 架）：${CRAFT.map((c) => `<b>${c.name}</b>：${c.note}`).join('；')}。<br>對付航空艦隊，多帶<b>攔截機</b>可以保護艦隊。` },
       { phase: 'loadout', title: '陣型與預算', text: '每支艦隊可以選<b>起始陣型</b>（這次敵人多是空中威脅，圓陣的防空 ×2）。確認<b>沒有超出預算</b>後，按「<b>下一步：部署 →</b>」。',

@@ -7215,7 +7215,7 @@ function showLoadout() {
     </div>
     <div class="ld-side g-card">
       <div class="ld-tabs">${keys.map((key) => `<button class="g-btn sm ${key === sel ? 'on' : ''}" data-tab="${key}">${tabName(key)}</button>`).join('')}
-        ${lo.fleets.length < sc.maxFleets && lo.fleets.length < pool.length ? '<button class="g-btn sm add" id="l-add" title="最多 ' + sc.maxFleets + ' 支艦隊">＋ 艦隊</button>' : ''}${SPS.length < Math.max(1, lo.fleets.length) ? `<button class="g-btn sm add" id="l-sup" title="補給艦＋護衛艦，不佔艦隊數、沒有指揮官；最多跟艦隊數一樣多支">＋ 補給（${SPS.length}／${Math.max(1, lo.fleets.length)}）</button>` : ''}</div>
+        ${lo.fleets.length < sc.maxFleets && lo.fleets.length < pool.length ? '<button class="g-btn sm add" id="l-add" title="最多 ' + sc.maxFleets + ' 支艦隊">＋ 艦隊</button>' : ''}${SPS.length < Math.max(1, lo.fleets.length) ? `<button class="g-btn sm add" id="l-sup" title="補給艦＋護衛艦，不佔艦隊數、沒有指揮官；最多跟艦隊數一樣多支（目前 ${SPS.length}／${Math.max(1, lo.fleets.length)}）">＋ 補給</button>` : ''}</div>
       ${lo.fleets.length ? '' : '<div class="g-warn">這個陣營沒有可派的指揮官，先到星際酒館招募。</div>'}
       ${over ? `<div class="g-warn ld-over">超出預算 ${fmtN(used - sc.budget)} 點，請減少艦艇。</div>` : ''}
       <div class="ld-body">${body}</div>
@@ -9089,20 +9089,21 @@ function showTavern(msg) {
 
 // ───── 編成畫面：3D 艦隊集結（太空港前的編隊）─────
 // 玩家改艦種數量時，對應的船加入／離開編隊：大船（航母、戰列艦、補給艦）從超空間躍傳出現、躍傳離開；
-// 其餘的船從背後的太空港出港、飛進編隊的位置，減少時飛回港內。每艘模型代表 DOCK.unit 單位（畫面下方寫幾艘）
+// 其餘的船從背後的太空港出港、飛進編隊的位置，減少時飛回港內。每艘模型代表該艦隊 unit 單位（畫面下方寫幾艘）。
+// 所有艦隊同時在場景裡（斜列排開），選哪支鏡頭就運鏡到哪支；每支艦隊中央是旗艦（★）
 const DOCK = {
-  wrap: null, cv: null, r: null, scene: null, cam: null, sc: null, key: '0', fac: -1, comp: null, types: [], last: {},
-  ships: [], fx: [], raf: 0, W: 0, H: 0, unit: 10, tPrev: 0, lay: null, laySig: '',
-  orb: { yaw: 0.42, pitch: 0.24, dist: 120, base: 0.42, user: -99, fit: 1 }, drag: null, station: null, stKey: '', planet: null, sky: null, glowTex: null,
+  wrap: null, cv: null, r: null, scene: null, cam: null, sc: null, lo: null, fac: -1, groups: [], focus: null, fresh: true, foc: null, Rc: 0, focTh: null,
+  fx: [], raf: 0, W: 0, H: 0, tPrev: 0,
+  orb: { yaw: -0.2, pitch: 0.34, dist: 120, base: -0.2, user: -99, fit: 1 }, drag: null, station: null, stKey: '', planet: null, sky: null, glowTex: null,
   center: null, bay: null, bayDir: null,
 };
 const dockNow = () => performance.now() / 1000;
 const DOCK_NAME = ['帝國軍艦太空港', '聯盟艦隊修整站', '灰鴉傭兵泊港', '改造人類船塢', '機械智慧母港', '感染者巢港', '蟲族巢穴'];
-const DOCK_WARP = [true, true, false, false, false, true];   // 依艦種：躍傳（true）或從太空港出港
-const DOCK_FRONT = [4, 3, 2, 1, 0, 5];                      // 編隊由前到後：護衛、驅逐、巡洋、戰列、航母、補給
+const DOCK_WARP = [true, true, false, false, false, true];   // 依艦種：躍傳（true）或從太空港出港；旗艦（'F'）也是躍傳
+DOCK_WARP.F = true;
 const DOCK_MAX = 54;                                         // 畫面上最多幾艘模型（超過就讓每艘代表更多）
 const DOCK_HEAD = new THREE.Vector3(1, 0, 0);                // 編隊朝向
-const dockLen = (t) => TYPE_W[t] * 1.15;
+const dockLen = (t) => (t === 'F' ? TYPE_W[1] * 2.2 : TYPE_W[t]) * 1.15;   // 旗艦：放大的戰列艦（戰場上是 2.4 倍）
 
 function dockGlowTex() {
   const c = document.createElement('canvas'); c.width = c.height = 64;
@@ -9168,30 +9169,54 @@ function dockSize() {
   DOCK.r.setSize(r.width, r.height, false); DOCK.cam.aspect = r.width / r.height; DOCK.cam.updateProjectionMatrix();
 }
 function dockClear() {
-  for (const s of DOCK.ships) { if (s.g) DOCK.scene.remove(s.g); dockTrail(s, false); }
+  for (const gr of DOCK.groups) dockDropGroup(gr);
   for (const f of DOCK.fx) { DOCK.scene.remove(f.o); f.o.material.dispose(); }
-  DOCK.ships = []; DOCK.fx = []; DOCK.laySig = ''; DOCK.unit = 10;
+  DOCK.groups = []; DOCK.fx = []; DOCK.focus = null;
 }
+function dockDropShips(gr) {
+  for (const s of gr.ships) { if (s.g) DOCK.scene.remove(s.g); dockTrail(s, false); }
+  gr.ships = []; gr.laySig = '';
+}
+function dockDropGroup(gr) { dockDropShips(gr); if (gr.tag) gr.tag.remove(); }
 
-// showLoadout 每次重畫後呼叫：放回畫面、找出剛被修改的艦隊當焦點
+// showLoadout 每次重畫後呼叫。每支艦隊（含補給艦隊）在場景裡各有一組船，一直都在；
+// 切換分頁只是鏡頭運鏡過去。只有艦數變了（增減、自動分配、新增／移除艦隊）才有船加入或離開的動畫
 function dockAttach() {
   dockInit();
-  const sc = GAME.sc, lo = GAME.loadout, SPS = supplyList(lo);
-  const items = [...lo.fleets.map((f, k) => ({ key: String(k), f, types: [0, 1, 2, 3, 4] })), ...SPS.map((S, i) => ({ key: 's' + i, f: S, types: [4, SUPPLY_T] }))];
-  const prevKey = DOCK.key;
-  if (DOCK.sc !== sc) { DOCK.sc = sc; DOCK.key = null; dockClear(); }
-  const cur = items.find((it) => it.key === GAME.ldSel) || items[0];
+  const lo = GAME.loadout, SPS = supplyList(lo);
+  // 換了關卡或整份編成：直接擺好，不播動畫
+  if (DOCK.sc !== GAME.sc || DOCK.lo !== lo) { dockClear(); DOCK.sc = GAME.sc; DOCK.lo = lo; DOCK.fresh = true; }
+  const items = [
+    ...lo.fleets.map((f, k) => ({ key: String(k), f, sup: false, name: `第${'一二三四五六'[k]}艦隊` })),
+    ...SPS.map((S, i) => ({ key: 's' + i, f: S, sup: true, name: supplyName(i) })),
+  ];
+  const live = [];
+  for (const it of items) {
+    let gr = DOCK.groups.find((g) => g.f === it.f && !g.leaving);
+    const c = !it.sup && it.f.cmdr != null && COMMANDERS.find((o) => o.id === it.f.cmdr);
+    const fac = ownFac(c, lo.faction || 0).fac ?? (lo.faction || 0);
+    if (!gr) {
+      gr = { f: it.f, sup: it.sup, types: it.sup ? [4, SUPPLY_T] : [0, 1, 2, 3, 4], fac, unit: 10, laySig: '', lay: null, ships: [],
+        th: 0, thT: 0, anchor: new THREE.Vector3(), head: DOCK_HEAD.clone(), quat: new THREE.Quaternion(), bay: new THREE.Vector3(), bayDir: new THREE.Vector3(), snap: DOCK.fresh, placed: false, tag: null };
+      const tg = gr.tag = document.createElement('button'); tg.className = 'dock-tag'; tg.type = 'button';
+      tg.onclick = () => { if (GAME.ldSel !== gr.key) { GAME.ldSel = gr.key; showLoadout(); } };
+      DOCK.wrap.appendChild(tg);
+      DOCK.groups.push(gr);
+    } else if (gr.fac !== fac) { gr.fac = fac; dockDropShips(gr); gr.snap = true; }   // 換了指揮官（陣營外觀不同）：直接換船，不算增減
+    gr.key = it.key; gr.fac = fac; gr.name = it.name + (c ? '・' + c.name : '');
+    live.push(gr);
+  }
+  for (const gr of DOCK.groups) if (!live.includes(gr) && !gr.leaving) { gr.leaving = true; gr.laySig = ''; if (gr.tag) { gr.tag.remove(); gr.tag = null; } }   // 移除的艦隊：全部離隊
+  DOCK.groups.sort((a, b) => (a.leaving ? 1e3 : live.indexOf(a)) - (b.leaving ? 1e3 : live.indexOf(b)));
+  DOCK.focus = live.find((g) => g.key === GAME.ldSel) || live[0] || null;
+  DOCK.fresh = false;
+  const sf = lo.faction || 0;
+  if (sf !== DOCK.fac) { DOCK.fac = sf; dockStation(sf); }
   DOCK.wrap.hidden = false;
-  if (!cur) { DOCK.comp = null; dockClear(); return; }
-  const c = cur.f.cmdr != null && COMMANDERS.find((o) => o.id === cur.f.cmdr);
-  const fac = ownFac(c, lo.faction || 0).fac ?? (lo.faction || 0);
-  if (cur.key !== prevKey || fac !== DOCK.fac || cur.types.join() !== DOCK.types.join()) dockClear();   // 換了艦隊或外觀：重新集結
-  if (fac !== DOCK.fac) dockStation(fac);
-  DOCK.key = cur.key; DOCK.fac = fac; DOCK.comp = cur.f.comp; DOCK.types = cur.types;
   dockSize();
   if (!DOCK.raf) { DOCK.tPrev = dockNow(); DOCK.raf = requestAnimationFrame(dockFrame); }
 }
-// 背景的太空港：該陣營的大型太空站（用到才下載）
+// 背景的太空港：玩家陣營的大型太空站（用到才下載）
 function dockStation(fac) {
   const key = FAC_KEY[fac] + 's2'; DOCK.stKey = key;
   if (DOCK.station) { DOCK.scene.remove(DOCK.station); DOCK.station = null; }
@@ -9199,61 +9224,79 @@ function dockStation(fac) {
     if (DOCK.stKey !== key || DOCK.station) return;
     const M = getModel(key) || getModel('es2'); if (!M) return;
     const g = new THREE.Group(), m = new THREE.Mesh(M.lods[0], M.mat);
-    m.scale.setScalar(150); m.rotation.y = Math.PI / 2; g.add(m);
+    m.scale.setScalar(125); m.rotation.y = Math.PI / 2; g.add(m);
     for (let i = 0; i < 14; i++) {   // 港口的導航燈
       const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: DOCK.glowTex, color: FACTION[fac] ? FACTION[fac].glow : 0xffaa55, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
       const a = i / 14 * Math.PI * 2; s.position.set(Math.cos(a) * 40, (i % 2 ? 1 : -1) * 9, Math.sin(a) * 40); s.scale.setScalar(4); s.userData.ph = i; g.add(s);
     }
+    g.position.copy(DOCK_ST);
     DOCK.station = g; DOCK.scene.add(g);
   });
 }
 
-// ── 編隊位置：每個艦種一個方塊，從前到後排；新增的船排在方塊最後面 ──
-function dockCounts() {
-  const T = DOCK.types, tot = T.reduce((a, t) => a + (DOCK.comp[t] || 0), 0);
+// ── 編隊位置：每個艦種一個方塊，從前到後排；旗艦在中間 ──
+function dockCounts(gr) {
+  if (gr.leaving) return gr.types.map((t) => [t, 0]).concat(gr.sup ? [] : [['F', 0]]);
+  const T = gr.types, comp = gr.f.comp, tot = T.reduce((a, t) => a + (comp[t] || 0), 0);
   // 每艘模型代表幾單位：超過上限才加大、少很多才減小（避免加一種船時別的船跟著離隊）
   const need = Math.max(10, 10 * Math.ceil(tot / 10 / DOCK_MAX)), low = Math.max(10, 10 * Math.ceil(tot / 10 / (DOCK_MAX * 0.55)));
-  if (need > DOCK.unit) DOCK.unit = need; else if (low < DOCK.unit) DOCK.unit = low;
-  const unit = DOCK.unit;
-  return T.map((t) => [t, DOCK.comp[t] > 0 ? Math.max(1, Math.round(DOCK.comp[t] / unit)) : 0]);
+  if (need > gr.unit) gr.unit = need; else if (low < gr.unit) gr.unit = low;
+  const out = T.map((t) => [t, comp[t] > 0 ? Math.max(1, Math.round(comp[t] / gr.unit)) : 0]);
+  if (!gr.sup) out.push(['F', 1]);   // 艦隊旗艦（戰場上本隊多的那艘大戰列艦）；補給艦隊沒有
+  return out;
 }
-function dockLayout(counts) {
-  const slots = {}; let front = 0, prevL = 0, minX = 0, maxX = 0, maxZ = 0;
-  for (const t of DOCK_FRONT) {
-    const e = counts.find((c) => c[0] === t); if (!e || !e[1]) continue;
-    const n = e[1], L = dockLen(t), cols = Math.min(n, Math.max(2, Math.ceil(Math.sqrt(n * 2.4)))), rows = Math.ceil(n / cols);
-    const sx = L * 1.1, sz = L * 0.72;
-    if (prevL) front -= (prevL + L) * 0.6;
-    const out = slots[t] = [];
-    for (let i = 0; i < n; i++) {
-      const r = Math.floor(i / cols), inRow = r === rows - 1 ? n - r * cols : cols, c = i - r * cols;
-      const z = (c - (inRow - 1) / 2) * sz + (r % 2 ? sz * 0.25 : 0), x = front - r * sx, y = ((r + c) % 2 ? 1 : -1) * L * 0.16 + (c % 3 - 1) * L * 0.05;
-      out.push(new THREE.Vector3(x, y, z)); minX = Math.min(minX, x); maxX = Math.max(maxX, x); maxZ = Math.max(maxZ, Math.abs(z));
+// 跟戰場同一套陣型產生器（genFormation／genOrderly）：照「起始陣型」與「排列」擺，
+// 一樣分成幾支分艦隊、旗艦在本隊中央、前排小船後排大船；模型比戰場的圖示少，所以間距放大 DOCK_GAP 倍
+const DOCK_GAP = 1.5;
+function dockLayout(gr, counts) {
+  const f = gr.f, kind = FORMATIONS[f.formation] ? f.formation : gr.sup ? 'ring' : 'line';
+  const slots = {}, per = {}; let N = 0, hasF = false;
+  for (const [t, n] of counts) { if (n) slots[t] = []; if (t === 'F') hasF = n > 0; else { per[t] = n; N += n; } }
+  const P = N + (hasF ? 1 : 0);
+  if (!P) return { slots, R: 30, hx: 20, hz: 20, back: 0 };
+  const real = gr.types.reduce((x, t) => x + (f.comp[t] || 0), 0);
+  const K = Math.max(1, Math.min(P, Math.max(gr.sup ? 1 : 2, Math.min(6, Math.round(real / 380)))));
+  // 各艦種輪流分到每支分艦隊（每支至少一艘）；旗艦在本隊
+  const sq = Array.from({ length: K }, () => ({})), cnt = new Array(K).fill(0), flagK = Math.floor((K - 1) / 2);
+  let c = hasF ? 1 : 0; if (hasF) cnt[flagK]++;
+  for (const t of SHIP_ORDER_FRONT_TO_BACK) for (let i = 0; i < (per[t] || 0); i++) { const k = (flagK + c++) % K; sq[k][t] = (sq[k][t] || 0) + 1; cnt[k]++; }
+  const order = cnt.map((_, i) => i);
+  const lay = f.orderly ? genOrderly(kind, cnt, order, f.layers || 1) : genFormation(kind, cnt, order, rand(4242));
+  const raw = [];
+  lay.forEach((Lq, k) => {
+    if (!Lq) return;
+    const pts = Lq.local.map((l) => ({ u: Lq.cu + l[0], y: (Lq.cw || 0) + l[1], v: Lq.cv + l[2], l }));
+    if (k === flagK && hasF) {   // 旗艦：本隊中央偏後
+      let bi = 0, bd = 1e9; pts.forEach((q, i) => { const d = Math.hypot(q.l[0], q.l[2] + 8); if (d < bd) { bd = d; bi = i; } });
+      const fp = pts.splice(bi, 1)[0]; raw.push({ t: 'F', u: fp.u, y: f.orderly || kind === 'hcone' ? fp.y : 4, v: fp.v });
     }
-    front -= (rows - 1) * sx; prevL = L;
-  }
+    pts.sort((x, z) => z.v - x.v);   // 由前到後：護衛、驅逐、巡洋、戰列、補給、航母
+    const seq = []; for (const t of SHIP_ORDER_FRONT_TO_BACK) for (let i = 0; i < (sq[k][t] || 0); i++) seq.push(t);
+    pts.forEach((q, i) => { if (seq[i] != null) raw.push({ t: seq[i], u: q.u, y: q.y * (+seq[i] <= 1 && !f.orderly ? 0.6 : 1), v: q.v }); });
+  });
+  let minX = 1e9, maxX = -1e9, maxZ = 0;
+  for (const q of raw) { const x = q.v * DOCK_GAP; minX = Math.min(minX, x); maxX = Math.max(maxX, x); maxZ = Math.max(maxZ, Math.abs(q.u * DOCK_GAP)); }
   const cx = (minX + maxX) / 2;
-  for (const t in slots) for (const p of slots[t]) p.x -= cx;
+  for (const q of raw) if (slots[q.t]) slots[q.t].push(new THREE.Vector3(q.v * DOCK_GAP - cx, q.y * DOCK_GAP * 0.8, -q.u * DOCK_GAP));
+  for (const t in slots) slots[t].sort((m, n) => (n.x - m.x) || (m.z - n.z));   // 同艦種依前後排：變陣時每艘船滑到差不多對應的位置
   const halfX = (maxX - minX) / 2 + 8;
-  return { slots, R: Math.max(30, Math.hypot(halfX, maxZ + 8)), back: minX - cx };
+  return { slots, R: Math.max(30, Math.hypot(halfX, maxZ + 8)), hx: halfX, hz: maxZ + 8, back: minX - cx };
 }
 
-// 船數跟著 comp：多了加入編隊，少了從最後面離開
-function dockSync(now) {
-  const counts = dockCounts(), sig = counts.map((c) => c.join(':')).join(',');
-  if (sig === DOCK.laySig) return;
-  DOCK.laySig = sig; DOCK.lay = dockLayout(counts);
-  const st = DOCK.lay;
-  DOCK.bay = new THREE.Vector3(st.back - 60, 8, -165); DOCK.bayDir = new THREE.Vector3(1, 0, 0.8).normalize();
-  
+// 船數跟著 comp：多了加入編隊，少了從最後面離開（gr.snap＝直接擺好，不播動畫）
+function dockSync(gr, now) {
+  const counts = dockCounts(gr), f = gr.f, sig = counts.map((c) => c.join(':')).join(',') + '|' + f.formation + (f.orderly ? ':o' + (f.layers || 1) : '');
+  if (sig === gr.laySig) return;
+  gr.laySig = sig; gr.lay = dockLayout(gr, counts);   // 只換陣型：船數不變，各艦滑到新位置（dockShipTick 的 dock 狀態）
+  const snap = gr.snap; gr.snap = false;
   const add = [], drop = [];
   for (const [t, n] of counts) {
-    const live = DOCK.ships.filter((s) => s.t === t && s.st !== 'out' && s.st !== 'gone');
+    const live = gr.ships.filter((s) => s.t === t && s.st !== 'out' && s.st !== 'gone');
     for (let i = live.length; i < n; i++) add.push({ t, i });
     for (const s of live) if (s.i >= n) drop.push(s);
   }
-  const first = !DOCK.ships.length, stag = Math.min(first ? 0.09 : 0.14, (first ? 2.6 : 1.8) / Math.max(1, add.length));
-  add.forEach((a, k) => DOCK.ships.push({ ...a, st: 'in', t0: now + 0.15 + k * stag, g: null, pos: new THREE.Vector3(), ph: Math.random() * 6, fx0: false }));
+  const first = !gr.ships.length, stag = Math.min(first ? 0.09 : 0.14, (first ? 2.6 : 1.8) / Math.max(1, add.length));
+  add.forEach((a, k) => gr.ships.push({ ...a, gr, st: snap ? 'dock' : 'in', snap, t0: snap ? now - 9 : now + 0.15 + k * stag, g: null, pos: new THREE.Vector3(), ph: Math.random() * 6, fx0: false }));
   drop.sort((a, b) => b.i - a.i).forEach((s, k) => {
     if (s.st === 'in' && now < s.t0) { s.st = 'gone'; return; }   // 還沒出現就取消
     s.st = 'out'; s.t0 = now + k * Math.min(0.14, 1.5 / drop.length); s.from = s.pos.clone(); s.fx0 = false;
@@ -9262,18 +9305,18 @@ function dockSync(now) {
 
 // 一艘船：船體＋武器（跟戰場同一套掛點）＋尾焰光
 const DOCK_SUPPLY_MAT = {};
-function dockMakeShip(t) {
-  const fk = FAC_KEY[DOCK.fac] || 'e', key = fk + (t === SUPPLY_T ? SHIP_TYPES[SUPPLY_T].look : t);
-  const M = getModel(key) || getModel('e' + (t === SUPPLY_T ? 2 : t)); if (!M) return null;
+function dockMakeShip(t, fac) {
+  const mt = t === 'F' ? 1 : t, fk = FAC_KEY[fac] || 'e', key = fk + (mt === SUPPLY_T ? SHIP_TYPES[SUPPLY_T].look : mt);
+  const M = getModel(key) || getModel('e' + (mt === SUPPLY_T ? 2 : mt)); if (!M) return null;
   let mat = M.mat;
-  if (t === SUPPLY_T) mat = DOCK_SUPPLY_MAT[key] || (DOCK_SUPPLY_MAT[key] = (() => { const m = M.mat.clone(); m.color = new THREE.Color(0x9fc49a); m.emissiveIntensity = 0.08; return m; })());   // 補給艦：借巡洋艦外觀、偏綠的灰
+  if (mt === SUPPLY_T) mat = DOCK_SUPPLY_MAT[key] || (DOCK_SUPPLY_MAT[key] = (() => { const m = M.mat.clone(); m.color = new THREE.Color(0x9fc49a); m.emissiveIntensity = 0.08; return m; })());   // 補給艦：借巡洋艦外觀、偏綠的灰
   const g = new THREE.Group(), body = new THREE.Group(), L = dockLen(t);
   body.add(new THREE.Mesh(M.lods[0], mat));
-  if (t !== SUPPLY_T) for (const m of mountsOf(key)) {
+  if (mt !== SUPPLY_T) for (const m of mountsOf(key)) {
     const W = getModel(fk + 'w' + m.w); if (!W) continue;
     const o = new THREE.Mesh(W.lods[Math.min(1, W.lods.length - 1)], W.mat); setMountObj(o, m); body.add(o);
   }
-  const F = FACTION[DOCK.fac] || FACTION[0];
+  const F = FACTION[fac] || FACTION[0];
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: DOCK.glowTex, color: F.glow, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
   glow.position.set(0, 0, -0.52); body.add(glow);
   body.scale.setScalar(L); g.add(body);
@@ -9308,29 +9351,30 @@ function bez3(a, b, c, d, u, out) {
 const _dv = new THREE.Vector3(), _dw = new THREE.Vector3(), _dT = new THREE.Vector3(), _dP = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
 
 function dockShipTick(s, now, dt) {
-  const slot = DOCK.lay && DOCK.lay.slots[s.t] && DOCK.lay.slots[s.t][s.i];
-  if (!s.g) { if (now < s.t0 && s.st === 'in') return; s.g = dockMakeShip(s.t); if (!s.g) return; if (s.st !== 'in') s.g.position.copy(s.pos); }
-  const { body, glow, L } = s.g.userData, F = FACTION[DOCK.fac] || FACTION[0];
-  const T = _dT.copy(slot || s.pos); T.y += Math.sin(now * 0.9 + s.ph) * L * 0.04;
-  let face = DOCK_HEAD, stretch = 1, scale = 1, gl = 0.55 + 0.1 * Math.sin(now * 9 + s.ph), vis = true;
+  const gr = s.gr, slot = gr.lay && gr.lay.slots[s.t] && gr.lay.slots[s.t][s.i];
+  if (!s.g) { if (now < s.t0 && s.st === 'in') return; s.g = dockMakeShip(s.t, gr.fac); if (!s.g) return; if (s.st !== 'in') s.g.position.copy(s.pos); }
+  const { body, glow, L } = s.g.userData, F = FACTION[gr.fac] || FACTION[0];
+  const H = gr.head, T = slot ? _dT.copy(slot).applyQuaternion(gr.quat).add(gr.anchor) : _dT.copy(s.pos); T.y += Math.sin(now * 0.9 + s.ph) * L * 0.04;
+  if (s.snap) { s.snap = false; s.pos.copy(T); }   // 一開始就在編隊裡
+  let face = H, stretch = 1, scale = 1, gl = 0.55 + 0.1 * Math.sin(now * 9 + s.ph), vis = true;
   const p = now - s.t0, warp = DOCK_WARP[s.t];
   if (s.st === 'in') {
     if (p < 0) vis = false;
     else if (warp) {   // 躍傳進入：前方先閃光，船從超空間高速衝出、拉長的船身縮回原形，最後衝擊環
-      if (!s.fx0) { s.fx0 = true; dockFx('flash', _dv.copy(T).addScaledVector(DOCK_HEAD, -L * 0.3), L * 3.2, 0.5, 0xbfdcff); }
+      if (!s.fx0) { s.fx0 = true; dockFx('flash', _dv.copy(T).addScaledVector(H, -L * 0.3), L * 3.2, 0.5, 0xbfdcff); }
       if (p < 0.22) vis = false;
       else {
         const q = Math.min(1, (p - 0.22) / 0.38), k = 1 - easeOutQ(q);
-        if (!s.fx1) { s.fx1 = true; const st0 = _dv.copy(T).addScaledVector(DOCK_HEAD, -300); dockFx('streak', st0, L * 0.12, 0.55, F.glow); const f = DOCK.fx[DOCK.fx.length - 1]; f.o.userData.len = 600; }
-        s.pos.copy(T).addScaledVector(DOCK_HEAD, -k * 520); stretch = 1 + 26 * k * k; gl = 2.5;
+        if (!s.fx1) { s.fx1 = true; const st0 = _dv.copy(T).addScaledVector(H, -300); dockFx('streak', st0, L * 0.12, 0.55, F.glow); const f = DOCK.fx[DOCK.fx.length - 1]; f.o.userData.len = 600; }
+        s.pos.copy(T).addScaledVector(H, -k * 520); stretch = 1 + 26 * k * k; gl = 2.5;
         if (q >= 1) { s.st = 'dock'; dockFx('ring', T, L * 1.4, 0.9, F.glow); dockFx('flash', T, L * 2.2, 0.45, 0xffffff); }
       }
     } else {           // 出港：從太空港的機庫口飛出，畫一道弧線進入編隊位置
       const dur = 2.6 + (s.ph % 1) * 0.6, q = Math.min(1, p / dur), u = smooth(q);
-      _dP[0].copy(DOCK.bay); _dP[1].copy(DOCK.bay).addScaledVector(DOCK.bayDir, 60).add(_dw.set(0, 18 + s.ph * 3, 0));
-      _dP[2].copy(T).addScaledVector(DOCK_HEAD, -70); _dP[3].copy(T);
+      _dP[0].copy(gr.bay); _dP[1].copy(gr.bay).addScaledVector(gr.bayDir, 60).add(_dw.set(0, 18 + s.ph * 3, 0));
+      _dP[2].copy(T).addScaledVector(H, -70); _dP[3].copy(T);
       bez3(_dP[0], _dP[1], _dP[2], _dP[3], u, s.pos);
-      bez3(_dP[0], _dP[1], _dP[2], _dP[3], Math.min(1, u + 0.01), _dv); face = _dw.copy(_dv).sub(s.pos); if (face.lengthSq() < 1e-6) face = DOCK_HEAD; else face.normalize();
+      bez3(_dP[0], _dP[1], _dP[2], _dP[3], Math.min(1, u + 0.01), _dv); face = _dw.copy(_dv).sub(s.pos); if (face.lengthSq() < 1e-6) face = H; else face.normalize();
       scale = Math.min(1, 0.15 + q * 5); gl = 1.8 - q;
       if (q >= 1) s.st = 'dock';
     }
@@ -9338,19 +9382,19 @@ function dockShipTick(s, now, dt) {
     s.pos.lerp(T, 1 - Math.exp(-dt * 2.2));   // 編隊重排：慢慢滑到新位置
   } else if (s.st === 'out') {
     if (warp) {   // 躍傳離開：引擎充能，往前拉長衝進超空間
-      if (p < 0.8) { gl = 0.6 + p * 3.5; s.pos.copy(s.from).addScaledVector(DOCK_HEAD, -p * L * 0.15); }
+      if (p < 0.8) { gl = 0.6 + p * 3.5; s.pos.copy(s.from).addScaledVector(H, -p * L * 0.15); }
       else {
         const q = Math.min(1, (p - 0.8) / 0.3);
-        if (!s.fx0) { s.fx0 = true; dockFx('flash', s.from, L * 2.6, 0.5, 0xffffff); dockFx('streak', _dv.copy(s.from).addScaledVector(DOCK_HEAD, 300), L * 0.1, 0.6, F.glow); DOCK.fx[DOCK.fx.length - 1].o.userData.len = 600; }
-        s.pos.copy(s.from).addScaledVector(DOCK_HEAD, easeInQ(q) * 700); stretch = 1 + 30 * q * q; gl = 3;
+        if (!s.fx0) { s.fx0 = true; dockFx('flash', s.from, L * 2.6, 0.5, 0xffffff); dockFx('streak', _dv.copy(s.from).addScaledVector(H, 300), L * 0.1, 0.6, F.glow); DOCK.fx[DOCK.fx.length - 1].o.userData.len = 600; }
+        s.pos.copy(s.from).addScaledVector(H, easeInQ(q) * 700); stretch = 1 + 30 * q * q; gl = 3;
         if (q >= 1) { s.st = 'gone'; dockFx('ring', s.from, L * 1.2, 0.8, F.glow); }
       }
     } else {      // 回港：脫離編隊、繞回太空港的機庫口
       const dur = 2.6, q = Math.min(1, p / dur), u = smooth(q);
-      _dP[0].copy(s.from); _dP[1].copy(s.from).addScaledVector(DOCK_HEAD, 45).add(_dw.set(0, 22, 30));
-      _dP[2].copy(DOCK.bay).addScaledVector(DOCK.bayDir, 70).add(_dw.set(0, 16, 0)); _dP[3].copy(DOCK.bay);
+      _dP[0].copy(s.from); _dP[1].copy(s.from).addScaledVector(H, 45).add(_dw.set(0, 22, 30));
+      _dP[2].copy(gr.bay).addScaledVector(gr.bayDir, 70).add(_dw.set(0, 16, 0)); _dP[3].copy(gr.bay);
       bez3(_dP[0], _dP[1], _dP[2], _dP[3], u, s.pos);
-      bez3(_dP[0], _dP[1], _dP[2], _dP[3], Math.min(1, u + 0.01), _dv); face = _dw.copy(_dv).sub(s.pos); if (face.lengthSq() < 1e-6) face = DOCK_HEAD; else face.normalize();
+      bez3(_dP[0], _dP[1], _dP[2], _dP[3], Math.min(1, u + 0.01), _dv); face = _dw.copy(_dv).sub(s.pos); if (face.lengthSq() < 1e-6) face = H; else face.normalize();
       scale = Math.min(1, (1 - q) * 5 + 0.1); gl = 1.6;
       if (q >= 1) s.st = 'gone';
     }
@@ -9374,13 +9418,13 @@ function dockTrail(s, on, face, L, col) {
 // 可見區域：扣掉上方工具列、左側（手機是下方）的編成面板、右側的教學面板
 function dockVisible() {
   const W = DOCK.W, H = DOCK.H, q = (sel) => { const e = document.querySelector(sel); return e && e.offsetParent ? e.getBoundingClientRect() : null; };
-  let x0 = 0, x1 = W, y0 = 0, y1 = H;
+  let x0 = 0, x1 = W, y0 = 0, y1 = H, sheet = false;
   const top = q('.ld-top'), side = q('.ld-side'), tut = document.body.classList.contains('tut-side') && q('#tut-panel');
   if (top) y0 = Math.min(H * 0.4, top.bottom);
-  if (side) { if (side.top > H * 0.35) y1 = Math.max(y0 + 80, side.top); else x0 = Math.min(W * 0.6, side.right); }
+  if (side) { if (side.top > H * 0.35) { y1 = Math.max(y0 + 80, side.top); sheet = true; } else x0 = Math.min(W * 0.6, side.right); }
   if (tut && tut.left > W * 0.4) x1 = Math.max(x0 + 120, tut.left);
   const vw = x1 - x0, vh = y1 - y0;
-  return { ox: W / 2 - (x0 + x1) / 2, oy: H / 2 - (y0 + y1) / 2, fit: Math.max(1, Math.min(2.2, 0.92 * Math.max(W / vw, (H / vh) * 0.8))) };
+  return { sheet, ox: W / 2 - (x0 + x1) / 2, oy: H / 2 - (y0 + y1) / 2, fit: Math.max(1, Math.min(2.2, 0.92 * Math.max(W / vw, (H / vh) * 0.8))) };
 }
 function dockFrame() {
   DOCK.raf = 0;
@@ -9388,33 +9432,83 @@ function dockFrame() {
   DOCK.raf = requestAnimationFrame(dockFrame);
   dockStep();
 }
+// 各艦隊繞著太空港排成一圈、艦首朝外（並排，看得出橫陣、凹形陣這些陣型的寬度）。鏡頭從圈外、艦隊斜前方看過去，
+// 太空港和其他艦隊就在牠後面當背景；換艦隊＝鏡頭沿著圓周運鏡過去
+const DOCK_UP = new THREE.Vector3(0, 1, 0), DOCK_ST = new THREE.Vector3(0, 50, 0);
+function dockPlace(dt) {
+  const L = DOCK.groups.filter((g) => !g.leaving && g.lay);
+  // 平均排滿一圈：從任何一支看過去，對面（圈的另一邊）的艦隊都在背景裡
+  const gap = L.map((g, k) => (k ? L[k - 1].lay.hz + g.lay.hz + 40 : 0)), arc = gap.reduce((x, y) => x + y, 0) + (L.length > 1 ? L[L.length - 1].lay.hz + L[0].lay.hz + 40 : 0);
+  const RcT = Math.max(150, 100 + Math.max(0, ...L.map((g) => g.lay.hx)), arc / (Math.PI * 2)), k1 = 1 - Math.exp(-dt * 2);   // 圈要大到艦隊尾巴碰不到太空港
+  DOCK.Rc = DOCK.Rc ? DOCK.Rc + (RcT - DOCK.Rc) * k1 : RcT;
+  let th = 0;
+  L.forEach((gr, k) => {
+    th += arc ? gap[k] / arc * Math.PI * 2 : 0; gr.thT = th;
+    if (!gr.placed) { gr.th = th; gr.placed = true; } else gr.th += (th - gr.th) * k1;
+  });
+  for (const gr of DOCK.groups) {
+    if (gr.leaving) continue;   // 離開中的艦隊留在原地
+    gr.anchor.set(Math.sin(gr.th) * DOCK.Rc, 0, Math.cos(gr.th) * DOCK.Rc);
+    gr.quat.setFromAxisAngle(DOCK_UP, gr.th - Math.PI / 2); gr.head.copy(DOCK_HEAD).applyQuaternion(gr.quat);
+    const out = _dTag.set(gr.anchor.x, 0, gr.anchor.z).normalize();   // 太空港 → 艦隊
+    gr.bay.copy(DOCK_ST).addScaledVector(out, 55).y -= 35; gr.bayDir.copy(out);
+  }
+  if (DOCK.station) DOCK.station.position.copy(DOCK_ST);
+}
+const _dTag = new THREE.Vector3();
+function dockTags() {
+  const C = DOCK.cam;
+  for (const gr of DOCK.groups) {
+    const tg = gr.tag; if (!tg) continue;
+    const fl = gr.ships.find((s) => s.t === 'F' && s.g);
+    if (fl) _dTag.copy(fl.pos).y += fl.g.userData.L * 0.3; else if (gr.lay) _dTag.copy(gr.anchor).y += dockLen(SUPPLY_T) * 0.7; else { tg.hidden = true; continue; }
+    _dTag.project(C);
+    const on = gr === DOCK.focus, vis = _dTag.z < 1 && Math.abs(_dTag.x) < 1.05 && Math.abs(_dTag.y) < 1.05;
+    tg.hidden = !vis; if (!vis) continue;
+    tg.style.transform = `translate(${((_dTag.x + 1) / 2 * DOCK.W).toFixed(1)}px, ${((1 - _dTag.y) / 2 * DOCK.H).toFixed(1)}px) translate(-50%, -100%)`;
+    const txt = (gr.sup ? '' : '★ ') + gr.name;
+    if (tg.textContent !== txt) tg.textContent = txt;
+    tg.classList.toggle('on', on); tg.title = on ? (gr.sup ? '' : '旗艦') : '點一下切換到這支艦隊';
+  }
+}
 function dockStep() {
   const now = dockNow(), dt = Math.min(0.1, now - DOCK.tPrev); DOCK.tPrev = now;
-  if (!DOCK.W || !DOCK.comp) return;
-  dockSync(now);
-  if (DOCK.station && DOCK.lay) DOCK.station.position.set(DOCK.lay.back - 100, 30, -230);
-  for (const s of DOCK.ships) dockShipTick(s, now, dt);
-  DOCK.ships = DOCK.ships.filter((s) => { if (s.st === 'gone') { if (s.g) DOCK.scene.remove(s.g); dockTrail(s, false); return false; } return true; });
+  if (!DOCK.W) return;
+  for (const gr of DOCK.groups) dockSync(gr, now);
+  dockPlace(dt);
+  for (const gr of DOCK.groups) {
+    for (const s of gr.ships) dockShipTick(s, now, dt);
+    gr.ships = gr.ships.filter((s) => { if (s.st === 'gone') { if (s.g) DOCK.scene.remove(s.g); dockTrail(s, false); return false; } return true; });
+  }
+  DOCK.groups = DOCK.groups.filter((g) => { if (g.leaving && !g.ships.length) { dockDropGroup(g); return false; } return true; });
   dockFxTick(now);
   if (DOCK.station) {
     DOCK.station.rotation.y = now * 0.02;
     for (const c of DOCK.station.children) if (c.isSprite) c.material.opacity = 0.35 + 0.65 * (Math.sin(now * 2.2 + c.userData.ph * 1.7) > 0.6 ? 1 : 0.2);
   }
-  // 鏡頭：慢慢左右擺，拖曳後停一下再繼續
-  const O = DOCK.orb, R = DOCK.lay ? DOCK.lay.R : 40;
+  // 鏡頭：繞著目前選的艦隊慢慢左右擺，拖曳後停一下再繼續；換艦隊時運鏡過去
+  const O = DOCK.orb, Fg = DOCK.focus && DOCK.focus.lay ? DOCK.focus : null, R = Fg ? Fg.lay.R : 40;
+  const thT = Fg ? Fg.th : 0;
+  DOCK.focTh = DOCK.focTh == null ? thT : DOCK.focTh + (thT - DOCK.focTh) * (1 - Math.exp(-dt * 2.4));
+  const Fc = _dTag.set(Math.sin(DOCK.focTh) * DOCK.Rc, 0, Math.cos(DOCK.focTh) * DOCK.Rc), yaw = O.yaw + DOCK.focTh;
   const idle = now - O.user > 5;
-  O.yaw = idle ? O.base + 0.22 * Math.sin((now - O.user) * 0.07) : O.base;
-  O.dist += (R * 0.95 + 18 - O.dist) * (1 - Math.exp(-dt * 1.5));
+  O.yaw = idle ? O.base + 0.16 * Math.sin((now - O.user) * 0.07) : O.base;
+  O.dist += (Math.max(R * 1.2 + 18, DOCK.groups.length > 1 ? 85 : 0) - O.dist) * (1 - Math.exp(-dt * 2));   // 小艦隊也別貼太近，才看得到周圍
   const C = DOCK.cam, cp = Math.cos(O.pitch);
   // 介面擋住的地方不算：艦隊放在剩下可見區域的中間，區域越小鏡頭拉越遠
   const V = dockVisible();
   O.fit += (V.fit - O.fit) * (1 - Math.exp(-dt * 3));
-  const dist = O.dist * O.fit;
-  C.position.set(Math.sin(O.yaw) * cp * dist, Math.sin(O.pitch) * dist + R * 0.12, Math.cos(O.yaw) * cp * dist);
-  C.lookAt(0, R * 0.12, 0);
+  const dist = O.dist * O.fit, hy = O.dist * 0.1;
+  C.position.set(Fc.x + Math.sin(yaw) * cp * dist, Fc.y + Math.sin(O.pitch) * dist + hy, Fc.z + Math.cos(yaw) * cp * dist);
+  // 有其他艦隊時視線往圈內（太空港）偏一點：選到的艦隊在前景偏下，後面的太空港和其他艦隊進到畫面裡
+  const lk = DOCK.groups.length > 1 ? Math.min(DOCK.Rc * 0.4, R * 0.45) * (V.sheet ? 0.3 : 1) : 0,   // 手機（下方面板）可見區太矮，少偏一點
+    Ln = Math.hypot(Fc.x, Fc.z) || 1;
+  C.lookAt(Fc.x - Fc.x / Ln * lk, Fc.y + hy, Fc.z - Fc.z / Ln * lk);
   C.setViewOffset(DOCK.W, DOCK.H, V.ox, V.oy, DOCK.W, DOCK.H);
+  C.updateMatrixWorld();
   DOCK.sky.position.copy(C.position);
-  const cap = gEl('ld-cap'); if (cap) { const t = `${DOCK_NAME[DOCK.fac] || DOCK_NAME[0]}・每艘模型＝${fmtN(DOCK.unit * opts.rep)} 艘・拖曳背景可轉動視角`; if (cap.textContent !== t) cap.textContent = t; }
+  dockTags();
+  const cap = gEl('ld-cap'); if (cap) { const t = `${DOCK_NAME[DOCK.fac] || DOCK_NAME[0]}・每艘模型＝${fmtN((Fg ? Fg.unit : 10) * opts.rep)} 艘・★＝旗艦・拖曳背景可轉動視角`; if (cap.textContent !== t) cap.textContent = t; }
   DOCK.r.render(DOCK.scene, C);
 }
 
@@ -10202,7 +10296,7 @@ const TUT_LESSONS = [
       { phase: 'loadout', title: '編成畫面', text: () => `這是<b>編成</b>：用預算（這一課 3,000 點）決定每支艦隊帶什麼船、由哪位指揮官帶領。<br>${tutShipTable()}<small>數量以圖示計，1 個圖示＝${opts.rep} 艘；成本是每個圖示的點數。</small>` },
       { phase: 'loadout', title: '看敵情配隊', text: () => `情報：敵方是<b>航母＋飛彈巡洋艦</b>的航空艦隊，而這份起始編成<b>幾乎沒有護衛艦</b>。艦載機和飛彈都會被<b>防空</b>攔截——<b>護衛艦</b>防空最好（防空係數 ${SHIP_TYPES[4].aa}，其他艦種約 0.2），又便宜。<br>把全軍的護衛艦增加到 <b>150 個圖示以上</b>（在艦種那一列按 ＋ 或直接輸入數字）。`,
         goal: '護衛艦合計 ≥ 150', check: () => tutLoComp(4) >= 150, live: () => `目前護衛艦 ${tutLoComp(4)}／150` },
-      { phase: 'loadout', title: '補給艦隊', text: () => `巡洋艦（${SHIP_TYPES[2].missile.n} 發）與驅逐艦（${SHIP_TYPES[3].missile.n} 發）的飛彈打完就沒了。按「<b>＋ 補給艦隊</b>」：補給艦 ${SUPPLY_RULE.range} 範圍內的友艦每 ${SUPPLY_RULE.cd} 秒補 1 發。補給艦隊不佔艦隊數、沒有指揮官，預設跟在艦隊後方。<br><small>補給艦被擊沉，它帶的存量就沒了——別讓它跑到前線。</small>`,
+      { phase: 'loadout', title: '補給艦隊', text: () => `巡洋艦（${SHIP_TYPES[2].missile.n} 發）與驅逐艦（${SHIP_TYPES[3].missile.n} 發）的飛彈打完就沒了。按「<b>＋ 補給</b>」：補給艦 ${SUPPLY_RULE.range} 範圍內的友艦每 ${SUPPLY_RULE.cd} 秒補 1 發。補給艦隊不佔艦隊數、沒有指揮官，預設跟在艦隊後方。<br><small>補給艦被擊沉，它帶的存量就沒了——別讓它跑到前線。</small>`,
         goal: '加入一支補給艦隊', check: () => GAME.loadout && supplyList(GAME.loadout).length > 0 },
       { phase: 'loadout', title: '航母與艦載機（選讀）', text: () => `如果編了<b>航母</b>，下方會出現<b>艦載機配置</b>（每艘 ${SHIP_TYPES[0].fighters.n} 架）：${CRAFT.map((c) => `<b>${c.name}</b>：${c.note}`).join('；')}。<br>對付航空艦隊，多帶<b>攔截機</b>可以保護艦隊。` },
       { phase: 'loadout', title: '陣型與預算', text: '每支艦隊可以選<b>起始陣型</b>（這次敵人多是空中威脅，圓陣的防空 ×2）。確認<b>沒有超出預算</b>後，按「<b>下一步：部署 →</b>」。',

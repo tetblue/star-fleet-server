@@ -1008,7 +1008,7 @@ function showLoadout() {
     </div>
     <div class="ld-side g-card">
       <div class="ld-tabs">${keys.map((key) => `<button class="g-btn sm ${key === sel ? 'on' : ''}" data-tab="${key}">${tabName(key)}</button>`).join('')}
-        ${lo.fleets.length < sc.maxFleets && lo.fleets.length < pool.length ? '<button class="g-btn sm add" id="l-add" title="最多 ' + sc.maxFleets + ' 支艦隊">＋ 艦隊</button>' : ''}${SPS.length < Math.max(1, lo.fleets.length) ? `<button class="g-btn sm add" id="l-sup" title="補給艦＋護衛艦，不佔艦隊數、沒有指揮官；最多跟艦隊數一樣多支">＋ 補給（${SPS.length}／${Math.max(1, lo.fleets.length)}）</button>` : ''}</div>
+        ${lo.fleets.length < sc.maxFleets && lo.fleets.length < pool.length ? '<button class="g-btn sm add" id="l-add" title="最多 ' + sc.maxFleets + ' 支艦隊">＋ 艦隊</button>' : ''}${SPS.length < Math.max(1, lo.fleets.length) ? `<button class="g-btn sm add" id="l-sup" title="補給艦＋護衛艦，不佔艦隊數、沒有指揮官；最多跟艦隊數一樣多支（目前 ${SPS.length}／${Math.max(1, lo.fleets.length)}）">＋ 補給</button>` : ''}</div>
       ${lo.fleets.length ? '' : '<div class="g-warn">這個陣營沒有可派的指揮官，先到星際酒館招募。</div>'}
       ${over ? `<div class="g-warn ld-over">超出預算 ${fmtN(used - sc.budget)} 點，請減少艦艇。</div>` : ''}
       <div class="ld-body">${body}</div>

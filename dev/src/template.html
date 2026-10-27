@@ -386,6 +386,10 @@
   .dock-bg[hidden], body:not(.ld-on) .dock-bg { display: none; }
   .dock-bg canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
   .dock-bg canvas:active { cursor: grabbing; }
+  .dock-tag { position: absolute; left: 0; top: 0; padding: 2px 8px; border: 1px solid rgba(160,180,215,.35); border-radius: 3px; background: rgba(4,8,18,.62); color: var(--dim); font: inherit; font-size: calc(11.5px * var(--ui)); white-space: nowrap; cursor: pointer; will-change: transform; }
+  .dock-tag:hover { color: var(--text); border-color: var(--line); }
+  .dock-tag.on { color: var(--pc); border-color: rgba(242,179,90,.55); cursor: default; }
+  .dock-tag[hidden] { display: none; }
   body.ld-on #game { background: linear-gradient(90deg, rgba(2,4,10,.6), rgba(2,4,10,0) 42%), linear-gradient(180deg, rgba(2,4,10,.55), rgba(2,4,10,0) 18%); backdrop-filter: none; pointer-events: none; overflow: hidden; }
   .ld-screen { position: fixed; inset: 0; pointer-events: none; display: flex; flex-direction: column; }
   .ld-screen .ld-top, .ld-screen .ld-side { pointer-events: auto; }
@@ -403,6 +407,7 @@
   .ld-tabs { display: flex; flex-wrap: wrap; gap: calc(5px * var(--sp)); padding-bottom: calc(6px * var(--sp)); border-bottom: 1px solid var(--line); }
   .ld-tabs .g-btn.on { border-color: var(--pc); color: var(--pc); background: rgba(242,179,90,.1); }
   .ld-tabs .g-btn.add { border-style: dashed; color: var(--dim); }
+  .ld-tabs .g-btn { padding: calc(3px * var(--sp)) calc(7px * var(--sp)); font-size: calc(12px * var(--ui)); white-space: nowrap; }
   .ld-over { font-size: calc(12px * var(--ui)); }
   .ld-fh { display: flex; align-items: center; gap: calc(8px * var(--sp)); font-size: calc(14px * var(--ui)); }
   .ld-fh .g-dim { font-size: calc(12px * var(--ui)); }
