@@ -709,28 +709,64 @@ function menuBg() {
   if (!battleSetup || !battleSetup.bg) { newBattle(12345); setRule('fire', true); }
   paused = false; updateTimeUI();
 }
+// ───── 選單圖示與圖塊（主選單、單人戰鬥的模式選擇、模式大廳共用） ─────
+// 線條圖示（24×24，顏色跟著 currentColor）
+const MENU_ICONS = {
+  single: '<path d="M12 2.5 19 20l-7-4-7 4z"/><path d="M12 8v6"/>',
+  multi: '<path d="M4 4l11 11M20 4 9 15M13 17l4-4M7 13l4 4M16.5 16.5 20 20M7.5 16.5 4 20"/>',
+  rec: '<circle cx="12" cy="12" r="9"/><path d="M10 8.5l5.5 3.5-5.5 3.5z"/>',
+  wed: '<circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/>',
+  set: '<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>',
+  save: '<path d="M6.5 19a4.5 4.5 0 0 1-.4-9A6 6 0 0 1 17.6 8.5 4.5 4.5 0 0 1 17.5 19z"/><path d="M12 17v-6M9.5 13.5 12 11l2.5 2.5"/>',
+  test: '<path d="M9 3h6M10 3v6l-5 10a1.5 1.5 0 0 0 1.3 2h11.4a1.5 1.5 0 0 0 1.3-2L14 9V3"/><path d="M7.5 15h9"/>',
+  cmd: '<path d="M12 2.5l3.2 7.5H8.8zM6 12l3.2 7.5H2.8zM18 12l3.2 7.5h-6.4z"/>',
+  pilot: '<path d="M12 2l1.6 6.2L21 13v2l-7.3-2-.5 5 3 2.2V22L12 21l-4.2 1v-1.8l3-2.2-.5-5L3 15v-2l7.4-4.8z"/>',
+  story: '<path d="M12 6C10 4.5 7 4 3 4v15c4 0 7 .5 9 2 2-1.5 5-2 9-2V4c-4 0-7 .5-9 2z"/><path d="M12 6v15"/>',
+  rand: '<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="8.5" cy="8.5" r="1.2" fill="currentColor"/><circle cx="15.5" cy="8.5" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="8.5" cy="15.5" r="1.2" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1.2" fill="currentColor"/>',
+  endless: '<path d="M12 12c-2-3-4-4.5-6-4.5a4.5 4.5 0 0 0 0 9c2 0 4-1.5 6-4.5s4-4.5 6-4.5a4.5 4.5 0 0 1 0 9c-2 0-4-1.5-6-4.5z"/>',
+  sim: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12 4 7.5"/>',
+  train: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/>',
+  watch: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  tal: '<path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6l-5.4 2.9 1.2-6-4.5-4.2 6.1-.7z"/>',
+  tav: '<path d="M5 9h10v10a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z"/><path d="M15 11h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-2M5 9c0-2 1.3-3.2 3-3.2C8.6 4.6 9.7 4 11 4s2.6.8 3 2c1 .2 1 1.5 1 3"/>',
+  hang: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3 17.8V21h3.2l6.3-6.3a4 4 0 0 0 5.2-5.4l-2.6 2.6-2.5-.6-.6-2.5z"/>',
+};
+function menuIcon(k) { return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${MENU_ICONS[k] || ''}</svg>`; }
+// 圖塊按鈕：o = { id, data, icon, en, name, desc, st, cls, off, badge, tag }；desc 太長時畫面上會截斷，完整內容放在 title
+function menuTile(o) {
+  const attr = o.id ? `id="${o.id}"` : '', data = o.data ? ` ${o.data}` : '';
+  return `<button class="mt ${o.cls || ''} ${o.off ? 'off' : ''}" ${attr}${data} ${o.off ? 'disabled' : ''} title="${escH(String(o.desc || '').replace(/<[^>]+>/g, ''))}">
+    <span class="mt-ic">${menuIcon(o.icon)}</span>
+    <span class="mt-tx">${o.en ? `<span class="mt-en">${o.en}</span>` : ''}<b class="mt-name">${o.name}</b>${o.desc ? `<span class="mt-desc">${o.desc}</span>` : ''}${o.off ? '<span class="mt-st">尚未開放</span>' : o.st ? `<span class="mt-st">${o.st}</span>` : ''}</span>
+    ${o.badge ? `<i class="mt-badge" title="可分配的天賦點數">${o.badge}</i>` : ''}${o.tag ? `<span class="mt-tag">${o.tag}</span>` : ''}</button>`;
+}
+
 function showMenu() {
   mpQuit(); pvpExit();   // 離開多人戰鬥：斷開連線、換回單人的指揮官
   setPhase('menu'); GAME.replaying = false; GAME.playerSide = 0; menuBg();
-  const item = (id, no, name, desc, cls = '', tag = '') => `<button class="g-btn mm-item ${cls}" id="${id}"><span class="mm-no">${no}</span><span class="mm-tx"><b>${name}</b><small>${desc}</small></span>${tag ? `<span class="mm-tag">${tag}</span>` : '<span class="mm-arr">›</span>'}</button>`;
+  const T = (id, icon, name, desc, cls = '') => menuTile({ id, icon, name, desc, cls });
   overlay(`<div class="g-menu">
     <h1>星海艦隊戰</h1><div class="sub">FLEET TACTICS · 原型</div>
     ${window.API ? `<div class="g-player"><span class="g-dim">玩家</span><b>${escH(API.name())}</b><span id="m-sync" class="sync-${STORE.state ? STORE.state() : 'ok'}">${syncText()}</span><button class="g-btn sm" id="m-acct">帳號</button><button class="g-btn sm" id="m-out">登出</button></div>` : ''}
-    <div class="mm-list">
-      ${item('m-single', '01', '單人戰鬥', '訓練作戰・隨機戰役・無限戰場・模擬室', 'pri')}
-      ${item('m-multi', '02', '多人戰鬥', '和內網的其他玩家 1 對 1 對戰，或觀戰')}
-      ${item('m-rec', '03', '戰鬥回放', '每場戰鬥都存在伺服器，隨時可以重看')}
-      ${item('m-wed', '04', '武器配置', '調整、新增各艦種的武器位置（2D／3D 共用）')}
-      ${item('m-set', '05', '設定', '按鍵綁定、遊戲速度、介面資訊')}
-      ${item('m-save', '06', '存檔管理', '3 個雲端存檔欄位：儲存、讀取進度，也可以匯出成檔案或從檔案匯入')}
-      ${item('m-test', '07', '遊戲測試', '大軍畫面、效能與戰鬥數值（射程、側背受擊倍率等）的測試場')}
+    <div class="mm-tiles">
+      <div class="mt-grid mt-main">
+        ${T('m-single', 'single', '單人戰鬥', '指揮官・王牌飛行員', 'pri row')}
+        ${T('m-multi', 'multi', '多人戰鬥', '和內網的其他玩家 1 對 1 對戰，或觀戰', 'pri row')}
+      </div>
+      <div class="mt-grid mt-util">
+        ${T('m-rec', 'rec', '戰鬥回放', '每場戰鬥都存在伺服器，隨時可以重看')}
+        ${T('m-wed', 'wed', '武器配置', '調整、新增各艦種的武器位置（2D／3D 共用）')}
+        ${T('m-set', 'set', '設定', '按鍵綁定、遊戲速度、介面資訊')}
+        ${T('m-save', 'save', '存檔管理', '3 個雲端存檔欄位：儲存、讀取進度，也可以匯出成檔案或從檔案匯入')}
+        ${T('m-test', 'test', '遊戲測試', '大軍畫面、效能與戰鬥數值（射程、側背受擊倍率等）的測試場')}
+      </div>
     </div>
     <div class="mm-note" id="mm-note"></div>
     <div class="g-row mm-view" style="justify-content:center"><span class="g-dim">畫面</span><button class="g-btn sm ${mode3D ? '' : 'pri'}" id="m-2d">2D 像素</button><button class="g-btn sm ${mode3D ? 'pri' : ''}" id="m-3d">3D 模型</button><span class="g-dim" style="font-size:calc(12px * var(--ui))">（作戰中也可按 M 或畫面上方按鈕切換）</span></div>
   </div>`);
   gEl('m-2d').onclick = () => { setRenderMode('2d'); showMenu(); };
   gEl('m-3d').onclick = () => { setRenderMode('3d'); showMenu(); };
-  gEl('m-single').onclick = showSingle;
+  gEl('m-single').onclick = () => { GAME.spMode = null; showSingle(); };
   gEl('m-multi').onclick = () => (window.API ? showMulti() : (gEl('mm-note').textContent = '多人戰鬥要連上伺服器才能玩。'));
   gEl('m-wed').onclick = () => openWeaponEditor(showMenu);
   gEl('m-rec').onclick = () => showRecords();
@@ -739,40 +775,83 @@ function showMenu() {
   gEl('m-save').onclick = () => (window.API ? showSaves() : (gEl('mm-note').textContent = '存檔管理要連上伺服器才能用。'));
   gEl('m-test').onclick = () => { overlay(null); setPhase('sandbox'); newBattle(12345); setCmdSide(0); };   // 原本的測試場（數值、畫面）
 }
-// 單人戰鬥：四種模式＋指揮官、星際酒館
+// 單人戰鬥：先選模式（指揮官、王牌飛行員…），再進該模式的大廳。GAME.spMode＝目前所在的模式（戰鬥、子畫面返回時回到同一個大廳）
+// 新模式加在 SP_MODES（icon 是 MENU_ICONS 的 key）；每個模式都有 主線、隨機戰役、無限戰場、模擬室、訓練場、天賦，其餘是該模式獨有的（showSpHub）
+const SP_MODES = [
+  { key: 'cmd', icon: 'cmd', en: 'COMMANDER', name: '指揮官', desc: '指揮整支艦隊：編成、部署、下令，用陣型、技能與地形打贏艦隊戰',
+    st: () => { const pts = COMMANDERS.reduce((s, o) => s + Math.max(0, cmdrPoints(o.id)), 0); return `${COMMANDERS.length} 位指揮官${pts ? `・可分配天賦 ${pts} 點` : ''}・功勳 ${fmtN(ROSTER.merit)}`; } },
+  { key: 'pilot', icon: 'pilot', en: 'ACE PILOT', name: '王牌飛行員', desc: '不指揮艦隊：以一名飛行員的身分駕駛特殊改裝的艦載機加入戰場。背後或座艙視角、滑鼠瞄準，靠自己的任務決定成敗',
+    st: () => pilotSummary() },
+];
 function showSingle() {
+  const M = SP_MODES.find((m) => m.key === GAME.spMode);
+  if (M) return showSpHub(M);
   mpQuit(); pvpExit();
   setPhase('menu'); GAME.replaying = false; GAME.playerSide = 0; menuBg();
-  const c = campLoad(), ro = randOpts(), sp = storyLoad();
-  const pts = COMMANDERS.reduce((s, o) => s + Math.max(0, cmdrPoints(o.id)), 0);
-  const mode = (id, en, name, desc, st) => `<button class="sp-mode" id="${id}"><span class="sp-en">${en}</span><b>${name}</b><span class="sp-desc">${desc}</span><span class="sp-st">${st}</span></button>`;
   overlay(`<div class="g-wrap sp-wrap">
-    <div class="g-head"><h2>單人戰鬥</h2><span class="crumb">選擇作戰模式</span><span class="g-sp"></span><button class="g-btn" id="sp-back">← 主選單</button></div>
-    <div class="sp-op"><span class="g-dim">操作難度</span>${opSeg('sp-op')}<span class="sp-opd">${OP_LEVELS[opLevel()].desc}</span></div>
-    <div class="sp-grid">
-      <button class="sp-mode wide" id="sp-story"><span class="sp-en">CAMPAIGN</span><b>雙星記</b><span class="sp-desc">劇情戰役：選擇帝國篇或聯盟篇，從頭到尾指揮同一個陣營，打到這場戰爭的結局；番外篇〈雙星之外〉是灰鴉傭兵團的故事</span><span class="sp-st">${STORY_LINE[sp.line] ? `${STORY_LINE[sp.line].name} ${storyCount(sp, sp.line)}／${storySeq(sp.line).length} 場作戰` : '尚未開始'}</span></button>
-      ${mode('sp-train', 'TRAINING', '訓練作戰', '從零開始的教學課程與戰術手冊，以及固定的作戰關卡：讀情報、編成、部署，熟悉各種戰況', `教學 ${TUT_LESSONS.filter((L) => tutLoad().done[L.id]).length}／${TUT_LESSONS.length}・${SCENARIOS.length} 場作戰`)}
-      ${mode('sp-rand', 'SKIRMISH', '隨機戰役', '自選規模與敵軍強度，敵軍和地形每次隨機生成', `${RAND_SIZES[ro.size].name}・敵軍${RAND_DIFF[ro.diff].name}・地形${RAND_TERR[ro.terr].name}`)}
-      ${mode('sp-camp', 'ENDLESS', '無限戰場', '無限關卡：敵軍依你的指揮官等級生成，一關比一關大', `目前第 ${c.stage} 關・最高第 ${c.best} 關`)}
-      ${mode('sp-sand', 'SIMULATOR', '模擬室', '自由布置雙方艦隊、指揮官與地形，用正式規則測試戰術（可接管任一方）', '不計戰績、不給經驗')}
-      <button class="sp-mode wide" id="sp-pilot"><span class="sp-en">ACE PILOT</span><b>王牌飛行員</b><span class="sp-desc">不指揮艦隊：以一名飛行員的身分駕駛特殊改裝的艦載機加入隨機戰場。背後視角或座艙視角，滑鼠瞄準、雙武裝，累積戰功解鎖新武裝</span><span class="sp-st">${pilotSummary()}</span></button>
-      <button class="sp-mode wide" id="sp-watch"><span class="sp-en">SPECTATE</span><b>AI 對戰觀摩</b><span class="sp-desc">選擇雙方 AI 的難度與打法，看 AI 互打：即時解說每支艦隊在做什麼，參考推進、消耗、包抄、突破與反制的時機</span><span class="sp-st">${watchSummary()}</span></button>
-    </div>
-    <div class="sp-row">
-      <button class="sp-sub" id="sp-cmdr"><b>指揮官</b><span>${COMMANDERS.length} 位・等級與天賦</span>${pts ? `<i title="可分配的天賦點數">${pts}</i>` : ''}</button>
-      <button class="sp-sub" id="sp-tav"><b>星際酒館</b><span>功勳 ${fmtN(ROSTER.merit)}・招募兩個陣營的指揮官</span></button>
-    </div></div>`);
+    <div class="g-head"><h2>單人戰鬥</h2><span class="crumb">選擇遊戲模式</span><span class="g-sp"></span><button class="g-btn" id="sp-back">← 主選單</button></div>
+    <div class="mt-grid mt-modes">${SP_MODES.map((m) => menuTile({ data: `data-spm="${m.key}"`, icon: m.icon, en: m.en, name: m.name, desc: m.desc, st: m.st(), cls: 'big' })).join('')}</div></div>`);
   gEl('sp-back').onclick = showMenu;
-  bindOpSeg('sp-op', showSingle);
-  gEl('sp-story').onclick = () => showStory();
-  gEl('sp-train').onclick = () => showTraining();
-  gEl('sp-rand').onclick = showRandom;
-  gEl('sp-camp').onclick = showCampaign;
-  gEl('sp-sand').onclick = () => showSim();
-  gEl('sp-watch').onclick = () => showWatch();
-  gEl('sp-pilot').onclick = () => showPilot();
-  gEl('sp-cmdr').onclick = () => showCommanders(showSingle);
-  gEl('sp-tav').onclick = () => showTavern();
+  document.querySelectorAll('[data-spm]').forEach((b) => (b.onclick = () => { GAME.spMode = b.dataset.spm; showSingle(); }));
+}
+// 模式大廳：上排＝作戰（共通的五種，還沒做的顯示「尚未開放」）；下排＝天賦（共通）＋該模式專屬
+function showSpHub(M) {
+  mpQuit(); pvpExit();
+  setPhase('menu'); GAME.replaying = false; GAME.playerSide = 0; menuBg();
+  const cmd = M.key === 'cmd', own = '專屬';
+  let ops, subs;
+  if (cmd) {
+    const c = campLoad(), ro = randOpts(), sp = storyLoad();
+    const pts = COMMANDERS.reduce((s, o) => s + Math.max(0, cmdrPoints(o.id)), 0);
+    ops = [
+      { id: 'sp-story', icon: 'story', en: 'CAMPAIGN', name: '主線・雙星記', desc: '劇情戰役：選擇帝國篇或聯盟篇，從頭到尾指揮同一個陣營，打到這場戰爭的結局；番外篇〈雙星之外〉是灰鴉傭兵團的故事', st: STORY_LINE[sp.line] ? `${STORY_LINE[sp.line].name} ${storyCount(sp, sp.line)}／${storySeq(sp.line).length} 場` : '尚未開始', cls: 'pri' },
+      { id: 'sp-rand', icon: 'rand', en: 'SKIRMISH', name: '隨機戰役', desc: '自選規模與敵軍強度，敵軍和地形每次隨機生成', st: `${RAND_SIZES[ro.size].name}・敵軍${RAND_DIFF[ro.diff].name}・地形${RAND_TERR[ro.terr].name}` },
+      { id: 'sp-camp', icon: 'endless', en: 'ENDLESS', name: '無限戰場', desc: '無限關卡：敵軍依你的指揮官等級生成，一關比一關大', st: `第 ${c.stage} 關・最高第 ${c.best} 關` },
+      { id: 'sp-sand', icon: 'sim', en: 'SIMULATOR', name: '模擬室', desc: '自由布置雙方艦隊、指揮官與地形，用正式規則測試戰術（可接管任一方）', st: '不計戰績、不給經驗' },
+      { id: 'sp-train', icon: 'train', en: 'TRAINING', name: '訓練場', desc: '從零開始的教學課程與戰術手冊，以及固定的作戰關卡：讀情報、編成、部署，熟悉各種戰況', st: `教學 ${TUT_LESSONS.filter((L) => tutLoad().done[L.id]).length}／${TUT_LESSONS.length}・${SCENARIOS.length} 場作戰` },
+    ];
+    subs = [
+      { id: 'sp-tal', icon: 'tal', name: '天賦', desc: `${COMMANDERS.length} 位指揮官・等級與天賦`, badge: pts },
+      { id: 'sp-watch', icon: 'watch', name: 'AI 對戰', desc: `看 AI 互打並即時解說・${watchSummary()}`, tag: own },
+      { id: 'sp-tav', icon: 'tav', name: '星際酒館', desc: `功勳 ${fmtN(ROSTER.merit)}・招募兩個陣營的指揮官`, tag: own },
+    ];
+  } else {
+    const p = pilotLoad(), free = pilotTalFree(p), L = pilotLevel(p.xp);
+    ops = [
+      { id: 'sp-story', icon: 'story', en: 'CAMPAIGN', name: '主線', desc: '飛行員的劇情戰役', off: true },
+      { id: 'sp-rand', icon: 'rand', en: 'SORTIE', name: '隨機戰役', desc: '加入隨機生成的艦隊戰：每次出擊隨機指派任務，完成後回己方航母降落結算', st: `${RAND_SIZES[p.size].name}・${FACTION_NAME[p.fac === 1 ? 1 : 0]}・出擊 ${p.sorties}`, cls: 'pri' },
+      { id: 'sp-camp', icon: 'endless', en: 'ENDLESS', name: '無限戰場', desc: '一場接一場的連續出擊', off: true },
+      { id: 'sp-sand', icon: 'sim', en: 'SIMULATOR', name: '模擬室', desc: '自由布置戰場與目標，測試機體與武裝', off: true },
+      { id: 'sp-train', icon: 'train', en: 'TRAINING', name: '訓練場', desc: '飛行、射擊、降落整補的教學', off: true },
+    ];
+    subs = [
+      { id: 'sp-tal', icon: 'tal', name: '天賦', desc: `飛行員 Lv ${L.lv}・戰功 ${fmtN(p.merit)}`, badge: free > 0 ? free : 0 },
+      { id: 'sp-hang', icon: 'hang', name: '機庫', desc: `${PILOT_FRAMES[p.frame].name}・調整機體、武裝與纏鬥裝備`, tag: own },
+    ];
+  }
+  overlay(`<div class="g-wrap sp-wrap mt-hub">
+    <div class="g-head"><h2 class="mt-h2"><span class="mt-ic">${menuIcon(M.icon)}</span>${M.name}</h2><span class="crumb">單人戰鬥・選擇作戰</span><span class="g-sp"></span><button class="g-btn" id="sp-back">← 選擇模式</button></div>
+    ${cmd ? `<div class="sp-op"><span class="g-dim">操作難度</span>${opSeg('sp-op')}<span class="sp-opd">${OP_LEVELS[opLevel()].desc}</span></div>` : ''}
+    <div class="mt-sec">作戰</div>
+    <div class="mt-grid mt-ops">${ops.map(menuTile).join('')}</div>
+    <div class="mt-sec">整備</div>
+    <div class="mt-grid mt-subs">${subs.map((o) => menuTile({ ...o, cls: 'row' })).join('')}</div></div>`);
+  gEl('sp-back').onclick = () => { GAME.spMode = null; showSingle(); };
+  if (cmd) {
+    bindOpSeg('sp-op', showSingle);
+    gEl('sp-story').onclick = () => showStory();
+    gEl('sp-train').onclick = () => showTraining();
+    gEl('sp-rand').onclick = showRandom;
+    gEl('sp-camp').onclick = showCampaign;
+    gEl('sp-sand').onclick = () => showSim();
+    gEl('sp-watch').onclick = () => showWatch();
+    gEl('sp-tal').onclick = () => showCommanders(showSingle);
+    gEl('sp-tav').onclick = () => showTavern();
+  } else {
+    gEl('sp-rand').onclick = () => showPilot('rand');
+    gEl('sp-hang').onclick = () => showPilot('hangar');
+    gEl('sp-tal').onclick = () => showPilot('tal');
+  }
 }
 // ───── 指揮官與天賦 ─────
 function showCommanders(back) {

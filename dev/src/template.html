@@ -146,6 +146,91 @@
   .sp-sub b { font-size: calc(15px * var(--ui)); letter-spacing: .15em; font-weight: 600; white-space: nowrap; } .sp-sub span { color: var(--dim); font-size: calc(12px * var(--ui)); }
   .sp-sub i { margin-left: auto; font-style: normal; font-size: calc(11px * var(--ui)); min-width: calc(20px * var(--ui)); text-align: center; padding: 1px calc(6px * var(--sp)); border-radius: 10px; background: var(--pc); color: #10131a; font-weight: 700; }
   body.pf-1 .sp-mode, body.pf-1 .sp-sub { border-radius: 0; }
+  .sp-mode.off { cursor: default; opacity: .45; } .sp-mode.off, .sp-mode.off:hover { background: rgba(12,19,33,.85); border-color: var(--line); } .sp-mode.off .sp-st { color: var(--dim); }
+  /* ── 選單圖塊（主選單、單人戰鬥模式、模式大廳）：橫向排列、依畫面寬度自動換行 ── */
+  .mt-grid { --mt-min: 170px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(calc(var(--mt-min) * var(--ui)), 100%), 1fr)); gap: calc(12px * var(--sp)); width: 100%; }
+  .mt { position: relative; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: calc(10px * var(--sp)); padding: calc(16px * var(--sp)) calc(14px * var(--sp)) calc(12px * var(--sp)); text-align: left; font: inherit; color: var(--text); cursor: pointer;
+    background: rgba(12,19,33,.85); border: 1px solid var(--line); border-top: 3px solid var(--pc); border-radius: 4px; transition: border-color .15s, background .15s, transform .15s; }
+  .mt:hover { background: rgba(22,32,52,.92); border-color: var(--pc); transform: translateY(-2px); }
+  .mt:focus-visible { outline: 2px solid var(--pc); outline-offset: 2px; }
+  .mt-ic { flex: none; width: calc(46px * var(--ui)); height: calc(46px * var(--ui)); display: grid; place-items: center; border: 1px solid var(--pc); border-radius: 50%; color: var(--pc); background: rgba(255,255,255,.03); }
+  .mt-ic svg { width: 56%; height: 56%; }
+  .mt:hover .mt-ic { background: rgba(255,255,255,.08); }
+  .mt-tx { display: flex; flex-direction: column; gap: calc(4px * var(--sp)); flex: 1; min-width: 0; width: 100%; }
+  .mt-en { font-size: calc(10px * var(--ui)); letter-spacing: .25em; color: var(--pc); opacity: .85; }
+  .mt-name { font-size: calc(17px * var(--ui)); letter-spacing: .14em; font-weight: 600; }
+  .mt-desc { flex: 1; color: var(--dim); font-size: calc(12px * var(--ui)); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  .mt-st { font-size: calc(11.5px * var(--ui)); color: var(--text); border-top: 1px solid var(--line); padding-top: calc(6px * var(--sp)); margin-top: calc(2px * var(--sp)); }
+  .mt-badge { position: absolute; top: calc(8px * var(--sp)); right: calc(8px * var(--sp)); font-style: normal; font-size: calc(11px * var(--ui)); min-width: calc(20px * var(--ui)); text-align: center; padding: 1px calc(6px * var(--sp)); border-radius: 10px; background: var(--pc); color: #10131a; font-weight: 700; }
+  .mt-tag { position: absolute; top: calc(8px * var(--sp)); right: calc(8px * var(--sp)); font-size: calc(10.5px * var(--ui)); color: var(--pc); border: 1px solid var(--pc); padding: 0 calc(6px * var(--sp)); border-radius: 3px; letter-spacing: .1em; opacity: .85; }
+  .mt-badge + .mt-tag { right: calc(40px * var(--sp)); }
+  .mt.pri { background: linear-gradient(180deg, rgba(90,61,20,.55), rgba(12,19,33,.85)); }
+  body.pf-1 .mt.pri { background: linear-gradient(180deg, rgba(23,70,110,.55), rgba(12,19,33,.85)); }
+  .mt.off, .mt.off:hover { cursor: default; opacity: .45; transform: none; background: rgba(12,19,33,.85); border-color: var(--line); }
+  .mt.off .mt-ic { border-color: var(--line); color: var(--dim); } .mt.off .mt-st { color: var(--dim); }
+  /* 橫式圖塊：圖示在左 */
+  .mt.row { flex-direction: row; align-items: center; gap: calc(14px * var(--sp)); border-top-width: 1px; border-left: 3px solid var(--pc); padding: calc(12px * var(--sp)) calc(16px * var(--sp)); }
+  .mt.row .mt-desc { -webkit-line-clamp: 2; flex: none; }
+  .mt.row .mt-tx { padding-right: calc(34px * var(--sp)); }
+  /* 大圖塊（選擇模式） */
+  .mt.big { padding: calc(24px * var(--sp)); gap: calc(14px * var(--sp)); min-height: calc(250px * var(--ui)); }
+  .mt.big .mt-ic { width: calc(84px * var(--ui)); height: calc(84px * var(--ui)); border-width: 2px; }
+  .mt.big .mt-name { font-size: calc(26px * var(--ui)); letter-spacing: .2em; }
+  .mt.big .mt-desc { font-size: calc(13px * var(--ui)); -webkit-line-clamp: 5; }
+  .mt-modes { --mt-min: 300px; }
+  .mt-ops { --mt-min: 165px; }
+  .mt-subs { --mt-min: 250px; }
+  .mt-sec { font-size: calc(11px * var(--ui)); letter-spacing: .3em; color: var(--dim); margin: calc(16px * var(--sp)) 0 calc(8px * var(--sp)); display: flex; align-items: center; gap: calc(10px * var(--sp)); }
+  .mt-sec::after { content: ''; flex: 1; border-top: 1px solid var(--line); }
+  .mt-hub { max-width: calc(1180px * var(--ui)); }
+  .mt-h2 { display: flex; align-items: center; gap: calc(10px * var(--sp)); align-self: center; }
+  .mt-h2 .mt-ic { width: calc(34px * var(--ui)); height: calc(34px * var(--ui)); }
+  .g-head:has(.mt-h2) { align-items: center; }
+  /* 主選單 */
+  .mm-tiles { display: flex; flex-direction: column; gap: calc(12px * var(--sp)); width: min(calc(980px * var(--ui)), calc(100vw - 32px)); }
+  .mt-main { --mt-min: 300px; }
+  .mt-main .mt.row { padding: calc(18px * var(--sp)) calc(20px * var(--sp)); }
+  .mt-main .mt-ic { width: calc(58px * var(--ui)); height: calc(58px * var(--ui)); }
+  .mt-main .mt-name { font-size: calc(21px * var(--ui)); letter-spacing: .22em; }
+  .mt-util { --mt-min: 150px; }
+  .mt-util .mt { align-items: center; text-align: center; }
+  .mt-util .mt-tx { align-items: center; }
+  .mt-util .mt-desc { -webkit-line-clamp: 3; }
+  body.pf-1 .mt { border-radius: 0; }
+  /* 窄畫面：作戰圖塊兩欄、文字縮短；更窄時全部改成圖示在左的單欄 */
+  @media (max-width: 760px) {
+    .mt-grid { gap: calc(8px * var(--sp)); }
+    .mt-ops, .mt-util { --mt-min: 130px; }
+    .mt-desc { -webkit-line-clamp: 2; }
+    .mt.big { min-height: 0; }
+    .mt.big .mt-ic { width: calc(60px * var(--ui)); height: calc(60px * var(--ui)); }
+  }
+  @media (max-width: 480px) {
+    .mt-main, .mt-modes, .mt-subs { grid-template-columns: 1fr; }
+    .mt-ops, .mt-util { grid-template-columns: repeat(3, 1fr); }
+    .mt-ops .mt-name, .mt-util .mt-name { font-size: calc(13.5px * var(--ui)); letter-spacing: .06em; }
+    .mt-ops .mt-st { font-size: calc(10.5px * var(--ui)); }
+    .mt-ops .mt, .mt-util .mt { align-items: center; text-align: center; padding: calc(10px * var(--sp)) calc(8px * var(--sp)); gap: calc(6px * var(--sp)); }
+    .mt-ops .mt-tx, .mt-util .mt-tx { align-items: center; }
+    .mt-ops .mt-desc, .mt-util .mt-desc, .mt-ops .mt-en { display: none; }
+    .mt-main .mt, .mt.big, .mt-subs .mt { flex-direction: row; align-items: center; text-align: left; padding: calc(10px * var(--sp)) calc(12px * var(--sp)); gap: calc(12px * var(--sp)); }
+    .mt-ic, .mt.big .mt-ic, .mt-main .mt-ic { width: calc(40px * var(--ui)); height: calc(40px * var(--ui)); }
+    .mt-name, .mt.big .mt-name, .mt-main .mt-name { font-size: calc(16px * var(--ui)); }
+    .mt.big .mt-desc, .mt-main .mt-desc, .mt-subs .mt-desc { -webkit-line-clamp: 2; }
+    .mt.big .mt-tx, .mt-subs .mt-tx { padding-right: calc(30px * var(--sp)); }
+  }
+  /* 矮畫面（筆電 768 高、橫放平板）：縮小圖示、只留一兩行說明 */
+  @media (max-height: 820px) {
+    .mt { padding-top: calc(12px * var(--sp)); gap: calc(8px * var(--sp)); }
+    .mt-ic { width: calc(38px * var(--ui)); height: calc(38px * var(--ui)); }
+    .mt-desc { -webkit-line-clamp: 2; }
+    .mt.big { min-height: 0; }
+    .mt.big .mt-ic { width: calc(64px * var(--ui)); height: calc(64px * var(--ui)); }
+    .mt-main .mt-ic { width: calc(46px * var(--ui)); height: calc(46px * var(--ui)); }
+    .mt-sec { margin-top: calc(10px * var(--sp)); }
+    .g-menu .sub { margin-bottom: calc(6px * var(--sp)); }
+  }
+  @media (max-height: 620px) { .mt-util .mt-desc, .mt-ops .mt-desc { display: none; } }
   .rd-opts dd .g-dim { font-size: calc(12px * var(--ui)); margin-top: calc(4px * var(--sp)); } .wed-seg.rd-seg { display: inline-flex; flex-wrap: wrap; max-width: 100%; }
   .rd-seg button { padding: calc(5px * var(--sp)) calc(14px * var(--sp)); } .rd-seg button.on { background: color-mix(in srgb, var(--pc) 20%, transparent); color: var(--pc); font-weight: 600; }
   .g-menu .mm-view .g-btn { width: auto; padding: calc(4px * var(--sp)) calc(12px * var(--sp)); font-size: calc(12.5px * var(--ui)); }

@@ -154,7 +154,8 @@ function pilotSave(p) { try { STORE.setItem(PILOT_STORE, JSON.stringify(p)); } c
 function pilotSummary() { const p = pilotLoad(); return `飛行員 Lv ${pilotLevel(p.xp).lv}・${PILOT_FRAMES[p.frame].name}・戰功 ${fmtN(p.merit)}・擊墜 ${p.kf}`; }
 
 // ───── 機庫（出擊前設定） ─────
-function showPilot() {
+function showPilot(view) {   // view：rand 隨機戰役（出擊設定）、hangar 機庫、tal 天賦
+  if (typeof view === 'string') GAME.plView = view; view = GAME.plView || 'rand';
   const p = pilotLoad();
   setPhase('briefing');
   const seg = (key, arr) => `<div class="wed-seg rd-seg" data-po="${key}">${arr.map(([v, n]) => `<button data-v="${v}" class="${p[key] === v ? 'on' : ''}">${n}</button>`).join('')}</div>`;
@@ -180,17 +181,17 @@ function showPilot() {
       <div class="pl-tal-b"><button class="g-btn sm" data-tal="${T.id}" data-d="-1" ${r ? '' : 'disabled'}>−</button><button class="g-btn sm" data-tal="${T.id}" data-d="1" ${r < T.max && free > 0 ? '' : 'disabled'}>＋</button></div></div>`; }).join('');
   const B = pilotBuild({ frame: p.frame, tal: p.tal }), lo = p.slots.map((id) => { const m = pilotSlotMods(id, pilotProf(p.wxp[id] || 0).lv, B); return `${PILOT_WEAPONS[id].name}${m.max ? ` ${m.max} ${PILOT_WEAPONS[id].type === 'lock' ? '枚' : '發'}` : ''}`; }).join('＋') + (p.gear ? `・纏鬥裝備：${PILOT_WEAPONS[p.gear].name}` : '');
   overlay(`<div class="g-wrap">
-    <div class="g-head"><h2>王牌飛行員</h2><span class="crumb">不指揮艦隊・駕駛一架艦載機加入隨機戰場・沒有回放</span><span class="g-sp"></span><button class="g-btn" id="pl-back">← 單人戰鬥</button></div>
+    <div class="g-head"><h2>${{ rand: '隨機戰役', hangar: '機庫', tal: '天賦' }[view]}</h2><span class="crumb">王牌飛行員・${{ rand: '不指揮艦隊・駕駛一架艦載機加入隨機戰場・沒有回放', hangar: '機體、武裝與纏鬥裝備', tal: '飛行員天賦' }[view]}</span><span class="g-sp"></span><button class="g-btn" id="pl-back">← 王牌飛行員</button></div>
     <div class="g-card pl-rec"><div class="pl-lv"><span class="g-dim">飛行員等級</span><b>Lv ${L.lv}</b>${L.need ? `<span class="pl-xp">${bar(L.xp, L.need)}<small>${fmtN(Math.floor(L.xp))}／${fmtN(L.need)}</small></span>` : '<small>最高等級</small>'}</div><div><span class="g-dim">戰功</span><b>${fmtN(p.merit)}</b></div><div><span class="g-dim">出擊</span><b>${p.sorties}</b></div><div><span class="g-dim">任務成功</span><b>${p.wins}</b></div>
       <div><span class="g-dim">擊墜</span><b>${p.kf}</b></div><div><span class="g-dim">擊沉</span><b>${p.ks}</b></div><div><span class="g-dim">被擊墜</span><b>${p.deaths}</b></div>
       <span class="g-dim pl-note">戰功同時是飛行員經驗（升級得天賦點數）與解鎖武裝的門檻；武器用得越多，熟練度越高。</span></div>
-    <div class="g-card" style="margin-top:12px"><h3>天賦 <span class="g-dim" style="font-weight:400">可用點數 <b class="${free > 0 ? 'g-pc' : ''}">${free}</b>・每升一級 1 點・可以隨時免費重新分配</span><button class="g-btn sm" id="pl-tal-reset" style="float:right">全部重新分配</button></h3><div class="pl-tals">${tals}</div></div>
-    <div class="g-card" style="margin-top:12px"><h3>機體</h3><div class="pl-frames">${frames}</div></div>
+    ${view === 'tal' ? `<div class="g-card" style="margin-top:12px"><h3>天賦 <span class="g-dim" style="font-weight:400">可用點數 <b class="${free > 0 ? 'g-pc' : ''}">${free}</b>・每升一級 1 點・可以隨時免費重新分配</span><button class="g-btn sm" id="pl-tal-reset" style="float:right">全部重新分配</button></h3><div class="pl-tals">${tals}</div></div>` : ''}
+    ${view === 'hangar' ? `<div class="g-card" style="margin-top:12px"><h3>機體</h3><div class="pl-frames">${frames}</div></div>
     <div class="intel-grid" style="margin-top:12px">
       ${PILOT_SLOTS.map((S, k) => `<div class="g-card"><h3>${S.name}（${plSlotKey(k)}）</h3><div class="pl-wpns">${wcell(k)}</div></div>`).join('')}
     </div>
-    <div class="g-card" style="margin-top:12px"><h3>纏鬥裝備（${plKey('pilot_gear')}）<span class="g-dim" style="font-weight:400">　不佔武器槽，另外裝一件</span></h3><div class="pl-wpns">${gcell}</div></div>
-    <div class="intel-grid" style="margin-top:12px">
+    <div class="g-card" style="margin-top:12px"><h3>纏鬥裝備（${plKey('pilot_gear')}）<span class="g-dim" style="font-weight:400">　不佔武器槽，另外裝一件</span></h3><div class="pl-wpns">${gcell}</div></div>` : ''}
+    ${view === 'rand' ? `<div class="intel-grid" style="margin-top:12px">
       <div class="g-card"><h3>戰場</h3><dl class="kv rd-opts">
         <dt>所屬陣營</dt><dd>${seg('fac', [[0, FACTION_NAME[0]], [1, FACTION_NAME[1]]])}<div class="g-dim">從己方航母起飛；敵軍是另一個陣營</div></dd>
         <dt>規模</dt><dd>${seg('size', RAND_SIZES.map((s, i) => [i, s.name]))}<div class="g-dim">每一方 ${fmtN(RAND_SIZES[p.size].budget)} 點兵力・${Math.round(RAND_SIZES[p.size].time / 60)} 分鐘</div></dd>
@@ -207,15 +208,18 @@ function showPilot() {
         <tr><td>${plKey('pilot_land')}</td><td>靠近己方航母時：自動降落、整補（彈藥、耐久補滿），再彈射起飛</td></tr><tr><td>Esc</td><td>暫停</td></tr></table>
         <div style="margin-top:6px"><button class="g-btn sm" id="pl-keys">修改按鍵…</button></div>
         <div class="g-dim" style="margin-top:6px">需要滑鼠：開戰後點一下畫面開始駕駛（滑鼠游標會被鎖定）。</div></div>
-    </div>
-    <div class="g-row" style="margin-top:12px"><span class="g-dim">${F.name}：${lo}</span><span class="g-sp"></span><button class="g-btn pri" id="pl-go">出擊 →</button></div></div>`);
+    </div>` : ''}
+    <div class="g-row" style="margin-top:12px"><span class="g-dim">${F.name}：${lo}</span><span class="g-sp"></span>${view === 'rand' ? '<button class="g-btn" id="pl-hang">機庫…</button><button class="g-btn pri" id="pl-go">出擊 →</button>' : '<button class="g-btn pri" id="pl-sortie">前往出擊 →</button>'}</div></div>`);
   gEl('pl-back').onclick = showSingle;
-  gEl('pl-go').onclick = () => pilotGo();
-  gEl('pl-keys').onclick = () => openSettings();
+  const on = (id, f) => { const e = gEl(id); if (e) e.onclick = f; };
+  on('pl-go', () => pilotGo());
+  on('pl-hang', () => showPilot('hangar'));
+  on('pl-sortie', () => showPilot('rand'));
+  on('pl-keys', () => openSettings());
   const keep = () => { const y = gEl('game').scrollTop; pilotSave(p); showPilot(); gEl('game').scrollTop = y; };
   document.querySelectorAll('[data-fr]').forEach((b) => (b.onclick = () => { p.frame = +b.dataset.fr; keep(); }));
   document.querySelectorAll('[data-tal]').forEach((b) => (b.onclick = () => { const T = PILOT_TALENTS.find((x) => x.id === b.dataset.tal), r = (p.tal[T.id] || 0) + +b.dataset.d; if (r < 0 || r > T.max || (+b.dataset.d > 0 && pilotTalFree(p) <= 0)) return; p.tal[T.id] = r; keep(); }));
-  gEl('pl-tal-reset').onclick = () => { p.tal = {}; keep(); };
+  on('pl-tal-reset', () => { p.tal = {}; keep(); });
   document.querySelectorAll('.pl-wpn[data-slot]').forEach((b) => (b.onclick = () => { p.slots[+b.dataset.slot] = b.dataset.w; keep(); }));
   document.querySelectorAll('[data-gear]').forEach((b) => (b.onclick = () => { p.gear = b.dataset.gear; keep(); }));
   document.querySelectorAll('[data-po]').forEach((g) => g.querySelectorAll('button').forEach((b) => (b.onclick = () => { p[g.dataset.po] = +b.dataset.v; keep(); })));
@@ -1571,6 +1575,6 @@ function pilotReport() {
     </div>
     <div class="g-row" style="margin-top:14px"><button class="g-btn" id="pr-menu">單人戰鬥</button><span class="g-sp"></span><button class="g-btn" id="pr-hangar">機庫</button><button class="g-btn pri" id="pr-again">再出擊（新任務）→</button></div></div>`);
   gEl('pr-menu').onclick = showSingle;
-  gEl('pr-hangar').onclick = showPilot;
+  gEl('pr-hangar').onclick = () => showPilot('hangar');
   gEl('pr-again').onclick = pilotGo;
 }
