@@ -96,13 +96,14 @@ const PILOT_TALENTS = [
   { id: 'shield', name: '護盾增幅', max: 3, desc: (r) => `護盾 +${12 * r}%、回充 +${10 * r}%` },
   { id: 'engine', name: '推進器調校', max: 3, desc: (r) => `巡航與加速速度 +${5 * r}%` },
   { id: 'agile', name: '機動調校', max: 3, desc: (r) => `轉向、翻滾 +${6 * r}%` },
-  { id: 'boost', name: '加速儲能', max: 2, desc: (r) => `加速能量 +${25 * r}%` },
+  { id: 'boost', name: '加速儲能', max: 2, desc: (r) => `加速能量 +${25 * r}%、耗盡後恢復到 ${30 - 10 * r}% 就能再加速` },
   { id: 'bay', name: '彈艙擴充', max: 3, desc: (r) => `飛彈、魚雷、火箭攜帶量 +${25 * r}%` },
   { id: 'cool', name: '散熱系統', max: 3, desc: (r) => `機砲熱量 −${12 * r}%` },
   { id: 'lock', name: '快速鎖定', max: 2, desc: (r) => `鎖定時間 −${15 * r}%` },
   { id: 'ace', name: '王牌直覺', max: 2, desc: (r) => `受到的傷害 −${8 * r}%` },
   { id: 'rescue', name: '緊急回收', max: 2, desc: (r) => `重新出擊快 ${1.5 * r} 秒` },
 ];
+const PILOT_BOOST_MIN = 0.3;   // 加速能量用光後要恢復到這個比例才能再加速（「加速儲能」每級 −10%）
 const PILOT_LV_MAX = 26;   // 25 點剛好點滿全部天賦
 function pilotLvNeed(lv) { return 120 + 80 * (lv - 1); }   // Lv → Lv+1 要的經驗
 function pilotLevel(xp) { let lv = 1, need = pilotLvNeed(1); while (lv < PILOT_LV_MAX && xp >= need) { xp -= need; lv++; need = pilotLvNeed(lv); } return { lv, xp, need: lv >= PILOT_LV_MAX ? 0 : need }; }
@@ -126,7 +127,7 @@ function pilotBuild(cfg) {
   const T = (id) => Math.min((PILOT_TALENTS.find((x) => x.id === id) || { max: 0 }).max, (cfg.tal || {})[id] || 0), B = PILOT_FRAMES[cfg.frame] || PILOT_FRAMES[1];
   const sp = (1 + 0.05 * T('engine')) * PILOT_SPEED, ag = 1 + 0.06 * T('agile');
   const fr = { ...B, hp: B.hp * (1 + 0.1 * T('armor')), sh: B.sh * (1 + 0.12 * T('shield')), shR: B.shR * (1 + 0.1 * T('shield')), min: B.min * sp, cruise: B.cruise * sp, max: B.max * sp, acc: B.acc * PILOT_SPEED,
-    turn: B.turn * ag, roll: B.roll * ag, boostT: B.boostT * (1 + 0.25 * T('boost')) };
+    turn: B.turn * ag, roll: B.roll * ag, boostT: B.boostT * (1 + 0.25 * T('boost')), boostMin: PILOT_BOOST_MIN - 0.1 * T('boost') };
   return { fr, taken: 1 - 0.08 * T('ace'), respawn: PILOT_RESPAWN - 1.5 * T('rescue'), bay: 1 + 0.25 * T('bay'), cool: 1 - 0.12 * T('cool'), lock: 1 - 0.15 * T('lock') };
 }
 function pilotSlotMods(id, lv, B) {
@@ -188,7 +189,7 @@ function showPilot(view) {   // view：rand 隨機戰役（出擊設定）、han
         <dt>失敗</dt><dd>被擊墜超過上限（依 AI 難度：${PILOT_DEATHS.map((n, i) => `難度 ${i + 1} ${n} 次`).join('、')}）、護衛的航母被擊沉，或戰鬥結束前沒完成。艦隊戰勝負只是小獎勵。己方航母全滅就無法再出擊。</dd></dl></div>
       <div class="g-card"><h3>操作（滑鼠＋鍵盤）</h3><table class="pl-keys">
         <tr><td>滑鼠移動</td><td>瞄準方向（機體自動轉過去）</td></tr>${PILOT_SLOTS.map((S, k) => `<tr><td>${plSlotKey(k)}</td><td>${S.name}</td></tr>`).join('')}
-        <tr><td>${plKey('pilot_thr_up')}／${plKey('pilot_thr_dn')}</td><td>油門加／減（可以減到 0 停住，再按住減速鍵＝逆向噴射倒退）</td></tr><tr><td>${plKey('pilot_stop')}</td><td>油門歸零</td></tr><tr><td>${plKey('pilot_roll_l')}／${plKey('pilot_roll_r')}</td><td>翻滾</td></tr><tr><td>${plKey('pilot_boost')}</td><td>加速（有能量）</td></tr>
+        <tr><td>${plKey('pilot_thr_up')}／${plKey('pilot_thr_dn')}</td><td>油門加／減（可以減到 0 停住，再按住減速鍵＝逆向噴射倒退）</td></tr><tr><td>${plKey('pilot_stop')}</td><td>油門歸零</td></tr><tr><td>${plKey('pilot_roll_l')}／${plKey('pilot_roll_r')}</td><td>翻滾</td></tr><tr><td>${plKey('pilot_boost')}</td><td>加速（耗能量；用光後要恢復到 30% 才能再加速，天賦「加速儲能」可降低）</td></tr>
         <tr><td>${plKey('pilot_gear')}</td><td>纏鬥裝備（例如電磁干擾）</td></tr>
         <tr><td>${plKey('pilot_target')}</td><td>鎖定準心附近的敵人（機砲會顯示提前量）</td></tr><tr><td>${plKey('pilot_view')}</td><td>背後視角／座艙視角</td></tr><tr><td>滾輪</td><td>背後視角的鏡頭距離</td></tr>
         <tr><td>${plKey('pilot_jump')}</td><td><b>小型躍傳</b>：打開選單用數字鍵選一支艦隊（敵我都可以），充能 ${PILOT_JUMP.calm} 秒（被攻擊時 ${PILOT_JUMP.hot} 秒）後跳到它的交戰距離；冷卻 ${PILOT_JUMP.cd} 秒。從母艦到戰區最快的方法</td></tr>
@@ -301,7 +302,7 @@ function pilotGo() {
 }
 
 // ───── 戰鬥中 ─────
-Object.assign(PL, { side: 0, F: [0, 0, 1], U: [0, 1, 0], yaw: 0, pitch: 0, speed: 0, thr: 0.6, boost: 1, hp: 0, sh: 0, shT: -9, inv: 0, dead: false, deadT: 0,
+Object.assign(PL, { side: 0, F: [0, 0, 1], U: [0, 1, 0], yaw: 0, pitch: 0, speed: 0, thr: 0.6, boost: 1, boostLock: false, hp: 0, sh: 0, shT: -9, inv: 0, dead: false, deadT: 0,
   home: -1, frame: null, slots: [], fire: [false, false, false, false], press: [false, false, false, false], keys: new Set(), tgt: null, cock: false, camD: 1, msl: [], feed: [], hitT: -9, hurtT: -9,
   rearm: 0, out: 0, rng: 1, hits: [], flash: null, stats: null, el: null, ctx: null, pauseEl: null, locked: false, manualT: 0, seed: 0, banner: '' });
 const _pa = new THREE.Vector3(), _pb = new THREE.Vector3(), _pp = new THREE.Vector3();
@@ -329,7 +330,7 @@ function pilotBegin(cfg) {
 }
 function pilotEnd() {
   if (!PL.on) return;
-  PL.beam = null; PL.dock = null; PL.jump = null; PL.flash = null; PL.ecm = null; pilotBeamFrame(); pilotHitFrame(); ftrTrailMat.uniforms.uTrailMax.value = 1e6;
+  PL.beam = null; PL.dock = null; PL.jump = null; PL.flash = null; PL.ecm = null; pilotBeamFrame(); pilotHitFrame(); pilotFlameFrame(0); ftrTrailMat.uniforms.uTrailMax.value = 1e6;
   PL.on = false; PL.spec = false;
   if (PL.j >= 0) FT.state[PL.j] = 0;
   if (document.pointerLockElement) document.exitPointerLock();
@@ -355,7 +356,7 @@ function pilotSpawn(first) {
   FT.state[j] = 2; FT.side[j] = PL.side; FT.kind[j] = 3; FT.role[j] = Fr.role; FT.carrier[j] = c; FT.hp[j] = 999; FT.seed[j] = 0.5; FT.t0[j] = t; FT.launch[j] = 0; FT.ret[j] = 0; FT.engT[j] = 0; FT.tgt[j] = -1;
   fP[j * 3] = _pa.x + F[0] * L * 0.6; fP[j * 3 + 1] = _pa.y + L * 0.25 + 0.6; fP[j * 3 + 2] = _pa.z + F[2] * L * 0.6;
   PL.F = F; PL.U = v3.norm(v3.cross(v3.cross(F, [0, 1, 0]), F)); PL.yaw = Math.atan2(F[0], F[2]); PL.pitch = Math.asin(F[1]);
-  PL.speed = Fr.cruise; PL.thr = 0.6; PL.boost = 1; PL.hp = Fr.hp; PL.sh = Fr.sh; PL.shT = -9; PL.inv = t + 3; PL.dead = false; PL.rearm = 0; PL.out = 0;
+  PL.speed = Fr.cruise; PL.thr = 0.6; PL.boost = 1; PL.boostLock = false; PL.hp = Fr.hp; PL.sh = Fr.sh; PL.shT = -9; PL.inv = t + 3; PL.dead = false; PL.rearm = 0; PL.out = 0;
   fV[j * 3] = F[0] * PL.speed; fV[j * 3 + 1] = F[1] * PL.speed; fV[j * 3 + 2] = F[2] * PL.speed;
   pilotResetSlots();
   PL.beam = null; PL.dock = { ph: 'out', t: 0, c }; pilotDockStep(j, 0, t);   // 從甲板彈射起飛
@@ -381,10 +382,14 @@ function pilotFly(j, dt, t) {
   if (PL.out > 4) { const yaw = Math.atan2(-px, -pz); PL.yaw += wrapAngle(yaw - PL.yaw) * Math.min(1, dt * 2); PL.pitch += (Math.atan2(-py, Math.max(1, rr)) - PL.pitch) * Math.min(1, dt * 2); }
   const A = pilotAim();
   // 速度：油門＋加速
-  const boosting = plHeld('pilot_boost');
+  // 能量用光＝推進器鎖住，恢復到 boostMin 才能再加速
+  const bMin = Fr.boostMin ?? PILOT_BOOST_MIN;
+  if (PL.boostLock && PL.boost >= bMin) { PL.boostLock = false; pilotFeed('推進器恢復：可以再加速', 'ok'); }
+  const boosting = plHeld('pilot_boost') && PL.boost > 0 && !PL.boostLock;
   let want = Fr.cruise * PL.thr;   // 0＝停在原地、負＝逆向噴射倒退
-  if (boosting && PL.boost > 0) { want = Fr.max; PL.boost = Math.max(0, PL.boost - dt / Fr.boostT); } else PL.boost = Math.min(1, PL.boost + dt / (Fr.boostT * 2.5));
-  PL.boosting = boosting && PL.boost > 0;
+  if (boosting) { want = Fr.max; PL.boost = Math.max(0, PL.boost - dt / Fr.boostT); if (PL.boost <= 0) { PL.boostLock = true; pilotFeed(`加速能量耗盡：恢復到 ${Math.round(bMin * 100)}% 才能再加速`, 'hint'); } }
+  else PL.boost = Math.min(1, PL.boost + dt / (Fr.boostT * 2.5));
+  PL.boosting = boosting;
   if (simTick % 15 === 0) PL.travel = pilotTravelOk(fP[j3], fP[j3 + 1], fP[j3 + 2]);
   const tk = PL.travel && want > 0 ? PILOT_TRAVEL.mul : 1; want *= tk;
   const ak = Math.max(tk, Math.abs(PL.speed) > Fr.max * 1.05 ? PILOT_TRAVEL.mul : 1);   // 航行加速時（或剛結束時）加減速也快一點
@@ -646,7 +651,7 @@ function pilotDockStep(j, dt, t) {
   } else if (d.ph === 'deck') {
     if (PL.mis && PL.mis.done && !GAME.result) { PL.mis.rtb = true; GAME.result = battleResult('end', '任務完成，返航', { pilotRtb: true }); }   // 完成任務後降落＝結算
     P = K.P; F = K.F; PL.rearm = Math.min(1, d.t / PILOT_DOCK.deckT);
-    if (d.t >= PILOT_DOCK.deckT) { PL.hp = Fr.hp; PL.sh = Fr.sh; PL.boost = 1; pilotResetSlots(); PL.rearm = 0; d.ph = 'out'; d.t = 0; pilotFeed('整補完成：彈藥、耐久補滿・彈射起飛！', 'ok'); }
+    if (d.t >= PILOT_DOCK.deckT) { PL.hp = Fr.hp; PL.sh = Fr.sh; PL.boost = 1; PL.boostLock = false; pilotResetSlots(); PL.rearm = 0; d.ph = 'out'; d.t = 0; pilotFeed('整補完成：彈藥、耐久補滿・彈射起飛！', 'ok'); }
   } else {
     // 彈射：沿甲板加速到巡航速度，最後稍微拉起
     const T = PILOT_DOCK.outT, a = Fr.cruise / T, s = 0.5 * a * d.t * d.t, lift = Math.max(0, d.t - T * 0.5) * 0.12;
@@ -1128,6 +1133,7 @@ function pilotFrame(dt) {
   pilotMisTick();
   pilotBeamFrame();
   pilotHitFrame();
+  pilotFlameFrame(dt);
   pilotHud();
 }
 // 儀表風格參考《機戰傭兵6》（準心四角的武裝讀數、準心下方的 AP／護盾／EN 條、上方目標資訊條）
@@ -1401,9 +1407,11 @@ function pilotVitals(g, cx, y, m, ca, red, now) {
   bar(y + 21, 7, hk, low ? red : '#f0f4fa');
   g.fillStyle = 'rgba(6,12,22,.8)'; for (let q = 1; q < 10; q++) g.fillRect(x0 + w * q / 10 - 0.5, y + 21, 1, 7);   // AP 條分 10 格
   g.strokeStyle = ca(0.35); g.strokeRect(x0 - 0.5, y + 14.5, w + 1, 14);
-  bar(y + 33, 3, PL.boost, PL.boosting ? PL_AMB : 'rgba(255,211,106,.55)');
+  bar(y + 33, 3, PL.boost, PL.boostLock ? 'rgba(255,120,90,.75)' : PL.boosting ? PL_AMB : 'rgba(255,211,106,.55)');
+  if (PL.boostLock) { g.fillStyle = '#fff'; g.fillRect(x0 + w * (Fr.boostMin ?? PILOT_BOOST_MIN) - 0.5, y + 31, 1.5, 7); }   // 鎖住時標出恢復加速的位置
   plFont(g, 9, true, true); g.fillStyle = 'rgba(220,228,240,.6)'; g.fillText('EN', x0 - 5, y + 35);
-  if (PL.boost < 0.15 && bl) { g.textAlign = 'left'; g.fillStyle = PL_AMB; g.fillText('EN LOW', x0 + w + 5, y + 35); }
+  if (PL.boostLock) { if (bl) { g.textAlign = 'left'; g.fillStyle = 'rgba(255,140,110,.95)'; g.fillText('EN RECHARGE', x0 + w + 5, y + 35); } }
+  else if (PL.boost < 0.15 && bl) { g.textAlign = 'left'; g.fillStyle = PL_AMB; g.fillText('EN LOW', x0 + w + 5, y + 35); }
   g.textAlign = 'left';
 }
 // 上方航向帶：機首航向（000～359），標出指定目標（黃）、任務目標（橘）、護衛目標與母艦（綠）的方位；超出範圍就停在兩端
@@ -1494,6 +1502,33 @@ const PL_HIT = (() => {
   m.visible = false; m.renderOrder = 8; m.frustumCulled = false; scene.add(m); return m;
 })();
 const _hitHull = new THREE.Color(1.0, 0.55, 0.2), _hitSh = new THREE.Color(0.45, 0.75, 1.0);
+// 自己的機的推進器噴焰：機尾的錐形火焰（白色核心＋陣營色外焰）＋噴口光球；油門越大越長，加速時變長變亮、閃動；倒退時改由機首噴
+const PL_FLAME = (() => {
+  const geo = new THREE.ConeGeometry(1, 1, 14, 1, true); geo.translate(0, 0.5, 0);   // 底面在原點、尖端朝 +Y
+  const mk = (c, o) => new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  const g = new THREE.Group(), core = mk(0xffffff, 0.9), glow = mk(0xffaa55, 0.45), halo = mk(0xffaa55, 0.16);
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffaa55, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false }));
+  g.add(halo, glow, core, ball); g.visible = false; g.renderOrder = 7; for (const m of [core, glow, halo, ball]) m.frustumCulled = false; scene.add(g);
+  return { g, core, glow, halo, ball, k: 0, b: 0 };
+})();
+const _flY = new THREE.Vector3(0, 1, 0), _flD = new THREE.Vector3(), _flW = new THREE.Color(1, 1, 1);
+function pilotFlameFrame(dt) {
+  const j = PL.j, on = PL.on && !PL.spec && !PL.dead && !(PL.cock && !PL.dead) && j >= 0 && FT.state[j] === 2;
+  const Q = PL_FLAME; Q.g.visible = !!on; if (!on) { Q.k = Q.b = 0; return; }
+  const rev = PL.speed < -0.5, a = Math.min(1, (dt || 0.016) * 8);
+  const kWant = rev ? 0.5 : Math.max(0.12, Math.min(1, PL.thr)), bWant = PL.boosting ? 1 : 0;
+  Q.k += (kWant - Q.k) * a; Q.b += (bWant - Q.b) * Math.min(1, (dt || 0.016) * (bWant ? 12 : 5));   // 點火快、熄火慢一點
+  const FL = PILOT_FTR_LEN, F = PL.F, now = performance.now() / 1000, fl = 1 + 0.18 * Math.sin(now * 61) + 0.1 * Math.sin(now * 37) + Q.b * 0.15 * Math.sin(now * 89);
+  const sgn = rev ? 1 : -1, nz = rev ? 0.42 : 0.47;   // 倒退：從機首往前噴
+  Q.g.position.set(fP[j * 3] + F[0] * sgn * nz * FL, fP[j * 3 + 1] + F[1] * sgn * nz * FL, fP[j * 3 + 2] + F[2] * sgn * nz * FL);
+  _flD.set(F[0] * sgn, F[1] * sgn, F[2] * sgn); Q.g.quaternion.setFromUnitVectors(_flY, _flD);
+  const len = FL * (rev ? 0.3 : 0.25 + 0.45 * Q.k + 1.3 * Q.b) * fl, r = FL * (0.028 + 0.01 * Q.k + 0.022 * Q.b);   // 背後視角噴焰朝著鏡頭，太粗會蓋住機身
+  Q.core.scale.set(r * 0.45, len * 0.75, r * 0.45); Q.glow.scale.set(r, len, r); Q.halo.scale.set(r * 1.7, len * 0.6, r * 1.7);
+  Q.ball.scale.setScalar(r * (1.1 + 0.6 * Q.b) * fl);
+  const col = FACTION[SIDE_FAC[PL.side]].glow;
+  Q.glow.material.color.copy(col); Q.halo.material.color.copy(col); Q.ball.material.color.copy(col).lerp(_flW, 0.35 * Q.b);
+  Q.core.material.opacity = 0.5 + 0.35 * Q.b; Q.glow.material.opacity = 0.3 + 0.3 * Q.b; Q.halo.material.opacity = 0.05 + 0.12 * Q.b; Q.ball.material.opacity = 0.2 + 0.3 * Q.b;
+}
 function pilotHitFrame() {
   const f = PL.flash, age = f ? (performance.now() - f.t) / 1000 : 9, on = PL.on && !PL.spec && !PL.dead && !PL.cock && age < 0.22;
   PL_HIT.visible = on; if (!on) return;
