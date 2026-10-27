@@ -694,6 +694,7 @@ function setPhase(ph) {
   document.body.classList.toggle('game-battle', ph === 'battle' || ph === 'replay');
   document.body.classList.toggle('game-deploy', ph === 'deploy');
   document.body.classList.toggle('ld-on', ph === 'loadout');   // 編成：背景是 3D 太空港（dock.js）
+  document.body.classList.remove('hg-on');   // 王牌飛行員的機庫（hangar.js）：進機庫畫面時再加回來
   document.body.classList.toggle('game-sand', ph === 'sandbox');
   document.body.classList.toggle('game-simedit', ph === 'simedit');
   document.body.classList.toggle('game-watch', !!GAME.watch && (ph === 'battle' || ph === 'replay'));

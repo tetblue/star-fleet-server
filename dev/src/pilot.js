@@ -158,22 +158,10 @@ function showPilot(view) {   // view：rand 隨機戰役（出擊設定）、han
   if (typeof view === 'string') GAME.plView = view; view = GAME.plView || 'rand';
   const p = pilotLoad();
   setPhase('briefing');
+  if (view === 'hangar') return pilotHangar(p);
   const seg = (key, arr) => `<div class="wed-seg rd-seg" data-po="${key}">${arr.map(([v, n]) => `<button data-v="${v}" class="${p[key] === v ? 'on' : ''}">${n}</button>`).join('')}</div>`;
   const F = PILOT_FRAMES[p.frame];
   const bar = (v, max) => `<i class="pl-bar"><b style="width:${Math.round(v / max * 100)}%"></b></i>`;
-  const frames = PILOT_FRAMES.map((f, i) => `<button class="pl-frame ${i === p.frame ? 'on' : ''}" data-fr="${i}"><span class="sp-en">${f.en}</span><b>${f.name}</b>
-    <span class="pl-st">耐久 ${bar(f.hp + f.sh, 100)} 速度 ${bar(f.max, 100)} 機動 ${bar(f.turn, 2.5)}</span><small>${f.desc}</small></button>`).join('');
-  const wcell = (k) => PILOT_WPN_ORDER.map((id) => {
-    const W = PILOT_WEAPONS[id], lock = W.unlock > p.merit, on = p.slots[k] === id, other = p.slots.some((x, i) => i !== k && x === id);
-    const P = pilotProf(p.wxp[id] || 0), prof = lock ? '' : `<span class="pl-prof">熟練 Lv ${P.lv}${P.next ? ` ${bar(P.xp - P.cur, P.next - P.cur)}` : '（最高）'}</span>`;
-    return `<button class="pl-wpn ${on ? 'on' : ''} ${lock ? 'lock' : ''}" data-slot="${k}" data-w="${id}" ${lock ? 'disabled' : ''} title="${W.desc}"><b>${W.name}</b>${prof}<small>${lock ? `戰功 ${fmtN(W.unlock)} 解鎖` : other && on ? '其他槽也裝了這把（各自的彈藥、鎖定）' : `${W.desc}${P.lv ? `<br>熟練加成：${pilotProfDesc(id, P.lv)}` : ''}`}</small></button>`;
-  }).join('');
-  const gcell = ['', ...PILOT_GEAR_ORDER].map((id) => {
-    if (!id) return `<button class="pl-wpn pl-gear ${p.gear ? '' : 'on'}" data-gear=""><b>不裝</b><small>纏鬥裝備槽空著</small></button>`;
-    const W = PILOT_WEAPONS[id], lock = W.unlock > p.merit, P = pilotProf(p.wxp[id] || 0);
-    const prof = lock ? '' : `<span class="pl-prof">熟練 Lv ${P.lv}${P.next ? ` ${bar(P.xp - P.cur, P.next - P.cur)}` : '（最高）'}</span>`;
-    return `<button class="pl-wpn pl-gear ${p.gear === id ? 'on' : ''} ${lock ? 'lock' : ''}" data-gear="${id}" ${lock ? 'disabled' : ''} title="${W.desc}"><b>${W.name}</b>${prof}<small>${lock ? `戰功 ${fmtN(W.unlock)} 解鎖` : `${W.desc}${P.lv ? `<br>熟練加成：${pilotProfDesc(id, P.lv)}` : ''}`}</small></button>`;
-  }).join('');
   const L = pilotLevel(p.xp), free = pilotTalFree(p);
   const tals = PILOT_TALENTS.map((T) => { const r = Math.min(T.max, p.tal[T.id] || 0);
     return `<div class="pl-tal ${r ? 'on' : ''}"><div class="pl-tal-h"><b>${T.name}</b><span class="pl-pips">${Array.from({ length: T.max }, (_, k) => `<i class="${k < r ? 'on' : ''}"></i>`).join('')}</span></div>
@@ -186,11 +174,6 @@ function showPilot(view) {   // view：rand 隨機戰役（出擊設定）、han
       <div><span class="g-dim">擊墜</span><b>${p.kf}</b></div><div><span class="g-dim">擊沉</span><b>${p.ks}</b></div><div><span class="g-dim">被擊墜</span><b>${p.deaths}</b></div>
       <span class="g-dim pl-note">戰功同時是飛行員經驗（升級得天賦點數）與解鎖武裝的門檻；武器用得越多，熟練度越高。</span></div>
     ${view === 'tal' ? `<div class="g-card" style="margin-top:12px"><h3>天賦 <span class="g-dim" style="font-weight:400">可用點數 <b class="${free > 0 ? 'g-pc' : ''}">${free}</b>・每升一級 1 點・可以隨時免費重新分配</span><button class="g-btn sm" id="pl-tal-reset" style="float:right">全部重新分配</button></h3><div class="pl-tals">${tals}</div></div>` : ''}
-    ${view === 'hangar' ? `<div class="g-card" style="margin-top:12px"><h3>機體</h3><div class="pl-frames">${frames}</div></div>
-    <div class="intel-grid" style="margin-top:12px">
-      ${PILOT_SLOTS.map((S, k) => `<div class="g-card"><h3>${S.name}（${plSlotKey(k)}）</h3><div class="pl-wpns">${wcell(k)}</div></div>`).join('')}
-    </div>
-    <div class="g-card" style="margin-top:12px"><h3>纏鬥裝備（${plKey('pilot_gear')}）<span class="g-dim" style="font-weight:400">　不佔武器槽，另外裝一件</span></h3><div class="pl-wpns">${gcell}</div></div>` : ''}
     ${view === 'rand' ? `<div class="intel-grid" style="margin-top:12px">
       <div class="g-card"><h3>戰場</h3><dl class="kv rd-opts">
         <dt>所屬陣營</dt><dd>${seg('fac', [[0, FACTION_NAME[0]], [1, FACTION_NAME[1]]])}<div class="g-dim">從己方航母起飛；敵軍是另一個陣營</div></dd>
@@ -217,12 +200,52 @@ function showPilot(view) {   // view：rand 隨機戰役（出擊設定）、han
   on('pl-sortie', () => showPilot('rand'));
   on('pl-keys', () => openSettings());
   const keep = () => { const y = gEl('game').scrollTop; pilotSave(p); showPilot(); gEl('game').scrollTop = y; };
-  document.querySelectorAll('[data-fr]').forEach((b) => (b.onclick = () => { p.frame = +b.dataset.fr; keep(); }));
   document.querySelectorAll('[data-tal]').forEach((b) => (b.onclick = () => { const T = PILOT_TALENTS.find((x) => x.id === b.dataset.tal), r = (p.tal[T.id] || 0) + +b.dataset.d; if (r < 0 || r > T.max || (+b.dataset.d > 0 && pilotTalFree(p) <= 0)) return; p.tal[T.id] = r; keep(); }));
   on('pl-tal-reset', () => { p.tal = {}; keep(); });
-  document.querySelectorAll('.pl-wpn[data-slot]').forEach((b) => (b.onclick = () => { p.slots[+b.dataset.slot] = b.dataset.w; keep(); }));
-  document.querySelectorAll('[data-gear]').forEach((b) => (b.onclick = () => { p.gear = b.dataset.gear; keep(); }));
   document.querySelectorAll('[data-po]').forEach((g) => g.querySelectorAll('button').forEach((b) => (b.onclick = () => { p[g.dataset.po] = +b.dataset.v; keep(); })));
+}
+// ───── 機庫畫面：背景是全螢幕 3D 機庫（hangar.js），介面疊在上面、不捲動 ─────
+// 點一個掛架（武裝一～四、纏鬥裝備）→ 下面列出可以裝的武器；換機體＝升降梯、換武裝＝機械手臂
+function pilotHangar(p) {
+  const sel = GAME.hgSel = Math.max(0, Math.min(4, GAME.hgSel || 0));
+  const bar = (v, max) => `<i class="pl-bar"><b style="width:${Math.round(Math.min(1, v / max) * 100)}%"></b></i>`;
+  const F = PILOT_FRAMES[p.frame], L = pilotLevel(p.xp), B = pilotBuild({ frame: p.frame, tal: p.tal });
+  const wname = (id) => (id ? PILOT_WEAPONS[id].name : '（空）');
+  const ammo = (id) => { if (!id) return ''; const m = pilotSlotMods(id, pilotProf(p.wxp[id] || 0).lv, B); return m.max ? ` ${m.max} ${PILOT_WEAPONS[id].type === 'lock' ? '枚' : '發'}` : ''; };
+  const slots = [...PILOT_SLOTS.map((S, k) => ({ k, name: S.name, key: plSlotKey(k), id: p.slots[k] })), { k: 4, name: '纏鬥裝備', key: plKey('pilot_gear'), id: p.gear }];
+  const ids = sel === 4 ? ['', ...PILOT_GEAR_ORDER] : PILOT_WPN_ORDER, cur = sel === 4 ? p.gear : p.slots[sel];
+  const chip = (id) => {
+    if (!id) return `<button class="hg-chip ${cur ? '' : 'on'}" data-hw=""><b>不裝</b><small>纏鬥裝備槽空著</small></button>`;
+    const W = PILOT_WEAPONS[id], lock = W.unlock > p.merit, P = pilotProf(p.wxp[id] || 0), other = sel < 4 && p.slots.some((x, i) => i !== sel && x === id);
+    return `<button class="hg-chip ${id === cur ? 'on' : ''} ${lock ? 'lock' : ''}" data-hw="${id}" ${lock ? 'disabled' : ''} title="${W.desc}"><b>${W.name}</b><small>${lock ? `戰功 ${fmtN(W.unlock)} 解鎖` : `熟練 Lv ${P.lv}${other ? '・其他槽也有' : ''}`}</small></button>`;
+  };
+  const CW = cur && PILOT_WEAPONS[cur], CP = cur ? pilotProf(p.wxp[cur] || 0) : null;
+  overlay(`<div class="ld-screen hg-screen">
+    <div class="ld-top">
+      <button class="g-btn" id="pl-back">← 王牌飛行員</button>
+      <div class="ld-title"><h2>機庫</h2><span class="crumb">王牌飛行員・機體、武裝與纏鬥裝備</span></div>
+      <div class="hg-rec"><span>Lv <b>${L.lv}</b></span>${L.need ? `<span class="pl-xp">${bar(L.xp, L.need)}<small>${fmtN(Math.floor(L.xp))}／${fmtN(L.need)}</small></span>` : ''}<span class="g-dim">戰功 <b>${fmtN(p.merit)}</b></span><span class="g-dim">擊墜 <b>${p.kf}</b></span></div>
+      <span class="g-sp"></span>
+      <button class="g-btn pri" id="pl-sortie">前往出擊 →</button>
+    </div>
+    <div class="ld-side g-card hg-side">
+      <div class="hg-h">機體<small>換機體時升降梯會把機體換上來</small></div>
+      <div class="hg-frames">${PILOT_FRAMES.map((f, i) => `<button class="hg-fr ${i === p.frame ? 'on' : ''}" data-fr="${i}" title="${f.desc}"><span class="sp-en">${f.en}</span><b>${f.name.replace('・改', '')}</b></button>`).join('')}</div>
+      <div class="hg-fd"><div class="hg-st"><span>耐久</span>${bar(F.hp + F.sh, 100)}<span>速度</span>${bar(F.max, 100)}<span>機動</span>${bar(F.turn, 2.5)}</div><small>${F.desc}</small></div>
+      <div class="hg-h">武裝<small>點一個掛架，再選要裝的武器</small></div>
+      <div class="hg-slots">${slots.map((S) => `<button class="hg-slot ${S.k === sel ? 'on' : ''} ${S.k === 4 ? 'gear' : ''}" data-hs="${S.k}"><span>${S.name}<small>${S.key}</small></span><b>${wname(S.id)}<small>${ammo(S.id)}</small></b></button>`).join('')}</div>
+      <div class="hg-pick">${ids.map(chip).join('')}</div>
+      <div class="hg-desc">${CW ? `<b>${CW.name}</b>　${CW.desc}${CP.lv ? `<br><span class="g-pc">熟練 Lv ${CP.lv}：${pilotProfDesc(cur, CP.lv)}</span>` : ''}` : '<span class="g-dim">這個槽沒有裝東西。</span>'}</div>
+    </div>
+    <div class="ld-cap" id="hg-cap"></div>
+  </div>`);
+  gEl('pl-back').onclick = showSingle;
+  gEl('pl-sortie').onclick = () => showPilot('rand');
+  const redo = () => { pilotSave(p); showPilot('hangar'); };
+  document.querySelectorAll('[data-fr]').forEach((b) => (b.onclick = () => { p.frame = +b.dataset.fr; redo(); }));
+  document.querySelectorAll('[data-hs]').forEach((b) => (b.onclick = () => { GAME.hgSel = +b.dataset.hs; redo(); }));
+  document.querySelectorAll('[data-hw]').forEach((b) => (b.onclick = () => { if (sel === 4) p.gear = b.dataset.hw; else p.slots[sel] = b.dataset.hw; redo(); }));
+  hgAttach(p, sel);
 }
 // 設定 → 模擬室布局（雙方 AI；己方第一艦隊一定有航母）
 function pilotLayout(p) {
@@ -818,7 +841,7 @@ function pilotMissiles(dt, t) {
       if (cd < 2.4) { pending.push({ kind: 'ak', a: 1, t, i: g, dmg: m.dmg, side: PL.side, pl: W.id }); spawnFx(tx, ty, tz, PL.side, 1.6, 26); PL.msl.splice(k, 1); continue; }
     }
     if ((m.n++ & 1) === 0) spawnBeam(x0 - m.vx * dt, y0 - m.vy * dt, z0 - m.vz * dt, m.x, m.y, m.z, t, 0.18, PL.side, 0.8, 1.0, shipFac(PL.home >= 0 ? PL.home : 0));
-    if (m.life <= 0 || (ROCKS.length && rockBlock(x0, y0, z0, m.x, m.y, m.z) >= 0)) { spawnFx(m.x, m.y, m.z, PL.side, 1.4, 26); PL.msl.splice(k, 1); }
+    if (m.life <= 0 || (SOLID && rockBlock(x0, y0, z0, m.x, m.y, m.z) >= 0)) { spawnFx(m.x, m.y, m.z, PL.side, 1.4, 26); PL.msl.splice(k, 1); }
   }
 }
 function pilotRetarget(m) {

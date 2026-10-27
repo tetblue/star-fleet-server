@@ -327,8 +327,8 @@ function dockTrail(s, on, face, L, col) {
   s.trail.forEach((o, k) => { const h = s.hist[Math.min(s.hist.length - 1, k * 2)]; o.position.copy(h); const f = 1 - k / N; o.scale.setScalar(L * 0.55 * f + 0.3); o.material.opacity = 0.75 * f * f; });
 }
 // 可見區域：扣掉上方工具列、左側（手機是下方）的編成面板、右側的教學面板
-function dockVisible() {
-  const W = DOCK.W, H = DOCK.H, q = (sel) => { const e = document.querySelector(sel); return e && e.offsetParent ? e.getBoundingClientRect() : null; };
+function dockVisible(W = DOCK.W, H = DOCK.H) {   // 機庫（hangar.js）也用
+  const q = (sel) => { const e = document.querySelector(sel); return e && e.offsetParent ? e.getBoundingClientRect() : null; };
   let x0 = 0, x1 = W, y0 = 0, y1 = H, sheet = false;
   const top = q('.ld-top'), side = q('.ld-side'), tut = document.body.classList.contains('tut-side') && q('#tut-panel');
   if (top) y0 = Math.min(H * 0.4, top.bottom);
