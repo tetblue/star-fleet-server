@@ -70,3 +70,4 @@ async function autoStory(id, o = {}) {
   }
 }
 Object.assign(window.__demo, { autoStory, queueMode });
+Object.assign(window.__demo, { GRD: () => GRD, setGround, groundBlock, groundGen, newBattle, battleSetup: () => battleSetup, groundFrame, GV });   // 近地作戰（除錯）

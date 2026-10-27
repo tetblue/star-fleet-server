@@ -203,7 +203,7 @@ function makeSetup(sc, lo, attempt) {
     fleetsS.push({ side: 1, name: ev.name, ax: sx * 800, az: -140 + R() * 200, ay: Math.round((R() - 0.5) * 240), h: sx < 0 ? Math.PI / 2 : -Math.PI / 2, formation: ev.formation, comp: ev.comp.slice(),
       commander: ev.commander ? { ...ev.commander } : reinforceCmdr(sc), reserve: true, activateAt: at, ai: { tactic: 'push', level: sc.level } });
   }
-  return { bg: false, terrain: sc.terrain, fleets: fleetsS, scenario: sc.id, timeLimit: sc.timeLimit, level: sc.level, factions: sc.enemyFac != null ? [lo.faction || 0, sc.enemyFac] : (lo.faction || 0) === 1 ? [1, 0] : [0, 1], ...(sc.goal ? { goal: sc.goal } : {}), ...(sc.lines ? { lines: sc.lines } : {}), ...(sc.dlines ? { dlines: sc.dlines } : {}), ...(sc.defect ? { defect: sc.defect } : {}), ...(sc.aiOmni ? { omni: [false, true] } : {}), ...(sc.untimed ? { untimed: true } : {}) };   // untimed：沒有時限（timeLimit 只當目標時間）；aiOmni：這一關的 AI 不受戰爭迷霧限制
+  return { bg: false, terrain: sc.terrain, ...(sc.ground ? { ground: { ...sc.ground } } : {}), fleets: fleetsS, scenario: sc.id, timeLimit: sc.timeLimit, level: sc.level, factions: sc.enemyFac != null ? [lo.faction || 0, sc.enemyFac] : (lo.faction || 0) === 1 ? [1, 0] : [0, 1], ...(sc.goal ? { goal: sc.goal } : {}), ...(sc.lines ? { lines: sc.lines } : {}), ...(sc.dlines ? { dlines: sc.dlines } : {}), ...(sc.defect ? { defect: sc.defect } : {}), ...(sc.aiOmni ? { omni: [false, true] } : {}), ...(sc.untimed ? { untimed: true } : {}) };   // untimed：沒有時限（timeLimit 只當目標時間）；aiOmni：這一關的 AI 不受戰爭迷霧限制
 }
 
 // ───── 技能（命令 'skill'） ─────
@@ -807,7 +807,7 @@ function showSpHub(M) {
     const pts = COMMANDERS.reduce((s, o) => s + Math.max(0, cmdrPoints(o.id)), 0);
     ops = [
       { id: 'sp-story', icon: 'story', en: 'CAMPAIGN', name: '主線・雙星記', desc: '劇情戰役：選擇帝國篇或聯盟篇，從頭到尾指揮同一個陣營，打到這場戰爭的結局；番外篇〈雙星之外〉是灰鴉傭兵團的故事', st: STORY_LINE[sp.line] ? `${STORY_LINE[sp.line].name} ${storyCount(sp, sp.line)}／${storySeq(sp.line).length} 場` : '尚未開始', cls: 'pri' },
-      { id: 'sp-rand', icon: 'rand', en: 'SKIRMISH', name: '隨機戰役', desc: '自選規模與敵軍強度，敵軍和地形每次隨機生成', st: `${RAND_SIZES[ro.size].name}・敵軍${RAND_DIFF[ro.diff].name}・地形${RAND_TERR[ro.terr].name}` },
+      { id: 'sp-rand', icon: 'rand', en: 'SKIRMISH', name: '隨機戰役', desc: '自選規模與敵軍強度，敵軍和地形每次隨機生成', st: `${RAND_SIZES[ro.size].name}・敵軍${RAND_DIFF[ro.diff].name}・${ro.env ? GROUND_ENV[ro.env].name : `地形${RAND_TERR[ro.terr].name}`}` },
       { id: 'sp-camp', icon: 'endless', en: 'ENDLESS', name: '無限戰場', desc: '無限關卡：敵軍依你的指揮官等級生成，一關比一關大', st: `第 ${c.stage} 關・最高第 ${c.best} 關` },
       { id: 'sp-sand', icon: 'sim', en: 'SIMULATOR', name: '模擬室', desc: '自由布置雙方艦隊、指揮官與地形，用正式規則測試戰術（可接管任一方）', st: '不計戰績、不給經驗' },
       { id: 'sp-train', icon: 'train', en: 'TRAINING', name: '訓練場', desc: '從零開始的教學課程與戰術手冊，以及固定的作戰關卡：讀情報、編成、部署，熟悉各種戰況', st: `教學 ${TUT_LESSONS.filter((L) => tutLoad().done[L.id]).length}／${TUT_LESSONS.length}・${SCENARIOS.length} 場作戰` },
@@ -897,6 +897,7 @@ function minimapSVG(sc, intel, lo) {
   const sx = W / (MAP_BOUNDS.x1 - MAP_BOUNDS.x0);
   const rect = (r, c, op) => `<rect x="${mx(r.x0)}" y="${mz(r.z0)}" width="${mx(r.x1) - mx(r.x0)}" height="${mz(r.z1) - mz(r.z0)}" fill="${c}" fill-opacity="${op}" stroke="${c}" stroke-opacity=".7" stroke-dasharray="4 3"/>`;
   let s = `<svg class="minimap" viewBox="0 0 ${W} ${Hh}">`;
+  s += groundMinimapSVG(sc.ground, W, Hh, mx, mz);   // 近地：高度底圖、砲台
   s += rect(DEPLOY_ZONE, '#f2b35a', 0.08) + rect(ENEMY_ZONE, '#7cc4ff', 0.06);
   for (const t of sc.terrain) s += `<circle cx="${mx(t.x)}" cy="${mz(t.z)}" r="${t.r * sx}" fill="#${TERRAIN_TYPES[t.type].color.toString(16).padStart(6, '0')}" fill-opacity=".22"/>`;
   for (const f of intel.fleets) s += `<circle cx="${mx(f.x)}" cy="${mz(f.z)}" r="${f.fuzz * sx + 6}" fill="#7cc4ff" fill-opacity=".18" stroke="#7cc4ff" stroke-opacity=".6"/><text x="${mx(f.x)}" y="${mz(f.z) - f.fuzz * sx - 9}" fill="#9fd2ff" font-size="10" text-anchor="middle">${f.name}</text>`;
@@ -924,7 +925,7 @@ function briefIntel(sc, I) {
             <dt>偏好打法</dt><dd>${f.tactic ? `${TACTICS[f.tactic].name}<span class="conf">${TACTICS[f.tactic].desc}</span>` : '<span class="unk">不明</span>'}</dd></dl></div>`).join('')}
             <dl class="kv"><dt>其他</dt><dd>${I.events ? (I.events.length ? I.events.join('<br>') : '未發現其他部隊') : '<span class="unk">不明（無法排除伏兵或增援）</span>'}</dd></dl></div>
           <div class="g-card"><h3>戰場環境</h3>${minimapSVG(sc, I, GAME.loadout)}
-            <div style="margin-top:8px;font-size:calc(12.5px * var(--ui))">${sc.terrain.length ? [...new Set(sc.terrain.map((t) => t.type))].map((k) => `<div><b>${TERRAIN_TYPES[k].name}</b>：<span class="g-dim">${TERRAIN_TYPES[k].desc}</span></div>`).join('') : '<span class="g-dim">開闊宙域，沒有地形影響。</span>'}</div></div>
+            <div style="margin-top:8px;font-size:calc(12.5px * var(--ui))">${envBriefHtml(sc)}</div></div>
         </div>${briefFaction(briefEnemyFac(sc))}`;
 }
 function showBriefing(sc) {

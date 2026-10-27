@@ -131,6 +131,9 @@ const U = {
   uSqM: { value: Array.from({ length: MAX_SQ }, () => new THREE.Vector4()) },     // 陣型變換 start, dur
   uSqP: { value: Array.from({ length: MAX_SQ }, () => new THREE.Vector4()) },     // 3D：高度、俯仰角
   uRock: { value: Array.from({ length: 8 }, () => new THREE.Vector4()) }, uRockN: { value: 0 },   // 實體障礙（球）：x, y, z, r
+  // 近地作戰（ground.js）：地面高度格（uGrd＝半寬、格子大小、格數、開關）；直立的柱子（軌道電梯纜繩）x, z, r, 頂端高度
+  uGrdTex: { value: (() => { const t = new THREE.DataTexture(new Float32Array([-1e4]), 1, 1, THREE.RedFormat, THREE.FloatType); t.needsUpdate = true; return t; })() }, uGrd: { value: new THREE.Vector4(1, 1, 1, 0) },
+  uPil: { value: Array.from({ length: 16 }, () => new THREE.Vector4()) }, uPilN: { value: 0 },
   uAlt: { value: 1 },
   uFog: { value: 1 },
   uCamDir: { value: CAM_DIR },
@@ -141,6 +144,7 @@ const U = {
 const COMMON_GLSL = /* glsl */`
   uniform float uTime; uniform vec2 uRes; uniform vec4 uSq[${MAX_SQ}]; uniform vec4 uSqT[${MAX_SQ}]; uniform vec4 uSqM[${MAX_SQ}]; uniform vec4 uSqP[${MAX_SQ}];
   uniform vec4 uRock[8]; uniform float uRockN;
+  uniform sampler2D uGrdTex; uniform vec4 uGrd; uniform vec4 uPil[16]; uniform float uPilN;
   uniform float uAlt; uniform float uFog; uniform vec3 uCamDir;
   attribute vec3 aLocal; attribute vec3 aLocal2; attribute vec4 aInfo; attribute vec2 aState; attribute float aScale; attribute vec4 aPath; attribute vec4 aSwap; attribute float aSwapD;
   const float PI = 3.14159265;
@@ -171,6 +175,8 @@ const COMMON_GLSL = /* glsl */`
     p += R * L.x + F * L.z + Up * ly;
     if (aPath.w > 0.5) p = vec3(aPath.x, sp.x + ly, aPath.y);   // 蛇行迴轉：位置由 CPU 沿軌跡算好（水平）
     for (int k = 0; k < 8; k++) { if (float(k) >= uRockN) break; vec3 d = p - uRock[k].xyz; float dl = length(d); if (dl < uRock[k].w + 1.5) p = uRock[k].xyz + d / max(dl, 0.001) * (uRock[k].w + 1.5); }   // 被障礙擋住：推到表面
+    for (int k = 0; k < 16; k++) { if (float(k) >= uPilN) break; vec2 d = p.xz - uPil[k].xy; float dl = length(d); if (dl < uPil[k].z + 1.5 && p.y < uPil[k].w) p.xz = uPil[k].xy + d / max(dl, 0.001) * (uPil[k].z + 1.5); }   // 近地：柱子（水平推開）
+    if (uGrd.w > 0.5) { vec2 gc = clamp(floor((p.xz + uGrd.x) / uGrd.y), 0., uGrd.z - 1.); p.y = max(p.y, texture2D(uGrdTex, (gc + 0.5) / uGrd.z).r); }   // 近地：最低飛行高度（同 groundPush）
     // 微幅漂浮（整齊模式也保留，幅度遠小於艦距）
     float bob = 1.;
     p.y += sin(uTime * 0.6 + seed * 40.) * 0.35 * bob;
@@ -1148,7 +1154,7 @@ function fowUpdate() {
       if (e.side === q.side || !fowLive(e)) continue;
       const i = sqIdx(e); if (row[i]) continue;
       if (Math.hypot(e.x - q.x, (e.y || 0) - (q.y || 0), e.z - q.z) - Math.max(e.W, e.D) / 2 > R) continue;
-      if (ROCKS.length && rockBlock(q.x, q.y || 0, q.z, e.x, e.y || 0, e.z) >= 0) continue;   // 躲在巨大小行星後面
+      if (SOLID && rockBlock(q.x, q.y || 0, q.z, e.x, e.y || 0, e.z) >= 0) continue;   // 躲在巨大小行星後面
       row[i] = 1;
     }
   }
@@ -1194,7 +1200,7 @@ function fowUpdate() {
     for (const [e, o] of f.fowLast) {
       if (f.fowK[sqIdx(e)]) continue;
       if (e.alive <= 0 && t - o.t > FOW_RULE.last) { f.fowLast.delete(e); continue; }
-      for (const q of eyes) if (Math.hypot(o.x - q.x, o.y - (q.y || 0), o.z - q.z) < fowSensor(q) * 0.8 && !(ROCKS.length && rockBlock(q.x, q.y || 0, q.z, o.x, o.y, o.z) >= 0)) { f.fowLast.delete(e); break; }
+      for (const q of eyes) if (Math.hypot(o.x - q.x, o.y - (q.y || 0), o.z - q.z) < fowSensor(q) * 0.8 && !(SOLID && rockBlock(q.x, q.y || 0, q.z, o.x, o.y, o.z) >= 0)) { f.fowLast.delete(e); break; }
     }
   }
   for (let s = 0; s < 2; s++) FOW.pings[s] = FOW.pings[s].filter((p) => t - p.t < FOW_RULE.ping);
@@ -1250,7 +1256,7 @@ function fowScan(f, auto = false) {
   for (const e of squadrons) {
     if (e.side === s || !fowLive(e) || Math.hypot(e.x - C.x, (e.y || 0) - C.y, e.z - C.z) > FOW_RULE.scanR) continue;
     if (e.fleet && !pinged.has(e.fleet)) { pinged.add(e.fleet); FOW.pings[e.side].push({ fleet: e.fleet.id, a: Math.atan2(C.x - e.x, C.z - e.z), t }); }   // 只有方向
-    if (jm || (ROCKS.length && rockBlock(C.x, C.y, C.z, e.x, e.y || 0, e.z) >= 0)) continue;
+    if (jm || (SOLID && rockBlock(C.x, C.y, C.z, e.x, e.y || 0, e.z) >= 0)) continue;
     f.fowRev[sqIdx(e)] = t + FOW_RULE.scanShow; n++;
   }
   fowUpdate();
@@ -1816,7 +1822,7 @@ function groupSpeed(g, t) {
     if (!morph && sqMorphing(q, t)) morph = true;
   }
   if (ts > 1.9) ts = 1;
-  return BASE_SPEED * ts * Math.min(fs, 2) * (FORMATIONS[g.formation].speed || 1) * (morph ? 0.75 : 1) * (inTerrain('asteroid', g.ax, g.az, g.ay || 0) ? 0.5 : 1);
+  return BASE_SPEED * ts * Math.min(fs, 2) * (FORMATIONS[g.formation].speed || 1) * (morph ? 0.75 : 1) * (inTerrain('asteroid', g.ax, g.az, g.ay || 0) ? 0.5 : 1) * (GRD ? gravMul(g) : 1);   // 近地：重力
 }
 // 突進：只有往前走時加速
 function groupFwd(g) { let f = 9; for (const q of g.sqs) if (q.alive > 0) f = Math.min(f, fleetMods(q.fleet).fwd); return f > 8 ? 1 : f; }
@@ -1864,10 +1870,12 @@ const ALT_MAX = 400, PITCH_MAX = 1.1;   // 高度範圍 ±400；俯仰最多約 
 function altitudeStep(g, dt, t) {
   if (g.inactive) return;
   if (g.ayT == null) g.ayT = g.ay || 0;
+  if (GRD && g.ayT < GROUND_Y + GROUND_RULE.minAlt) g.ayT = GROUND_Y + GROUND_RULE.minAlt;   // 近地：不能鑽進地面
   const pl = g.plan, dy = g.ayT - (g.ay || 0), v = groupSpeed(g, t);
   let vy = 0;
   if (Math.abs(dy) > 0.02) {
     let vmax = v * 0.8;
+    if (GRD && dy > 0) vmax *= gravClimb(g);   // 近地：重的船爬升更慢
     if (pl && pl.segs && pl.kind !== 'scatter' && pl.segs.length) { const tH = planRemain(pl) / Math.max(2, pl.v || v); vmax = Math.min(vmax, Math.abs(dy) / Math.max(0.5, tH) + 0.5); }
     const step = Math.min(Math.abs(dy), vmax * dt); g.ay = (g.ay || 0) + Math.sign(dy) * step; vy = Math.sign(dy) * step / dt;
   }
@@ -1880,7 +1888,7 @@ function altitudeStep(g, dt, t) {
 }
 // 繞開實體障礙：部隊中心太靠近時往外偏（水平），船艦本身再由 rockPush 推到障礙表面
 function avoidRocks(g, dt) {
-  if (!ROCKS.length) return;
+  if (!ROCKS.length && !(GRD && GRD.pil.length)) return;
   const bx = g.ax, bz = g.az;
   let ox = 0, oz = 0, ext = 0;
   for (const q of g.sqs) if (q.alive > 0) ext = Math.max(ext, Math.min(q.W1 || 0, q.D1 || 0));
@@ -1891,6 +1899,13 @@ function avoidRocks(g, dt) {
     if (need <= 0) continue;
     let nx = dx, nz = dz; if (dh < 1e-3) { const H = groupHeading(g, U.uTime.value); nx = Math.cos(H); nz = -Math.sin(H); } else { nx /= dh; nz /= dh; }
     ox += nx * need; oz += nz * need;
+  }
+  if (GRD) for (const p of GRD.pil) {   // 近地：柱子只看水平距離
+    if ((g.ay || 0) > p.top) continue;
+    const req = p.r + 15, dx = bx - p.x, dz = bz - p.z, dh = Math.hypot(dx, dz);   // 只讓部隊中心繞開，個別的船由 groundPush 推開
+    if (dh >= req) continue;
+    let nx = dx, nz = dz; if (dh < 1e-3) { const H = groupHeading(g, U.uTime.value); nx = Math.cos(H); nz = -Math.sin(H); } else { nx /= dh; nz /= dh; }
+    ox += nx * (req - dh); oz += nz * (req - dh);
   }
   const k = Math.min(1, dt * 1.5);
   g.avx = (g.avx || 0) + (ox - (g.avx || 0)) * k; g.avz = (g.avz || 0) + (oz - (g.avz || 0)) * k;
@@ -1967,12 +1982,15 @@ function shipWorldCPU(i, out) {
   // 陣型的前 F＝(sin h·cos p, sin p, cos h·cos p)、右 R＝(cos h, 0, −sin h)、上 U＝(−sin h·sin p, cos p, −cos h·sin p)
   else out.set(sq.x + ch * L[0] - sh * sp * ly + sh * cp * L[2], y0 + cp * ly + sp * L[2], sq.z - sh * L[0] - ch * sp * ly + ch * cp * L[2]);
   if (ROCKS.length) rockPush(out);
+  if (GRD) groundPush(out);   // 近地：柱子、地面與建築
   return out;
 }
 // ───── 實體障礙（小行星）：擋住移動與射擊 ─────
 let ROCKS = [];
 function setRocks() {
-  ROCKS = terrainList().filter((t) => TERRAIN_TYPES[t.type] && TERRAIN_TYPES[t.type].solid).map((t) => ({ x: t.x, y: t.y || 0, z: t.z, r: t.r })).slice(0, 8);
+  setGround();   // 近地作戰（ground.js）：地面、建築、砲台
+  ROCKS = terrainList().filter((t) => TERRAIN_TYPES[t.type] && TERRAIN_TYPES[t.type].solid).map((t) => ({ x: t.x, y: t.y || 0, z: t.z, r: t.r })).concat(GRD ? GRD.rocks : []).slice(0, 8);
+  SOLID = ROCKS.length > 0 || !!GRD;
   U.uRockN.value = ROCKS.length; ROCKS.forEach((r, k) => U.uRock.value[k].set(r.x, r.y, r.z, r.r));
 }
 function rockPush(out) {
@@ -1990,6 +2008,7 @@ function rockBlock(ax, ay, az, bx, by, bz) {
     const disc = b * b - 4 * a * c; if (disc < 0 || a < 1e-6) continue;
     const t = (-b - Math.sqrt(disc)) / (2 * a); if (t > 0.001 && t < 1 && t < best) best = t;
   }
+  if (GRD) { const g = groundBlock(ax, ay, az, bx, by, bz); if (g >= 0 && g < best) best = g; }   // 近地：地面、建築、柱子
   return best <= 1 ? best : -1;
 }
 
@@ -2114,6 +2133,7 @@ function hitChance(gk, gun, dist, target, attackerSq, ax, ay, az, bx, by, bz) {
   const vf = 1 - HIT_RULE.speedMax * Math.min(1, (tq.vel || 0) / HIT_RULE.speedRef);
   let ef = 1;
   if (inTerrain('nebula', ax, az, ay) || inTerrain('nebula', bx, bz, by)) ef *= HIT_RULE.nebula;
+  if (GRD) ef *= groundHitMul(ay, by);   // 近地：大氣
   const am = attackerSq.mods || fleetMods(attackerSq.fleet), link = am.fac === 1;   // 聯盟：資料鏈
   const jm = jam[attackerSq.side].until > U.uTime.value;
   if (jm) {   // 被干擾：聯盟懲罰減半；機械智慧網路斷線，懲罰加重（冗餘節點減輕額外的部分）
@@ -2371,7 +2391,7 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
       if (c >= 0) { target = c; shipWorldCPU(c, _b); dist = Math.max(1, _a.distanceTo(_b)); if (!fowKnowsSq(sq, squadrons[ships.sq[c]])) accM = FOW_RULE.area.blind; }
       else {
         const r = FOW_RULE.area.r; _b.set(ar.x + (rnd() - 0.5) * r * 1.4, ar.y + (rnd() - 0.5) * r * 0.4, ar.z + (rnd() - 0.5) * r * 1.4);
-        const fxs = GUN_FX[gk], L = _a.distanceTo(_b), t0 = U.uTime.value + delay, blk = ROCKS.length ? rockBlock(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z) : -1;
+        const fxs = GUN_FX[gk], L = _a.distanceTo(_b), t0 = U.uTime.value + delay, blk = SOLID ? rockBlock(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z) : -1;
         if (blk >= 0) _b.set(_a.x + (_b.x - _a.x) * blk, _a.y + (_b.y - _a.y) * blk, _a.z + (_b.z - _a.z) * blk);
         spawnBeam(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z, t0, _a.distanceTo(_b) / (fxs.spd + rnd() * 120), sq.side, (volleyShot ? 0.6 : 1) * fxs.inten * (0.4 + 0.6 * beamFalloff(L, gun)), Math.min(fxs.len, 60 / L), sqFac(sq));
         gunStats[sq.side][gk][0]++; beamLastT[sq.side] = U.uTime.value;
@@ -2379,6 +2399,8 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
       }
     }
   }
+  // 近地：有時候改打射程內的敵方地面砲台
+  if (GRD && GRD.live && gk !== 'aa' && !volleyShot && target < 0 && rnd() < TURRET_RULE.pick) { const tu = turretFor(sq.side, attacker, gun, far); if (tu) return fireTurret(attacker, gk, gun, sq, tu, delay, dmgMul); }
   // 候選：主／副砲先看部隊指定的目標，不行再找最近的；防空只找最近的
   for (let tries = 0; target < 0 && tries < (gk === 'aa' ? 2 : 3); tries++) {
     const c = gk === 'aa' || tries > 0 ? pickTarget(sq.side, sq) : focusTarget(sq);
@@ -2389,6 +2411,7 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
   }
   if (target < 0) {
     if (gk === 'sec' && !volleyShot) { const o = nearestAir(1 - sq.side, attacker, gun, far, _a.x, _a.y, _a.z); if (o) { shipWorldCPU(attacker, _a); return fireAir(attacker, gk, gun, sq, o, delay); } }
+    if (GRD && GRD.live && gk !== 'aa') { shipWorldCPU(attacker, _a); const tu = turretFor(sq.side, attacker, gun, far); if (tu) return fireTurret(attacker, gk, gun, sq, tu, delay, dmgMul); }   // 近地：沒有船可打就打砲台
     return false;
   }
   let ff = false;   // 擬真難度：射線上有友軍分艦隊 → 可能誤擊或停火
@@ -2415,7 +2438,7 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
     graze = rayB;
     if (i < 0 && ok) { i = target; th = L; graze = Math.sqrt(rnd()); }   // 打中瞄準的目標：落點在船身截面上均勻分布
     const end = i >= 0 ? th : L;
-    blk = ROCKS.length ? rockBlock(_a.x, _a.y, _a.z, _a.x + ux * end, _a.y + uy * end, _a.z + uz * end) : -1;
+    blk = SOLID ? rockBlock(_a.x, _a.y, _a.z, _a.x + ux * end, _a.y + uy * end, _a.z + uz * end) : -1;
     // 途中先碰到敵方飛彈／艦載機：由它吃下這一發
     const o = rayAir(1 - sq.side, _a.x, _a.y, _a.z, ux, uy, uz, end * (blk >= 0 ? blk : 1));
     if (o) {
@@ -2439,7 +2462,7 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
     if (hit) { target = i; dist = Math.max(1, th); }
   } else {
     // 被巨大小行星擋住：光束打在岩石上（沒有傷害）
-    blk = ROCKS.length ? rockBlock(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z) : -1;
+    blk = SOLID ? rockBlock(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z) : -1;
     const p = hitChance(gk, gun, dist, target, sq, _a.x, _a.y, _a.z, _b.x, _b.y, _b.z) * accM;
     hit = blk < 0 && (ff || rnd() < p);
     if (!ff) fowExpose(sq, target);   // 戰爭迷霧：被打的艦隊看得到開火的人幾秒
@@ -2463,10 +2486,11 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
   const L = _a.distanceTo(_b), dur = L / (fxs.spd + rnd() * 120);
   const t0 = U.uTime.value + delay;
   spawnBeam(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z, t0, dur, sq.side, inten, Math.min(fxs.len, 60 / L), sqFac(sq));
-  if (blk >= 0) { if (rnd() < 0.25) pending.push({ kind: 'sp', t: t0 + dur * (ray ? 1 : blk), side: sq.side, x: _b.x, y: _b.y, z: _b.z }); return true; }
-  if (!hit) return true;
+  if (blk >= 0) { if (GRD || rnd() < 0.25) pending.push({ kind: 'sp', t: t0 + dur * (ray ? 1 : blk), side: sq.side, x: _b.x, y: _b.y, z: _b.z }); return true; }
+  if (!hit) { if (GRD) groundStray(_b.x, _b.y, _b.z, t0 + dur); return true; }   // 近地：打偏的光束有時會掉進城裡
   const asp = hitAspect(target, _a.x, _a.z, _b.x, _b.z, _a.y, _b.y), am = fleetMods(sq.fleet);
   let dmg = gun.dmg * dmgMul * fm * am.dmg;
+  if (GRD) dmg *= groundDmgMul(_a.y, _b.y);   // 近地：大氣讓光束衰減
   if (sideFocus(sq.side) === tq) dmg *= 1.2;
   if (ff) dmg *= ffMul;
   if (am.fac === 1 && !ff) { tq.lkT = t0; tq.lkQ = sq; }   // 聯盟資料鏈：標記這支敵分艦隊
@@ -2515,6 +2539,7 @@ let stateDirty = false;
 function killShip(i, t, x, y, z, mul = 1) {
   if (!ships.alive[i]) return;
   ships.alive[i] = 0;
+  if (GRD) groundWreck(x, y, z, ships.type[i], ships.side[i]);   // 近地：殘骸墜落、撞進地面（只是畫面）
   shipGeo.getAttribute('aState').array[i * 2] = t;
   stateDirty = true;
   const q = squadrons[ships.sq[i]];
@@ -2826,7 +2851,7 @@ function launchMissileAt(x, y, z, side, msq, target, dmg, t0, src, accM = 1) {
   if (hit) misC.set([_b.x, _b.y, _b.z], i * 3);
   else { const off = TYPE_W[ships.type[target]] * (1.2 + rnd() * 1.5) * (rnd() < 0.5 ? -1 : 1); misC.set([_b.x + dx / dist * 12 + lx * off, _b.y + (rnd() - 0.5) * 6, _b.z + dz / dist * 12 + lz * off], i * 3); }
   const dur = dist / (85 + rnd() * 35);
-  const blk = ROCKS.length ? rockBlock(x, y, z, _b.x, _b.y, _b.z) : -1, cut = blk >= 0 ? Math.max(0.05, blk) : 1;   // 被巨大小行星擋住＝撞上岩石（同艦艇飛彈）
+  const blk = SOLID ? rockBlock(x, y, z, _b.x, _b.y, _b.z) : -1, cut = blk >= 0 ? Math.max(0.05, blk) : 1;   // 被巨大小行星擋住＝撞上岩石（同艦艇飛彈）
   misT.set([t0, dur, (msq ? sqFac(msq) : SIDE_FAC[side]) + 0.5, cut], i * 4);
   if (misDirtyFrom < 0) misDirtyFrom = i; misDirtyCount++;
   misGen[i]++; misShot[i] = 0; misLive[i] = blk >= 0 ? 0 : 1; misSide[i] = side; misSpd[i] = dist / dur;
@@ -2866,7 +2891,7 @@ function launchMissile(launcher, t0, maxRange = 0) {
     misC.set([_b.x + dx / dist * 12 + lx * off, _b.y + (rnd() - 0.5) * 6, _b.z + dz / dist * 12 + lz * off], i * 3);
   }
   const dur = dist / (85 + rnd() * 35);
-  const blk = ROCKS.length ? rockBlock(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z) : -1;   // 被巨大小行星擋住＝撞上岩石
+  const blk = SOLID ? rockBlock(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z) : -1;   // 被巨大小行星擋住＝撞上岩石
   // 攔截不再開火時就決定：飛彈真的在空中飛，由對方的防空砲／副砲打下來（見 fireAir）
   const intercepted = blk >= 0;   // 只有撞上岩石是一開始就知道的
   const cut = blk >= 0 ? Math.max(0.05, blk) : 1;
@@ -2901,7 +2926,7 @@ function launchMissileArea(launcher, t0, A) {
   misA.set([_a.x, _a.y + 1.5, _a.z], i * 3);
   misB.set([(_a.x + bx) / 2 + lx * lat, (_a.y + by) / 2 + up, (_a.z + bz) / 2 + lz * lat], i * 3);
   misC.set([bx, by, bz], i * 3);
-  const dur = dist / (85 + rnd() * 35), blk = ROCKS.length ? rockBlock(_a.x, _a.y, _a.z, bx, by, bz) : -1, cut = blk >= 0 ? Math.max(0.05, blk) : 1;
+  const dur = dist / (85 + rnd() * 35), blk = SOLID ? rockBlock(_a.x, _a.y, _a.z, bx, by, bz) : -1, cut = blk >= 0 ? Math.max(0.05, blk) : 1;
   misT.set([t0, dur, sqFac(sq) + 0.5, cut], i * 4);
   if (misDirtyFrom < 0) misDirtyFrom = i; misDirtyCount++;
   misGen[i]++; misShot[i] = 0; misLive[i] = blk >= 0 ? 0 : 1; misSide[i] = sq.side; misSpd[i] = dist / dur;
@@ -3416,7 +3441,7 @@ function updateFighters(dt) {
             FT.cd[i] -= fdt;
             if (FT.cd[i] <= 0) {
               FT.cd[i] = 0.25;
-              const g = FT.tgt[i], fh = rnd() < strikeChance(STRIKE_RULE.lance, g, s, { x: tx, y: ty, z: tz }) && !(ROCKS.length && rockBlock(px, py, pz, tx, ty, tz) >= 0);   // 被巨大小行星擋住就打不到
+              const g = FT.tgt[i], fh = rnd() < strikeChance(STRIKE_RULE.lance, g, s, { x: tx, y: ty, z: tz }) && !(SOLID && rockBlock(px, py, pz, tx, ty, tz) >= 0);   // 被巨大小行星擋住就打不到
               const fs = ftrStats[s]; fs[0]++; if (fh) fs[1]++;
               if (fh) { const asp = hitAspect(g, px, pz, tx, tz, py, ty); pending.push({ kind: 'lb', src: 2, t: t + 0.02, target: g, side: s, asp, dmg: C.dps * 0.25 * ftrDmgMul(home), hm: hitMul(asp, hq, squadrons[ships.sq[g]]), fx: rnd() < 0.3, dirIdx: dirIndexOf(tx - px, tz - pz), x: tx, y: ty, z: tz }); }
             }
@@ -3428,6 +3453,7 @@ function updateFighters(dt) {
     const sp = FT.launch[i] > 0 ? Math.min(speed, vl + 30 * dt) : speed;
     vx = vx / vl * sp; vy = vy / vl * sp; vz = vz / vl * sp;
     px += vx * dt; py += vy * dt; pz += vz * dt;
+    if (GRD) { const gh = terrainHAt(px, pz) + 0.3; if (py < gh) { py = gh; if (vy < 0) vy = 0; } }   // 近地：艦載機不鑽進地面
     fP[i3] = px; fP[i3 + 1] = py; fP[i3 + 2] = pz; fV[i3] = vx; fV[i3 + 1] = vy; fV[i3 + 2] = vz;
     // 射擊：機首大致對準目標才開火
     const gunCraft = kind === 0 && FT.role[i] <= 1;   // 攔截機、攻擊機用機砲；重攻擊機在上面另外處理
@@ -3437,7 +3463,7 @@ function updateFighters(dt) {
       FT.cd[i] = FT.role[i] === 0 ? IR.cd[0] + rnd() * (IR.cd[1] - IR.cd[0]) : 0.35 + rnd() * 0.5;
       const g = FT.tgt[i];
       // 命中率：攔截機打艦載機／飛彈，攻擊機打船；沒中就偏開
-      const fh = FT.tk[i] === 3 ? rnd() < IR.acc.missile : FT.tk[i] === 0 ? rnd() < IR.acc.fighter * (FT.kind[g] === 2 ? FOW_RULE.recon.acc : 1) : rnd() < strikeChance(STRIKE_RULE.fighter, g, s, { x: tx, y: ty, z: tz }) && !(ROCKS.length && rockBlock(px, py, pz, tx, ty, tz) >= 0);   // 掃射船：被巨大小行星擋住就打不到
+      const fh = FT.tk[i] === 3 ? rnd() < IR.acc.missile : FT.tk[i] === 0 ? rnd() < IR.acc.fighter * (FT.kind[g] === 2 ? FOW_RULE.recon.acc : 1) : rnd() < strikeChance(STRIKE_RULE.fighter, g, s, { x: tx, y: ty, z: tz }) && !(SOLID && rockBlock(px, py, pz, tx, ty, tz) >= 0);   // 掃射船：被巨大小行星擋住就打不到
       const miss = fh ? 1.5 : 7 + rnd() * 6;
       const me = PL.on && FT.tk[i] === 0 && FT.tgt[i] === PL.j, bd = d / (me ? 300 : 450);   // 打向玩家的機：慢一點、亮一點，照提前量瞄準（轉向就閃得掉）
       const lx = me ? fV[PL.j * 3] * bd : 0, ly = me ? fV[PL.j * 3 + 1] * bd : 0, lz = me ? fV[PL.j * 3 + 2] * bd : 0;
@@ -3471,7 +3497,7 @@ function processHits() {
     pending[k] = pending[pending.length - 1]; pending.pop();
     if (e.kind === 'mi') {   // 撞上岩石，或沒命中、在目標後方自爆（半路被打下的就不再爆一次）
       if (e.mi != null) { if (!misLive[e.mi] || misGen[e.mi] !== e.g) continue; misLive[e.mi] = 0; }
-      spawnFx(e.x, e.y, e.z, e.side, 3.2, 26); continue;
+      spawnFx(e.x, e.y, e.z, e.side, 3.2, 26); if (GRD) { groundScar(e.x, e.y, e.z, 2.5); groundStray(e.x, e.y, e.z, e.t, true); } continue;
     }
     if (e.kind === 'ak') {   // 防空／副砲打中飛彈或艦載機
       if (e.a === 0) {
@@ -3493,7 +3519,9 @@ function processHits() {
       continue;
     }
     if (e.kind === 'mh' && e.mi != null) { if (!misLive[e.mi] || misGen[e.mi] !== e.g) continue; misLive[e.mi] = 0; }   // 半路被打下了
-    if (e.kind === 'sp') { spawnFx(e.x, e.y, e.z, e.side, 1.4, 20); continue; }   // 光束打在岩石上的火花
+    if (e.kind === 'sp') { spawnFx(e.x, e.y, e.z, e.side, 1.4, 20); if (GRD && e.r !== -1) groundScar(e.x, e.y, e.z, e.r != null ? e.r : 1.6); continue; }   // 近地：打到地面＝炸毀建築（r＝-1：不炸）
+    if (e.kind === 'tu') { turretHit(e); continue; }   // 近地：打中地面砲台
+    if (e.kind === 'gt') { groundTargetHit(e); continue; }   // 駕駛：打中地面目標   // 光束打在岩石上的火花
     if (!ships.alive[e.target] && !(e.kind === 'mh' && e.rt && misRetarget(e))) continue;   // 聯盟飛彈：目標沉了就轉向附近的敵艦
     const tSide = ships.side[e.target];
     const tq = squadrons[ships.sq[e.target]];
@@ -3909,6 +3937,7 @@ function fullHash() {
   for (const g of groups) { mix(Math.round(g.ax * 64)); mix(Math.round(g.az * 64)); }
   for (let j = 0; j < FTR_MAX; j++) if (FT.state[j]) { mix(j); mix(FT.state[j]); }
   for (const a of dmgStats) for (const v of a) mix(v);
+  if (GRD) for (const tu of GRD.tur) mix(Math.round(tu.hp * 8));   // 近地：砲台
   mix(Math.round(jam[0].until * 60)); mix(Math.round(jam[1].until * 60)); mix(simTick);
   return h.toString(16);
 }
@@ -4213,8 +4242,8 @@ function fowFxFrame() {
 function apply3DVisibility() {
   if (shipMesh) shipMesh.visible = !mode3D;
   ftrSpriteMesh.visible = !mode3D;
-  bgMesh.visible = !mode3D;
-  if (R3.ready) { R3.sky.visible = mode3D; for (const it of R3.list) it.mesh.visible = mode3D; for (const l of R3.lights) l.visible = mode3D; }
+  bgMesh.visible = !mode3D && !GRD;   // 近地：天空與地面取代星空
+  if (R3.ready) { R3.sky.visible = mode3D && !GRD; for (const it of R3.list) it.mesh.visible = mode3D; for (const l of R3.lights) l.visible = mode3D; }
   glowMat.uniforms.u3D.value = mode3D ? 1 : 0;
 }
 
@@ -4963,7 +4992,7 @@ const UI_OPTS = [
   ['preview', '命令預覽', '目的地框、移動路線、變陣後的位置'], ['queue', '戰術隊列', '隊列每一步的顏色、箭頭與編號（戰術面板一律顯示）'],
   ['blink', '閃爍提醒', '正在執行的命令會閃爍'], ['ghosts', '暫停時的預定位置小點', '暫停時用小點畫出每艘船的預定位置'],
   ['stats', '戰況簡報', '右上角戰鬥列的長條圖按鈕：命中率、被擊沉方向、艦載機與飛彈'], ['skillbar', '指令卡', '右下角的指令按鈕（關掉後按鍵照樣有效）'],
-  ['selbar', '選取面板', '畫面下方顯示目前選取的艦隊、兵力與命令'], ['minimap', '小地圖', '左下角的全戰場縮圖：點＝移動鏡頭、右鍵＝移動選取的艦隊'], ['toasts', '通知訊息', '開戰、技能、增援等通知'],
+  ['selbar', '選取面板', '畫面下方顯示目前選取的艦隊、兵力與命令'], ['minimap', '小地圖', '左下角的全戰場縮圖：點＝移動鏡頭、右鍵＝移動選取的艦隊'], ['toasts', '通知訊息', '開戰、技能、增援等通知'], ['fps', '幀率', '畫面右上角顯示每秒畫面數（FPS）'],
   ['compass', '艦橋方位儀', '指揮官視角上方的方位刻度與各艦隊方位'],
 ];
 const SETTINGS = (() => {
@@ -5205,6 +5234,8 @@ function simulate(dt) {
   pushSquadronUniforms();
   continuousFire(dt);
   autoWeapons(dt);
+  if (GRD && GRD.live && opts.fire) turretStep(dt);   // 近地：地面砲台開火
+  if (GRD && GRD.gts && PL.on && opts.fire) groundPilotAA(dt);   // 駕駛：地面目標對玩家開火
   if (opts.fire && opts.rotate) { rotateLines(U.uTime.value); fieldRepair(dt, U.uTime.value); }
   if (opts.fire && simTick % (SALVAGE_RULE.every * SIM_HZ) === 11) salvageBuild(U.uTime.value);   // 傭兵：用零件重造沉沒的船
   if (simTick % 30 === 17) netUpdate();   // 機械智慧：網路連結
@@ -5298,6 +5329,7 @@ function frame() {
   bgMat.uniforms.uOff.value.set(view.target.x * ppu, -view.target.z * Math.sin(ELEV) * ppu);
   apply3DVisibility();
   if (mode3D) { if (R3.sky) R3.sky.position.copy(camera.position); update3D(); }
+  groundFrame();   // 近地：天空、砲台、電梯車廂
 
   renderer.info.reset();
   const gq = gpuBegin();
@@ -5311,7 +5343,15 @@ function frame() {
 
   // HUD
   fpsAcc += dt; fpsN++;
-  if (fpsAcc > 0.5) { fpsShow = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
+  if (fpsAcc > 0.5) {
+    fpsShow = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0;
+    const fb = $('fpsbadge');   // 右上角的幀率（設定裡可以關）
+    if (fb) { const on = uiOn('fps'); fb.textContent = on ? `${fpsShow.toFixed(0)} FPS` : ''; fb.className = !on ? '' : fpsShow < 30 ? 'bad' : fpsShow < 50 ? 'low' : ''; }
+    if (fb) {   // 作戰中右上角是頂部列：改放在頂部列的左邊
+      const bh = $('battlehud'), r = bh && !bh.hidden && bh.offsetWidth ? bh.getBoundingClientRect() : null;
+      fb.style.right = r ? `${Math.round(innerWidth - r.left + 6)}px` : ''; fb.style.top = r ? `${Math.round(r.top + r.height / 2 - fb.offsetHeight / 2)}px` : '';
+    }
+  }
   hudT -= dt;
   if (hudT <= 0) {
     hudT = 0.25;

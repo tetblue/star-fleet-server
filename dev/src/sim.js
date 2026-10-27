@@ -32,7 +32,7 @@ function simDefault() {
 }
 // 從訓練作戰匯入：我方用預設編成與自己的指揮官（天賦制），敵方照關卡設定（含增援，固定出現）
 function simFromScenario(sc) {
-  const m = { name: sc.name, fac: 0, victory: true, ctl: 0, seed: sc.seed, fleets: [], terrain: JSON.parse(JSON.stringify(sc.terrain || [])) };
+  const m = { name: sc.name, fac: 0, victory: true, ctl: 0, seed: sc.seed, fleets: [], terrain: JSON.parse(JSON.stringify(sc.terrain || [])), ...(sc.ground ? { ground: { ...sc.ground } } : {}) };
   defaultLoadout(sc, 0).fleets.forEach((f, k) => {
     const c = COMMANDERS.find((o) => o.id === f.cmdr) || COMMANDERS[0];
     m.fleets.push({ side: 0, name: `我方第${SIM_CN[k]}艦隊`, cmdr: simCmdrFrom(c, 'tal'), comp: f.comp.slice(), hangar: HANGAR_DEFAULT.slice(), formation: f.formation, orderly: false, layers: 1,
@@ -53,7 +53,7 @@ function simFromScenario(sc) {
 function simSetup(m, edit) {
   const S = {
     bg: false, scenario: 'sim', level: 1, factions: m.fac ? [1, 0] : [0, 1], timeLimit: m.timeLimit || SIM_INF, noVictory: !m.victory,
-    terrain: m.terrain.map((t) => ({ ...t })),
+    terrain: m.ground ? [] : m.terrain.map((t) => ({ ...t })), ...(m.ground && GROUND_SCENES[m.ground.scene] ? { ground: { ...m.ground } } : {}),   // 近地作戰：不用太空地形
     fleets: m.fleets.map((f) => {
       const c = f.cmdr, tal = c.mode === 'tal' ? { ...c.tal } : null;
       return { side: f.side, name: f.name, ax: f.x, az: f.z, ay: f.y || 0, h: f.h, formation: f.formation, orderly: !!f.orderly, layers: f.layers || 1, comp: f.comp.slice(), hangar: f.hangar.slice(),
@@ -139,6 +139,10 @@ function simFieldHtml(m) {
     <div class="sim-row"><span>我方陣營</span><div class="wed-seg" id="sim-fac"><button data-v="0" class="${m.fac === 0 ? 'on emp' : ''}">帝國軍</button><button data-v="1" class="${m.fac === 1 ? 'on all' : ''}">聯盟軍</button></div></div>
     <div class="sim-row"><span>操作難度</span>${opSeg('sim-op')}</div>
     <div class="g-dim sim-note">${OP_LEVELS[opLevel()].desc}（與單人戰鬥共用同一個設定）</div>
+    <div class="sim-row"><span>戰場</span><div class="wed-seg" id="sim-env"><button data-v="" class="${!m.ground ? 'on' : ''}">太空</button>${GROUND_KEYS.map((k) => `<button data-v="${k}" class="${m.ground && m.ground.scene === k ? 'on' : ''}">${GROUND_SCENES[k].name}</button>`).join('')}</div></div>
+    ${m.ground ? `<div class="g-dim sim-note">${GROUND_SCENES[m.ground.scene].desc}（近地戰場不使用太空地形）</div>
+    <div class="sim-row"><span>地面砲台</span><div class="wed-seg" id="sim-gdef"><button data-v="-1" class="${m.ground.def === -1 ? 'on' : ''}">沒有</button><button data-v="0" class="${m.ground.def === 0 ? 'on' : ''}">${simSideName(m, 0)}</button><button data-v="1" class="${m.ground.def === 1 ? 'on' : ''}">${simSideName(m, 1)}</button></div></div>
+    <div class="sim-row"><span>地形種子</span><input class="g-in" type="number" id="sim-gseed" value="${m.ground.seed}" style="width:110px"><button class="g-btn sm" id="sim-gre">換一個</button></div>` : ''}
     <div class="sim-row"><span>戰爭迷霧</span><div class="wed-seg" id="sim-fow"><button data-v="1" class="${m.fow !== false ? 'on' : ''}">開</button><button data-v="0" class="${m.fow === false ? 'on' : ''}">關</button></div></div>
     <div class="g-dim sim-note">開＝只看得到偵測範圍內（或掃描到）的敵軍，自動攻擊也只打看得到的；關＝雙方都看得到全部</div>
     <div class="sim-row"><span>${SIM.mid ? '繼續時指揮' : '開戰時指揮'}</span><div class="wed-seg" id="sim-ctl"><button data-v="0" class="${m.ctl === 0 ? 'on' : ''}">我方</button><button data-v="1" class="${m.ctl === 1 ? 'on' : ''}">敵方</button></div></div>
@@ -212,6 +216,10 @@ function simBind(el) {
   // 戰場設定
   q('#sim-fac [data-v]').forEach((b) => (b.onclick = () => { m.fac = +b.dataset.v; simChanged(); }));
   q('#sim-ctl [data-v]').forEach((b) => (b.onclick = () => { m.ctl = +b.dataset.v; simChanged(false); }));
+  q('#sim-env [data-v]').forEach((b) => (b.onclick = () => { const k = b.dataset.v; m.ground = k ? { scene: k, seed: (m.ground && m.ground.seed) || ((Math.random() * 1e6) | 0) + 1, def: m.ground ? m.ground.def : 1 } : null; simChanged(); }));   // 近地作戰
+  q('#sim-gdef [data-v]').forEach((b) => (b.onclick = () => { m.ground.def = +b.dataset.v; simChanged(); }));
+  on('sim-gseed', 'onchange', (e) => { m.ground.seed = Math.max(1, simNum(e.target.value, 1) | 0); simChanged(); });
+  on('sim-gre', 'onclick', () => { m.ground.seed = ((Math.random() * 1e6) | 0) + 1; simChanged(); });
   q('#sim-fow [data-v]').forEach((b) => (b.onclick = () => { m.fow = b.dataset.v === '1'; simChanged(); }));   // 規則改變：戰鬥中改了就要重建
   if (el.querySelector('#sim-op')) bindOpSeg('sim-op', () => simChanged());   // 難度會改變規則（高度、誤射）：戰鬥中改了就要重建
   on('sim-discard', 'onclick', simDiscard);

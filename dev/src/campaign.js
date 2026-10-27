@@ -10,6 +10,7 @@ const CAMP_ARCHETYPES = [
   { key: 'raider', name: '突擊', mix: [0, 0.04, 0.16, 0.48, 0.32], formations: ['wedge', 'column', 'spindle'], tactics: ['flank', 'flank', 'breakthrough'] },
   { key: 'missile', name: '飛彈', mix: [0.02, 0.1, 0.46, 0.3, 0.12], formations: ['crescent', 'line'], tactics: ['kite', 'kite', 'push'] },
 ];
+const CAMP_ENV = ['太空', '混合', '近地'];   // 無限戰場的戰場環境（c.env）
 const CAMP_SKILLS = ['focus', 'wall', 'charge', 'rapid', 'evade', 'jam'];
 
 function campLoad() {
@@ -29,6 +30,9 @@ function campStage(c) {
     timeLimit: 300 + Math.min(240, st * 15), budget, maxFleets: st < 3 ? 2 : 3, level: Math.min(3, 1 + Math.floor(st / 4)),
     seed: campHash(c.seed, st, c.attempt, 7) % 100000, terrain: campTerrain(R, st), enemy: [], events: [], intel: { accuracy: 0.8, hide: [] },
   };
+  const env = CAMP_ENV[c.env] ? c.env : 0, G = mulberry32(campHash(c.seed, st, c.attempt, 13));
+  if (env === 2 || (env === 1 && G() < 0.4)) { sc.terrain = []; sc.ground = { scene: GROUND_KEYS[Math.floor(G() * GROUND_KEYS.length)], seed: campHash(c.seed, st, c.attempt, 17), def: 1 }; }
+  if (sc.ground) { sc.story = `近地作戰・${GROUND_SCENES[sc.ground.scene].name}。敵軍據守地面，有防空砲台支援。敵軍會依你出擊的指揮官平均等級（±3）生成。`; return sc; }
   sc.story = `隨機宙域。${sc.terrain.length ? '地形：' + [...new Set(sc.terrain.map((t) => TERRAIN_TYPES[t.type].name))].join('、') + '。' : '開闊宙域，沒有地形。'}敵軍會依你出擊的指揮官平均等級（±3）生成。`;
   return sc;
 }
@@ -91,6 +95,7 @@ function showCampaign() {
       <div><span class="g-dim">目前</span><b class="cp-stage">第 ${c.stage} 關</b>${c.attempt ? `<span class="g-dim">（第 ${c.attempt + 1} 次挑戰）</span>` : ''}</div>
       <div><span class="g-dim">最高紀錄</span><b>第 ${c.best} 關</b></div><div><span class="g-dim">勝／敗／平</span><b>${c.wins}／${c.losses}／${c.draws || 0}</b></div></div>
       <dl class="kv" style="margin-top:10px"><dt>規則</dt><dd>每一關的敵人依「出擊指揮官的平均等級 ±3」隨機生成：等級越高，敵方指揮官越強、技能越多、AI 越會打、艦隊越多，兵力也依等級差增減。地形每關隨機。</dd>
+      <dt>戰場</dt><dd><div class="wed-seg rd-seg" id="cp-env">${CAMP_ENV.map((e, k) => `<button data-v="${k}" class="${(c.env || 0) === k ? 'on' : ''}">${e}</button>`).join('')}</div><div class="g-dim">太空＝一般宙域；混合＝約四成的關卡在行星地表附近（近地作戰）；近地＝每一關都是近地作戰</div></dd>
       <dt>過關</dt><dd>打贏進下一關（預算、時間限制、艦隊數上限逐關增加）；打輸或平手重打這一關，敵人與地形會重新生成。指揮官經驗照常累積。</dd></dl>
       <div class="g-row" style="margin-top:12px"><button class="g-btn sm" id="cp-reset">從第 1 關重新開始</button><span class="g-sp"></span><button class="g-btn pri" id="cp-go">出擊：第 ${c.stage} 關 →</button></div></div>
     ${hist.length ? `<div class="g-card"><h3>最近的關卡</h3><table class="stat-tbl"><tr><th>關卡</th><th>結果</th><th>敵軍等級</th><th>我方平均等級</th><th>剩餘（我／敵）</th></tr>
@@ -98,6 +103,7 @@ function showCampaign() {
   </div>`);
   gEl('cp-back').onclick = showSingle;
   gEl('cp-go').onclick = () => showCampBriefing();
+  gEl('cp-env').querySelectorAll('button').forEach((b) => (b.onclick = () => { const n = campLoad(); n.env = +b.dataset.v; campSave(n); showCampaign(); }));
   gEl('cp-reset').onclick = (e) => {
     const b = e.target; if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.textContent = '確定重來？（最高紀錄保留）'; return; }
     const n = campLoad(); n.stage = 1; n.attempt = 0; n.seed = (Math.random() * 1e9) >>> 0; campSave(n); showCampaign();
@@ -125,7 +131,7 @@ function showCampBriefing() {
         <dt>敵軍等級</dt><dd>出擊指揮官平均等級 ±3（目前編成的平均是 Lv ${avg}，敵軍會在 Lv ${Math.max(1, avg - 3)}～${avg + 3}）</dd>
         <dt>敵軍編成</dt><dd><span class="unk">不明：部署時才會偵測到</span></dd></dl></div>
       <div class="g-card"><h3>戰場環境</h3>${minimapSVG(sc, GAME.intel, GAME.loadout)}
-        <div style="margin-top:8px;font-size:calc(12.5px * var(--ui))">${sc.terrain.length ? [...new Set(sc.terrain.map((t) => t.type))].map((k) => `<div><b>${TERRAIN_TYPES[k].name}</b>：<span class="g-dim">${TERRAIN_TYPES[k].desc}</span></div>`).join('') : '<span class="g-dim">開闊宙域，沒有地形影響。</span>'}</div></div>
+        <div style="margin-top:8px;font-size:calc(12.5px * var(--ui))">${envBriefHtml(sc)}</div></div>
     </div>
     <div class="g-row" style="margin-top:12px"><span class="g-sp"></span><button class="g-btn pri" id="cb-next">進入編成 →</button></div></div>`);
   gEl('cb-back').onclick = showCampaign;
@@ -161,7 +167,8 @@ const RAND_LOOK = [{ name: '對立陣營', fac: null }, { name: '傭兵', fac: 2
 const randSeed = () => ((Math.random() * 1e9) >>> 0) || 1;
 function randOpts() {
   let o = null; try { o = JSON.parse(STORE.getItem(RAND_STORE) || 'null'); } catch (e) { o = null; }
-  o = Object.assign({ size: 1, diff: 1, terr: 3, look: 0, seed: 0 }, o || {});
+  o = Object.assign({ size: 1, diff: 1, terr: 3, look: 0, env: 0, seed: 0 }, o || {});
+  if (!GROUND_ENV[o.env]) o.env = 0;
   if (!RAND_SIZES[o.size]) o.size = 1; if (!RAND_DIFF[o.diff]) o.diff = 1; if (!RAND_TERR[o.terr]) o.terr = 3; if (!RAND_LOOK[o.look]) o.look = 0;
   if (!o.seed) o.seed = randSeed();
   return o;
@@ -177,6 +184,8 @@ function randStage(o) {
   };
   const lk = RAND_LOOK[o.look].fac, L = mulberry32(campHash(o.seed, 7));
   if (lk === 'rand') sc.enemyFac = 2 + Math.floor(L() * 5); else if (lk != null) sc.enemyFac = lk;
+  const ge = GROUND_ENV[o.env].g;   // 近地作戰：不放太空地形，改成地表場景（敵軍是防守方）
+  if (ge) { const G = mulberry32(campHash(o.seed, o.env, 21)); sc.terrain = []; sc.ground = { scene: groundPick(ge, G), seed: campHash(o.seed, o.env, 23), def: 1 }; }
   return sc;
 }
 // 編成沿用上一場（指揮官、陣型、機庫）；預算不同時兵力等比例縮放
@@ -201,14 +210,15 @@ function showRandom() {
   setPhase('briefing');
   const avg = campAvgLevel(GAME.loadout);
   const seg = (key, arr) => `<div class="wed-seg rd-seg" data-opt="${key}">${arr.map((a, k) => `<button data-v="${k}" class="${o[key] === k ? 'on' : ''}">${a.name}</button>`).join('')}</div>`;
-  const terr = sc.terrain.length ? [...new Set(sc.terrain.map((t) => t.type))].map((k) => `<div><b>${TERRAIN_TYPES[k].name}</b>：<span class="g-dim">${TERRAIN_TYPES[k].desc}</span></div>`).join('') : '<span class="g-dim">開闊宙域，沒有地形影響。</span>';
+  const terr = envBriefHtml(sc);
   overlay(`<div class="g-wrap">
     <div class="g-head"><h2>隨機戰役</h2><span class="crumb">單場作戰・敵軍與地形隨機生成・不影響無限戰場進度</span><span class="g-sp"></span><button class="g-btn" id="rd-back">← 單人戰鬥</button></div>
     <div class="intel-grid">
       <div class="g-card"><h3>戰場設定</h3>
         <dl class="kv rd-opts"><dt>規模</dt><dd>${seg('size', RAND_SIZES)}<div class="g-dim">預算 ${fmtN(S.budget)} 點・最多 ${S.maxFleets} 支艦隊・${Math.round(S.time / 60)} 分鐘</div></dd>
         <dt>敵軍強度</dt><dd>${seg('diff', RAND_DIFF)}<div class="g-dim">依出擊指揮官的平均等級（目前 Lv ${avg}）：敵軍 ${D.off == null ? `Lv ${Math.max(1, avg - 3)}～${avg + 3} 隨機` : `Lv ${Math.max(1, avg + D.off)}`}。等級越高，敵方技能越多、AI 越會打、兵力越多</div></dd>
-        <dt>地形</dt><dd>${seg('terr', RAND_TERR)}<div class="g-dim">星雲、小行星帶、巨大小行星隨機放在戰場中段</div></dd>
+        <dt>戰場</dt><dd>${seg('env', GROUND_ENV)}<div class="g-dim">太空，或靠近行星地表的「近地作戰」（艦隊離地約 10 公里）：巨型結構與山是障礙、一般建築會被流彈炸毀，大氣削弱光束、重力拖慢重艦，敵方有地面防空砲台${sc.ground ? `・這一場：<b>${GROUND_SCENES[sc.ground.scene].name}</b>` : ''}</div></dd>
+        ${sc.ground ? '' : `<dt>地形</dt><dd>${seg('terr', RAND_TERR)}<div class="g-dim">星雲、小行星帶、巨大小行星隨機放在戰場中段</div></dd>`}
         <dt>敵軍外觀</dt><dd>${seg('look', RAND_LOOK)}<div class="g-dim">決定敵軍艦船的外觀、顏色與種族特性${sc.enemyFac != null ? `・這一場：<b class="g-${FACTION_CLS[sc.enemyFac]}">${FACTION_NAME[sc.enemyFac]}</b>` : ''}</div></dd>
         <dt>勝利條件</dt><dd>殲滅敵軍，或使敵軍損失超過 ${Math.round((1 - ROUT_AT) * 100)}%（潰走）</dd><dt>敗北條件</dt><dd>我軍損失超過 ${Math.round((1 - ROUT_AT) * 100)}%</dd>
         <dt>敵軍編成</dt><dd><span class="unk">不明：部署時才會偵測到</span></dd>
