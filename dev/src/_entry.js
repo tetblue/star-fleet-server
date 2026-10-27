@@ -13345,7 +13345,7 @@ function showPilot(view) {   // view：rand 隨機戰役（出擊設定）、han
     <div class="g-row" style="margin-top:12px"><span class="g-dim">${F.name}：${lo}</span><span class="g-sp"></span>${view === 'rand' ? '<button class="g-btn" id="pl-hang">機庫…</button><button class="g-btn pri" id="pl-go">出擊 →</button>' : '<button class="g-btn pri" id="pl-sortie">前往出擊 →</button>'}</div></div>`);
   gEl('pl-back').onclick = showSingle;
   const on = (id, f) => { const e = gEl(id); if (e) e.onclick = f; };
-  on('pl-go', () => pilotGo());
+  on('pl-go', () => pilotLaunch());
   on('pl-hang', () => showPilot('hangar'));
   on('pl-sortie', () => showPilot('rand'));
   on('pl-keys', () => openSettings());
@@ -13434,6 +13434,8 @@ function pilotLayout(p) {
   m.name = `${PILOT_MIS[mis.type].name}・${S.name}・${WATCH_LV[li].name}`;
   return m;
 }
+// 出擊：先在 3D 機庫播彈射動畫（hangar.js），播完（或點一下略過）才開戰
+function pilotLaunch() { hgLaunch(pilotLoad(), pilotGo); }
 function pilotGo() {
   const p = pilotLoad(); p.seed = randSeed(); pilotSave(p);
   simEndMid(); overlay(null);
@@ -14749,7 +14751,7 @@ function pilotReport() {
     <div class="g-row" style="margin-top:14px"><button class="g-btn" id="pr-menu">單人戰鬥</button><span class="g-sp"></span><button class="g-btn" id="pr-hangar">機庫</button><button class="g-btn pri" id="pr-again">再出擊（新任務）→</button></div></div>`);
   gEl('pr-menu').onclick = showSingle;
   gEl('pr-hangar').onclick = () => showPilot('hangar');
-  gEl('pr-again').onclick = pilotGo;
+  gEl('pr-again').onclick = pilotLaunch;
 }
 
 // ───── 王牌飛行員：3D 機庫（機庫畫面的全螢幕背景）─────
@@ -14767,6 +14769,7 @@ const HG_DEPTH = 24;        // 升降梯降下的深度
 const HG_LIFT = 1.7;        // 升降各幾秒
 const HG_HOLE = 22;         // 升降梯開口邊長
 const HG_GEAR_H = 2.3;      // 機腹離升降台的高度（起落架）
+const HG_DOOR = { w: 34, h: 24 };   // 彈射艙門（後牆中間）
 const HG_LOOK = [{ s: 0.9, c: 0xc4d4ff }, { s: 1, c: 0xffffff }, { s: 1.12, c: 0xdfe6c4 }, { s: 1.18, c: 0xe4d4ff }];   // 依機體：大小、色調
 const HG_RACK = ['pulse', 'homing', 'repair', 'heavy', 'rocket', 'torpedo', 'lance', 'ecm'];   // 吊架上的順序（上排四個、下排四個）
 const HG_ARM = { L1: 14, L2: 14, SH: 4.2 };   // 上臂、前臂長度、肩膀高度
@@ -14878,12 +14881,35 @@ function hgBuildRoom() {
   }, [4, 1]);
   const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, metalness: 0.4, roughness: 0.7, emissive: 0xffffff, emissiveMap: wallTex, emissiveIntensity: 0.35 });
   const wall = (w, hh, x, z, ry) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, hh), wallMat); m.position.set(x, hh / 2, z); m.rotation.y = ry; S.add(m); };
-  wall(220, 44, 0, -48, 0); wall(150, 44, -82, 20, Math.PI / 2); wall(150, 44, 82, 20, -Math.PI / 2);
+  // 後牆中間留出彈射艙門的開口（寬 HG_DOOR.w、高 HG_DOOR.h）
+  const DW = HG_DOOR.w / 2, DH = HG_DOOR.h, wallP = (x0, x1, y0, y1) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, y1 - y0), wallMat); m.position.set((x0 + x1) / 2, (y0 + y1) / 2, -48); S.add(m); };
+  wallP(-110, -DW, 0, 44); wallP(DW, 110, 0, 44); wallP(-DW, DW, DH, 44);
+  wall(150, 44, -82, 20, Math.PI / 2); wall(150, 44, 82, 20, -Math.PI / 2);
   const strip = M.glow(0xdfe8ff, 1.6);
   for (let k = -2; k <= 2; k++) { const m = new THREE.Mesh(new THREE.BoxGeometry(2, 0.4, 90), strip); m.position.set(k * 16, 40, 0); S.add(m); }
-  // 後牆的大型艙門（關著，透出一條縫的光）
-  const door = new THREE.Mesh(new THREE.BoxGeometry(46, 28, 1), M.dark); door.position.set(0, 14, -47.4); S.add(door);
-  const seam = new THREE.Mesh(new THREE.BoxGeometry(0.5, 27, 1.2), M.glow(0x8fc4ff, 2.2)); seam.position.set(0, 14, -47.3); S.add(seam);
+  // 彈射艙門：左右兩扇，出擊時往兩邊滑開，外面是太空
+  const doorTex = hgTex(256, 256, (g, w) => { g.fillStyle = '#20262f'; g.fillRect(0, 0, w, w); g.strokeStyle = 'rgba(160,180,210,.25)'; g.lineWidth = 3; for (let y = 32; y < w; y += 48) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); } g.fillStyle = '#d6a21e'; for (let y = 8; y < w; y += 64) g.fillRect(w - 18, y, 10, 28); });
+  const doorMat = new THREE.MeshStandardMaterial({ map: doorTex, metalness: 0.6, roughness: 0.5 });
+  HG.door = [-1, 1].map((sd) => { const d = new THREE.Mesh(new THREE.BoxGeometry(DW, DH, 1.2), doorMat); d.position.set(sd * DW / 2, DH / 2, -47.6); d.scale.x = sd; S.add(d); return d; });
+  HG.seam = new THREE.Mesh(new THREE.BoxGeometry(0.4, DH - 1, 1.4), M.glow(0x8fc4ff, 2.2)); HG.seam.position.set(0, DH / 2, -47.5); S.add(HG.seam);
+  const frame = M.glow(0xffa21e, 0.8);
+  for (const [w, h, x, y] of [[DW * 2 + 2, 1, 0, DH + 0.5], [1, DH, -DW - 0.5, DH / 2], [1, DH, DW + 0.5, DH / 2]]) { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.6), frame); b.position.set(x, y, -47.8); S.add(b); }
+  // 艙門外：星空與遠方的行星（不受霧影響）
+  const spaceTex = hgTex(1024, 512, (g, w, hh) => {
+    g.fillStyle = '#01020a'; g.fillRect(0, 0, w, hh);
+    const neb = g.createRadialGradient(w * 0.7, hh * 0.3, 0, w * 0.7, hh * 0.3, w * 0.5); neb.addColorStop(0, 'rgba(90,60,160,.35)'); neb.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = neb; g.fillRect(0, 0, w, hh);
+    for (let i = 0; i < 900; i++) { const b = Math.random(); g.fillStyle = `rgba(255,255,255,${0.25 + b * 0.75})`; const r = b > 0.97 ? 1.6 : 0.7; g.beginPath(); g.arc(Math.random() * w, Math.random() * hh, r, 0, 7); g.fill(); }
+    const pl = g.createRadialGradient(w * 0.2, hh * 1.25, hh * 0.5, w * 0.2, hh * 1.25, hh * 0.78); pl.addColorStop(0, '#2b4a7a'); pl.addColorStop(0.9, '#3d6db8'); pl.addColorStop(1, 'rgba(80,140,255,0)'); g.fillStyle = pl; g.fillRect(0, 0, w, hh);
+  });
+  const space = new THREE.Mesh(new THREE.PlaneGeometry(420, 210), new THREE.MeshBasicMaterial({ map: spaceTex, fog: false })); space.position.set(0, 40, -170); S.add(space);
+  // 彈射軌道：從升降梯延伸到艙門，出擊時燈號依序往前跑
+  HG.track = [];
+  for (let z = -HG_HOLE / 2 - 1.5; z > -46; z -= 2.6) { const l = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.08, 1.4), M.glow(0x6fb8ff, 0.2)); l.position.set(0, 0.05, z); S.add(l); HG.track.push(l); }
+  for (const x of [-1.6, 1.6]) { const rail = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 34), M.metal); rail.position.set(x, 0.06, -12 - HG_HOLE / 2 - 6); S.add(rail); }
+  // 噴流擋板：平常收在甲板下，彈射前在機尾後方豎起
+  const defl = HG.defl = new THREE.Group(); defl.position.set(0, 0, 9.5);
+  const plate = new THREE.Mesh(new THREE.BoxGeometry(12, 4, 0.4), new THREE.MeshStandardMaterial({ map: hazard.clone(), metalness: 0.4, roughness: 0.6 })); plate.position.y = 2; plate.material.map.repeat.set(3, 4); plate.material.map.needsUpdate = true; defl.add(plate);
+  defl.rotation.x = Math.PI / 2; defl.visible = false; S.add(defl);
 }
 
 // ── 武器模型（程式產生，前方 +Z；userData.r＝中心到頂部的高度，掛架從頂部接上）──
@@ -15120,6 +15146,12 @@ const hgArmsIdle = () => HG.arms.every((A) => !A.cur && !A.steps.length);
 function hgStep() {
   const now = hgNow(), dt = Math.min(0.1, now - HG.tPrev); HG.tPrev = now;
   if (!HG.W) return;
+  if (HG.cine) {   // 出擊動畫：手臂停在原位，鏡頭照劇本走
+    for (const A of HG.arms) hgArmIK(A);
+    hgFxTick(now, dt); HG.ring.visible = false;
+    if (HG.cine) hgCineStep(now, dt);
+    HG.r.render(HG.scene, HG.cam); return;
+  }
   const L = HG.lift;
   if (!HG.ftr && getModel(hgFighterKey(HG.facWant))) { hgBuildFighter(HG.facWant, HG.frameWant); hgSnap(); }
   // 換機體：等手臂停下 → 降下 → 換機（武裝在下層裝好）→ 升上來
@@ -15175,11 +15207,86 @@ function hgAttach(p, sel) {
   ensureModels([hgFighterKey(fac)]);
   if (fresh) {   // 剛進機庫：直接擺好，不播動畫
     for (const A of HG.arms) { A.steps = []; A.cur = null; A.queue = []; if (A.held) { HG.scene.remove(A.held); A.held = null; } A.tip.copy(A.home); A.openT = A.open = 1; }
-    HG.lift.st = 'idle'; HG.plat.position.y = 0;
+    HG.lift.st = 'idle'; HG.plat.position.y = 0; HG.cine = null; hgLaunchReset();
     if (getModel(hgFighterKey(fac))) { hgBuildFighter(fac, p.frame); hgSnap(); } else if (HG.ftr) { HG.plat.remove(HG.ftr); HG.ftr = null; }
   }
   hgSize();
   if (!HG.raf) { HG.tPrev = hgNow(); HG.raf = requestAnimationFrame(hgFrame); }
+}
+
+// ── 出擊：彈射動畫 ──
+// 轉台把機首轉向後方的彈射艙門 → 艙門滑開、噴流擋板豎起、引擎充能、倒數 → 彈射出艙門，畫面淡出後開戰。點一下畫面略過
+const HG_CINE = { rot: [0, 1.6], door: [1.1, 2.7], defl: [1.8, 2.6], spool: [2.2, 3.8], cnt: 2.6, go: 3.8, fade: [4.7, 5.5], end: 5.6 };
+const HG_CAM = [   // 時間、鏡頭位置、看的點
+  [0, [24, 10, 18], [0, 4, 0]], [1.8, [11, 11, 25], [0, 5, -20]], [3.8, [7, 11.5, 22], [0, 5.5, -34]], [5.4, [3, 9.5, 13], [0, 7.5, -80]],
+];
+const hgSpan = (q, r) => Math.max(0, Math.min(1, (q - r[0]) / (r[1] - r[0])));
+const hgEase = (x) => x * x * (3 - 2 * x);
+function hgLaunchReset() {   // 回到機庫平常的樣子（艙門關、轉台歸位、擋板收起）
+  if (!HG.door) return;
+  const DW = HG_DOOR.w / 2;
+  HG.door.forEach((d, k) => { d.position.x = (k ? 1 : -1) * DW / 2; }); HG.seam.visible = true;
+  HG.plat.rotation.y = 0; HG.defl.visible = false; HG.defl.rotation.x = Math.PI / 2;
+  for (const l of HG.track) l.material.emissiveIntensity = 0.2;
+  if (HG.eng) { HG.eng.parent && HG.eng.parent.remove(HG.eng); HG.eng = null; }
+}
+function hgLaunch(p, done) {
+  setPhase('briefing');
+  overlay(`<div class="hg-screen hg-cine" id="hg-cine"><div class="hg-cine-cap" id="hg-cine-cap"></div><div class="hg-cine-skip">點一下畫面略過</div><div class="hg-fade" id="hg-fade"></div></div>`);
+  HG.live = false; hgAttach(p, -1);
+  if (!HG.ftr) { done(); return; }   // 模型還沒好：直接開戰
+  // 引擎噴口的光（機尾）
+  const body = HG.ftr.children[0], bb = body.geometry.boundingBox, S = body.scale.x;
+  if (HG.glowTex) {
+    const e = HG.eng = new THREE.Sprite(new THREE.SpriteMaterial({ map: HG.glowTex, color: 0x9fd4ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+    e.position.set(0, (bb.min.y + bb.max.y) / 2 * S, bb.min.z * S - 0.3); HG.ftr.add(e);
+  }
+  HG.cine = { t0: hgNow() + 0.2, done, z0: HG.ftr.position.z, crossed: false };
+  gEl('hg-cine').onclick = hgCineEnd;
+}
+function hgCineEnd() {
+  const c = HG.cine; if (!c) return;
+  HG.cine = null; hgLaunchReset(); c.done();
+}
+const _hgE = new THREE.Vector3(), _hgC = new THREE.Vector3(), _hgL = new THREE.Vector3();
+function hgCineStep(now, dt) {
+  const c = HG.cine, q = now - c.t0, C = HG.cam, R = HG_CINE, DW = HG_DOOR.w / 2;
+  HG.plat.rotation.y = Math.PI * hgEase(hgSpan(q, R.rot));   // 轉台：機首轉向艙門（-Z）
+  const kd = hgEase(hgSpan(q, R.door));
+  HG.door.forEach((d, k) => { d.position.x = (k ? 1 : -1) * (DW / 2 + kd * (DW + 1.5)); }); HG.seam.visible = kd < 0.02;
+  if (q > R.defl[0]) { HG.defl.visible = true; HG.defl.rotation.x = Math.PI / 2 * (1 - hgEase(hgSpan(q, R.defl))); }
+  const alarm = q < R.go + 0.6 && Math.sin(now * 12) > 0;
+  for (const b of HG.beacons) { b.b.material.emissiveIntensity = alarm ? 3 : 0.3; if (b.s) b.s.material.opacity = alarm ? 0.9 : 0; }
+  // 軌道燈：開門後依序往艙門跑，彈射時全亮
+  HG.track.forEach((l, i) => { l.material.emissiveIntensity = q > R.go ? 3 : q > R.door[0] ? 0.3 + 2.6 * Math.pow(Math.max(0, Math.sin(q * 9 - i * 0.55)), 4) : 0.2; });
+  // 引擎：充能時越來越亮，彈射時最亮
+  const ks = hgSpan(q, R.spool);
+  if (HG.eng) { const k = q > R.go ? 1 : ks; HG.eng.scale.setScalar(1 + k * 4 + (q > R.go ? Math.random() * 0.8 : 0)); HG.eng.material.opacity = 0.2 + 0.8 * k; }
+  // 彈射：沿軌道加速衝出艙門（轉台轉了 180°，機體座標的 +Z＝世界的 -Z）
+  if (q > R.go) {
+    const t = q - R.go; HG.ftr.position.z = c.z0 + 0.5 * 180 * t * t;
+    if (HG.eng && HG.glowTex) {   // 尾焰
+      HG.eng.getWorldPosition(_hgE);
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: HG.glowTex, color: 0x8cc8ff, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false }));
+      s.position.copy(_hgE); s.scale.setScalar(2.4); HG.scene.add(s); HG.fx.push({ s, v: null, t0: now, life: 0.45, grow: 2.4 });
+      if (!c.crossed && _hgE.z < -48) { c.crossed = true; hgSparks(_hgL.set(0, HG.ftr.position.y + 3, -48)); }
+    }
+  }
+  // 鏡頭：照關鍵格內插；彈射那一下震動
+  let k = 0; while (k < HG_CAM.length - 2 && q > HG_CAM[k + 1][0]) k++;
+  const A = HG_CAM[k], B = HG_CAM[k + 1], u = hgEase(Math.max(0, Math.min(1, (q - A[0]) / (B[0] - A[0]))));
+  _hgC.set(...A[1]).lerp(_hgL.set(...B[1]), u); const look = new THREE.Vector3(...A[2]).lerp(new THREE.Vector3(...B[2]), u);
+  const sh = q > R.go - 0.15 && q < R.go + 0.9 ? 0.45 * (1 - (q - R.go + 0.15) / 1.05) : 0;
+  if (sh > 0) _hgC.add(_hgE.set((Math.random() - 0.5) * sh, (Math.random() - 0.5) * sh, (Math.random() - 0.5) * sh));
+  C.position.copy(_hgC); C.lookAt(look); C.clearViewOffset(); C.updateMatrixWorld();
+  // 字幕、淡出
+  const cap = gEl('hg-cine-cap');
+  if (cap) {
+    const t = q < R.rot[1] ? '轉台就位・機首對準彈射軌道' : q < R.cnt ? '彈射艙門開啟' : q < R.go ? `彈射器充能　${3 - Math.floor((q - R.cnt) / ((R.go - R.cnt) / 3))}` : q < R.fade[0] ? '彈射！' : '';
+    if (cap.textContent !== t) { cap.textContent = t; cap.classList.toggle('go', q >= R.go); }
+  }
+  const fd = gEl('hg-fade'); if (fd) fd.style.opacity = hgSpan(q, R.fade).toFixed(3);
+  if (q >= R.end) hgCineEnd();
 }
 
 

@@ -195,7 +195,7 @@ function showPilot(view) {   // view：rand 隨機戰役（出擊設定）、han
     <div class="g-row" style="margin-top:12px"><span class="g-dim">${F.name}：${lo}</span><span class="g-sp"></span>${view === 'rand' ? '<button class="g-btn" id="pl-hang">機庫…</button><button class="g-btn pri" id="pl-go">出擊 →</button>' : '<button class="g-btn pri" id="pl-sortie">前往出擊 →</button>'}</div></div>`);
   gEl('pl-back').onclick = showSingle;
   const on = (id, f) => { const e = gEl(id); if (e) e.onclick = f; };
-  on('pl-go', () => pilotGo());
+  on('pl-go', () => pilotLaunch());
   on('pl-hang', () => showPilot('hangar'));
   on('pl-sortie', () => showPilot('rand'));
   on('pl-keys', () => openSettings());
@@ -284,6 +284,8 @@ function pilotLayout(p) {
   m.name = `${PILOT_MIS[mis.type].name}・${S.name}・${WATCH_LV[li].name}`;
   return m;
 }
+// 出擊：先在 3D 機庫播彈射動畫（hangar.js），播完（或點一下略過）才開戰
+function pilotLaunch() { hgLaunch(pilotLoad(), pilotGo); }
 function pilotGo() {
   const p = pilotLoad(); p.seed = randSeed(); pilotSave(p);
   simEndMid(); overlay(null);
@@ -1599,5 +1601,5 @@ function pilotReport() {
     <div class="g-row" style="margin-top:14px"><button class="g-btn" id="pr-menu">單人戰鬥</button><span class="g-sp"></span><button class="g-btn" id="pr-hangar">機庫</button><button class="g-btn pri" id="pr-again">再出擊（新任務）→</button></div></div>`);
   gEl('pr-menu').onclick = showSingle;
   gEl('pr-hangar').onclick = () => showPilot('hangar');
-  gEl('pr-again').onclick = pilotGo;
+  gEl('pr-again').onclick = pilotLaunch;
 }
