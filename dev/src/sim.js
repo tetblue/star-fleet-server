@@ -140,7 +140,7 @@ function simFieldHtml(m) {
     <div class="sim-row"><span>操作難度</span>${opSeg('sim-op')}</div>
     <div class="g-dim sim-note">${OP_LEVELS[opLevel()].desc}（與單人戰鬥共用同一個設定）</div>
     <div class="sim-row"><span>戰爭迷霧</span><div class="wed-seg" id="sim-fow"><button data-v="1" class="${m.fow !== false ? 'on' : ''}">開</button><button data-v="0" class="${m.fow === false ? 'on' : ''}">關</button></div></div>
-    <div class="g-dim sim-note">${opLevel() === 2 ? '擬真難度：開＝只看得到偵測範圍內（或掃描到）的敵軍，自動攻擊也只打看得到的；關＝雙方都看得到全部' : '只有擬真難度才有戰爭迷霧'}</div>
+    <div class="g-dim sim-note">開＝只看得到偵測範圍內（或掃描到）的敵軍，自動攻擊也只打看得到的；關＝雙方都看得到全部</div>
     <div class="sim-row"><span>${SIM.mid ? '繼續時指揮' : '開戰時指揮'}</span><div class="wed-seg" id="sim-ctl"><button data-v="0" class="${m.ctl === 0 ? 'on' : ''}">我方</button><button data-v="1" class="${m.ctl === 1 ? 'on' : ''}">敵方</button></div></div>
     <div class="sim-row"><span>勝負判定</span><label><input type="checkbox" id="sim-vic" ${m.victory ? 'checked' : ''}> 一方全滅或潰走（剩 ${Math.round(ROUT_AT * 100)}% 以下）就結束</label></div>
     <div class="sim-row"><span>時限</span><span class="g-dim">模擬室沒有時間限制</span></div>
@@ -349,7 +349,7 @@ function simStart() {
   GAME.pilot = m.pilot || null;   // 王牌飛行員：雙方艦隊都由 AI 指揮，玩家駕駛一架艦載機
   GAME.sc = { id: 'sim', name: GAME.watch ? `AI 對戰觀摩・${m.name}` : GAME.pilot ? `王牌飛行員・${m.name}` : `模擬室・${m.name}`, sim: true, seed: m.seed, timeLimit: m.timeLimit || SIM_INF };
   fieldGroup.clear();
-  applyOp(GAME.pilot ? 1 : opLevel(), !GAME.pilot && m.fow !== false); const setup = simSetup(m, false); setup.op = GAME.op;   // 擬真：戰爭迷霧可以在模擬室關掉；駕駛：可以上下移動、沒有戰爭迷霧
+  applyOp(GAME.pilot ? 1 : opLevel(), !GAME.pilot && m.fow !== false); const setup = simSetup(m, false); setup.op = GAME.op;   // 戰爭迷霧可以在模擬室關掉；駕駛：可以上下移動、沒有戰爭迷霧
   if (GAME.watch) GAME.op = Math.min(GAME.op, 1);   // 觀摩：規則照操作難度（含擬真的誤射），但畫面不鎖在艦橋
   newBattle(m.seed >>> 0, setup);
   setRule('fire', true); setRule('advance', false);

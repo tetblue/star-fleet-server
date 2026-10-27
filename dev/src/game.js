@@ -670,14 +670,14 @@ function drawField(showZones) {
 // 一般：2D／3D／指揮官模式都能用，艦隊都在同一平面；進階：作戰中只能 3D 與指揮官模式，可以升降；
 // 擬真：開戰直接上艦橋、不能離開，而且射線穿過別的友軍部隊時可能誤傷（同部隊多半停火）。存在玩家存檔（fleet.oplv），回放不受限制
 const OP_LEVELS = [
-  { name: '一般', desc: '可用 2D、3D 與指揮官模式；艦隊都在同一平面，不能升降' },
-  { name: '進階', desc: '只能用 3D 與指揮官模式；艦隊可以上下移動' },
+  { name: '一般', desc: '可用 2D、3D 與指揮官模式；艦隊都在同一平面，不能升降；戰爭迷霧：只看得到偵測範圍內、掃描到的敵軍' },
+  { name: '進階', desc: '只能用 3D 與指揮官模式；艦隊可以上下移動；戰爭迷霧：只看得到偵測範圍內、掃描到的敵軍' },
   { name: '擬真', desc: '作戰中只能用指揮官模式（艦橋）；艦隊可以上下移動；射線穿過別的友軍部隊會誤傷，同一個部隊（同陣型）內被擋住多半停火；戰爭迷霧：只看得到偵測範圍內、掃描到的敵軍，自動攻擊也只打看得到的（可以用區域攻擊盲射）' },
 ];
 function opLevel() { let n = 0; try { n = +(STORE.getItem('fleet.oplv') || 0); } catch (e) { n = 0; } return OP_LEVELS[n] ? n : 0; }
 function setOpLevel(n) { try { STORE.setItem('fleet.oplv', String(n)); } catch (e) { /* 只在本次 */ } }
 function opNow() { return ((GAME.phase === 'battle' || GAME.phase === 'deploy') && GAME.op) || 0; }   // 目前生效的難度（作戰、部署中）
-function applyOp(op = GAME.sc && (GAME.sc.mp || GAME.sc.tut) ? GAME.sc.op : opLevel(), fow = true) { GAME.op = op; opts.flat = op === 0; opts.ff = op === 2 ? 2 : false; opts.fow = op === 2 && fow; opts.ray = opts.deflect = opts.rotate = true; }   // 建立戰場前呼叫（規則會記進回放）；fow＝擬真的戰爭迷霧（模擬室可以關）
+function applyOp(op = GAME.sc && (GAME.sc.mp || GAME.sc.tut) ? GAME.sc.op : opLevel(), fow = true) { GAME.op = op; opts.flat = op === 0; opts.ff = op === 2 ? 2 : false; opts.fow = !!fow; opts.ray = opts.deflect = opts.rotate = true; }   // 建立戰場前呼叫（規則會記進回放）；fow＝戰爭迷霧（所有難度都有，模擬室可以關）
 function opSeg(id) { const cur = opLevel(); return `<div class="wed-seg rd-seg" id="${id}">${OP_LEVELS.map((o, i) => `<button data-v="${i}" class="${cur === i ? 'on' : ''}">${o.name}</button>`).join('')}</div>`; }
 function bindOpSeg(id, redraw) { gEl(id).querySelectorAll('button').forEach((b) => (b.onclick = () => { setOpLevel(+b.dataset.v); redraw(); })); }
 function force3D() { if (opNow() >= 1 && !mode3D) { setRenderMode('3d', false); GAME.forced3D = true; } }   // 進階以上：作戰中強制 3D（不改存檔的畫面設定）

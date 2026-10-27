@@ -1107,7 +1107,7 @@ function seenSq(viewer, q) {
 // 玩家畫面要不要遮敵情（作戰中被干擾；觀摩時看得到全部）。戰爭迷霧另外由 fowView 處理
 function playerFogged() { return typeof GAME !== 'undefined' && (GAME.phase === 'battle' || GAME.phase === 'replay') && !GAME.watch && !NET.spec && jammed(GAME.playerSide) && !fowOn(); }
 
-// ───── 戰爭迷霧（擬真難度＋opts.fow；規則記進回放）─────
+// ───── 戰爭迷霧（所有難度，opts.fow；規則記進回放）─────
 // 每支艦隊各有一份「知道哪些敵方分艦隊的位置」（f.fowK，每 FOW_RULE.tick 重算）：
 //   自己的分艦隊偵測半徑內、視線沒被巨大小行星擋住；攻擊型艦載機周圍；掃描結果、開火暴露（f.fowRev 到期前）
 //   沒被干擾＝全軍共享（每支艦隊都知道全軍知道的）；被干擾＝各艦隊只知道自己偵測到的，掃描也沒有結果
@@ -4456,7 +4456,7 @@ function reconFleet(f) {
 function armRecon(f) {
   if (GAME.phase !== 'battle') return;
   if (!f && !actOn().length) return;   // 沒有選取：不下令
-  if (!fowOn()) { toast('只有擬真難度開啟戰爭迷霧時才需要掃描', 'hint'); return; }
+  if (!fowOn()) { toast('戰爭迷霧關閉時不需要掃描', 'hint'); return; }
   f = reconFleet(f);
   if (!f) { toast('沒有航母：區域掃描要由航母派出偵察機', 'hint'); return; }
   const cd = fowReconLeft(f); if (cd > 0) { toast(`${f.name}：偵察機冷卻中（${Math.ceil(cd)} 秒）`, 'hint'); return; }

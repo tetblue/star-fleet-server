@@ -1107,7 +1107,7 @@ function seenSq(viewer, q) {
 // 玩家畫面要不要遮敵情（作戰中被干擾；觀摩時看得到全部）。戰爭迷霧另外由 fowView 處理
 function playerFogged() { return typeof GAME !== 'undefined' && (GAME.phase === 'battle' || GAME.phase === 'replay') && !GAME.watch && !NET.spec && jammed(GAME.playerSide) && !fowOn(); }
 
-// ───── 戰爭迷霧（擬真難度＋opts.fow；規則記進回放）─────
+// ───── 戰爭迷霧（所有難度，opts.fow；規則記進回放）─────
 // 每支艦隊各有一份「知道哪些敵方分艦隊的位置」（f.fowK，每 FOW_RULE.tick 重算）：
 //   自己的分艦隊偵測半徑內、視線沒被巨大小行星擋住；攻擊型艦載機周圍；掃描結果、開火暴露（f.fowRev 到期前）
 //   沒被干擾＝全軍共享（每支艦隊都知道全軍知道的）；被干擾＝各艦隊只知道自己偵測到的，掃描也沒有結果
@@ -4456,7 +4456,7 @@ function reconFleet(f) {
 function armRecon(f) {
   if (GAME.phase !== 'battle') return;
   if (!f && !actOn().length) return;   // 沒有選取：不下令
-  if (!fowOn()) { toast('只有擬真難度開啟戰爭迷霧時才需要掃描', 'hint'); return; }
+  if (!fowOn()) { toast('戰爭迷霧關閉時不需要掃描', 'hint'); return; }
   f = reconFleet(f);
   if (!f) { toast('沒有航母：區域掃描要由航母派出偵察機', 'hint'); return; }
   const cd = fowReconLeft(f); if (cd > 0) { toast(`${f.name}：偵察機冷卻中（${Math.ceil(cd)} 秒）`, 'hint'); return; }
@@ -5430,10 +5430,10 @@ const FIELD_REPAIR = { below: 0.6, dur: 10, first: 0.4, alone: 0.3, n: 1, step: 
 //   天賦「輪替演練」每階換位時間 −tal
 const ROTATE_RULE = { dur: 6, cd: 15, gap: 10, fresh: { sh: 0.8, hp: 0.6 }, max: 2, per: 0.02, shEarly: 0.25, shRegen: 0.3, hull: 0.35, fast: 0.4, tal: 0.15 };
 const AA_TYPE_REF = 0.275;   // 艦種防空係數的基準（一般編成的平均值 ≈ 0.275，平均起來命中率不變）
-// 擬真難度的戰爭迷霧：各艦種的偵測半徑（3D 距離；分艦隊取編成裡最大的那一種）。護衛艦是偵察艦；戰列艦主砲 900 比自己看得到的遠，要靠友軍偵測
+// 戰爭迷霧：各艦種的偵測半徑（3D 距離；分艦隊取編成裡最大的那一種）。護衛艦是偵察艦；戰列艦主砲 900 比自己看得到的遠，要靠友軍偵測
 const SENSOR_R = [550, 650, 650, 600, 750, 450];   // 航母、戰列、巡洋、驅逐、護衛、補給
 SHIP_TYPES.forEach((t, k) => (t.sensor = SENSOR_R[k]));
-// 戰爭迷霧（擬真＋迷霧開啟）：自動攻擊只打「知道位置」的敵人（偵測範圍內、掃描結果、艦載機看到的、開火暴露的）
+// 戰爭迷霧（迷霧開啟時）：自動攻擊只打「知道位置」的敵人（偵測範圍內、掃描結果、艦載機看到的、開火暴露的）
 //   tick＝每幾個模擬 tick 重算一次；ftr＝攻擊型艦載機周圍看得到的半徑；expose＝敵艦開火後，被打的艦隊看得到它幾秒
 //   scanFirst＝開戰後幾秒才能第一次掃描（自動、手動都一樣）
 //   scanR／scanShow／scanCd＝掃描半徑、掃到的顯示幾秒、冷卻（每一方共用；天賦「偵察」每階 −scanCdRecon 秒、偵測半徑 +sensorRecon）
@@ -5510,7 +5510,7 @@ const SKILLS = {
   evade: { name: '機動迴避', uses: 2, cd: 50, dur: 12, scope: 'fleet',
     desc: '艦隊各方向移動速度 ×1.4、受到傷害 −25%，持續 12 秒。' },
   jam: { name: '干擾', uses: 1, cd: 90, dur: 25, scope: 'side',
-    desc: '干擾敵軍通訊 25 秒：敵方雷達失效（看到的我方位置停在干擾開始那一刻、兵力與狀態不明，AI 也會用舊情報判斷）；下令變陣（包括原地轉向後的重排、畫陣線）要多等 6 秒才開始；開火（光束、飛彈、防空）命中率 −15%。擬真難度開啟戰爭迷霧時：敵方各艦隊不能共享情報（只看得到自己偵測到的），掃描也沒有結果，偵察機的情報要等飛回母艦才回報。' },
+    desc: '干擾敵軍通訊 25 秒：敵方雷達失效（看到的我方位置停在干擾開始那一刻、兵力與狀態不明，AI 也會用舊情報判斷）；下令變陣（包括原地轉向後的重排、畫陣線）要多等 6 秒才開始；開火（光束、飛彈、防空）命中率 −15%。戰爭迷霧開啟時：敵方各艦隊不能共享情報（只看得到自己偵測到的），掃描也沒有結果，偵察機的情報要等飛回母艦才回報。' },
   // targetMode 'point'＝點選地圖上的位置；fixed＝次數不受「戰術熟練」影響
   merc: { name: '傭兵支援', uses: 1, cd: 0, dur: 0, scope: 'fleet', targetMode: 'point', fixed: true,
     desc: '點選地圖上的位置：15 秒後灰鴉傭兵團的艦隊（本場預算的 30%）從最近的地圖邊緣進場，開往該位置，之後聽你指揮。呼叫時扣 200 功勳；每場一次（打下劇情支線「渡鴉之巢」之後才有）。' },
@@ -5712,7 +5712,7 @@ const ALT_RANGE = 400;   // 戰場的高度範圍 ±400（y＝0 是基準面）
 // ── 作戰 ──
 // 敵方艦隊：comp＝各艦種圖示數 [航母, 戰列, 巡洋, 驅逐, 護衛]
 // intel：情報準確度（0～1，影響數量誤差）與看不到的項目
-// aiOmni：true＝這一關的 AI 全知（擬真難度的戰爭迷霧不限制敵方，偵測、自動攻擊都照看得到全部；預設不開）
+// aiOmni：true＝這一關的 AI 全知（戰爭迷霧不限制敵方，偵測、自動攻擊都照看得到全部；預設不開）
 const SCENARIOS = [
   {
     id: 's1', name: '邊境遭遇戰', size: '小型', timeLimit: 240, budget: 2700, maxFleets: 2, level: 1, seed: 101,
@@ -6877,14 +6877,14 @@ function drawField(showZones) {
 // 一般：2D／3D／指揮官模式都能用，艦隊都在同一平面；進階：作戰中只能 3D 與指揮官模式，可以升降；
 // 擬真：開戰直接上艦橋、不能離開，而且射線穿過別的友軍部隊時可能誤傷（同部隊多半停火）。存在玩家存檔（fleet.oplv），回放不受限制
 const OP_LEVELS = [
-  { name: '一般', desc: '可用 2D、3D 與指揮官模式；艦隊都在同一平面，不能升降' },
-  { name: '進階', desc: '只能用 3D 與指揮官模式；艦隊可以上下移動' },
+  { name: '一般', desc: '可用 2D、3D 與指揮官模式；艦隊都在同一平面，不能升降；戰爭迷霧：只看得到偵測範圍內、掃描到的敵軍' },
+  { name: '進階', desc: '只能用 3D 與指揮官模式；艦隊可以上下移動；戰爭迷霧：只看得到偵測範圍內、掃描到的敵軍' },
   { name: '擬真', desc: '作戰中只能用指揮官模式（艦橋）；艦隊可以上下移動；射線穿過別的友軍部隊會誤傷，同一個部隊（同陣型）內被擋住多半停火；戰爭迷霧：只看得到偵測範圍內、掃描到的敵軍，自動攻擊也只打看得到的（可以用區域攻擊盲射）' },
 ];
 function opLevel() { let n = 0; try { n = +(STORE.getItem('fleet.oplv') || 0); } catch (e) { n = 0; } return OP_LEVELS[n] ? n : 0; }
 function setOpLevel(n) { try { STORE.setItem('fleet.oplv', String(n)); } catch (e) { /* 只在本次 */ } }
 function opNow() { return ((GAME.phase === 'battle' || GAME.phase === 'deploy') && GAME.op) || 0; }   // 目前生效的難度（作戰、部署中）
-function applyOp(op = GAME.sc && (GAME.sc.mp || GAME.sc.tut) ? GAME.sc.op : opLevel(), fow = true) { GAME.op = op; opts.flat = op === 0; opts.ff = op === 2 ? 2 : false; opts.fow = op === 2 && fow; opts.ray = opts.deflect = opts.rotate = true; }   // 建立戰場前呼叫（規則會記進回放）；fow＝擬真的戰爭迷霧（模擬室可以關）
+function applyOp(op = GAME.sc && (GAME.sc.mp || GAME.sc.tut) ? GAME.sc.op : opLevel(), fow = true) { GAME.op = op; opts.flat = op === 0; opts.ff = op === 2 ? 2 : false; opts.fow = !!fow; opts.ray = opts.deflect = opts.rotate = true; }   // 建立戰場前呼叫（規則會記進回放）；fow＝戰爭迷霧（所有難度都有，模擬室可以關）
 function opSeg(id) { const cur = opLevel(); return `<div class="wed-seg rd-seg" id="${id}">${OP_LEVELS.map((o, i) => `<button data-v="${i}" class="${cur === i ? 'on' : ''}">${o.name}</button>`).join('')}</div>`; }
 function bindOpSeg(id, redraw) { gEl(id).querySelectorAll('button').forEach((b) => (b.onclick = () => { setOpLevel(+b.dataset.v); redraw(); })); }
 function force3D() { if (opNow() >= 1 && !mode3D) { setRenderMode('3d', false); GAME.forced3D = true; } }   // 進階以上：作戰中強制 3D（不改存檔的畫面設定）
@@ -9212,7 +9212,7 @@ function simFieldHtml(m) {
     <div class="sim-row"><span>操作難度</span>${opSeg('sim-op')}</div>
     <div class="g-dim sim-note">${OP_LEVELS[opLevel()].desc}（與單人戰鬥共用同一個設定）</div>
     <div class="sim-row"><span>戰爭迷霧</span><div class="wed-seg" id="sim-fow"><button data-v="1" class="${m.fow !== false ? 'on' : ''}">開</button><button data-v="0" class="${m.fow === false ? 'on' : ''}">關</button></div></div>
-    <div class="g-dim sim-note">${opLevel() === 2 ? '擬真難度：開＝只看得到偵測範圍內（或掃描到）的敵軍，自動攻擊也只打看得到的；關＝雙方都看得到全部' : '只有擬真難度才有戰爭迷霧'}</div>
+    <div class="g-dim sim-note">開＝只看得到偵測範圍內（或掃描到）的敵軍，自動攻擊也只打看得到的；關＝雙方都看得到全部</div>
     <div class="sim-row"><span>${SIM.mid ? '繼續時指揮' : '開戰時指揮'}</span><div class="wed-seg" id="sim-ctl"><button data-v="0" class="${m.ctl === 0 ? 'on' : ''}">我方</button><button data-v="1" class="${m.ctl === 1 ? 'on' : ''}">敵方</button></div></div>
     <div class="sim-row"><span>勝負判定</span><label><input type="checkbox" id="sim-vic" ${m.victory ? 'checked' : ''}> 一方全滅或潰走（剩 ${Math.round(ROUT_AT * 100)}% 以下）就結束</label></div>
     <div class="sim-row"><span>時限</span><span class="g-dim">模擬室沒有時間限制</span></div>
@@ -9421,7 +9421,7 @@ function simStart() {
   GAME.pilot = m.pilot || null;   // 王牌飛行員：雙方艦隊都由 AI 指揮，玩家駕駛一架艦載機
   GAME.sc = { id: 'sim', name: GAME.watch ? `AI 對戰觀摩・${m.name}` : GAME.pilot ? `王牌飛行員・${m.name}` : `模擬室・${m.name}`, sim: true, seed: m.seed, timeLimit: m.timeLimit || SIM_INF };
   fieldGroup.clear();
-  applyOp(GAME.pilot ? 1 : opLevel(), !GAME.pilot && m.fow !== false); const setup = simSetup(m, false); setup.op = GAME.op;   // 擬真：戰爭迷霧可以在模擬室關掉；駕駛：可以上下移動、沒有戰爭迷霧
+  applyOp(GAME.pilot ? 1 : opLevel(), !GAME.pilot && m.fow !== false); const setup = simSetup(m, false); setup.op = GAME.op;   // 戰爭迷霧可以在模擬室關掉；駕駛：可以上下移動、沒有戰爭迷霧
   if (GAME.watch) GAME.op = Math.min(GAME.op, 1);   // 觀摩：規則照操作難度（含擬真的誤射），但畫面不鎖在艦橋
   newBattle(m.seed >>> 0, setup);
   setRule('fire', true); setRule('advance', false);
@@ -10209,7 +10209,7 @@ function manBody(id) {
     case 'adv':
       return `<table class="tut-tbl"><tr><th>難度</th><th class="tl">規則</th></tr>${OP_LEVELS.map((o) => `<tr><td><b>${o.name}</b></td><td class="tl">${o.desc}</td></tr>`).join('')}</table>` +
         P(`<b>高度</b>（進階以上）：戰場高度 ±${ALT_RANGE}。右鍵按住＋滾輪調整目的地高度，按住 ${tutK('pitch_mod')} 轉滾輪＝仰角；戰術面板的側視圖可以直接拖。錯開高度能讓後排不被前排擋住射線。`) +
-        P(`<b>戰爭迷霧</b>（擬真）：只看得到偵測範圍內的敵人（${SHIP_TYPES.map((s, t) => `${s.name} ${SENSOR_R[t]}`).join('、')}）；敵人開火會暴露 ${FOW_RULE.expose} 秒。自動脈衝掃描半徑 ${FOW_RULE.scanR}、冷卻 ${FOW_RULE.scanCd} 秒；航母可以派<b>偵察機</b>（${tutK('scan')}＋點地圖）做區域掃描（半徑 ${FOW_RULE.recon.r}、冷卻 ${FOW_RULE.recon.cd} 秒）。看不到的敵人不會被自動攻擊，用<b>區域攻擊</b>（${tutK('area')}＋點地圖）盲射。被干擾時各艦隊不能共享情報。`) +
+        P(`<b>戰爭迷霧</b>（所有難度）：只看得到偵測範圍內的敵人（${SHIP_TYPES.map((s, t) => `${s.name} ${SENSOR_R[t]}`).join('、')}）；敵人開火會暴露 ${FOW_RULE.expose} 秒。自動脈衝掃描半徑 ${FOW_RULE.scanR}、冷卻 ${FOW_RULE.scanCd} 秒；航母可以派<b>偵察機</b>（${tutK('scan')}＋點地圖）做區域掃描（半徑 ${FOW_RULE.recon.r}、冷卻 ${FOW_RULE.recon.cd} 秒）。看不到的敵人不會被自動攻擊，用<b>區域攻擊</b>（${tutK('area')}＋點地圖）盲射。被干擾時各艦隊不能共享情報。`) +
         P('<b>友軍誤傷</b>（擬真）：光束穿過別的友軍部隊可能誤傷，同部隊被擋住多半停火。用空心錐陣、錯開高度、天賦「精準射擊／火線管制／完美布陣」減少。') +
         P(`<b>艦橋</b>（擬真，${tutK('bridge')}）：從旗艦艦橋看戰場，只能低頭在戰術台下令。設定裡可以讓低頭時自動暫停。`);
     case 'tips':

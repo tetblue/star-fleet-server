@@ -621,7 +621,7 @@ function manBody(id) {
     case 'adv':
       return `<table class="tut-tbl"><tr><th>難度</th><th class="tl">規則</th></tr>${OP_LEVELS.map((o) => `<tr><td><b>${o.name}</b></td><td class="tl">${o.desc}</td></tr>`).join('')}</table>` +
         P(`<b>高度</b>（進階以上）：戰場高度 ±${ALT_RANGE}。右鍵按住＋滾輪調整目的地高度，按住 ${tutK('pitch_mod')} 轉滾輪＝仰角；戰術面板的側視圖可以直接拖。錯開高度能讓後排不被前排擋住射線。`) +
-        P(`<b>戰爭迷霧</b>（擬真）：只看得到偵測範圍內的敵人（${SHIP_TYPES.map((s, t) => `${s.name} ${SENSOR_R[t]}`).join('、')}）；敵人開火會暴露 ${FOW_RULE.expose} 秒。自動脈衝掃描半徑 ${FOW_RULE.scanR}、冷卻 ${FOW_RULE.scanCd} 秒；航母可以派<b>偵察機</b>（${tutK('scan')}＋點地圖）做區域掃描（半徑 ${FOW_RULE.recon.r}、冷卻 ${FOW_RULE.recon.cd} 秒）。看不到的敵人不會被自動攻擊，用<b>區域攻擊</b>（${tutK('area')}＋點地圖）盲射。被干擾時各艦隊不能共享情報。`) +
+        P(`<b>戰爭迷霧</b>（所有難度）：只看得到偵測範圍內的敵人（${SHIP_TYPES.map((s, t) => `${s.name} ${SENSOR_R[t]}`).join('、')}）；敵人開火會暴露 ${FOW_RULE.expose} 秒。自動脈衝掃描半徑 ${FOW_RULE.scanR}、冷卻 ${FOW_RULE.scanCd} 秒；航母可以派<b>偵察機</b>（${tutK('scan')}＋點地圖）做區域掃描（半徑 ${FOW_RULE.recon.r}、冷卻 ${FOW_RULE.recon.cd} 秒）。看不到的敵人不會被自動攻擊，用<b>區域攻擊</b>（${tutK('area')}＋點地圖）盲射。被干擾時各艦隊不能共享情報。`) +
         P('<b>友軍誤傷</b>（擬真）：光束穿過別的友軍部隊可能誤傷，同部隊被擋住多半停火。用空心錐陣、錯開高度、天賦「精準射擊／火線管制／完美布陣」減少。') +
         P(`<b>艦橋</b>（擬真，${tutK('bridge')}）：從旗艦艦橋看戰場，只能低頭在戰術台下令。設定裡可以讓低頭時自動暫停。`);
     case 'tips':
