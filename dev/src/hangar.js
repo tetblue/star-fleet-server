@@ -26,6 +26,18 @@ function hgTex(w, h, draw, rep) {
   if (rep) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rep[0], rep[1]); }
   return t;
 }
+// 共用材質（機庫與戰鬥中自己機上的武裝模型都用）
+function hgMats() {
+  return HG.mats || (HG.mats = {
+    metal: new THREE.MeshStandardMaterial({ color: 0x8b939f, metalness: 0.75, roughness: 0.35 }),
+    dark: new THREE.MeshStandardMaterial({ color: 0x2b3039, metalness: 0.6, roughness: 0.5 }),
+    white: new THREE.MeshStandardMaterial({ color: 0xd9dee6, metalness: 0.3, roughness: 0.45 }),
+    red: new THREE.MeshStandardMaterial({ color: 0xb8302a, metalness: 0.3, roughness: 0.5 }),
+    yellow: new THREE.MeshStandardMaterial({ color: 0xd29a22, metalness: 0.45, roughness: 0.45 }),
+    arm: new THREE.MeshStandardMaterial({ color: 0xd8a032, metalness: 0.5, roughness: 0.4 }),
+    glow: (c, k = 2) => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: k, roughness: 0.4 }),
+  });
+}
 function hgInit() {
   if (HG.wrap) return;
   const w = HG.wrap = document.createElement('div'); w.className = 'dock-bg hg-bg'; w.innerHTML = '<canvas></canvas>'; HG.cv = w.querySelector('canvas');
@@ -41,15 +53,7 @@ function hgInit() {
   const key = new THREE.SpotLight(0xfff0d8, 900, 120, 0.55, 0.5, 1.6); key.position.set(6, 42, 14); key.target.position.set(0, 0, 0); S.add(key, key.target);
   const fill = new THREE.PointLight(0x6fa8ff, 160, 90, 1.6); fill.position.set(-30, 18, 18); S.add(fill);
   const rim = new THREE.PointLight(0xffb070, 140, 90, 1.6); rim.position.set(28, 14, -26); S.add(rim);
-  const M = HG.mats = {
-    metal: new THREE.MeshStandardMaterial({ color: 0x8b939f, metalness: 0.75, roughness: 0.35 }),
-    dark: new THREE.MeshStandardMaterial({ color: 0x2b3039, metalness: 0.6, roughness: 0.5 }),
-    white: new THREE.MeshStandardMaterial({ color: 0xd9dee6, metalness: 0.3, roughness: 0.45 }),
-    red: new THREE.MeshStandardMaterial({ color: 0xb8302a, metalness: 0.3, roughness: 0.5 }),
-    yellow: new THREE.MeshStandardMaterial({ color: 0xd29a22, metalness: 0.45, roughness: 0.45 }),
-    arm: new THREE.MeshStandardMaterial({ color: 0xd8a032, metalness: 0.5, roughness: 0.4 }),
-    glow: (c, k = 2) => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: k, roughness: 0.4 }),
-  };
+  hgMats();
   hgBuildRoom(); hgBuildRacks(); hgBuildArms();
   // 選中的掛架：底下一圈光
   HG.ring = new THREE.Mesh(new THREE.RingGeometry(0.75, 1, 40), new THREE.MeshBasicMaterial({ color: 0xf2b35a, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
@@ -159,7 +163,7 @@ function hgBuildRoom() {
 // ── 武器模型（程式產生，前方 +Z；userData.r＝中心到頂部的高度，掛架從頂部接上）──
 function hgCylZ(r1, r2, L, mat, z = 0, seg = 18) { const m = new THREE.Mesh(new THREE.CylinderGeometry(r2, r1, L, seg), mat); m.rotation.x = Math.PI / 2; m.position.z = z; return m; }
 function hgWeapon(id) {
-  const M = HG.mats, g = new THREE.Group(), add = (m, x = 0, y = 0) => { m.position.x += x; m.position.y += y; g.add(m); return m; };
+  const M = hgMats(), g = new THREE.Group(), add = (m, x = 0, y = 0) => { m.position.x += x; m.position.y += y; g.add(m); return m; };
   let r = 0.35;
   if (id === 'pulse') {        // 脈衝機砲：機砲莢艙＋雙管
     add(hgCylZ(0.34, 0.34, 2.4, M.metal)); add(hgCylZ(0.34, 0.18, 0.5, M.metal, 1.45)); add(hgCylZ(0.3, 0.34, 0.3, M.dark, -1.3));
@@ -284,7 +288,14 @@ function hgBuildFighter(fac, frame) {
     const st = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, HG_GEAR_H + 0.4, 8), HG.mats.dark); st.position.set(x * S * 1.2, bb.min.y * S - HG_GEAR_H / 2 + 0.2, z * S); g.add(st);
     const wh = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.3, 14), HG.mats.dark); wh.rotation.z = Math.PI / 2; wh.position.set(st.position.x, bb.min.y * S - HG_GEAR_H + 0.35, st.position.z); g.add(wh);
   }
-  // 掛架：左右翼各兩個（內、外），機腹一個；沿著翼下往上打射線找機身下緣
+  HG.hp = hgHardpoints(geo, S);
+  P.add(g); HG.ftr = g; HG.fac = fac; HG.frame = frame;
+  return true;
+}
+// 掛架位置（機體座標，機身放大 S 倍）：左右翼各兩個（內、外），機腹一個；沿著翼下往上打射線找機身下緣
+// 回傳：武裝一（左內）、二（右內）、三（左外）、四（右外）、纏鬥裝備（機腹）
+function hgHardpoints(geo, S) {
+  geo.computeBoundingBox(); const bb = geo.boundingBox;
   const rc = new THREE.Raycaster(), up = new THREE.Vector3(0, 1, 0), mesh = new THREE.Mesh(geo), o = new THREE.Vector3();
   const halfW = Math.max(-bb.min.x, bb.max.x), zc = (bb.min.z + bb.max.z) / 2;
   const under = (x) => {
@@ -298,13 +309,23 @@ function hgBuildFighter(fac, frame) {
   const pick = (f) => { for (let s = f; s > 0.08; s *= 0.8) { const u = under(halfW * s); if (u) return [halfW * s, u]; } return [halfW * f * 0.5, [zc, bb.min.y + 0.05]]; };
   const inner = pick(0.34), outer = pick(0.66), belly = under(0) || [zc, bb.min.y];
   const L = (x, u) => new THREE.Vector3(x * S, u[1] * S - 0.06, u[0] * S);
-  HG.hp = [L(-inner[0], inner[1]), L(inner[0], inner[1]), L(-outer[0], outer[1]), L(outer[0], outer[1]), L(0, belly)];   // 武裝一（左內）、二（右內）、三（左外）、四（右外）、纏鬥裝備（機腹）
+  const hp = [L(-inner[0], inner[1]), L(inner[0], inner[1]), L(-outer[0], outer[1]), L(outer[0], outer[1]), L(0, belly)];
   // 外側掛架太靠近內側就往外推一點
-  for (const k of [2, 3]) if (Math.abs(HG.hp[k].x - HG.hp[k - 2].x) < 1.4) HG.hp[k].x = HG.hp[k - 2].x + Math.sign(HG.hp[k].x || (k === 2 ? -1 : 1)) * 1.4;
-  if (Math.abs(HG.hp[4].x) < 0.01 && Math.abs(HG.hp[0].x) < 1.2) { HG.hp[0].x = -1.2; HG.hp[1].x = 1.2; }
-  P.add(g); HG.ftr = g; HG.fac = fac; HG.frame = frame;
-  return true;
+  for (const k of [2, 3]) if (Math.abs(hp[k].x - hp[k - 2].x) < 1.4) hp[k].x = hp[k - 2].x + Math.sign(hp[k].x || (k === 2 ? -1 : 1)) * 1.4;
+  if (Math.abs(hp[4].x) < 0.01 && Math.abs(hp[0].x) < 1.2) { hp[0].x = -1.2; hp[1].x = 1.2; }
+  return hp;
 }
+// 各武器的發射口（武器模型座標，跟 hgWeapon 的造型對齊）；有好幾個口的輪流發射
+const HG_MUZZLE = {
+  pulse: [[-0.13, 0, 2.74], [0.13, 0, 2.74]],              // 雙管輪流
+  homing: [[-0.24, -0.14, 1.5], [0.24, -0.14, 1.5]],        // 兩枚飛彈輪流
+  repair: [[0, 0, 1.37]],
+  heavy: [[0, 0, 2.98]],
+  rocket: [[0, 0, 1.07], ...[0, 3, 1, 4, 2, 5].map((k) => [Math.cos(k * Math.PI / 3) * 0.28, Math.sin(k * Math.PI / 3) * 0.28, 1.07])],   // 七根發射管跳著輪
+  torpedo: [[0, 0, 2.4]],
+  lance: [[0, 0, 2.95]],
+  ecm: [[0, -0.42, 0]],
+};
 function hgMountAt(k, w) {   // 把武器裝到掛架 k（機體座標）
   const p = HG.hp[k]; w.position.set(p.x, p.y - w.userData.r, p.z); w.quaternion.identity(); HG.ftr.add(w);
   HG.mount[k] = { id: w.userData.id, mesh: w };

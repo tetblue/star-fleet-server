@@ -315,7 +315,7 @@ function pilotNewSlot(id) { const m = pilotSlotMods(id, PL.prof[id] || 0, PL.B);
 function pilotResetSlots() { PL.slots = PL.slotIds.map(pilotNewSlot); if (!PL.gear && PL.gearId) PL.gear = pilotNewSlot(PL.gearId); }   // 纏鬥裝備的冷卻不因整補重置
 function pilotBegin(cfg) {
   PL.on = true; PL.spec = false; PL.side = 0; PL.j = FTR_MAX - 1; FT.state[PL.j] = 0;
-  PL.B = pilotBuild(cfg); PL.frame = PL.B.fr; PL.taken = PL.B.taken; PL.respawn = PL.B.respawn; PL.prof = cfg.prof || {}; PL.slotIds = cfg.slots.slice(); PL.gearId = PILOT_WEAPONS[cfg.gear] && PILOT_WEAPONS[cfg.gear].gear ? cfg.gear : ''; PL.gear = null; PL.gearPress = false;
+  PL.B = pilotBuild(cfg); PL.frame = PL.B.fr; PL.taken = PL.B.taken; PL.respawn = PL.B.respawn; PL.prof = cfg.prof || {}; PL.slotIds = cfg.slots.slice(); PL.gearId = PILOT_WEAPONS[cfg.gear] && PILOT_WEAPONS[cfg.gear].gear ? cfg.gear : ''; PL.gear = null; PL.gearPress = false; PL.arms = null;
   PL.stats = { kf: 0, ks: 0, dmg: 0, deaths: 0, shots: 0, hits: 0, merit: 0, msl: 0, heal: 0, wxp: {} };
   PL.feed = []; PL.msl = []; PL.hits = []; PL.flash = null; PL.ecm = null; PL.dodge = 0; PL.tgt = null; PL.cock = false; PL.camD = 1; PL.rng = (battleSeed ^ 0x5bd1e995) >>> 0 || 1; PL.thr = 0.6; PL.saved = false; PL.savedBefore = PL.lv0 = PL.wx0 = null;
   PL.keys.clear(); PL.fire = [false, false, false, false]; PL.press = [false, false, false, false];
@@ -673,11 +673,9 @@ function pilotWeapon(k, dt, t, px, py, pz) {
     if (!fire || S.cd > 0 || S.over || (W.ammo && S.ammo <= 0)) return;
     S.cd += 1 / W.rof; if (S.cd < 0) S.cd = 0;
     if (W.ammo) S.ammo--; else { S.heat += W.heat * S.heatM; if (S.heat >= 1) { S.heat = 1; S.over = true; } }
-    S.side = 1 - S.side;
-    const Rt = v3.cross(F, PL.U), o = (S.side ? 0.25 : -0.25) * PILOT_FTR_LEN;
     const sp = W.spread, D = v3.norm([F[0] + (plRnd() - 0.5) * sp * 2, F[1] + (plRnd() - 0.5) * sp * 2, F[2] + (plRnd() - 0.5) * sp * 2]);
-    const mz = PILOT_FTR_LEN * 0.6;
-    pilotShot(px + F[0] * mz + Rt[0] * o, py + F[1] * mz + Rt[1] * o, pz + F[2] * mz + Rt[2] * o, D, W, t, (M.gun || 1) * S.dm);
+    const o = pilotMuzzle(k, S, px, py, pz);   // 從這個槽的武器發射口打出去（雙管、火箭管輪流）
+    pilotShot(o[0], o[1], o[2], D, W, t, (M.gun || 1) * S.dm);
     return;
   }
   if (W.type === 'lock') {
@@ -689,33 +687,34 @@ function pilotWeapon(k, dt, t, px, py, pz) {
     else { S.lockT = 0; S.lost = 0; S.lock = c ? c.i : -1; S.lockK = c ? c.k : ''; }
     if (!PL.press[k] || S.cd > 0 || S.ammo <= 0) return;
     const locked = !!c && S.lockT >= S.need;   // 沒鎖定也能發射
+    const o = pilotMuzzle(k, S, px, py, pz);   // 從掛架上的飛彈／魚雷位置射出
     if (W.vs === 'f') {
-      PL.msl.push({ x: px + F[0] * PILOT_FTR_LEN, y: py + F[1] * PILOT_FTR_LEN, z: pz + F[2] * PILOT_FTR_LEN, vx: F[0] * W.speed * PILOT_SPEED, vy: F[1] * W.speed * PILOT_SPEED, vz: F[2] * W.speed * PILOT_SPEED, tg: locked ? c.i : -1, turn: W.turn * (locked ? 1 : 0.8), age: 0, life: W.life / PILOT_SPEED, dmg: W.dmg * S.dm, W, n: 0 });
+      PL.msl.push({ x: o[0], y: o[1], z: o[2], vx: F[0] * W.speed * PILOT_SPEED, vy: F[1] * W.speed * PILOT_SPEED, vz: F[2] * W.speed * PILOT_SPEED, tg: locked ? c.i : -1, turn: W.turn * (locked ? 1 : 0.8), age: 0, life: W.life / PILOT_SPEED, dmg: W.dmg * S.dm, W, n: 0 });
     } else {
       const tc = locked ? c : c || pilotLockCand({ ...W, cone: 0.6 }, px, py, pz, null);
       if (!tc) { pilotFeed('前方沒有敵艦', 'hint'); return; }
       if (tc.k === 'g') {   // 地面目標：自己導引的魚雷
         const ms = 110 * PILOT_SPEED;
-        PL.msl.push({ gt: tc.i, x: px + F[0] * PILOT_FTR_LEN, y: py + F[1] * PILOT_FTR_LEN - PILOT_FTR_LEN * 0.3, z: pz + F[2] * PILOT_FTR_LEN, vx: F[0] * ms, vy: F[1] * ms, vz: F[2] * ms, life: 14 / PILOT_SPEED * 0.1 + 20, dmg: W.dmg * S.dm * (locked ? 1 : 0.7), W, n: 0 });
+        PL.msl.push({ gt: tc.i, x: o[0], y: o[1], z: o[2], vx: F[0] * ms, vy: F[1] * ms, vz: F[2] * ms, life: 14 / PILOT_SPEED * 0.1 + 20, dmg: W.dmg * S.dm * (locked ? 1 : 0.7), W, n: 0 });
         S.cd = W.cd; S.ammo--; PL.stats.msl++; S.lockT = 0; return;
       }
       const hq = squadrons[ships.sq[PL.home >= 0 ? PL.home : 0]], n0 = pending.length;
-      if (launchMissileAt(px + F[0] * PILOT_FTR_LEN, py + F[1] * PILOT_FTR_LEN - PILOT_FTR_LEN * 0.3, pz + F[2] * PILOT_FTR_LEN, PL.side, hq, tc.i, W.dmg * S.dm, t, 1, W.accM * (locked ? 1 : 0.55))) for (let q = n0; q < pending.length; q++) pending[q].pl = S.id;
+      if (launchMissileAt(o[0], o[1], o[2], PL.side, hq, tc.i, W.dmg * S.dm, t, 1, W.accM * (locked ? 1 : 0.55))) for (let q = n0; q < pending.length; q++) pending[q].pl = S.id;
     }
     S.cd = W.cd; S.ammo--; PL.stats.msl++;
     S.lockT = 0;
     return;
   }
-  if (W.type === 'beam' && W.heal) { pilotRepair(S, W, dt, t, px, py, pz, fire); return; }
+  if (W.type === 'beam' && W.heal) { pilotRepair(k, S, W, dt, t, px, py, pz, fire); return; }
   if (W.type === 'beam') {
     const dur = W.dur * S.enM, R = W.range * (M.lanceR || 1);
     if (!fire || S.en <= 0) { S.en = Math.min(1, S.en + dt / W.recharge); if (!fire && S.en > 0.15) S.empty = false; return; }
     if (S.empty) { S.en = Math.min(1, S.en + dt / W.recharge); return; }
     S.en -= dt / dur; if (S.en <= 0) { S.en = 0; S.empty = true; }
-    const mz = PILOT_FTR_LEN * 0.6, ox = px + F[0] * mz, oy = py + F[1] * mz, oz = pz + F[2] * mz;
+    const [ox, oy, oz] = pilotMuzzle(k, null, px, py, pz);
     const h = pilotRay(ox, oy, oz, F, R, null, false);
     const ex = ox + F[0] * h.s, ey = oy + F[1] * h.s, ez = oz + F[2] * h.s;
-    PL.beam = { t, b: [ex, ey, ez], hit: h.k };   // 畫面：pilotBeamFrame 每幀畫一條實體光束
+    PL.beam = { t, b: [ex, ey, ez], hit: h.k, k };   // 畫面：pilotBeamFrame 每幀畫一條實體光束
     if (h.k && simTick % 7 === 0) spawnFx(ex, ey, ez, h.k === 's' ? PL.side : PL.side, h.k === 's' ? 1.6 : 1.1, 30);   // 打到的地方冒火花
     S.dmgT -= dt;
     if (S.dmgT <= 0) {
@@ -757,15 +756,15 @@ function pilotEcmHides(o, x, y, z) {
   const j = PL.j; return Math.hypot(fP[j * 3] - x, fP[j * 3 + 1] - y, fP[j * 3 + 2] - z) <= PL.ecm.R;
 }
 // 維修光束：對準的友艦（射線碰到的第一艘）修船體與護盾；沒對準友艦就修自己
-function pilotRepair(S, W, dt, t, px, py, pz, fire) {
+function pilotRepair(k, S, W, dt, t, px, py, pz, fire) {
   if (!fire || S.en <= 0 || S.empty) { S.en = Math.min(1, S.en + dt / W.recharge); if (!fire && S.en > 0.15) S.empty = false; return; }
-  const F = PL.F, mz = PILOT_FTR_LEN * 0.6, ox = px + F[0] * mz, oy = py + F[1] * mz, oz = pz + F[2] * mz;
+  const F = PL.F, [ox, oy, oz] = pilotMuzzle(k, null, px, py, pz);
   const h = pilotRay(ox, oy, oz, F, W.range, { shipOnly: true, speed: 1e9 }, false, PL.side);
   let amt = 0;
   if (h.k === 's') {
     const i = h.i, a = Math.min(W.hps * S.dm * dt, maxHp(i) - ships.hp[i]); ships.hp[i] += Math.max(0, a); amt = Math.max(0, a);
     const b = Math.min(W.hps * 0.6 * S.dm * dt, ships.shMax[i] - ships.sh[i]); if (b > 0) { ships.sh[i] += b; amt += b * 0.5; }
-    PL.beam = { t, b: [ox + F[0] * h.s, oy + F[1] * h.s, oz + F[2] * h.s], hit: 's', heal: true };
+    PL.beam = { t, b: [ox + F[0] * h.s, oy + F[1] * h.s, oz + F[2] * h.s], hit: 's', heal: true, k };
     if (simTick % 9 === 0) spawnFx(PL.beam.b[0], PL.beam.b[1], PL.beam.b[2], PL.side, 0.9, 30);
   } else if (PL.hp < PL.frame.hp) { amt = Math.min(W.self * S.dm * dt, PL.frame.hp - PL.hp); PL.hp += amt; PL.selfFix = t; }
   if (amt <= 0) { S.en = Math.min(1, S.en + dt / W.recharge); return; }   // 沒有東西可修：不耗能量
@@ -1034,6 +1033,42 @@ function pilotDrawSelf(lod, x, y, z, L) {
   const F = PL.F, U = PL.U, Rr = v3.cross(U, F), e = mesh.instanceMatrix.array, o = mesh.count * 16;
   e.set([Rr[0] * L, Rr[1] * L, Rr[2] * L, 0, U[0] * L, U[1] * L, U[2] * L, 0, F[0] * L, F[1] * L, F[2] * L, 0, x, y, z, 1], o);
   mesh.count++;
+  // 掛架上的武裝（與機庫同一套模型）：機庫的機長是 HG_FL，縮到 L
+  const A = pilotArms(); if (!A || !PL_ARMS.children.length) return;
+  const k = L / HG_FL;
+  PL_ARMS.matrix.set(Rr[0] * k, U[0] * k, F[0] * k, x, Rr[1] * k, U[1] * k, F[1] * k, y, Rr[2] * k, U[2] * k, F[2] * k, z, 0, 0, 0, 1);
+  PL_ARMS.matrixWorldNeedsUpdate = true; PL_ARMS.visible = true;
+}
+// ───── 自己機上的武裝模型與發射口 ─────
+// 掛架：武裝一～四＋機腹的纏鬥裝備（hgHardpoints 的順序）；發射口存成「機長＝1」的機體座標（右、上、前）
+const PL_ARMS = (() => { const g = new THREE.Group(); g.matrixAutoUpdate = false; g.visible = false; scene.add(g); return g; })();
+function pilotSelfKey() { const k = FAC_KEY[shipFac(FT.carrier[PL.j])] + 'f'; return R3.meshByKey[k] ? k : 'ef'; }
+function pilotArms() {
+  const key = pilotSelfKey(), ids = [...PL.slotIds.slice(0, 4), PL.gearId || ''], sig = key + ids.join();
+  if (PL.arms && PL.arms.sig === sig) return PL.arms;
+  for (const c of PL_ARMS.children.slice()) {   // 換了機體或武裝：拆掉舊的（共用材質不釋放）
+    PL_ARMS.remove(c);
+    const shared = new Set(Object.values(hgMats()));
+    c.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material && !shared.has(o.material)) o.material.dispose(); });
+  }
+  const M = getModel(key); PL.arms = { sig, mz: [] };
+  if (!M) return PL.arms;
+  const hp = hgHardpoints(M.lods[0], HG_FL);
+  ids.forEach((id, k) => {
+    if (!id || !hp[k]) return;
+    const w = hgWeapon(id), c = hp[k].clone(); c.y -= w.userData.r; w.position.copy(c); PL_ARMS.add(w);
+    PL.arms.mz[k] = (HG_MUZZLE[id] || [[0, 0, 1]]).map((m) => [(c.x + m[0]) / HG_FL, (c.y + m[1]) / HG_FL, (c.z + m[2]) / HG_FL]);
+  });
+  return PL.arms;
+}
+// 武裝槽 k 的發射口（世界座標）；S＝有給就換到下一個口（雙管、火箭管輪流）
+function pilotMuzzle(k, S, px, py, pz) {
+  const A = pilotArms(), list = A && A.mz[k], F = PL.F, U = PL.U, R = v3.cross(U, F), L = PILOT_FTR_LEN;
+  let m;
+  if (list && list.length) { const i = S ? (S.mi = ((S.mi || 0) + 1) % list.length) : 0; m = list[i]; }
+  else m = [k & 1 ? 0.25 : -0.25, 0, 0.6];   // 模型還沒好：舊的固定位置
+  const x = m[0] * L, y = m[1] * L, z = m[2] * L;
+  return [px + R[0] * x + U[0] * y + F[0] * z, py + R[1] * x + U[1] * y + F[1] * z, pz + R[2] * x + U[2] * y + F[2] * z];
 }
 
 // ───── 輸入 ─────
@@ -1122,6 +1157,7 @@ function pilotHudBuild() {
   PL.el.hidden = false; PL.pauseEl.hidden = true;
 }
 function pilotFrame(dt) {
+  PL_ARMS.visible = false;   // 這一幀有畫自己的機（pilotDrawSelf）才顯示武裝
   if (!PL.on) return;
   if (GAME.phase !== 'battle') return;
   if (GAME.result && document.pointerLockElement) document.exitPointerLock();
@@ -1541,7 +1577,7 @@ function pilotHitFrame() {
 function pilotBeamFrame() {
   const B = PL.beam, on = PL.on && !PL.spec && !PL.dead && !PL.dock && B && B.b && U.uTime.value - B.t < 0.06;
   PL_BEAM.g.visible = !!on; if (!on) return;
-  const j = PL.j, F = PL.F, mz = PILOT_FTR_LEN * 0.55, a = [fP[j * 3] + F[0] * mz, fP[j * 3 + 1] + F[1] * mz, fP[j * 3 + 2] + F[2] * mz];
+  const j = PL.j, a = pilotMuzzle(B.k || 0, null, fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2]);   // 光束從武器的發射口出去
   _bmD.set(B.b[0] - a[0], B.b[1] - a[1], B.b[2] - a[2]); const len = _bmD.length() || 0.01; _bmD.divideScalar(len);
   PL_BEAM.g.position.set((a[0] + B.b[0]) / 2, (a[1] + B.b[1]) / 2, (a[2] + B.b[2]) / 2); PL_BEAM.g.quaternion.setFromUnitVectors(_bmY, _bmD);
   const now = performance.now() / 1000, w = PILOT_FTR_LEN * 0.1 * (1 + 0.35 * Math.sin(now * 53) + 0.2 * Math.sin(now * 31)), col = B.heal ? _healCol : FACTION[SIDE_FAC[PL.side]].beam;
