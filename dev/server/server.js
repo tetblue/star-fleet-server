@@ -11,7 +11,7 @@ const path = require('path');
 const http = require('http');
 const os = require('os');
 const crypto = require('crypto');
-const { loadModels } = require('./models.js');
+const { loadModels, parseGLB } = require('./models.js');
 const createMulti = require('./multi.js');
 
 const VERSION = '1.0.0';
@@ -25,6 +25,8 @@ const DEFAULT_CONFIG = {
   allowRegister: true,
   backup: { minIntervalMinutes: 10, keepRecent: 50, keepDays: 60 },
   maxRecordsPerPlayer: 500,
+  // 貼圖繪製存回模型：'local'＝只有在伺服器這台電腦上玩的人可以存（預設）、'all'＝所有登入的玩家、'off'＝不能存
+  modelEdit: 'local',
 };
 const ts = () => new Date().toLocaleString('zh-TW', { hour12: false });
 const log = (...a) => console.log(`[${ts()}]`, ...a);
@@ -116,6 +118,14 @@ function send(res, code, body, type = 'application/json; charset=utf-8', extra =
   res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store', ...extra }); res.end(body);
 }
 const json = (res, code, o) => send(res, code, JSON.stringify(o));
+function readRaw(req, limit) {
+  return new Promise((resolve, reject) => {
+    const parts = []; let n = 0;
+    req.on('data', (c) => { n += c.length; if (n > limit) { reject(new Error('檔案太大')); req.destroy(); } else parts.push(c); });
+    req.on('end', () => resolve(Buffer.concat(parts)));
+    req.on('error', reject);
+  });
+}
 function readBody(req, limit = 20 * 1048576) {
   return new Promise((resolve, reject) => {
     const parts = []; let n = 0;
@@ -157,6 +167,7 @@ async function api(req, res, url) {
   if (p === '/api/info') return json(res, 200, { name: '星海艦隊戰', version: VERSION, allowRegister: CFG.allowRegister, players: listPlayers().length });
   if (p === '/api/players' && m === 'GET') return json(res, 200, listPlayers());
   if (p === '/api/models' && m === 'GET') return send(res, 200, MODEL_JSON);
+  if (p === '/api/models/can-edit' && m === 'GET') return json(res, 200, { ok: canEditModels(req), mode: CFG.modelEdit });
   if ((p === '/api/register' || p === '/api/login') && m === 'POST') {
     const b = await readBody(req, 65536), name = normName(b.name);
     if (!name || name.length > 24 || /[\u0000-\u001f<>"\\/]/.test(name)) return json(res, 400, { error: '名稱要 1～24 個字，不能有 < > " / \\ 等符號' });
@@ -251,6 +262,36 @@ async function api(req, res, url) {
     }
     if (m === 'DELETE') { try { fs.unlinkSync(f); } catch (e) { /* 本來就空 */ } return json(res, 200, { ok: true }); }
   }
+  // 貼圖繪製：把畫好的 GLB 存回模型資料夾（原檔第一次被蓋掉前先備份到 models/_原始/），之後可以還原
+  const mm = p.match(/^\/api\/models\/(\w+)\/(glb|restore)$/);
+  if (mm) {
+    const key = mm[1], m0 = MODELS[key];
+    if (!m0) return json(res, 404, { error: '沒有這個模型' });
+    if (!canEditModels(req)) return json(res, 403, { error: CFG.modelEdit === 'off' ? '伺服器設定不允許修改模型（config.json 的 modelEdit）' : '只有在伺服器那台電腦上才能存回模型（config.json 的 modelEdit 改成 "all" 就能從別台電腦存）' });
+    const file = path.resolve(MODELS_DIR, m0.file), orig = origFile(m0.file);
+    if (mm[2] === 'glb' && m === 'PUT') {
+      const buf = await readRaw(req, 256 * 1048576);
+      if (buf.length < 20 || buf.readUInt32LE(0) !== 0x46546c67) return json(res, 400, { error: '不是 GLB 檔' });
+      try { parseGLB(buf); } catch (e) { return json(res, 400, { error: 'GLB 讀不出來：' + e.message }); }
+      if (!fs.existsSync(orig)) { fs.mkdirSync(path.dirname(orig), { recursive: true }); fs.copyFileSync(file, orig); }
+      writeAtomic(file, buf);
+      await refreshModels();
+      if (!MODELS[key]) {   // 遊戲用不了（例如找不到網格）：放回原本的檔案
+        writeAtomic(file, fs.readFileSync(orig)); await refreshModels();
+        return json(res, 400, { error: '這個 GLB 遊戲用不了，已放回原本的檔案（伺服器視窗有原因）' });
+      }
+      log(`貼圖繪製：${me.name} 存回 ${key}（${m0.file}，${(buf.length / 1048576).toFixed(1)} MB）`);
+      return json(res, 200, { ok: true, model: modelEntry(key) });
+    }
+    if (mm[2] === 'restore' && m === 'POST') {
+      if (!fs.existsSync(orig)) return json(res, 404, { error: '這個模型沒有改過' });
+      writeAtomic(file, fs.readFileSync(orig)); fs.unlinkSync(orig);
+      await refreshModels();
+      log(`貼圖繪製：${me.name} 還原 ${key}（${m0.file}）`);
+      return json(res, 200, { ok: true, model: modelEntry(key) });
+    }
+    return json(res, 405, { error: '方法不對' });
+  }
   // 多人戰鬥：串流收訊息、POST 送動作
   if (p === '/api/mp/stream' && m === 'GET') return MULTI.stream(req, res, me);
   if (p === '/api/mp/act' && m === 'POST') { const r = MULTI.act(me, await readBody(req, 1048576)); return json(res, r.error ? 400 : 200, r); }
@@ -279,6 +320,27 @@ async function api(req, res, url) {
     }
   }
   return json(res, 404, { error: '沒有這個功能' });
+}
+
+// ───── 模型清單 ─────
+const origFile = (rel) => path.join(MODELS_DIR, '_原始', rel);
+function modelEntry(k) {
+  const v = MODELS[k];
+  return { ...v, glb: '/models/' + v.file.split(/[\\/]/).map(encodeURIComponent).join('/') + '?v=' + v.mtime, lod: `/lod/${k}.bin?v=${v.mtime}-${v.lodBytes}`, painted: fs.existsSync(origFile(v.file)) };
+}
+let refreshing = Promise.resolve();
+function refreshModels() {   // 重讀模型資料夾（沒改的模型用快取，很快）；同時只跑一個
+  return (refreshing = refreshing.catch(() => {}).then(async () => {
+    MODELS = await loadModels(MODELS_DIR, CACHE_DIR, (s) => log(s));
+    const list = {}; for (const k in MODELS) list[k] = modelEntry(k);
+    MODEL_JSON = JSON.stringify({ models: list });
+  }));
+}
+function canEditModels(req) {
+  if (CFG.modelEdit === 'all') return true;
+  if (CFG.modelEdit === 'off') return false;
+  const a = req.socket.remoteAddress || '';
+  return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
 }
 
 async function handle(req, res) {
@@ -317,10 +379,7 @@ async function main() {
   loadSessions();
   log(`讀取模型資料夾：${MODELS_DIR}`);
   const t0 = Date.now();
-  MODELS = await loadModels(MODELS_DIR, CACHE_DIR, (s) => log(s));
-  const list = {};
-  for (const [k, v] of Object.entries(MODELS)) list[k] = { ...v, glb: '/models/' + v.file.split(/[\\/]/).map(encodeURIComponent).join('/') + '?v=' + v.mtime, lod: `/lod/${k}.bin?v=${v.mtime}-${v.lodBytes}` };
-  MODEL_JSON = JSON.stringify({ models: list });
+  await refreshModels();
   const mb = Object.values(MODELS).reduce((a, m) => a + m.bytes, 0) / 1048576;
   log(`模型就緒：${Object.keys(MODELS).length} 個，原檔共 ${mb.toFixed(1)} MB（${((Date.now() - t0) / 1000).toFixed(1)} 秒）`);
   const srv = http.createServer(handle);
