@@ -5,7 +5,9 @@
   "description": "星海艦隊戰 網頁端的開發與建置（輸出到 ../web）",
   "scripts": {
     "build": "node build.mjs",
-    "build:exe": "node build_exe.mjs"
+    "build:exe": "node build_exe.mjs",
+    "test": "node tools/smoke.mjs",
+    "bench": "node tools/bench.mjs"
   },
   "dependencies": {
     "three": "0.160.0"

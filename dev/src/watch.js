@@ -147,7 +147,7 @@ function watchHud() {
 function watchFrame() {
   const el = gEl('watchbar'); if (!el) return;
   { const h = gEl('hud'), r = h && getComputedStyle(h).display !== 'none' ? h.getBoundingClientRect() : null; const top = r && r.height ? r.bottom + 8 : 70; el.style.top = top + 'px'; el.style.maxHeight = `calc(100vh - ${top + 90}px)`; }   // 放在左上角資訊欄的下面
-  const m = SIM.m, side = (s) => {
+  const m = SIM.m || {}, side = (s) => {   // 劇情自動代打（autoStory）也開觀摩模式，但沒有模擬室的設定
     const info = m.sides && m.sides[s], col = FACTION[SIDE_FAC[s]].ui;
     const rows = fleets.filter((f) => f.side === s).map((f) => {
       const n = sumA(f.sqs.map((q) => q.alive)), g = fleetGroup(f), dead = n <= 0;

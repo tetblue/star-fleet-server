@@ -12370,7 +12370,7 @@ function watchHud() {
 function watchFrame() {
   const el = gEl('watchbar'); if (!el) return;
   { const h = gEl('hud'), r = h && getComputedStyle(h).display !== 'none' ? h.getBoundingClientRect() : null; const top = r && r.height ? r.bottom + 8 : 70; el.style.top = top + 'px'; el.style.maxHeight = `calc(100vh - ${top + 90}px)`; }   // 放在左上角資訊欄的下面
-  const m = SIM.m, side = (s) => {
+  const m = SIM.m || {}, side = (s) => {   // 劇情自動代打（autoStory）也開觀摩模式，但沒有模擬室的設定
     const info = m.sides && m.sides[s], col = FACTION[SIDE_FAC[s]].ui;
     const rows = fleets.filter((f) => f.side === s).map((f) => {
       const n = sumA(f.sqs.map((q) => q.alive)), g = fleetGroup(f), dead = n <= 0;
@@ -19267,6 +19267,7 @@ function renderSettings() {
       <label class="set-row set-chk"><span>3D 畫面顯示武器<br><small class="g-dim">船夠近（細節前三級）才畫；大軍遠景時關掉可以省效能</small></span><input type="checkbox" id="set-w3d" ${SETTINGS.weapons3D !== false ? 'checked' : ''}></label>
       <div class="set-row"><span>武器掛點<br><small class="g-dim">調整、新增每種船的武器位置</small></span><button class="g-btn sm" id="set-wed">武器配置…</button></div>
       <div class="set-row"><span>貼圖繪製<br><small class="g-dim">直接在船體、武器、艦載機的 3D 模型上畫貼圖，存回伺服器</small></span><button class="g-btn sm" id="set-paint">貼圖繪製…</button></div>
+      <div class="set-row"><span>模型工坊<br><small class="g-dim">修正 GLB：船頭朝向、原點、合併成一個網格、減面、刪除多餘的面</small></span><button class="g-btn sm" id="set-mtool">模型工坊…</button></div>
       <div class="set-row"><span>畫面</span><span class="g-row"><button class="g-btn sm ${mode3D ? '' : 'pri'}" data-rm="2d">2D 像素</button><button class="g-btn sm ${mode3D ? 'pri' : ''}" data-rm="3d">3D 模型</button></span></div>`;
   } else {
     body = `<div class="set-row"><span>介面大小<br><small class="g-dim">文字、按鈕與面板間距一起放大縮小</small></span>
@@ -19298,6 +19299,7 @@ function renderSettings() {
   if (q('#set-w3d')) q('#set-w3d').onchange = (e) => { SETTINGS.weapons3D = e.target.checked; saveSettings(); };
   if (q('#set-wed')) q('#set-wed').onclick = () => { closeSettings(); openWeaponEditor(GAME.phase === 'menu' ? showMenu : null); };
   if (q('#set-paint')) q('#set-paint').onclick = () => { closeSettings(); openPaintLink(); };
+  if (q('#set-mtool')) q('#set-mtool').onclick = () => openModelTool();
   if (q('#set-brpause')) q('#set-brpause').onchange = (e) => { SETTINGS.bridgePause = e.target.checked; saveSettings(); };
   for (const k of ['stat', 'pip']) if (q('#set-pin-' + k)) q('#set-pin-' + k).onchange = (e) => { SETTINGS.brPins[k] = e.target.checked; saveSettings(); };
   qa('[data-rm]').forEach((b) => (b.onclick = () => { setRenderMode(b.dataset.rm); setTimeout(renderSettings, 50); }));
@@ -19354,7 +19356,7 @@ function renderPaintLink() {
   const man = PNT.man || {}, order = Object.keys(PNT_KIND), rank = (k) => { const i = order.indexOf(man[k].kind); return i < 0 ? 9 : i; };
   const groups = STYLES.map(([p, n]) => [n, Object.keys(man).filter((k) => k[0] === p).sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : 1))]).filter((g) => g[1].length);
   const row = (k) => { const m = man[k]; return `<div class="pl-row"><span class="pl-name">${plEsc(m.name || k)}${m.painted ? '<span class="pl-tag">已改</span>' : ''}<br><small class="g-dim">${k}・${PNT_KIND[m.kind] || m.kind}・${plEsc(m.file)}</small></span>
-    <span class="g-row">${m.painted && PNT.canEdit && PNT.canEdit.ok ? `<button class="g-btn sm" data-plr="${k}">還原原始</button>` : ''}<button class="g-btn sm pri" data-plp="${k}">繪製</button></span></div>`; };
+    <span class="g-row">${m.painted && PNT.canEdit && PNT.canEdit.ok ? `<button class="g-btn sm" data-plr="${k}">還原原始</button>` : ''}<button class="g-btn sm" data-plt="${k}" title="在模型工坊修正朝向、原點、合併、減面">修正</button><button class="g-btn sm pri" data-plp="${k}">繪製</button></span></div>`; };
   PNT.el.innerHTML = `<div class="set-card pl-card"><div class="g-head" style="margin-bottom:10px"><h2>貼圖繪製</h2><span class="crumb">直接在 3D 模型上畫貼圖（移植自 Rubicon Paint）</span><span class="g-sp"></span><button class="g-btn" id="pl-close">完成</button></div>
     <p class="g-dim pl-note">選一個模型開啟繪圖視窗：筆刷、圖層、貼圖片、AO 烘焙，畫好按視窗上方的「存回遊戲」。存回後重新整理遊戲（其他玩家也是）才會看到新貼圖；2D 像素畫面用的是預先算好的圖，不會變。</p>
     ${PNT.msg ? `<p class="pl-msg">${plEsc(PNT.msg)}</p>` : ''}
@@ -19362,6 +19364,7 @@ function renderPaintLink() {
   const q = (s) => PNT.el.querySelector(s);
   q('#pl-close').onclick = closePaintLink;
   PNT.el.querySelectorAll('[data-plp]').forEach((b) => (b.onclick = () => plOpen(b.dataset.plp)));
+  PNT.el.querySelectorAll('[data-plt]').forEach((b) => (b.onclick = () => openModelTool(b.dataset.plt)));
   PNT.el.querySelectorAll('[data-plr]').forEach((b) => (b.onclick = () => plRestore(b.dataset.plr)));
 }
 async function plOpen(key) {
@@ -19380,6 +19383,8 @@ async function plOpen(key) {
   PNT.ping = setInterval(() => { if (!PNT.pending || !PNT.win || PNT.win.closed || ++n > 60) { clearInterval(PNT.ping); return; } PNT.win.postMessage({ t: 'rp-ping' }, '*'); }, 300);
   PNT.win.postMessage({ t: 'rp-ping' }, '*');
 }
+// 模型工坊（web/modeltool/）：另開分頁，網址 #模型鍵 直接打開那個模型
+function openModelTool(key) { const w = window.open('modeltool/index.html' + (key ? '#' + key : ''), 'star-modeltool'); if (w) w.focus(); }
 async function plRestore(key) {
   const m = PNT.man[key]; if (!m || PNT.busy) return;
   if (!confirm(`把「${m.name}」換回原本的 GLB？畫過的貼圖會不見（繪圖視窗裡的圖層還留著）。`)) return;

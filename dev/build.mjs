@@ -20,4 +20,8 @@ fs.writeFileSync(path.join(web, 'index.html'), tpl.replaceAll('__BUILD__', build
 // 貼圖繪製（Rubicon Paint）：一般 <script> 的靜態網頁，自帶 three.js r128，原樣複製到 web/paint/
 fs.rmSync(path.join(web, 'paint'), { recursive: true, force: true });
 for (const d of ['index.html', 'css', 'js', 'lib', 'LICENSE']) fs.cpSync(path.join(root, 'paint', d), path.join(web, 'paint', d), { recursive: true });
+// 模型工坊（修正 GLB：朝向、原點、合併、減面、刪面）：ES modules 打包成 web/modeltool/tool.js
+fs.rmSync(path.join(web, 'modeltool'), { recursive: true, force: true });
+await esbuild.build({ entryPoints: [path.join(root, 'modeltool', 'main.js')], bundle: true, minify: true, format: 'iife', outfile: path.join(web, 'modeltool', 'tool.js'), logLevel: 'warning' });
+fs.copyFileSync(path.join(root, 'modeltool', 'index.html'), path.join(web, 'modeltool', 'index.html'));
 console.log('web', build, '→', web);

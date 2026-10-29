@@ -12,3 +12,7 @@ data/
 
 # Deployment config (copy from config.example.json)
 /config.json
+
+# Test runs (dev/tools/harness.mjs): test server data and results
+dev/tools/.testbase/
+dev/test-results/

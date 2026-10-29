@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>模型工坊 · 星海艦隊戰</title>
+<style>
+  :root { --bg: #070b14; --panel: #0d1424; --line: #24324d; --text: #d8e4f5; --dim: #7f91ad; --acc: #5cc8ff; --ok: #6fdc8c; --warn: #ffc857; --bad: #ff6b6b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.5 "Microsoft JhengHei", "PingFang TC", system-ui, sans-serif; }
+  body { display: grid; grid-template-columns: 240px 1fr 330px; grid-template-rows: 44px 1fr; height: 100vh; overflow: hidden; }
+  header { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { margin: 0; font-size: 15px; letter-spacing: .08em; }
+  header .sp { flex: 1; }
+  #cur { color: var(--dim); }
+  button, select, input { font: inherit; color: var(--text); background: #15203a; border: 1px solid var(--line); border-radius: 4px; }
+  button { padding: 4px 10px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--acc); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: #17456b; border-color: #2f7fb8; }
+  button.sel { background: #2a4f2a; border-color: var(--ok); }
+  input[type=number] { width: 70px; padding: 2px 4px; }
+  select { padding: 2px 4px; }
+  #list { overflow: auto; border-right: 1px solid var(--line); background: var(--panel); padding: 6px 0; }
+  #list .grp { padding: 8px 12px 2px; color: var(--acc); font-size: 12px; letter-spacing: .1em; }
+  #list .it { padding: 3px 12px; cursor: pointer; display: flex; justify-content: space-between; gap: 6px; }
+  #list .it:hover { background: #15203a; }
+  #list .it.on { background: #1b3557; }
+  #list .it small { color: var(--dim); }
+  #list .tag { color: #ffd27a; font-size: 11px; }
+  #edView { position: relative; overflow: hidden; }
+  #edView canvas { display: block; }
+  #hint { position: absolute; left: 10px; bottom: 8px; color: var(--dim); font-size: 12px; pointer-events: none; }
+  #drop { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(10,30,60,.7); font-size: 18px; pointer-events: none; }
+  #drop.on { display: flex; }
+  #side { overflow: auto; border-left: 1px solid var(--line); background: var(--panel); padding: 4px 12px 30px; }
+  #side h3 { margin: 14px 0 6px; font-size: 13px; color: var(--acc); letter-spacing: .06em; }
+  .btns { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+  .edRow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0; }
+  .dim { color: var(--dim); }
+  .small { font-size: 12px; }
+  .tog { display: flex; gap: 6px; align-items: center; }
+  #checks div { padding: 2px 0; }
+  #checks .ok::before { content: '✓ '; color: var(--ok); }
+  #checks .warn::before { content: '⚠ '; color: var(--warn); }
+  #checks .bad::before { content: '✗ '; color: var(--bad); }
+  #checks .info::before { content: '・'; color: var(--dim); }
+  #stats { color: var(--dim); font-size: 12px; }
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); padding: 8px 16px; border-radius: 6px; background: #17324f; border: 1px solid #2f7fb8; display: none; z-index: 10; max-width: 70vw; }
+  #toast.bad { background: #4a1c1c; border-color: var(--bad); }
+  #toast.on { display: block; }
+  .edFaceDraw { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #busy { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 9; font-size: 16px; }
+  #busy.on { display: flex; }
+</style>
+</head>
+<body>
+<header>
+  <h1>模型工坊</h1><span id="cur">選一個模型</span><span class="sp"></span>
+  <button id="btnUndo" title="Ctrl+Z" disabled>復原</button><button id="btnRedo" title="Ctrl+Y" disabled>重做</button>
+  <label class="tog small"><input type="checkbox" id="wire"> 線框</label>
+  <a href="../" style="color:var(--dim)">← 回遊戲</a>
+</header>
+<nav id="list"></nav>
+<main id="edView"><div id="hint">左鍵旋轉、右鍵平移、滾輪縮放；F 重新取景。也可以把 GLB 檔拖進來替換目前的模型。</div><div id="drop">放開以載入這個 GLB（存回前不會影響遊戲）</div></main>
+<aside id="side">
+  <h3>規格檢查</h3>
+  <div id="checks" class="small"><div class="info">從左邊選一個模型。</div></div>
+  <div id="stats"></div>
+
+  <h3>朝向</h3>
+  <div class="dim small">青色箭頭是 models.json 設定的船頭方向（<span id="fwdName">+z</span>），黃色是上方（+y）。把模型轉到船頭對準箭頭。</div>
+  <div class="edRow small">繞 X <button data-rot="x,1">+90°</button><button data-rot="x,-1">−90°</button></div>
+  <div class="edRow small">繞 Y <button data-rot="y,1">+90°</button><button data-rot="y,-1">−90°</button><button data-rot="y,2">180°</button></div>
+  <div class="edRow small">繞 Z <button data-rot="z,1">+90°</button><button data-rot="z,-1">−90°</button></div>
+  <div class="btns"><button id="btnMirror" title="X 軸翻轉（左右對調）">左右鏡像</button></div>
+  <h3>原點</h3>
+  <div class="btns"><button id="btnCenter">外框中心 → 原點</button><button id="btnBottom">底面中心 → 原點</button></div>
+  <div class="dim small">船體繞原點轉向，原點最好在船的中心；武器的底座伺服器會自動對齊，不必設定。</div>
+
+  <h3>合併</h3>
+  <div class="dim small">遊戲只用第一個網格和它的貼圖。AI 模型常分成好幾塊、好幾張貼圖：合併成一個網格，貼圖依面積排進一張圖集（UV 超出 0～1 的會被夾住）。</div>
+  <div class="edRow small">圖集 <select id="atlasSize"><option>1024</option><option selected>2048</option><option>4096</option></select> px <button id="btnMerge" class="primary">合併成一個網格</button></div>
+
+  <h3>最佳化</h3>
+  <div class="btns"><button id="btnWeld" title="位置、法線、UV 都相同的頂點合成一個">焊接重複頂點</button></div>
+  <div class="edRow small">減面到 <input id="simpTarget" type="number" min="100" step="1000" value="20000"> 面 <button id="btnSimp">減面</button></div>
+  <div class="dim small">以 meshoptimizer 減面，保留 UV 與法線；伺服器另外會自動產生遠景的簡化網格。</div>
+
+  <div id="edFaceTools">
+    <h3>刪除多邊形</h3>
+    <div class="btns"><button id="edFaceOn">選取多邊形…</button></div>
+    <div id="edFacePanel" hidden>
+      <div class="btns" id="edFaceShape"></div>
+      <div class="edRow" id="edBrushRow"><label>筆刷半徑 <input id="edBrushR" type="number" min="2" max="300" value="24"> px</label></div>
+      <div class="edRow"><label>深度 <select id="edFaceDepth"><option value="visible">只選看得到的</option><option value="front">只選朝向鏡頭的（含被擋住的）</option><option value="all">穿透（全部）</option></select></label></div>
+      <div><label class="tog small"><input type="checkbox" id="edFaceFull"> 完全在範圍內才選（三個頂點）</label></div>
+      <div><label class="tog small"><input type="checkbox" id="edFaceSym"> 對稱選取（以原點的 X=0 左右鏡像）</label></div>
+      <div class="btns"><button id="edFaceGrow" title="已選的三角形所在的整塊（相連的面）">擴展到相連</button><button id="edFaceInv">反選</button><button id="edFaceClear" title="Esc">清除選取</button></div>
+      <div class="edRow small"><label>小碎塊：少於 <input id="edFaceSmallN" type="number" min="0" value="50"> 面</label><label>或面積 &lt; <input id="edFaceSmallA" type="number" min="0" step="0.1" value="0.5">%</label></div>
+      <div class="btns"><button id="edFaceSmall" title="自動選取漂浮的小碎塊（最大的一塊不選）">選取小碎塊</button></div>
+      <div id="edFaceInfo" class="small"></div>
+      <div class="btns"><button id="edFaceDel" class="primary">刪除選取的面（Delete）</button></div>
+      <div class="dim small">左鍵選取：Shift 加選、Ctrl 減選（筆刷按住 Ctrl 擦除）；右鍵旋轉、中鍵平移、滾輪縮放；Esc 清除選取。</div>
+    </div>
+  </div>
+
+  <h3>存檔</h3>
+  <div class="edRow small">貼圖最大邊 <select id="texMax"><option value="0">原尺寸</option><option value="4096">4096</option><option value="2048" selected>2048</option><option value="1024">1024</option></select>
+    格式 <select id="texFmt"><option value="png">PNG</option><option value="jpeg" selected>JPEG（小）</option></select></div>
+  <div class="btns"><button id="btnSave" class="primary">存回遊戲</button><button id="btnDl">下載 .glb</button><button id="btnRestore">還原原始</button></div>
+  <div id="saveNote" class="dim small"></div>
+</aside>
+<div id="toast"></div>
+<div id="busy">處理中…</div>
+<script src="tool.js"></script>
+</body>
+</html>

@@ -63,6 +63,7 @@ function renderSettings() {
       <label class="set-row set-chk"><span>3D 畫面顯示武器<br><small class="g-dim">船夠近（細節前三級）才畫；大軍遠景時關掉可以省效能</small></span><input type="checkbox" id="set-w3d" ${SETTINGS.weapons3D !== false ? 'checked' : ''}></label>
       <div class="set-row"><span>武器掛點<br><small class="g-dim">調整、新增每種船的武器位置</small></span><button class="g-btn sm" id="set-wed">武器配置…</button></div>
       <div class="set-row"><span>貼圖繪製<br><small class="g-dim">直接在船體、武器、艦載機的 3D 模型上畫貼圖，存回伺服器</small></span><button class="g-btn sm" id="set-paint">貼圖繪製…</button></div>
+      <div class="set-row"><span>模型工坊<br><small class="g-dim">修正 GLB：船頭朝向、原點、合併成一個網格、減面、刪除多餘的面</small></span><button class="g-btn sm" id="set-mtool">模型工坊…</button></div>
       <div class="set-row"><span>畫面</span><span class="g-row"><button class="g-btn sm ${mode3D ? '' : 'pri'}" data-rm="2d">2D 像素</button><button class="g-btn sm ${mode3D ? 'pri' : ''}" data-rm="3d">3D 模型</button></span></div>`;
   } else {
     body = `<div class="set-row"><span>介面大小<br><small class="g-dim">文字、按鈕與面板間距一起放大縮小</small></span>
@@ -94,6 +95,7 @@ function renderSettings() {
   if (q('#set-w3d')) q('#set-w3d').onchange = (e) => { SETTINGS.weapons3D = e.target.checked; saveSettings(); };
   if (q('#set-wed')) q('#set-wed').onclick = () => { closeSettings(); openWeaponEditor(GAME.phase === 'menu' ? showMenu : null); };
   if (q('#set-paint')) q('#set-paint').onclick = () => { closeSettings(); openPaintLink(); };
+  if (q('#set-mtool')) q('#set-mtool').onclick = () => openModelTool();
   if (q('#set-brpause')) q('#set-brpause').onchange = (e) => { SETTINGS.bridgePause = e.target.checked; saveSettings(); };
   for (const k of ['stat', 'pip']) if (q('#set-pin-' + k)) q('#set-pin-' + k).onchange = (e) => { SETTINGS.brPins[k] = e.target.checked; saveSettings(); };
   qa('[data-rm]').forEach((b) => (b.onclick = () => { setRenderMode(b.dataset.rm); setTimeout(renderSettings, 50); }));

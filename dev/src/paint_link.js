@@ -30,7 +30,7 @@ function renderPaintLink() {
   const man = PNT.man || {}, order = Object.keys(PNT_KIND), rank = (k) => { const i = order.indexOf(man[k].kind); return i < 0 ? 9 : i; };
   const groups = STYLES.map(([p, n]) => [n, Object.keys(man).filter((k) => k[0] === p).sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : 1))]).filter((g) => g[1].length);
   const row = (k) => { const m = man[k]; return `<div class="pl-row"><span class="pl-name">${plEsc(m.name || k)}${m.painted ? '<span class="pl-tag">已改</span>' : ''}<br><small class="g-dim">${k}・${PNT_KIND[m.kind] || m.kind}・${plEsc(m.file)}</small></span>
-    <span class="g-row">${m.painted && PNT.canEdit && PNT.canEdit.ok ? `<button class="g-btn sm" data-plr="${k}">還原原始</button>` : ''}<button class="g-btn sm pri" data-plp="${k}">繪製</button></span></div>`; };
+    <span class="g-row">${m.painted && PNT.canEdit && PNT.canEdit.ok ? `<button class="g-btn sm" data-plr="${k}">還原原始</button>` : ''}<button class="g-btn sm" data-plt="${k}" title="在模型工坊修正朝向、原點、合併、減面">修正</button><button class="g-btn sm pri" data-plp="${k}">繪製</button></span></div>`; };
   PNT.el.innerHTML = `<div class="set-card pl-card"><div class="g-head" style="margin-bottom:10px"><h2>貼圖繪製</h2><span class="crumb">直接在 3D 模型上畫貼圖（移植自 Rubicon Paint）</span><span class="g-sp"></span><button class="g-btn" id="pl-close">完成</button></div>
     <p class="g-dim pl-note">選一個模型開啟繪圖視窗：筆刷、圖層、貼圖片、AO 烘焙，畫好按視窗上方的「存回遊戲」。存回後重新整理遊戲（其他玩家也是）才會看到新貼圖；2D 像素畫面用的是預先算好的圖，不會變。</p>
     ${PNT.msg ? `<p class="pl-msg">${plEsc(PNT.msg)}</p>` : ''}
@@ -38,6 +38,7 @@ function renderPaintLink() {
   const q = (s) => PNT.el.querySelector(s);
   q('#pl-close').onclick = closePaintLink;
   PNT.el.querySelectorAll('[data-plp]').forEach((b) => (b.onclick = () => plOpen(b.dataset.plp)));
+  PNT.el.querySelectorAll('[data-plt]').forEach((b) => (b.onclick = () => openModelTool(b.dataset.plt)));
   PNT.el.querySelectorAll('[data-plr]').forEach((b) => (b.onclick = () => plRestore(b.dataset.plr)));
 }
 async function plOpen(key) {
@@ -56,6 +57,8 @@ async function plOpen(key) {
   PNT.ping = setInterval(() => { if (!PNT.pending || !PNT.win || PNT.win.closed || ++n > 60) { clearInterval(PNT.ping); return; } PNT.win.postMessage({ t: 'rp-ping' }, '*'); }, 300);
   PNT.win.postMessage({ t: 'rp-ping' }, '*');
 }
+// 模型工坊（web/modeltool/）：另開分頁，網址 #模型鍵 直接打開那個模型
+function openModelTool(key) { const w = window.open('modeltool/index.html' + (key ? '#' + key : ''), 'star-modeltool'); if (w) w.focus(); }
 async function plRestore(key) {
   const m = PNT.man[key]; if (!m || PNT.busy) return;
   if (!confirm(`把「${m.name}」換回原本的 GLB？畫過的貼圖會不見（繪圖視窗裡的圖層還留著）。`)) return;
