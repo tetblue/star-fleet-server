@@ -1,0 +1,126 @@
+<!doctype html><meta charset="utf-8"><title>conv</title>
+<body style="background:#222;color:#eee;font:12px sans-serif"><pre id="log"></pre>
+<script type="importmap">{"imports":{"three":"/three/build/three.module.js","three/addons/":"/three/examples/jsm/"}}</script>
+<script type="module">
+// TRIPO GLB → 遊戲用 GLB：轉向（船頭 +z）、置中／正規化、所有分件合成一個網格＋一張 2048 貼圖；
+// 分件動畫資訊寫在頂點屬性：_PART（0 不動、1 轉塔、2+k 砲管 k、10+k 艙蓋 k）、_PIV（該頂點所屬分件的樞軸點）
+import * as THREE from 'three'; import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'; import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+const log = (s) => { document.getElementById('log').textContent += s + '\n'; };
+const ROT = { '-x': new THREE.Matrix4().set(0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 0, 1), '+z': new THREE.Matrix4() };   // −x → +z：x' = z, z' = −x
+async function loadParts(file) {
+  const g = await new GLTFLoader().loadAsync('/in/' + file); g.scene.updateMatrixWorld(true);
+  const parts = []; g.scene.traverse((o) => { if (!o.isMesh) return;
+    const geo = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone(); geo.applyMatrix4(o.matrixWorld);
+    const m = o.material; parts.push({ geo, img: m.map && m.map.image, color: m.color ? m.color.clone() : new THREE.Color(1, 1, 1), box: new THREE.Box3().setFromBufferAttribute(geo.attributes.position) }); });
+  return parts;
+}
+function area(geo) { const p = geo.attributes.position, a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(); let s = 0;
+  for (let i = 0; i < p.count; i += 3) { a.fromBufferAttribute(p, i); b.fromBufferAttribute(p, i + 1); c.fromBufferAttribute(p, i + 2); s += b.sub(a).cross(c.sub(a)).length() / 2; } return s; }
+// 依表面積分配貼圖格子（貨架式排列），回傳 canvas；每個分件記下 [x, y, w, h, pad]
+function atlas(parts, A = 2048) {
+  if (parts.length === 1) { const im = parts[0].img, s = Math.min(A, Math.max(im ? im.width : 64, 64)); const cv = document.createElement('canvas'); cv.width = cv.height = s;
+    const cx = cv.getContext('2d'); if (im) cx.drawImage(im, 0, 0, s, s); else { cx.fillStyle = '#' + parts[0].color.getHexString(); cx.fillRect(0, 0, s, s); } parts[0].tile = [0, 0, s, s, 0]; return cv; }
+  const ar = parts.map((p) => Math.max(area(p.geo), 1e-6)), tot = ar.reduce((a, b) => a + b, 0);
+  for (let k = 1.0; k > 0.05; k *= 0.95) {   // 縮小比例直到排得下
+    const sz = parts.map((p, i) => Math.max(8, Math.min(1024, Math.floor(Math.sqrt(ar[i] / tot) * A * k)))), ord = parts.map((_, i) => i).sort((a, b) => sz[b] - sz[a]);
+    let x = 0, y = 0, rowH = 0, ok = true; const pos = [];
+    for (const i of ord) { const s = sz[i]; if (x + s > A) { x = 0; y += rowH; rowH = 0; } if (y + s > A) { ok = false; break; } pos[i] = [x, y, s, s]; x += s; rowH = Math.max(rowH, s); }
+    if (!ok) continue;
+    const cv = document.createElement('canvas'); cv.width = cv.height = A; const cx = cv.getContext('2d'); cx.fillStyle = '#808080'; cx.fillRect(0, 0, A, A);
+    parts.forEach((p, i) => { const [tx, ty, s] = pos[i], pad = Math.max(1, Math.min(4, Math.floor(s / 16)));
+      if (p.img) { cx.drawImage(p.img, tx, ty, s, s); cx.drawImage(p.img, tx + pad, ty + pad, s - pad * 2, s - pad * 2); }
+      else { cx.fillStyle = '#' + p.color.getHexString(); cx.fillRect(tx, ty, s, s); }
+      p.tile = [tx, ty, s, s, pad]; });
+    log(`  atlas k=${k.toFixed(2)} tiles ${Math.min(...pos.map((q) => q[2]))}..${Math.max(...pos.map((q) => q[2]))}px`);
+    return cv;
+  }
+  throw new Error('atlas failed');
+}
+// job: { file, out, fwd, kind: 'hull'|'weapon', prep(parts) → ctx, classify(partIndex, part, triCentroid, ctx) → { code, piv } }
+async function convert(job) {
+  const parts = await loadParts(job.file); log(`${job.file}: ${parts.length} parts`);
+  const R = ROT[job.fwd]; for (const p of parts) { p.geo.applyMatrix4(R); p.box = new THREE.Box3().setFromBufferAttribute(p.geo.attributes.position); }
+  const cv = atlas(parts), A = cv.width;
+  let n = 0; for (const p of parts) n += p.geo.attributes.position.count;
+  const P = new Float32Array(n * 3), N = new Float32Array(n * 3), UV = new Float32Array(n * 2), PART = new Float32Array(n), PIV = new Float32Array(n * 3);
+  let o = 0; const ctx = job.prep ? job.prep(parts) : {}; const counts = {};
+  parts.forEach((p, pi) => {
+    const pa = p.geo.attributes.position, na = p.geo.attributes.normal, ua = p.geo.attributes.uv, [tx, ty, tw, th, pad] = p.tile;
+    for (let v = 0; v < pa.count; v += 3) {
+      const c = new THREE.Vector3(); for (let k = 0; k < 3; k++) { c.x += pa.getX(v + k) / 3; c.y += pa.getY(v + k) / 3; c.z += pa.getZ(v + k) / 3; }
+      const r = job.classify ? job.classify(pi, p, c, ctx) : { code: 0, piv: [0, 0, 0] };
+      counts[r.code] = (counts[r.code] || 0) + 1;
+      for (let k = 0; k < 3; k++) { const i = o + v + k;
+        P[i * 3] = pa.getX(v + k); P[i * 3 + 1] = pa.getY(v + k); P[i * 3 + 2] = pa.getZ(v + k);
+        if (na) { N[i * 3] = na.getX(v + k); N[i * 3 + 1] = na.getY(v + k); N[i * 3 + 2] = na.getZ(v + k); }
+        let u = ua ? ua.getX(v + k) : 0.5, w = ua ? ua.getY(v + k) : 0.5; u = Math.min(1, Math.max(0, u)); w = Math.min(1, Math.max(0, w));
+        UV[i * 2] = (tx + pad + u * (tw - pad * 2)) / A; UV[i * 2 + 1] = (ty + pad + w * (th - pad * 2)) / A;
+        PART[i] = r.code; PIV[i * 3] = r.piv[0]; PIV[i * 3 + 1] = r.piv[1]; PIV[i * 3 + 2] = r.piv[2]; }
+    }
+    o += pa.count;
+  });
+  if (job.classify) log('  tris per part code ' + JSON.stringify(counts));
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.BufferAttribute(N, 3)); g.setAttribute('uv', new THREE.BufferAttribute(UV, 2));
+  if (job.classify) { g.setAttribute('part', new THREE.BufferAttribute(PART, 1)); g.setAttribute('piv', new THREE.BufferAttribute(PIV, 3)); }
+  // 正規化：船體類置中、z 長＝1；武器保持原尺寸（伺服器會把底面放到 y＝0、底座置中）
+  g.computeBoundingBox(); const b = g.boundingBox;
+  if (job.kind !== 'weapon') { const c = b.getCenter(new THREE.Vector3()), s = 1 / (b.max.z - b.min.z); g.applyMatrix4(new THREE.Matrix4().makeScale(s, s, s).multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z))); }
+  const merged = mergeVertices(g, 1e-6);
+  merged.computeBoundingBox(); log(`  verts ${merged.attributes.position.count} tris ${merged.index.count / 3} box ${merged.boundingBox.min.toArray().map((v) => v.toFixed(3))} → ${merged.boundingBox.max.toArray().map((v) => v.toFixed(3))}`);
+  const tex = new THREE.CanvasTexture(cv); tex.flipY = false; tex.colorSpace = THREE.SRGBColorSpace; tex.userData.mimeType = 'image/jpeg';
+  const mesh = new THREE.Mesh(merged, new THREE.MeshStandardMaterial({ map: tex, metalness: 0.3, roughness: 0.6 })); mesh.name = job.out.replace('.glb', '');
+  const buf = await new GLTFExporter().parseAsync(mesh, { binary: true });
+  await fetch('/out/' + job.out, { method: 'POST', body: buf }); log(`  → ${job.out} ${(buf.byteLength / 1024) | 0} KB`);
+  window.lastCanvas = cv; window.lastGeo = merged;
+  return log.text;
+}
+// ── 各模型的分件規則（座標是轉向後：船頭 +z、右 +x、上 +y） ──
+const inXZ = (c, b, e = 0) => c.x >= b.min.x - e && c.x <= b.max.x + e && c.z >= b.min.z - e && c.z <= b.max.z + e;
+const TURRET = { file: '聯盟_三聯裝主砲塔.glb', out: 'aw0.glb', fwd: '-x', kind: 'weapon',
+  prep(parts) {   // 轉軸：砲塔下方齒環（part 2 去掉中間砲管）的中心；砲耳：砲塔正面往後一點、砲管軸線高度
+    const ring = new THREE.Box3(), pa = parts[2].geo.attributes.position, v = new THREE.Vector3();
+    for (let i = 0; i < pa.count; i++) { v.fromBufferAttribute(pa, i); if (v.y < 0.19) ring.expandByPoint(v); }
+    const yc = ring.getCenter(new THREE.Vector3()), bb = parts[7].box.clone().union(parts[9].box), ty = (bb.min.y + bb.max.y) / 2;
+    const tz = parts[0].box.max.z - 0.03;
+    log(`  yaw axis x ${yc.x.toFixed(3)} z ${yc.z.toFixed(3)}; trunnion z ${tz.toFixed(3)} y ${ty.toFixed(3)}`);
+    return { yaw: [yc.x, 0, yc.z], tr: (x) => [x, ty, tz] };
+  },
+  classify(pi, p, c, X) {
+    if ([6, 1, 4, 8].includes(pi)) return { code: 0, piv: X.yaw };
+    if (pi === 9) return { code: 2, piv: X.tr(p.box.getCenter(new THREE.Vector3()).x) };
+    if (pi === 2 && c.y > 0.19 && c.y < 0.3 && Math.abs(c.x) < 0.07 && c.z > -0.1) return { code: 3, piv: X.tr(0) };
+    if (pi === 7) return { code: 4, piv: X.tr(p.box.getCenter(new THREE.Vector3()).x) };
+    return { code: 1, piv: X.yaw };
+  } };
+const VLS = { file: '聯盟_垂直飛彈發射模組.glb', out: 'aw2.glb', fwd: '-x', kind: 'weapon',
+  prep(parts) {   // 艙蓋：頂面 0.1～0.2 寬的分件（14 格）；part 2 是第 15 格＋其他格上的小標記；第 16 格本來就開著（不動）
+    const cells = parts.filter((p) => p.box.min.y > 0.47 && p.box.max.y < 0.51 && p.box.max.x - p.box.min.x > 0.1 && p.box.max.x - p.box.min.x < 0.2).map((p) => p.box);
+    const xs = [...new Set(cells.map((b) => Math.round((b.min.x + b.max.x) / 2 * 50)))].sort((a, b) => a - b).map((v) => v / 50);
+    const zs = [...new Set(cells.map((b) => Math.round((b.min.z + b.max.z) / 2 * 50)))].sort((a, b) => a - b).map((v) => v / 50);
+    const half = (cells[0].max.x - cells[0].min.x) / 2, open = parts[14].box;
+    let p2 = null;
+    for (const x of xs) for (const z of zs) {
+      const c = new THREE.Vector3(x, 0.5, z);
+      if (cells.some((b) => inXZ(c, b)) || inXZ(c, open)) continue;
+      p2 = new THREE.Box3(new THREE.Vector3(x - half, 0.47, z - half), new THREE.Vector3(x + half, 0.51, z + half));
+    }
+    log(`  ${cells.length} hatch boxes; grid x ${xs} z ${zs}; part-2 cell ${p2 && p2.getCenter(new THREE.Vector3()).toArray().map((v) => v.toFixed(3))}`);
+    return { cells: [...cells, p2] };
+  },
+  classify(pi, p, c, X) {
+    if (p.box.min.y < 0.47 || p.box.max.y > 0.51) return { code: 0, piv: [0, 0, 0] };
+    let best = -1; X.cells.forEach((b, k) => { if (inXZ(c, b, 0.012)) best = k; });
+    if (best < 0) return { code: 0, piv: [0, 0, 0] };
+    const b = X.cells[best];
+    return { code: 10 + best, piv: [b.min.x, 0.48, (b.min.z + b.max.z) / 2] };   // 鉸鏈在格子的 −x 邊（同原本就開著的那格）
+  } };
+const SIMPLE = [
+  { file: '聯盟_巡洋艦.glb', out: 'a2.glb', fwd: '-x', kind: 'hull' },
+  { file: '帝國_導彈機.glb', out: 'ef1.glb', fwd: '+z', kind: 'hull' },
+  { file: '聯盟_長程巡航飛彈.glb', out: 'am.glb', fwd: '-x', kind: 'hull' },
+  { file: '帝國_太空站大.glb', out: 'es2.glb', fwd: '-x', kind: 'hull' },
+  { file: '聯盟_太空站大.glb', out: 'as2.glb', fwd: '-x', kind: 'hull' },
+];
+window.JOBS = { TURRET, VLS, SIMPLE }; window.convert = convert; window.loadParts = loadParts; window.ready = true;
+</script>

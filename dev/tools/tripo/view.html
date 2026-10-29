@@ -1,0 +1,20 @@
+<!doctype html><meta charset="utf-8"><title>view</title>
+<style>body{margin:0;background:#222;color:#eee;font:12px sans-serif}canvas{display:block}#lab{position:fixed;left:4px;top:4px;white-space:pre}</style>
+<script type="importmap">{"imports":{"three":"/three/build/three.module.js","three/addons/":"/three/examples/jsm/"}}</script>
+<div id="lab"></div>
+<script type="module">
+import * as THREE from 'three'; import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+const W = 1200, H = 800, r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); r.setSize(W, H); document.body.appendChild(r.domElement);
+const scene = new THREE.Scene(); scene.add(new THREE.HemisphereLight(0xffffff, 0x333344, 2.2)); const dl = new THREE.DirectionalLight(0xffffff, 1.5); dl.position.set(1, 2, 1.5); scene.add(dl);
+let root = null; const loader = new GLTFLoader();
+window.load = async (file) => { if (root) scene.remove(root); const g = await loader.loadAsync('/in/' + file); root = g.scene; window.root = root; scene.add(root); root.updateMatrixWorld(true);
+  const parts = []; root.traverse((o) => { if (o.isMesh) { const b = new THREE.Box3().setFromObject(o); parts.push({ o, b, n: o.geometry.attributes.position.count }); } }); window.parts = parts; return parts.length; };
+// highlight: list of part indices → colors; others dimmed
+window.hi = (sets) => { window.parts.forEach((p, i) => { p.o.material = p.o.userData.m0 || (p.o.userData.m0 = p.o.material); });
+  if (!sets) return; const cols = [0xff3030, 0x30ff30, 0x3080ff, 0xffff30, 0xff30ff, 0x30ffff, 0xff9000, 0xffffff];
+  window.parts.forEach((p, i) => { let c = -1; sets.forEach((s, k) => { if (s.includes(i)) c = k; }); p.o.material = new THREE.MeshLambertMaterial({ color: c < 0 ? 0x555555 : cols[c % cols.length], transparent: c < 0, opacity: c < 0 ? 0.25 : 1 }); }); };
+// view: 'top','side','front','iso'; draws 1 view
+window.view = (v = 'iso', zoom = 1, cx = 0, cy = 0.2, cz = 0) => { const a = W / H, s = 0.6 / zoom, cam = new THREE.OrthographicCamera(-s * a, s * a, s, -s, -10, 10);
+  const P = { top: [0, 5, 0.0001], side: [5, 0, 0], front: [0, 0, 5], back: [0, 0, -5], iso: [3, 2.5, 3], iso2: [-3, 2.5, -3] }[v]; cam.position.set(cx + P[0], cy + P[1], cz + P[2]); cam.lookAt(cx, cy, cz); r.render(scene, cam); };
+window.ready = true; import("/fit.js");
+</script>

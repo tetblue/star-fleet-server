@@ -668,6 +668,7 @@ function capMain(s, t) {
   const sd = h.s, tf = sd / M.spd;
   const ex = ox + D[0] * sd, ey = oy + D[1] * sd, ez = oz + D[2] * sd, side = CAP.side;
   spawnBeam(ox, oy, oz, ex, ey, ez, t, tf, side, M.dmg >= 50 ? 1.8 : 1.3, Math.min(1, (M.dmg >= 50 ? 24 : 12) / Math.max(1, sd)), SIDE_FAC[side]);
+  rigFire(s.i, 'main', t, ex, ey, ez);   // 3D 砲塔轉向、後座
   spawnFx(ox, oy, oz, side, s.L * (M.dmg >= 50 ? 0.22 : 0.12), 30);
   CAP.stats.shots++; capSig(s, t);
   if (h.k === 'f') pending.push({ kind: 'ak', a: 1, t: t + tf, i: h.i, dmg: M.dmg * 0.5, side });
@@ -686,6 +687,7 @@ function capMissile(s, t, pressed) {
   if (s.lockT < M.lockT) { if (pressed) capFeed(Math.hypot(tp.x - s.x, tp.y - s.y, tp.z - s.z) > M.range ? '飛彈：目標在射程外' : '飛彈：鎖定中…', 'hint'); return; }
   s.mslN--; s.mslCd = M.cd; s.aiMslT = t + 2.5; CAP.stats.msl++; capSig(s, t);
   const ox = s.x + s.U[0] * s.L * 0.12, oy = s.y + s.U[1] * s.L * 0.12, oz = s.z + s.U[2] * s.L * 0.12;
+  rigFire(s.i, 'msl', t, tp.x, tp.y, tp.z);
   if (T.k === 's') launchMissileAt(ox, oy, oz, CAP.side, s.q, T.i, M.dmg, t, 1, 1.2);
   else CAP.msl.push({ x: ox, y: oy, z: oz, vx: s.vx * 0.5, vy: 9, vz: s.vz * 0.5, gi: T.k === 'g' ? T.i : -1, ms: T.k === 'ms' ? T.i : -1, dmg: M.dmg, life: 22, age: 0, n: 0 });
   if (ctl && (pressed || s.mslN % 4 === 0)) capFeed(`飛彈發射 → ${capTgtName(T)}（剩 ${s.mslN} 枚）`, 'ok');
@@ -729,6 +731,7 @@ function capPD(s, dt, t) {
     const lead = d / 600, tx = o.x + o.vx * lead + (hit ? 0 : (capRnd() - 0.5) * 6), ty = o.y + o.vy * lead + (hit ? 0 : (capRnd() - 0.5) * 4), tz = o.z + o.vz * lead + (hit ? 0 : (capRnd() - 0.5) * 6);
     const dur = Math.hypot(tx - mx, ty - my, tz - mz) / 600;
     spawnBeam(mx, my, mz, tx, ty, tz, t, dur, CAP.side, 0.5, Math.min(0.5, 6 / Math.max(1, d)), SIDE_FAC[CAP.side]);
+    rigFire(s.i, 'aa', t, tx, ty, tz);
     if (hit) pending.push({ kind: 'ak', t: t + dur, a: o.a, i: o.i, g: o.g, dmg: o.a === 0 ? 1 : P.dmg, side: CAP.side });
     capSig(s, t, 0.5);
   }
@@ -774,6 +777,7 @@ function capTurretShot(s, m, T, tg, t) {
   if (!hit) { const o = 1.5 + capRnd() * 3; tx += (capRnd() - 0.5) * o * 2; tz += (capRnd() - 0.5) * o * 2; ty += (capRnd() - 0.5) * o; }
   const dur = Math.hypot(tx - mx, ty - my, tz - mz) / 620;
   spawnBeam(mx, my, mz, tx, ty, tz, t, dur, side, 0.75, Math.min(0.3, 30 / Math.max(1, d)), SIDE_FAC[side]);
+  rigFire(s.i, 'sec', t, tx, ty, tz);
   capSig(s, t);
   if (!hit) { if (tg.k !== 'f' && GRD) pending.push({ kind: 'sp', t: t + dur, x: tx, y: Math.max(ty, terrainHAt(tx, tz)), z: tz, side, r: 0.15 }); return; }
   if (tg.k === 'ms') pending.push({ kind: 'ms', t: t + dur, id: tg.i, dmg: T.dmg, side, x: tx, y: ty, z: tz });

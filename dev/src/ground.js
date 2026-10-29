@@ -198,6 +198,7 @@ function fireTurret(attacker, gk, gun, sq, tu, delay, dmgMul) {
   else { _b.x += (rnd() - 0.5) * 16; _b.z += (rnd() - 0.5) * 16; _b.y = terrainHAt(_b.x, _b.z) + 0.3; }   // 沒打中：落在旁邊的地面（炸毀附近的建築）
   const L = _a.distanceTo(_b), dur = L / (fxs.spd + rnd() * 120), t0 = U.uTime.value + delay;
   spawnBeam(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z, t0, dur, sq.side, fxs.inten * (0.4 + 0.6 * fm), Math.min(fxs.len, 60 / L), sqFac(sq));
+  rigFire(attacker, gk, t0, _b.x, _b.y, _b.z);
   const gs = gunStats[sq.side][gk]; gs[0]++; if (hit) gs[1]++;
   beamLastT[sq.side] = U.uTime.value;
   pending.push(hit ? { kind: 'tu', k: tu.k, t: t0 + dur, side: sq.side, dmg: gun.dmg * dmgMul * fm * am.dmg * groundDmgMul(_a.y, _b.y), x: _b.x, y: _b.y, z: _b.z }

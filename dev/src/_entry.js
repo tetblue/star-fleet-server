@@ -2273,6 +2273,7 @@ function fireAir(attacker, gk, gun, sq, o, delay) {
   if (!hit) { tx += (rnd() - 0.5) * 10; ty += (rnd() - 0.5) * 6; tz += (rnd() - 0.5) * 10; }
   const fxs = GUN_FX[gk], t0 = U.uTime.value + delay, dur = Math.hypot(tx - _a.x, ty - _a.y, tz - _a.z) / spd;
   spawnBeam(_a.x, _a.y, _a.z, tx, ty, tz, t0, dur, sq.side, fxs.inten * (me ? 1.6 : 0.8), me ? Math.min(0.7, 14 / Math.max(1, dist)) : Math.min(0.5, 30 / Math.max(1, dist)), sqFac(sq));
+  rigFire(attacker, gk, t0, tx, ty, tz);
   if (hit) pending.push({ kind: 'ak', t: t0 + dur, a: o.a, i: o.i, g: o.g, dmg: gun.dmg, side: sq.side, ...(me ? { sx: _a.x, sy: _a.y, sz: _a.z, px: tx, py: ty, pz: tz } : {}) });
   return true;
 }
@@ -2436,6 +2437,7 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
         const fxs = GUN_FX[gk], L = _a.distanceTo(_b), t0 = U.uTime.value + delay, blk = SOLID ? rockBlock(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z) : -1;
         if (blk >= 0) _b.set(_a.x + (_b.x - _a.x) * blk, _a.y + (_b.y - _a.y) * blk, _a.z + (_b.z - _a.z) * blk);
         spawnBeam(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z, t0, _a.distanceTo(_b) / (fxs.spd + rnd() * 120), sq.side, (volleyShot ? 0.6 : 1) * fxs.inten * (0.4 + 0.6 * beamFalloff(L, gun)), Math.min(fxs.len, 60 / L), sqFac(sq));
+        rigFire(attacker, gk, t0, _b.x, _b.y, _b.z);
         gunStats[sq.side][gk][0]++; beamLastT[sq.side] = U.uTime.value;
         return true;
       }
@@ -2493,6 +2495,7 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
       beamPow[sq.side] += (fA - beamPow[sq.side]) * (beamShots[sq.side] ? 0.01 : 1); beamShots[sq.side]++; beamLastT[sq.side] = U.uTime.value;
       const t0 = U.uTime.value + delay, dur = tA / (fxs.spd + rnd() * 120);
       spawnBeam(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z, t0, dur, sq.side, (volleyShot ? 0.6 : 1) * fxs.inten * (0.4 + 0.6 * fA), Math.min(fxs.len, 60 / tA), sqFac(sq));
+      rigFire(attacker, gk, t0, _b.x, _b.y, _b.z);
       pending.push({ kind: 'ak', t: t0 + dur, a: o.a, i: o.i, g: o.g, dmg: gun.dmg * dmgMul * fA, side: sq.side, ...(PL.on && o.a === 1 && o.i === PL.j ? { sx: _a.x, sy: _a.y, sz: _a.z } : {}) });
       return true;
     }
@@ -2528,6 +2531,7 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
   const L = _a.distanceTo(_b), dur = L / (fxs.spd + rnd() * 120);
   const t0 = U.uTime.value + delay;
   spawnBeam(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z, t0, dur, sq.side, inten, Math.min(fxs.len, 60 / L), sqFac(sq));
+  rigFire(attacker, gk, t0, _b.x, _b.y, _b.z, target);   // 3D 砲塔轉向目標、後座（只是畫面）
   if (blk >= 0) { if (GRD || rnd() < 0.25) pending.push({ kind: 'sp', t: t0 + dur * (ray ? 1 : blk), side: sq.side, x: _b.x, y: _b.y, z: _b.z }); return true; }
   if (!hit) { if (GRD) groundStray(_b.x, _b.y, _b.z, t0 + dur); return true; }   // 近地：打偏的光束有時會掉進城裡
   const asp = hitAspect(target, _a.x, _a.z, _b.x, _b.z, _a.y, _b.y), am = fleetMods(sq.fleet);
@@ -2952,6 +2956,7 @@ function launchMissile(launcher, t0, maxRange = 0) {
     const md = SHIP_TYPES[ships.type[launcher]].missile;
     pending.push({ kind: 'mh', rt, acid: lm.fac === 6 ? 1 : 0, src: 1, mi: i, g: misGen[i], t: tHit, target, side: sq.side, asp, dmg: (md ? md.dmg : 30) * lm.dmg, hm: hitMul(asp, sq, tg), dirIdx: dirIndexOf(dx, dz), x: _b.x, y: _b.y, z: _b.z });
   }
+  rigFire(launcher, 'msl', t0, _b.x, _b.y, _b.z, target);   // 3D：發射艙開蓋
   wStats[sq.side].mFired++;
   return true;
 }
@@ -2959,6 +2964,7 @@ function launchMissile(launcher, t0, maxRange = 0) {
 function launchMissileArea(launcher, t0, A) {
   const sq = squadrons[ships.sq[launcher]], md = SHIP_TYPES[ships.type[launcher]].missile;
   shipWorldCPU(launcher, _a);
+  rigFire(launcher, 'msl', t0, A.x, A.y, A.z);
   const c = areaShip(sq.side, A);
   if (c >= 0) return launchMissileAt(_a.x, _a.y + 1.5, _a.z, sq.side, sq, c, (md ? md.dmg : 30) * fleetMods(sq.fleet).dmg, t0, 1, fowKnowsSq(sq, squadrons[ships.sq[c]]) ? 1 : FOW_RULE.area.blind);
   const r = FOW_RULE.area.r, bx = A.x + (rnd() - 0.5) * r, by = A.y + (rnd() - 0.5) * r * 0.3, bz = A.z + (rnd() - 0.5) * r;
@@ -4000,6 +4006,7 @@ const R3 = { ready: false, models: {}, meshByKey: {}, list: [], version: -1, lod
 const opts3 = { detail: 'auto', lodScale: 1 };
 const LOD3_PX = [170, 55, 16, 2];   // 以 CSS px 計：艦長超過幾 px 用第 0/1/2/3 級
 const TYPE_LEN3 = 1.0;       // 3D 艦長＝2D 貼圖寬 × 此值
+const MIS_LEN3 = 0.7, MIS_MODEL_MAX = 3000;   // 3D 飛彈模型（聯盟巡航飛彈）的長度與最多畫幾枚
 const FTR_LEN3 = 0.04;  // 3D 艦載機長度（原本 1.8）：約星際大戰鈦戰機比星艦的比例，戰列艦約 140 倍長、旗艦約 330 倍；指揮模式拉遠時只看得到尾焰
 
 function b64ToBuf(b64) { const s = atob(b64); const u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u.buffer; }
@@ -4049,6 +4056,13 @@ async function loadOneModel(key, m, loader, onBytes) {
       const src = mesh.geometry, g0 = new THREE.BufferGeometry();
       for (const a of ['position', 'normal', 'uv']) if (src.attributes[a]) g0.setAttribute(a, src.attributes[a].clone());
       if (src.index) g0.setIndex(src.index.clone());
+      // 分件動畫（TRIPO 武器）：_PART＝分件代號、_PIV＝樞軸點（樞軸跟著頂點一起轉向、移到底座）
+      // Paint 工具用 GLTFExporter 重存時會再加一個底線（_PART → __PART），兩種名稱都認
+      const sPart = src.attributes._part || src.attributes.__part, sPiv = src.attributes._piv || src.attributes.__piv;
+      if (sPart && sPiv) {
+        const pv = sPiv.clone(); pv.applyMatrix4(mesh.matrixWorld); pv.applyMatrix4(new THREE.Matrix4().fromArray(m.orient));
+        g0.setAttribute('aPart', sPart.clone()); g0.setAttribute('aPiv', pv);
+      }
       g0.applyMatrix4(mesh.matrixWorld); g0.applyMatrix4(new THREE.Matrix4().fromArray(m.orient));
       if (!g0.attributes.normal) g0.computeVertexNormals();
       g0.computeBoundingSphere();
@@ -4074,6 +4088,135 @@ function getModel(key) {
   const tex = m.tex || NO_MODEL_TEX, weapon = m.kind === 'weapon';
   const mat = themeMat(new THREE.MeshStandardMaterial({ map: tex, metalness: 0.35, roughness: 0.6, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: weapon ? 0.18 : 0.14 }), Math.max(0, FAC_KEY.indexOf(key[0])));
   return (MODEL_CACHE[key] = { lods: m.lods, mat, weapon, min: m.min, max: m.max, ready: Promise.resolve() });
+}
+
+// ───── 3D 武器動畫：轉動、瞄準、射擊 ─────
+// 每門武器依 WEAPON_RIG（weapons.js）決定動作；開火時記下「哪艘船的哪種砲、何時、朝哪裡打」，畫面每幀讓砲塔轉過去。
+// 分件模型（GLB 帶 _PART／_PIV）：0 底座不動、1 轉塔、2+k 第 k 根砲管（轉塔＋仰角＋輪流後座）、10+k 第 k 片艙蓋（開合）；
+// 沒分件的模型（還有遠景簡化網格）整座當轉塔。每個實例一組 aRig＝(方位角, 仰角, 開火後經過秒數, 艙蓋開度)。只影響畫面，不影響模擬。
+const RIG_GK = { main: 0, sec: 1, aa: 2, msl: 3 }, RIG_GKC = { m: 0, s: 1, a: 2, x: 3 };
+const RIG_M = 32;   // 每艘船最多幾個掛點有動畫
+const RIG_RULE = { hold: 8, yawRate: 2.2, pitchRate: 1.3, yawT: 2.8, yawF: 0.35, pitchT: [-0.08, 0.75], pitchF: [-0.04, 0.22], kick: 0.06, kickB: { t: 0.025, f: 0.03, l: 0.015, n: 0 } };
+const RIG = { ver: -1, n: 0, t: null, p: null, tg: null, yaw: null, pit: null, upd: null };
+function rigAlloc() {
+  if (RIG.ver === fleetVersion && RIG.n >= shipCount) return;
+  const n = Math.max(shipCount, 1);
+  Object.assign(RIG, { ver: fleetVersion, n, t: new Float32Array(n * 4).fill(-1e9), p: new Float32Array(n * 12), tg: new Int32Array(n * 4).fill(-1),
+    yaw: new Float32Array(n * RIG_M), pit: new Float32Array(n * RIG_M), upd: new Float32Array(n * RIG_M).fill(-1e9) });
+}
+// 持續瞄準（艦長的主砲）：只改瞄準點，不算開火
+function rigAim(i, gk, x, y, z) {
+  if (i < 0 || i >= shipCount) return;
+  rigAlloc();
+  const k = i * 4 + (RIG_GK[gk] ?? 0);
+  RIG.t[k] = Math.max(RIG.t[k], U.uTime.value - 1.5); RIG.p[k * 3] = x; RIG.p[k * 3 + 1] = y; RIG.p[k * 3 + 2] = z; RIG.tg[k] = -1;
+}
+// 開火紀錄：i 開火的船、gk 砲種、t0 開火時間（可能稍晚於現在）、(x,y,z) 落點、tg 目標艦（會跟著它轉；沒有＝-1）
+function rigFire(i, gk, t0, x, y, z, tg = -1) {
+  if (i < 0 || i >= shipCount) return;
+  rigAlloc();
+  const g = RIG_GK[gk] ?? 0, k = i * 4 + g;
+  RIG.t[k] = t0; RIG.p[k * 3] = x; RIG.p[k * 3 + 1] = y; RIG.p[k * 3 + 2] = z; RIG.tg[k] = tg;
+}
+const RIG_HEAD = /* glsl */`
+  attribute vec4 aRig; attribute float aPart; attribute vec3 aPiv;
+  uniform vec2 uYawC; uniform float uKick; uniform float uKickB;
+  vec3 rigRY(vec3 p, float a){ float c = cos(a), s = sin(a); return vec3(p.x * c + p.z * s, p.y, -p.x * s + p.z * c); }
+  vec3 rigRX(vec3 p, float a){ float c = cos(a), s = sin(a); return vec3(p.x, p.y * c + p.z * s, -p.y * s + p.z * c); }
+  vec3 rigRZ(vec3 p, float a){ float c = cos(a), s = sin(a); return vec3(p.x * c - p.y * s, p.x * s + p.y * c, p.z); }
+  float rigKick(float age){ return age < 0. ? 0. : age < 0.04 ? age / 0.04 : exp(-(age - 0.04) * 6.); }
+  vec3 rigApply(vec3 p, float pt){
+    if (aPart > 9.5) { vec3 c = aPiv * pt; return rigRZ(p - c, aRig.w * 1.9) + c; }   // 艙蓋：繞鉸鏈掀開
+    if (aPart > 1.5) {   // 砲管：後座（沿砲管往後）→ 仰角（繞砲耳）；三根輪流
+      p.z -= rigKick(aRig.z - (aPart - 2.) * 0.07) * uKick * pt;
+      vec3 c = aPiv * pt; p = rigRX(p - c, aRig.y) + c;
+    } else p.z -= rigKick(aRig.z) * uKickB * pt;   // 沒分件：整座輕微後座
+    if (aPart > 0.5) { vec3 c = vec3(uYawC.x, 0., uYawC.y) * pt; p = rigRY(p - c, aRig.x) + c; }
+    return p;
+  }
+`;
+function rigOBC(shader) {
+  themeOBC.call(this, shader);
+  Object.assign(shader.uniforms, this.userData.rigU);
+  shader.vertexShader = shader.vertexShader
+    .replace('void main() {', RIG_HEAD + '\nvoid main() {')
+    .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\n\tobjectNormal = rigApply(objectNormal, 0.);')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\n\ttransformed = rigApply(transformed, 1.);');
+}
+// 武器的動畫設定：mode＝t／f／l／n、g＝跟著的砲種（0 主砲 1 副砲 2 防空 3 飛彈）
+function rigSpec(wk) {
+  const f = 'eamcrib'.indexOf(wk[0]), w = +wk.slice(2);
+  if (f < 0 || !(w >= 0 && w < 6) || typeof WEAPON_RIG === 'undefined') return { mode: 'n', g: 0 };
+  return { mode: WEAPON_RIG[f][w] || 'n', g: RIG_GKC[WEAPON_GK[f][w]] ?? 0 };
+}
+function rigMat(key) {
+  const M = R3.models[key]; if (M.rigMat) return M.rigMat;
+  const src = MODEL_SRC[key], sp = rigSpec(key), g0 = M.lods[0], pa = g0.attributes.aPart;
+  let yc = [0, 0];
+  if (pa) for (let i = 0; i < pa.count; i++) if (Math.abs(pa.getX(i) - 1) < 0.1) { const v = g0.attributes.aPiv; yc = [v.getX(i), v.getZ(i)]; break; }
+  const mat = M.mat.clone(); mat.userData.themeF = M.mat.userData.themeF;
+  mat.userData.rigU = { uYawC: { value: new THREE.Vector2(yc[0], yc[1]) }, uKick: { value: RIG_RULE.kick }, uKickB: { value: pa ? 0 : RIG_RULE.kickB[sp.mode] || 0 } };
+  mat.onBeforeCompile = rigOBC; mat.customProgramCacheKey = () => 'fleet-theme-rig';
+  if (src) src.rig = !!pa;
+  return (M.rigMat = mat);
+}
+// 動畫用的幾何：共用原本的頂點，加上分件屬性（沒有就整座同一個代號）與每個實例的 aRig；容量不夠才重建
+function rigGeo(key, lod, cap) {
+  const M = R3.models[key], g = M.lods[lod], C = (M.rigGeo || (M.rigGeo = []));
+  if (C[lod] && C[lod].cap >= cap) return C[lod].geo;
+  if (C[lod]) C[lod].geo.dispose();
+  const geo = new THREE.BufferGeometry(); geo.setIndex(g.index);
+  for (const a of ['position', 'normal', 'uv']) if (g.attributes[a]) geo.setAttribute(a, g.attributes[a]);
+  const sp = rigSpec(key), rigged = !!M.lods[0].attributes.aPart;
+  if (g.attributes.aPart) { geo.setAttribute('aPart', g.attributes.aPart); geo.setAttribute('aPiv', g.attributes.aPiv); }
+  else {   // 遠景網格或沒分件的模型：砲塔類整座轉，其他不轉
+    const n = g.attributes.position.count, code = sp.mode === 't' || sp.mode === 'f' ? 1 : 0;
+    geo.setAttribute('aPart', new THREE.BufferAttribute(new Float32Array(n).fill(rigged && sp.mode === 'l' ? 0 : code), 1));
+    geo.setAttribute('aPiv', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+  }
+  geo.setAttribute('aRig', new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4).setUsage(THREE.DynamicDrawUsage));
+  geo.boundingSphere = g.boundingSphere;
+  C[lod] = { geo, cap };
+  return geo;
+}
+// 寫一門武器的 aRig（writeMounts 呼叫）：si 船、j 掛點序號、m 掛點、(px,py,pz) 掛點的世界位置、R/U/F 船的基底（_WB 與 fx,fy,fz）
+const _rv = new THREE.Vector3();
+function rigWrite(arr, k, si, j, m, px, py, pz, fx, fy, fz) {
+  const sp = m.rig, now = U.uTime.value;
+  let yawD = 0, pitD = 0, age = 99, open = 0;
+  if (si < RIG.n && RIG.ver === fleetVersion) {
+    // 這門武器跟著的砲種沒開過火（艦種沒有這種砲）：改跟最近開火的砲種
+    let g = sp.g, b = si * 4;
+    if (RIG.t[b + g] < -1e8) { let best = -1e9; for (let q = 0; q < 4; q++) if (RIG.t[b + q] > best) { best = RIG.t[b + q]; g = q; } }
+    const gi = b + g, tl = RIG.t[gi];
+    if (tl > -1e8) {
+      age = Math.min(99, now - tl);
+      if (sp.mode !== 'n' && now - tl < RIG_RULE.hold && (sp.mode === 't' || sp.mode === 'f')) {
+        const tg = RIG.tg[gi];
+        if (tg >= 0 && ships.alive[tg] && now - tl < 3) shipWorldCPU(tg, _rv); else _rv.set(RIG.p[gi * 3], RIG.p[gi * 3 + 1], RIG.p[gi * 3 + 2]);
+        const dx = _rv.x - px, dy = _rv.y - py, dz = _rv.z - pz;
+        const hx = dx * _WB[0] + dy * _WB[1] + dz * _WB[2], hy = dx * _WB[3] + dy * _WB[4] + dz * _WB[5], hz = dx * fx + dy * fy + dz * fz;   // 船體座標
+        const a = m.ax, lx = hx * a[0] + hy * a[1] + hz * a[2], ly = hx * a[3] + hy * a[4] + hz * a[5], lz = hx * a[6] + hy * a[7] + hz * a[8];   // 掛點座標
+        const lim = sp.mode === 't' ? RIG_RULE.yawT : RIG_RULE.yawF, pr = sp.mode === 't' ? RIG_RULE.pitchT : RIG_RULE.pitchF;
+        yawD = Math.max(-lim, Math.min(lim, Math.atan2(lx, lz)));
+        pitD = Math.max(pr[0], Math.min(pr[1], Math.atan2(ly, Math.hypot(lx, lz))));
+      }
+      if (sp.g === 3 || sp.mode === 'l') {   // 艙蓋：發射前 0.45 秒開始打開，發射後 0.9 秒開始關
+        const u = (now - (tl - 0.45)) / 0.35, v = (now - (tl + 0.9)) / 0.6;
+        open = Math.max(0, Math.min(1, u)) * (1 - Math.max(0, Math.min(1, v)));
+      }
+    }
+  }
+  // 平滑轉動（同一幀算第二次＝子畫面，dt＝0）
+  let yaw = yawD, pit = pitD;
+  if (j < RIG_M && si < RIG.n && RIG.ver === fleetVersion) {
+    const s = si * RIG_M + j, dt = Math.max(0, Math.min(0.1, now - RIG.upd[s]));
+    yaw = RIG.yaw[s]; pit = RIG.pit[s];
+    const dy = yawD - yaw, dp = pitD - pit, my = RIG_RULE.yawRate * dt, mp = RIG_RULE.pitchRate * dt;
+    yaw += Math.max(-my, Math.min(my, dy)); pit += Math.max(-mp, Math.min(mp, dp));
+    RIG.yaw[s] = yaw; RIG.pit[s] = pit; RIG.upd[s] = now;
+  }
+  arr[k] = yaw; arr[k + 1] = pit; arr[k + 2] = age; arr[k + 3] = open;
 }
 function init3D() {
   if (R3.ready) return;
@@ -4128,10 +4271,14 @@ function rebuild3D() {
     R3.mounts[tk] = list;
     for (const m of list) cap[m.wk] = (cap[m.wk] || 0) + capT[tk];
   }
+  for (const k of FAC_KEY) if (R3.models[k + 'f1']) cap[k + 'f1'] = FTR_MAX;   // 飛彈攻擊機（帝國導彈機）
+  if (R3.models.am) cap.am = MIS_MODEL_MAX;   // 聯盟飛彈
   for (const key in cap) {
     const M = R3.models[key]; if (!M) continue;
+    const rig = M.weapon && rigSpec(key).mode !== 'n';   // 有動畫的武器：另外的材質與幾何
     R3.meshByKey[key] = M.lods.map((g, lod) => {
-      const mesh = new THREE.InstancedMesh(g, M.mat, Math.max(1, cap[key]));
+      const n = Math.max(1, cap[key]), mesh = new THREE.InstancedMesh(rig ? rigGeo(key, lod, n) : g, rig ? rigMat(key) : M.mat, n);
+      if (rig) mesh.userData.rig = mesh.geometry.attributes.aRig;
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       mesh.frustumCulled = false; mesh.count = 0; mesh.renderOrder = 1;
       scene.add(mesh); R3.list.push({ key, lod, mesh });
@@ -4143,20 +4290,25 @@ function rebuild3D() {
 // 掛點 → 船體座標裡的 3×3（含尺寸）＋位移；旋轉＝先轉向 r（繞船的上方）再側傾 t（繞船的縱軸）
 function mountMatrix(m) {
   const r = (m.r || 0) * Math.PI / 180, t = (m.t || 0) * Math.PI / 180, s = m.s || 0.1;
-  const cr = Math.cos(r), sr = Math.sin(r), ct = Math.cos(t), st = Math.sin(t);
-  return { wk: m.hk[0] + 'w' + m.w, o: m.p, small: s < 0.1, q: [ct * cr * s, st * cr * s, -sr * s, -st * s, ct * s, 0, ct * sr * s, st * sr * s, cr * s] };
+  const cr = Math.cos(r), sr = Math.sin(r), ct = Math.cos(t), st = Math.sin(t), wk = m.hk[0] + 'w' + m.w;
+  // ax：掛點的三個軸（船體座標、單位長），武器動畫把目標方向換成掛點座標用
+  return { wk, o: m.p, small: s < 0.1, q: [ct * cr * s, st * cr * s, -sr * s, -st * s, ct * s, 0, ct * sr * s, st * sr * s, cr * s],
+    ax: [ct * cr, st * cr, -sr, -st, ct, 0, ct * sr, st * sr, cr], rig: rigSpec(wk), parts: !!(MODEL_SRC[wk] && MODEL_SRC[wk].lods[0].attributes.aPart) };
 }
 const _fr = new THREE.Frustum(), _pv = new THREE.Matrix4(), _sph = new THREE.Sphere();
 const _WB = new Float64Array(6);
 // 船上的武器：船的基底 × 掛點矩陣（船畫到第 2 級細節以內才畫武器，武器用同一級；第 2 級只畫大的）
-function writeMounts(hk, lod, wl, x, y, z, fx, fy, fz, L) {
+function writeMounts(hk, lod, wl, x, y, z, fx, fy, fz, L, si = -1) {   // si：哪一艘船（武器動畫用）
   const list = R3.mounts[hk]; if (!list || !list.length) return;
   const rx = _WB[0], ry = _WB[1], rz = _WB[2], ux = _WB[3], uy = _WB[4], uz = _WB[5];
-  for (const m of list) {
+  for (let j = 0; j < list.length; j++) {
+    const m = list[j];
     if (lod === 2 && m.small) continue;   // 遠一點的船只畫大砲塔，防空砲之類的小東西看不出來
 
-    const mesh = R3.meshByKey[m.wk][wl]; if (!mesh || mesh.count >= mesh.instanceMatrix.count) continue;
+    const mesh = R3.meshByKey[m.wk][m.parts && lod === 0 ? 0 : wl]; if (!mesh || mesh.count >= mesh.instanceMatrix.count) continue;   // 分件武器：船夠近就用原檔（砲管、艙蓋才會動）
     const q = m.q, o = m.o, e = mesh.instanceMatrix.array, k = mesh.count * 16;
+    const rg = mesh.userData.rig;
+    if (rg) rigWrite(rg.array, mesh.count * 4, si, j, m, x + (rx * o[0] + ux * o[1] + fx * o[2]) * L, y + (ry * o[0] + uy * o[1] + fy * o[2]) * L, z + (rz * o[0] + uz * o[1] + fz * o[2]) * L, fx, fy, fz);
     for (let c = 0; c < 3; c++) {
       const a = q[c * 3], b = q[c * 3 + 1], d = q[c * 3 + 2];
       e[k + c * 4] = (rx * a + ux * b + fx * d) * L; e[k + c * 4 + 1] = (ry * a + uy * b + fy * d) * L; e[k + c * 4 + 2] = (rz * a + uz * b + fz * d) * L; e[k + c * 4 + 3] = 0;
@@ -4234,15 +4386,16 @@ function update3D(cam = camera, vh = VH) {   // cam／vh：子畫面（其他旗
     if (lod > 3) continue;
     if (ck >= 0) {   // 艦長：照船的前／上畫（轉彎時側傾）
       const s = CAP.ships[ck], ms = R3.meshByKey[hullKey(i)]; if (!ms) continue;
+      if (lod <= 2) { const G = capGunDir(s); rigAim(i, 'main', _a.x + G[0] * 600, _a.y + G[1] * 600, _a.z + G[2] * 600); }   // 艦長：主砲塔一直跟著瞄準方向
       writeMatrixFU(ms[lod], _a.x, _a.y, _a.z, s.F, s.U, L);
-      if (lod <= 2 && SETTINGS.weapons3D !== false) writeMounts(typeKey(i), lod, forced >= 0 ? Math.min(3, forced + 1) : pickPx > 1500 ? 0 : lod + 1, _a.x, _a.y, _a.z, s.F[0], s.F[1], s.F[2], L);
+      if (lod <= 2 && SETTINGS.weapons3D !== false) writeMounts(typeKey(i), lod, forced >= 0 ? Math.min(3, forced + 1) : pickPx > 1500 ? 0 : lod + 1, _a.x, _a.y, _a.z, s.F[0], s.F[1], s.F[2], L, i);
       continue;
     }
     const pp = ships.snOn[i] ? 0 : (sq.p || 0), cpp = Math.cos(pp);   // 船身跟著陣型俯仰
     const hk = hullKey(i), ms = R3.meshByKey[hk], fx = Math.sin(h) * cpp, fy = Math.sin(pp), fz = Math.cos(h) * cpp;
     if (!ms) continue;
     writeMatrix(ms[lod], _a.x, _a.y, _a.z, fx, fy, fz, L);
-    if (lod <= 2 && SETTINGS.weapons3D !== false) writeMounts(typeKey(i), lod, forced >= 0 ? Math.min(3, forced + 1) : pickPx > 1500 ? 0 : lod + 1, _a.x, _a.y, _a.z, fx, fy, fz, L);   // 武器細節：很近才用原檔，其餘比船低一級
+    if (lod <= 2 && SETTINGS.weapons3D !== false) writeMounts(typeKey(i), lod, forced >= 0 ? Math.min(3, forced + 1) : pickPx > 1500 ? 0 : lod + 1, _a.x, _a.y, _a.z, fx, fy, fz, L, i);   // 武器細節：很近才用原檔，其餘比船低一級
   }
   // 艦載機：機首沿速度方向
   for (let j = 0; j < FTR_MAX; j++) {
@@ -4252,9 +4405,26 @@ function update3D(cam = camera, vh = VH) {   // cam／vh：子畫面（其他旗
     const lod = pick(FL, x, y, z);
     if (lod < 0 || lod > 3) continue;
     let vx = fV[j3], vy = fV[j3 + 1], vz = fV[j3 + 2]; const vl = Math.hypot(vx, vy, vz) || 1;
-    writeMatrix((R3.meshByKey[FAC_KEY[shipFac(FT.carrier[j])] + 'f'] || R3.meshByKey.ef)[lod], x, y, z, vx / vl, vy / vl, vz / vl, FL * (FT.kind[j] ? 0.6 : 1));   // 維修機小一點
+    const fk = FAC_KEY[shipFac(FT.carrier[j])], fm = !FT.kind[j] && FT.role[j] === 2 && R3.meshByKey[fk + 'f1'];   // 飛彈攻擊機有自己的模型（帝國導彈機）
+    writeMatrix((fm || R3.meshByKey[fk + 'f'] || R3.meshByKey.ef)[lod], x, y, z, vx / vl, vy / vl, vz / vl, FL * (FT.kind[j] ? 0.6 : fm ? 1.3 : 1));   // 維修機小一點、飛彈攻擊機大一點
   }
-  for (const it of R3.list) if (it.mesh.count) { const a = it.mesh.instanceMatrix; a.clearUpdateRanges && a.clearUpdateRanges(); a.addUpdateRange(0, it.mesh.count * 16); a.needsUpdate = true; }
+  // 聯盟飛彈：近一點的畫成巡航飛彈模型（尾端接在原本的光點／尾焰上）
+  const am = R3.meshByKey.am;
+  if (am) for (let i = 0; i < MIS_MAX; i++) {
+    if (!misLive[i] || Math.floor(misT[i * 4 + 2]) !== 1) continue;
+    const p = (t - misT[i * 4]) / misT[i * 4 + 1]; if (p < 0 || p > misT[i * 4 + 3]) continue;
+    bezCPU(i, p, _c);
+    const u = 1 - p, i3 = i * 3;   // 切線＝二次貝茲的導數
+    let dx = u * (misB[i3] - misA[i3]) + p * (misC[i3] - misB[i3]), dy = u * (misB[i3 + 1] - misA[i3 + 1]) + p * (misC[i3 + 1] - misB[i3 + 1]), dz = u * (misB[i3 + 2] - misA[i3 + 2]) + p * (misC[i3 + 2] - misB[i3 + 2]);
+    const dl = Math.hypot(dx, dy, dz) || 1; dx /= dl; dy /= dl; dz /= dl;
+    const x = _c.x + dx * MIS_LEN3 * 0.5, y = _c.y + dy * MIS_LEN3 * 0.5, z = _c.z + dz * MIS_LEN3 * 0.5, lod = pick(MIS_LEN3, x, y, z);
+    if (lod < 0 || lod > 3 || am[lod].count >= MIS_MODEL_MAX) continue;
+    writeMatrix(am[lod], x, y, z, dx, dy, dz, MIS_LEN3);
+  }
+  for (const it of R3.list) if (it.mesh.count) {
+    const a = it.mesh.instanceMatrix; a.clearUpdateRanges && a.clearUpdateRanges(); a.addUpdateRange(0, it.mesh.count * 16); a.needsUpdate = true;
+    const rg = it.mesh.userData.rig; if (rg) { rg.clearUpdateRanges && rg.clearUpdateRanges(); rg.addUpdateRange(0, it.mesh.count * 4); rg.needsUpdate = true; }
+  }
 }
 // ── 戰爭迷霧的畫面遮罩（每幀算一次，只影響畫面）：fowHid[分艦隊]＝看不到；敵方艦載機在我方偵測範圍外＝不畫 ──
 const fowHid = new Uint8Array(MAX_SQ), fowFtrHide = new Uint8Array(FTR_MAX);
@@ -6083,6 +6253,7 @@ function fireTurret(attacker, gk, gun, sq, tu, delay, dmgMul) {
   else { _b.x += (rnd() - 0.5) * 16; _b.z += (rnd() - 0.5) * 16; _b.y = terrainHAt(_b.x, _b.z) + 0.3; }   // 沒打中：落在旁邊的地面（炸毀附近的建築）
   const L = _a.distanceTo(_b), dur = L / (fxs.spd + rnd() * 120), t0 = U.uTime.value + delay;
   spawnBeam(_a.x, _a.y, _a.z, _b.x, _b.y, _b.z, t0, dur, sq.side, fxs.inten * (0.4 + 0.6 * fm), Math.min(fxs.len, 60 / L), sqFac(sq));
+  rigFire(attacker, gk, t0, _b.x, _b.y, _b.z);
   const gs = gunStats[sq.side][gk]; gs[0]++; if (hit) gs[1]++;
   beamLastT[sq.side] = U.uTime.value;
   pending.push(hit ? { kind: 'tu', k: tu.k, t: t0 + dur, side: sq.side, dmg: gun.dmg * dmgMul * fm * am.dmg * groundDmgMul(_a.y, _b.y), x: _b.x, y: _b.y, z: _b.z }
@@ -7058,7 +7229,7 @@ function groundMinimapSVG(g, W, Hh, mx, mz) {
 
 // 預設武器掛點（船體模型座標：船長＝1，船頭＋z、上＋y）；w＝武器編號，r＝轉向（度），t＝側傾（度），s＝尺寸
 // 太空站（es0～bs2）：依模型自動找圓形砲座與平台放的預設，可在武器配置裡改
-const MOUNTS_DEFAULT = {"e0":[{"w":3,"p":[-0.2228,0.0067,0.4183],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0537,0.0061,0.4124],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.2754,0.0084,-0.399],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0413,0.0077,-0.3914],"r":0,"t":0,"s":0.06},{"w":1,"p":[0.2806,-0.0199,0.026],"r":90,"t":0,"s":0.1},{"w":1,"p":[-0.2735,0.0042,0.1191],"r":0,"t":0,"s":0.09},{"w":2,"p":[0.0267,0.008,-0.1556],"r":90,"t":0,"s":0.08},{"w":2,"p":[-0.0268,0.0058,0.2526],"r":90,"t":0,"s":0.08}],"e1":[{"w":0,"p":[0.0011,-0.034,0.1198],"r":0,"t":0,"s":0.21},{"w":0,"p":[0,0.0026,-0.0498],"r":0,"t":0,"s":0.23},{"w":0,"p":[0.0024,-0.0168,-0.425],"r":180,"t":0,"s":0.22},{"w":1,"p":[0,-0.0325,0.3484],"r":0,"t":0,"s":0.11},{"w":1,"p":[-0.0908,-0.0359,-0.1025],"r":-90,"t":0,"s":0.12},{"w":1,"p":[0.0908,-0.0372,-0.1025],"r":90,"t":0,"s":0.12},{"w":3,"p":[-0.0803,-0.0331,-0.0325],"r":0,"t":0,"s":0.07},{"w":3,"p":[0.0803,-0.033,-0.0325],"r":0,"t":0,"s":0.07},{"w":3,"p":[-0.0731,-0.0169,-0.2987],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0731,-0.0184,-0.2987],"r":0,"t":0,"s":0.06},{"w":2,"p":[-0.1066,-0.0725,-0.0272],"r":0,"t":90,"s":0.09},{"w":2,"p":[0.1074,-0.0725,-0.0272],"r":0,"t":-90,"s":0.09}],"e2":[{"w":1,"p":[0.0021,0.0383,0.1152],"r":0,"t":0,"s":0.2},{"w":1,"p":[0,0.0508,-0.2987],"r":180,"t":0,"s":0.2},{"w":5,"p":[0,0.0251,0.3484],"r":0,"t":0,"s":0.14},{"w":4,"p":[-0.0732,-0.023,0.1998],"r":0,"t":90,"s":0.1},{"w":4,"p":[0.0732,-0.023,0.1998],"r":0,"t":-90,"s":0.1},{"w":3,"p":[-0.0763,0.024,-0.112],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0763,0.024,-0.112],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0951,-0.0202,-0.2966],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0951,-0.0202,-0.2966],"r":0,"t":0,"s":0.06}],"e3":[{"w":1,"p":[0,0.0065,0.0373],"r":0,"t":0,"s":0.17},{"w":5,"p":[0,-0.0145,0.2738],"r":0,"t":0,"s":0.16},{"w":3,"p":[-0.0498,-0.0163,0.1182],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0498,-0.0162,0.1182],"r":0,"t":0,"s":0.06},{"w":4,"p":[-0.0918,-0.0663,0.0552],"r":0,"t":90,"s":0.1},{"w":4,"p":[0.0918,-0.0663,0.0552],"r":0,"t":-90,"s":0.1}],"e4":[{"w":3,"p":[0,0.1175,-0.1493],"r":0,"t":0,"s":0.1},{"w":3,"p":[-0.0062,0.0507,0],"r":0,"t":0,"s":0.09},{"w":3,"p":[-0.1536,-0.0602,-0.1293],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.1536,-0.0602,-0.1293],"r":0,"t":0,"s":0.06},{"w":1,"p":[0,0.0479,0.1867],"r":0,"t":0,"s":0.1},{"w":3,"p":[0.0013,0.0424,-0.2941],"r":0,"t":0,"s":0.0775}],"a0":[{"w":3,"p":[-0.1099,-0.0025,0.2318],"r":0,"t":0,"s":0.04},{"w":3,"p":[0.1099,-0.0025,0.2318],"r":0,"t":0,"s":0.04},{"w":3,"p":[0.1207,0.0258,-0.1493],"r":0,"t":0,"s":0.06},{"w":1,"p":[-0.1019,0.0246,-0.0185],"r":0,"t":0,"s":0.09},{"w":2,"p":[0.1167,0.0212,-0.3088],"r":0,"t":0,"s":0.06},{"w":2,"p":[0.1453,0.0202,0.0053],"r":0,"t":0,"s":0.06}],"a1":[{"w":0,"p":[0,0,0.1717],"r":0,"t":0,"s":0.125},{"w":0,"p":[0,0.0059,0.0436],"r":0,"t":0,"s":0.16},{"w":0,"p":[0,0.0191,-0.0871],"r":0,"t":0,"s":0.24},{"w":5,"p":[-0.0021,-0.0021,0.3843],"r":0,"t":0,"s":0.14},{"w":3,"p":[-0.0799,-0.0108,-0.3858],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0799,-0.0105,-0.3858],"r":0,"t":0,"s":0.06},{"w":2,"p":[-0.0907,-0.0202,-0.0809],"r":0,"t":0,"s":0.06},{"w":2,"p":[-0.0907,-0.0209,-0.1556],"r":0,"t":0,"s":0.06},{"w":2,"p":[0.0874,-0.0204,-0.0809],"r":0,"t":0,"s":0.06},{"w":2,"p":[0.0874,-0.0208,-0.1556],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0586,-0.003,0.0249],"r":0,"t":0,"s":0.05},{"w":3,"p":[0.0586,-0.0041,0.0249],"r":0,"t":0,"s":0.05}],"a2":[{"w":1,"p":[-0.0015,0.0052,-0.3467],"r":180,"t":0,"s":0.125},{"w":1,"p":[0,0.0019,0.1618],"r":0,"t":0,"s":0.15},{"w":2,"p":[0,0.027,0.0498],"r":0,"t":0,"s":0.06},{"w":2,"p":[0,0.0277,-0.0187],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.056,0.0045,0.0249],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.056,0.0047,-0.056],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0498,0.0046,0.0249],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0498,0.0049,-0.056],"r":0,"t":0,"s":0.06},{"w":4,"p":[-0.1156,-0.0434,-0.0384],"r":0,"t":90,"s":0.08},{"w":4,"p":[0.1156,-0.0434,-0.0384],"r":0,"t":-90,"s":0.08}],"a3":[{"w":5,"p":[-0.0037,0.0668,-0.3181],"r":0,"t":0,"s":0.28},{"w":1,"p":[0.0003,0.0501,0.0171],"r":0,"t":0,"s":0.12},{"w":3,"p":[-0.0732,0.0566,-0.1825],"r":0,"t":0,"s":0.055},{"w":3,"p":[0.0732,0.0566,-0.1825],"r":0,"t":0,"s":0.055},{"w":2,"p":[-0.0871,0.0375,0],"r":0,"t":0,"s":0.06},{"w":2,"p":[0.0871,0.038,0],"r":0,"t":0,"s":0.06},{"w":4,"p":[-0.1556,0.023,-0.1742],"r":0,"t":0,"s":0.09},{"w":4,"p":[0.1556,0.023,-0.1742],"r":0,"t":0,"s":0.09}],"a4":[{"w":3,"p":[0,0.134,-0.1333],"r":0,"t":0,"s":0.1},{"w":3,"p":[0.3149,0.0227,-0.1327],"r":0,"t":0,"s":0.07},{"w":3,"p":[-0.3149,0.0227,-0.1327],"r":0,"t":0,"s":0.07},{"w":1,"p":[0,0.1264,0.3333],"r":0,"t":0,"s":0.1},{"w":2,"p":[0.0035,0.1214,-0.2862],"r":0,"t":0,"s":0.08}],"m0":[{"w":3,"p":[-0.1049,0.021,-0.4217],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.1067,0.0216,-0.4165],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.1024,0.0352,-0.3182],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0965,0.021,0.1577],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.082,0.0316,0.1698],"r":0,"t":0,"s":0.06},{"w":5,"p":[-0.1206,0.0382,-0.0535],"r":-275,"t":0,"s":0.18}],"m1":[{"w":0,"p":[0.0034,0,0.1781],"r":0,"t":0,"s":0.2},{"w":2,"p":[0.0427,0.0316,-0.346],"r":0,"t":0,"s":0.08},{"w":2,"p":[-0.0427,0.0316,-0.346],"r":0,"t":0,"s":0.08},{"w":5,"p":[-0.0062,0.031,-0.255],"r":0,"t":0,"s":0.18},{"w":3,"p":[-0.1066,0.0148,-0.0612],"r":0,"t":0,"s":0.06},{"w":0,"p":[0.0057,0.0349,0.0185],"r":0,"t":0,"s":0.2}],"m2":[{"w":0,"p":[-0.017,0.0309,0.2219],"r":0,"t":0,"s":0.2},{"w":1,"p":[-0.0052,0.0204,0.3871],"r":0,"t":0,"s":0.12},{"w":4,"p":[-0.0968,-0.0613,0.1992],"r":0,"t":90,"s":0.09},{"w":4,"p":[0.0983,-0.0623,0.2003],"r":0,"t":-90,"s":0.09},{"w":2,"p":[0.0254,0.0974,-0.0315],"r":0,"t":0,"s":0.08},{"w":2,"p":[-0.0254,0.0974,-0.0315],"r":0,"t":0,"s":0.08},{"w":0,"p":[0.0064,0.0295,-0.3086],"r":185,"t":0,"s":0.2},{"w":3,"p":[0.1253,-0.03,-0.129],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.1253,-0.03,-0.129],"r":0,"t":0,"s":0.06}],"m3":[{"w":3,"p":[0.0299,0.1161,-0.0697],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0331,0.1158,-0.0636],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0363,0.1143,0.0196],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0423,0.1172,0.0157],"r":0,"t":0,"s":0.06},{"w":5,"p":[-0.0024,0.0674,0.4236],"r":0,"t":0,"s":0.18},{"w":2,"p":[0.1616,0.0886,-0.0341],"r":0,"t":0,"s":0.08},{"w":2,"p":[-0.1663,0.0836,-0.0368],"r":0,"t":0,"s":0.08},{"w":1,"p":[0.0024,0.1113,0.1617],"r":0,"t":0,"s":0.12}],"m4":[{"w":1,"p":[0.0006,0.1228,0.3613],"r":0,"t":0,"s":0.12},{"w":5,"p":[-0.0029,0.1375,0.0774],"r":0,"t":0,"s":0.18},{"w":2,"p":[-0.0044,0.1343,-0.1106],"r":0,"t":0,"s":0.08},{"w":2,"p":[0.0051,0.1147,-0.2566],"r":0,"t":0,"s":0.08},{"w":3,"p":[-0.3829,0.0012,-0.1212],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.3878,0.0009,-0.1302],"r":0,"t":0,"s":0.06},{"w":4,"p":[0.3658,-0.0688,-0.1092],"r":0,"t":-180,"s":0.09},{"w":4,"p":[0.267,-0.0686,-0.0987],"r":0,"t":165,"s":0.09},{"w":4,"p":[-0.2676,-0.0683,-0.1066],"r":0,"t":-180,"s":0.09},{"w":4,"p":[-0.3664,-0.068,-0.1096],"r":0,"t":-165,"s":0.09}],"c0":[{"w":5,"p":[0.099,0.0355,-0.066],"r":0,"t":0,"s":0.09},{"w":5,"p":[0.099,0.0358,-0.23],"r":0,"t":0,"s":0.09},{"w":5,"p":[0.099,0.0343,-0.3],"r":0,"t":0,"s":0.09}],"c1":[{"w":0,"p":[0,0.0334,0.12],"r":0,"t":0,"s":0.14},{"w":0,"p":[0,0.0455,0],"r":0,"t":0,"s":0.14}],"c2":[{"w":1,"p":[0,0.0349,0.198],"r":0,"t":0,"s":0.13},{"w":1,"p":[0,0.0243,-0.32],"r":0,"t":0,"s":0.12},{"w":2,"p":[0.18,0.0031,-0.06],"r":0,"t":0,"s":0.13},{"w":2,"p":[-0.18,0.0023,-0.06],"r":0,"t":0,"s":0.13}],"c3":[{"w":3,"p":[0,0.0515,0.289],"r":0,"t":0,"s":0.26},{"w":4,"p":[0.08,0.0634,-0.07],"r":0,"t":0,"s":0.15},{"w":4,"p":[-0.08,0.0614,-0.07],"r":0,"t":0,"s":0.15}],"c4":[{"w":1,"p":[0,0.1659,-0.1],"r":0,"t":0,"s":0.11},{"w":2,"p":[0.2,0.0502,-0.08],"r":0,"t":0,"s":0.1},{"w":2,"p":[-0.2,0.0467,-0.08],"r":0,"t":0,"s":0.1}],"r0":[{"w":4,"p":[-0.135,0.0069,-0.008],"r":0,"t":0,"s":0.06},{"w":4,"p":[0.135,0.0069,-0.008],"r":0,"t":0,"s":0.06},{"w":4,"p":[-0.135,0.007,-0.231],"r":0,"t":0,"s":0.06},{"w":4,"p":[0.135,0.0071,-0.231],"r":0,"t":0,"s":0.06}],"r1":[{"w":0,"p":[0,0.0819,-0.008],"r":0,"t":0,"s":0.14},{"w":0,"p":[0,0.0822,-0.165],"r":0,"t":0,"s":0.14},{"w":0,"p":[0,0.0825,-0.293],"r":0,"t":0,"s":0.14}],"r2":[{"w":0,"p":[0,0.0879,0.099],"r":0,"t":0,"s":0.12},{"w":0,"p":[0,0.1013,-0.289],"r":0,"t":0,"s":0.12}],"r3":[{"w":2,"p":[0,0.0073,0.3],"r":0,"t":0,"s":0.4},{"w":3,"p":[-0.2,0.0043,0],"r":0,"t":0,"s":0.16},{"w":3,"p":[0.2,0.0042,0],"r":0,"t":0,"s":0.16}],"r4":[{"w":0,"p":[0,0.1539,-0.107],"r":0,"t":0,"s":0.11},{"w":3,"p":[-0.21,0.0973,-0.08],"r":0,"t":0,"s":0.17},{"w":3,"p":[0.21,0.0994,-0.08],"r":0,"t":0,"s":0.17}],"i0":[{"w":1,"p":[-0.083,-0.0038,0.046],"r":0,"t":0,"s":0.07},{"w":1,"p":[-0.073,0.0038,-0.223],"r":0,"t":0,"s":0.07},{"w":1,"p":[-0.094,0.0045,-0.28],"r":0,"t":0,"s":0.07},{"w":1,"p":[0.063,0.0034,-0.223],"r":0,"t":0,"s":0.07},{"w":1,"p":[0.088,0.0045,-0.28],"r":0,"t":0,"s":0.07}],"i1":[{"w":0,"p":[0,0.024,0.157],"r":0,"t":0,"s":0.13},{"w":0,"p":[0,0.0486,0.025],"r":0,"t":0,"s":0.13},{"w":1,"p":[-0.078,0.0253,-0.066],"r":0,"t":0,"s":0.07},{"w":1,"p":[-0.078,0.0241,-0.149],"r":0,"t":0,"s":0.07},{"w":1,"p":[0.079,0.0247,-0.066],"r":0,"t":0,"s":0.07},{"w":1,"p":[0.079,0.0234,-0.149],"r":0,"t":0,"s":0.07},{"w":0,"p":[0,0.0404,-0.256],"r":180,"t":0,"s":0.13}],"i2":[{"w":1,"p":[0,0.0718,0.284],"r":0,"t":0,"s":0.09}],"i3":[{"w":2,"p":[0,0.0216,0.355],"r":0,"t":0,"s":0.22},{"w":1,"p":[0,0.038,0.1],"r":0,"t":0,"s":0.08},{"w":4,"p":[0.12,0.0329,-0.05],"r":0,"t":0,"s":0.13},{"w":4,"p":[-0.12,0.0308,-0.05],"r":0,"t":0,"s":0.13}],"i4":[{"w":1,"p":[0,0.1045,-0.098],"r":0,"t":0,"s":0.09},{"w":5,"p":[-0.15,0.0181,0.11],"r":0,"t":0,"s":0.15},{"w":5,"p":[0.15,0.0163,0.11],"r":0,"t":0,"s":0.15}],"b0":[],"b1":[{"w":0,"p":[0,0.1582,-0.074],"r":0,"t":0,"s":0.18},{"w":0,"p":[0,0.1577,-0.245],"r":0,"t":0,"s":0.18}],"b2":[{"w":0,"p":[-0.078,0.0704,-0.017],"r":0,"t":0,"s":0.13},{"w":0,"p":[0.078,0.0691,-0.017],"r":0,"t":0,"s":0.13}],"b3":[{"w":2,"p":[0,0.0007,0.34],"r":0,"t":0,"s":0.3}],"b4":[{"w":3,"p":[0,0.1569,-0.066],"r":0,"t":0,"s":0.14}],"as0":[{"w":0,"p":[0,-0.0396,0.3065],"r":0,"t":0,"s":0.208},{"w":0,"p":[0,-0.0389,-0.3246],"r":180,"t":0,"s":0.196},{"w":0,"p":[-0.3205,-0.0396,-0.009],"r":-90,"t":0,"s":0.184},{"w":0,"p":[0.3205,-0.0394,-0.018],"r":90,"t":0,"s":0.184},{"w":1,"p":[0,0.1538,-0.0451],"r":180,"t":0,"s":0.11},{"w":1,"p":[0.1958,-0.0241,0.0721],"r":75,"t":0,"s":0.11},{"w":2,"p":[-0.0534,-0.0303,-0.4508],"r":180,"t":0,"s":0.085},{"w":3,"p":[-0.0623,-0.0337,0.4598],"r":-15,"t":0,"s":0.065},{"w":3,"p":[0.0623,-0.0339,-0.4598],"r":165,"t":0,"s":0.065},{"w":3,"p":[-0.454,-0.0328,-0.0631],"r":-105,"t":0,"s":0.065}],"as1":[{"w":0,"p":[0,0.0714,0.0364],"r":0,"t":0,"s":0.245},{"w":1,"p":[-0.179,0.0361,-0.1364],"r":-120,"t":0,"s":0.108},{"w":0,"p":[0.0948,0.0941,-0.3],"r":165,"t":0,"s":0.155},{"w":1,"p":[0.4107,0.0854,0.0273],"r":90,"t":0,"s":0.11},{"w":2,"p":[-0.4423,0.0875,0.0545],"r":-90,"t":0,"s":0.085},{"w":2,"p":[0.516,0.0691,0.0455],"r":90,"t":0,"s":0.085},{"w":3,"p":[0.0105,0.0436,0.4455],"r":0,"t":0,"s":0.065},{"w":3,"p":[-0.0737,0.0938,-0.3273],"r":-165,"t":0,"s":0.065},{"w":3,"p":[-0.3686,0.086,0.0545],"r":-75,"t":0,"s":0.065},{"w":3,"p":[0.4001,-0.0077,0.1545],"r":75,"t":0,"s":0.065}],"as2":[{"w":1,"p":[0.0878,0.1066,0.19],"r":30,"t":0,"s":0.121},{"w":1,"p":[-0.0933,0.1079,-0.19],"r":-150,"t":0,"s":0.121},{"w":1,"p":[0.0878,0.1075,-0.181],"r":150,"t":0,"s":0.121},{"w":1,"p":[-0.0878,0.1074,0.19],"r":-30,"t":0,"s":0.121},{"w":0,"p":[0.0165,0.131,-0.3258],"r":180,"t":0,"s":0.155},{"w":0,"p":[0,0.1145,0.3077],"r":0,"t":0,"s":0.155},{"w":2,"p":[-0.1043,0.1069,-0.3801],"r":-165,"t":0,"s":0.085},{"w":2,"p":[0.1866,0.1058,0.1629],"r":45,"t":0,"s":0.085},{"w":3,"p":[0.0878,0.1074,0.4615],"r":15,"t":0,"s":0.065},{"w":3,"p":[0.1152,0.0976,-0.4163],"r":165,"t":0,"s":0.065},{"w":3,"p":[-0.2744,-0.0194,-0.1719],"r":-120,"t":0,"s":0.065},{"w":3,"p":[-0.0823,0.1074,0.4615],"r":-15,"t":0,"s":0.065},{"w":3,"p":[0.2689,-0.0192,0.1357],"r":60,"t":0,"s":0.065}],"bs0":[{"w":0,"p":[0,0.1264,0],"r":0,"t":0,"s":0.3},{"w":0,"p":[0.242,0.0725,-0.2455],"r":135,"t":0,"s":0.151},{"w":0,"p":[0.233,0.0746,0.2455],"r":45,"t":0,"s":0.151},{"w":0,"p":[-0.251,0.0755,0.2455],"r":-45,"t":0,"s":0.151},{"w":3,"p":[-0.251,0.0617,-0.2364],"r":-135,"t":0,"s":0.073},{"w":2,"p":[-0.3047,0.0947,-0.3],"r":-135,"t":0,"s":0.085},{"w":3,"p":[0.0627,0.0514,0.3818],"r":15,"t":0,"s":0.065},{"w":3,"p":[0.3675,0.052,-0.0818],"r":105,"t":0,"s":0.065}],"bs1":[{"w":0,"p":[0,0.1895,0],"r":-90,"t":0,"s":0.155},{"w":0,"p":[0.2066,0.015,0.2347],"r":45,"t":0,"s":0.155},{"w":1,"p":[0.2515,0.0095,-0.009],"r":90,"t":0,"s":0.11},{"w":2,"p":[-0.2515,0.0095,0.0181],"r":-90,"t":0,"s":0.085},{"w":3,"p":[-0.3952,0.0129,0.316],"r":-45,"t":0,"s":0.065},{"w":3,"p":[0.3952,0.0128,-0.316],"r":135,"t":0,"s":0.065},{"w":3,"p":[0.3952,0.0114,0.316],"r":45,"t":0,"s":0.065},{"w":3,"p":[-0.2425,0.0108,-0.3611],"r":-150,"t":0,"s":0.065}],"bs2":[{"w":0,"p":[-0.289,0.0698,-0.1636],"r":-120,"t":0,"s":0.3},{"w":0,"p":[-0.289,0.0688,0.1545],"r":-60,"t":0,"s":0.3},{"w":0,"p":[-0.01,0.0754,0.3273],"r":0,"t":0,"s":0.278},{"w":0,"p":[-0.1894,0.0905,-0.3364],"r":-150,"t":0,"s":0.151},{"w":1,"p":[-0.4684,0.0961,0],"r":-90,"t":0,"s":0.11},{"w":1,"p":[0.309,0.0767,-0.3273],"r":135,"t":0,"s":0.11},{"w":1,"p":[0.3887,0.0634,0.2636],"r":60,"t":0,"s":0.11},{"w":2,"p":[-0.2292,0.0921,0.4091],"r":-30,"t":0,"s":0.085},{"w":2,"p":[0.3987,0.0649,-0.2545],"r":120,"t":0,"s":0.085},{"w":3,"p":[0.2193,0.0854,-0.4273],"r":150,"t":0,"s":0.065},{"w":3,"p":[-0.3289,0.068,0.3455],"r":-45,"t":0,"s":0.065},{"w":3,"p":[0.3289,0.0658,0.3364],"r":45,"t":0,"s":0.065},{"w":3,"p":[-0.309,0.067,-0.3636],"r":-135,"t":0,"s":0.065},{"w":3,"p":[0.4385,0.0649,-0.1364],"r":105,"t":0,"s":0.065}],"cs0":[{"w":0,"p":[0.0089,0.1029,-0.339],"r":180,"t":0,"s":0.241},{"w":0,"p":[-0.3394,0.1028,0.0089],"r":-90,"t":0,"s":0.241},{"w":0,"p":[0,0.1071,0.339],"r":0,"t":0,"s":0.241},{"w":0,"p":[0.3394,0.1066,0],"r":90,"t":0,"s":0.241},{"w":0,"p":[0.0089,0.1804,0],"r":90,"t":0,"s":0.133},{"w":1,"p":[-0.259,0.0763,-0.2587],"r":-135,"t":0,"s":0.11},{"w":5,"p":[-0.1965,0.1154,-0.3568],"r":-150,"t":0,"s":0.065},{"w":5,"p":[0.1786,0.121,0.3568],"r":30,"t":0,"s":0.065},{"w":5,"p":[0.3573,0.1279,-0.1695],"r":120,"t":0,"s":0.065}],"cs1":[{"w":0,"p":[-0.1484,0.0232,-0.1089],"r":-120,"t":0,"s":0.133},{"w":0,"p":[0.1484,0.0231,-0.1089],"r":120,"t":0,"s":0.133},{"w":1,"p":[-0.1425,0.009,0.2179],"r":-30,"t":0,"s":0.127},{"w":1,"p":[0.1543,0.0222,0.0091],"r":90,"t":0,"s":0.127},{"w":1,"p":[0.1484,0.0086,0.2179],"r":30,"t":0,"s":0.114},{"w":2,"p":[-0.0119,0.061,0.2088],"r":0,"t":0,"s":0.085},{"w":5,"p":[0.0237,0.0602,0.463],"r":0,"t":0,"s":0.065},{"w":5,"p":[0.0534,0.0312,-0.4358],"r":180,"t":0,"s":0.065},{"w":5,"p":[-0.2909,-0.1075,0.0182],"r":-90,"t":0,"s":0.065},{"w":5,"p":[0.2909,-0.1075,0.0182],"r":90,"t":0,"s":0.065}],"cs2":[{"w":0,"p":[-0.0057,0.1531,-0.1266],"r":180,"t":0,"s":0.155},{"w":0,"p":[0.1077,0.0964,0.0633],"r":60,"t":0,"s":0.155},{"w":0,"p":[-0.102,0.0948,0.0633],"r":-60,"t":0,"s":0.155},{"w":0,"p":[0.2096,0.0953,-0.1809],"r":135,"t":0,"s":0.155},{"w":1,"p":[-0.1473,0.0792,-0.2984],"r":-150,"t":0,"s":0.11},{"w":1,"p":[-0.2493,0.0705,-0.1899],"r":-120,"t":0,"s":0.11},{"w":5,"p":[0.2323,0.0313,-0.3889],"r":150,"t":0,"s":0.065},{"w":5,"p":[0.085,0.0726,0.3527],"r":15,"t":0,"s":0.065},{"w":5,"p":[-0.2323,0.0642,0],"r":-90,"t":0,"s":0.065},{"w":5,"p":[0.2323,0.0634,0],"r":90,"t":0,"s":0.065},{"w":5,"p":[-0.085,0.079,0.3437],"r":-15,"t":0,"s":0.065}],"es0":[{"w":0,"p":[0.1698,-0.0654,-0.2636],"r":150,"t":0,"s":0.258},{"w":0,"p":[-0.4032,-0.066,0.2545],"r":-60,"t":0,"s":0.258},{"w":0,"p":[-0.4032,-0.0633,-0.2636],"r":-120,"t":0,"s":0.246},{"w":0,"p":[0.1592,-0.0612,0.2636],"r":30,"t":0,"s":0.233},{"w":1,"p":[-0.4987,-0.0253,-0.0182],"r":-90,"t":0,"s":0.11},{"w":1,"p":[0.3608,-0.031,-0.0182],"r":90,"t":0,"s":0.11},{"w":2,"p":[-0.2016,0.0736,0.0727],"r":-75,"t":0,"s":0.085},{"w":3,"p":[-0.1592,-0.0513,0.4091],"r":-15,"t":0,"s":0.065},{"w":3,"p":[-0.1486,-0.0251,-0.4],"r":-165,"t":0,"s":0.065},{"w":3,"p":[-0.3926,-0.0269,0],"r":-90,"t":0,"s":0.065}],"es1":[{"w":0,"p":[-0.252,-0.0654,0.2806],"r":-45,"t":0,"s":0.16},{"w":0,"p":[0.2457,-0.0614,-0.2625],"r":135,"t":0,"s":0.16},{"w":0,"p":[-0.252,-0.0653,-0.2625],"r":-135,"t":0,"s":0.147},{"w":0,"p":[0.2583,-0.0661,0.2897],"r":45,"t":0,"s":0.147},{"w":1,"p":[0.126,0.0315,0.1086],"r":45,"t":0,"s":0.106},{"w":1,"p":[-0.0504,0.0234,-0.4074],"r":180,"t":0,"s":0.11},{"w":2,"p":[0.0693,0.0258,-0.4164],"r":165,"t":0,"s":0.085},{"w":2,"p":[-0.1512,0.039,0.1901],"r":-45,"t":0,"s":0.085},{"w":3,"p":[-0.0756,-0.0112,0.3531],"r":-15,"t":0,"s":0.065},{"w":3,"p":[0.1197,0.0345,-0.0905],"r":120,"t":0,"s":0.065},{"w":3,"p":[0.0693,-0.0112,0.344],"r":15,"t":0,"s":0.065},{"w":3,"p":[-0.1449,0.0399,0.0634],"r":-60,"t":0,"s":0.065}],"es2":[{"w":0,"p":[0.2617,-0.1073,-0.2087],"r":135,"t":0,"s":0.221},{"w":0,"p":[-0.2617,-0.1079,-0.1905],"r":-120,"t":0,"s":0.209},{"w":1,"p":[0.1584,-0.0172,0.1633],"r":45,"t":0,"s":0.082},{"w":0,"p":[0.0069,0.0148,0.3538],"r":0,"t":0,"s":0.155},{"w":0,"p":[-0.0069,0.0586,-0.3175],"r":180,"t":0,"s":0.155},{"w":1,"p":[-0.0758,0.0302,0.1905],"r":-15,"t":0,"s":0.11},{"w":2,"p":[0.0069,0.067,-0.1633],"r":180,"t":0,"s":0.085},{"w":2,"p":[0.0826,0.0274,0.2087],"r":15,"t":0,"s":0.085},{"w":3,"p":[-0.3306,-0.0585,-0.0635],"r":-105,"t":0,"s":0.065},{"w":3,"p":[-0.0895,0.0263,0.0816],"r":-45,"t":0,"s":0.065}],"is0":[{"w":2,"p":[0.2659,-0.026,-0.3],"r":135,"t":0,"s":0.094},{"w":0,"p":[0.2469,-0.0117,0.2818],"r":45,"t":0,"s":0.155},{"w":0,"p":[-0.2754,-0.0131,-0.3],"r":-135,"t":0,"s":0.155},{"w":2,"p":[-0.3229,-0.0109,0.2909],"r":-45,"t":0,"s":0.11},{"w":3,"p":[0,0.0259,0.4273],"r":0,"t":0,"s":0.085},{"w":1,"p":[0.0095,0.0402,0.3455],"r":0,"t":0,"s":0.065},{"w":1,"p":[-0.2849,-0.0702,-0.1636],"r":-120,"t":0,"s":0.065},{"w":1,"p":[0.2659,-0.0711,-0.1636],"r":120,"t":0,"s":0.065}],"is1":[{"w":2,"p":[-0.3921,0.0971,0.0091],"r":-90,"t":0,"s":0.094},{"w":2,"p":[-0.3454,0.0961,-0.3545],"r":-135,"t":0,"s":0.094},{"w":2,"p":[0.3454,0.0966,-0.3545],"r":135,"t":0,"s":0.084},{"w":0,"p":[-0.028,0.1344,0.1091],"r":-15,"t":0,"s":0.155},{"w":0,"p":[0.028,-0.0378,0.4182],"r":0,"t":0,"s":0.155},{"w":3,"p":[0.0093,0.1826,-0.2182],"r":180,"t":0,"s":0.085},{"w":3,"p":[-0.1494,0.0761,0.3818],"r":-15,"t":0,"s":0.085},{"w":1,"p":[0.252,0.0894,-0.3455],"r":150,"t":0,"s":0.065},{"w":1,"p":[-0.252,0.0876,-0.3455],"r":-150,"t":0,"s":0.065},{"w":1,"p":[0.028,0.1213,0.2273],"r":0,"t":0,"s":0.065},{"w":1,"p":[0.308,0.0937,0.0091],"r":90,"t":0,"s":0.065}],"is2":[{"w":2,"p":[-0.4099,0.0285,-0.1364],"r":-105,"t":0,"s":0.094},{"w":2,"p":[0.4099,0.0314,-0.1364],"r":105,"t":0,"s":0.094},{"w":2,"p":[0.4195,0.0326,0.2273],"r":60,"t":0,"s":0.084},{"w":2,"p":[-0.4195,0.0333,0.2273],"r":-60,"t":0,"s":0.084},{"w":0,"p":[0,0.0766,0.2182],"r":0,"t":0,"s":0.155},{"w":3,"p":[0,0.1374,-0.2182],"r":180,"t":0,"s":0.085},{"w":3,"p":[0.4385,0.0333,0.3909],"r":45,"t":0,"s":0.085},{"w":1,"p":[-0.429,0.0282,0.4273],"r":-45,"t":0,"s":0.065},{"w":1,"p":[0.4099,0.0445,0.3182],"r":45,"t":0,"s":0.065},{"w":1,"p":[-0.1144,0.0757,-0.2273],"r":-150,"t":0,"s":0.065},{"w":1,"p":[-0.0572,0.0452,0.4],"r":-15,"t":0,"s":0.065},{"w":1,"p":[0.286,0.0139,-0.1],"r":105,"t":0,"s":0.065}],"ms0":[{"w":1,"p":[0.437,0.0014,0],"r":90,"t":0,"s":0.086},{"w":1,"p":[0,0.0032,-0.4369],"r":180,"t":0,"s":0.086},{"w":3,"p":[-0.437,0.0115,0],"r":-90,"t":0,"s":0.06},{"w":3,"p":[0,0.0113,0.4369],"r":0,"t":0,"s":0.06},{"w":0,"p":[-0.0091,0.0702,0],"r":-90,"t":0,"s":0.155},{"w":2,"p":[-0.2367,0.0384,0],"r":-90,"t":0,"s":0.085},{"w":3,"p":[0.0091,0.0383,-0.2367],"r":180,"t":0,"s":0.065}],"ms1":[{"w":0,"p":[0.3541,0.0265,0.3727],"r":45,"t":0,"s":0.213},{"w":0,"p":[-0.3305,0.0155,-0.3727],"r":-135,"t":0,"s":0.188},{"w":0,"p":[0.3659,0.0158,-0.3727],"r":135,"t":0,"s":0.188},{"w":0,"p":[-0.3423,0.017,0.3818],"r":-45,"t":0,"s":0.188},{"w":1,"p":[-0.5548,0.177,0],"r":-90,"t":0,"s":0.11},{"w":1,"p":[0.5784,0.1349,0.0273],"r":90,"t":0,"s":0.11},{"w":2,"p":[-0.4603,0.172,0.0455],"r":-90,"t":0,"s":0.085},{"w":2,"p":[0.5194,0.1326,-0.0636],"r":90,"t":0,"s":0.085},{"w":3,"p":[-0.4603,0.1667,-0.0455],"r":-90,"t":0,"s":0.065},{"w":3,"p":[0.4013,0.0062,-0.2182],"r":120,"t":0,"s":0.065},{"w":3,"p":[0.4013,0.006,0.2182],"r":60,"t":0,"s":0.065},{"w":3,"p":[-0.3659,0.0222,0.2182],"r":-60,"t":0,"s":0.065}],"ms2":[{"w":0,"p":[0.2106,0.0233,-0.2818],"r":150,"t":0,"s":0.163},{"w":0,"p":[-0.2808,0.0067,0.2091],"r":-60,"t":0,"s":0.138},{"w":1,"p":[0.2106,0.0281,0.2364],"r":45,"t":0,"s":0.122},{"w":1,"p":[-0.1604,0.0265,-0.2818],"r":-150,"t":0,"s":0.122},{"w":0,"p":[0.01,0.1304,0],"r":90,"t":0,"s":0.155},{"w":0,"p":[0,0.0754,0.3091],"r":0,"t":0,"s":0.155},{"w":1,"p":[-0.371,0.0804,0],"r":-90,"t":0,"s":0.11},{"w":2,"p":[0.2106,0.1591,-0.0091],"r":90,"t":0,"s":0.085},{"w":2,"p":[-0.4913,0.0302,-0.1273],"r":-105,"t":0,"s":0.085},{"w":3,"p":[0.5114,0.0407,-0.1091],"r":105,"t":0,"s":0.065},{"w":3,"p":[-0.4813,0.0351,0.1],"r":-75,"t":0,"s":0.065},{"w":3,"p":[-0.1604,0.0315,-0.4091],"r":-165,"t":0,"s":0.065},{"w":3,"p":[0.0201,-0.0702,0.4545],"r":0,"t":0,"s":0.065},{"w":3,"p":[0.4913,0.0401,0.1091],"r":75,"t":0,"s":0.065}],"rs0":[{"w":0,"p":[0.273,-0.0133,-0.2542],"r":135,"t":0,"s":0.224},{"w":0,"p":[0.2639,-0.012,0.2724],"r":45,"t":0,"s":0.224},{"w":0,"p":[-0.2639,-0.0117,-0.2633],"r":-135,"t":0,"s":0.224},{"w":0,"p":[-0.2821,-0.01,0.2542],"r":-45,"t":0,"s":0.213},{"w":1,"p":[0,0.2061,-0.2361],"r":180,"t":0,"s":0.11},{"w":1,"p":[-0.0091,0.0393,0.4267],"r":0,"t":0,"s":0.11},{"w":3,"p":[-0.0273,0.2058,-0.118],"r":-165,"t":0,"s":0.085},{"w":4,"p":[0.4186,-0.0021,-0.3269],"r":135,"t":0,"s":0.065},{"w":4,"p":[-0.4186,-0.0022,0.3269],"r":-45,"t":0,"s":0.065},{"w":4,"p":[-0.3458,-0.0022,-0.3904],"r":-135,"t":0,"s":0.065}],"rs1":[{"w":0,"p":[-0.4416,0.0976,-0.0182],"r":-90,"t":0,"s":0.168},{"w":0,"p":[0.2551,0.0818,0.2182],"r":45,"t":0,"s":0.157},{"w":0,"p":[0.4318,0.0976,-0.0182],"r":90,"t":0,"s":0.146},{"w":1,"p":[0.4023,0.168,-0.3091],"r":135,"t":0,"s":0.11},{"w":1,"p":[-0.3925,0.1459,0.3455],"r":-45,"t":0,"s":0.11},{"w":3,"p":[0.3631,0.1709,-0.2],"r":120,"t":0,"s":0.085},{"w":3,"p":[-0.3729,0.1174,-0.3545],"r":-135,"t":0,"s":0.085},{"w":4,"p":[0.3729,0.1164,0.3182],"r":45,"t":0,"s":0.065},{"w":4,"p":[0.0589,0.1005,-0.4636],"r":180,"t":0,"s":0.065},{"w":4,"p":[-0.3631,0.1181,0.2455],"r":-60,"t":0,"s":0.065},{"w":4,"p":[-0.3337,0.1369,-0.2818],"r":-135,"t":0,"s":0.065}],"rs2":[{"w":0,"p":[0.0807,0.0835,0.0817],"r":45,"t":0,"s":0.123},{"w":1,"p":[-0.0986,0.0832,-0.0999],"r":-135,"t":0,"s":0.085},{"w":1,"p":[-0.0986,0.083,0.0908],"r":-45,"t":0,"s":0.085},{"w":0,"p":[-0.0359,0.1086,-0.3451],"r":180,"t":0,"s":0.155},{"w":0,"p":[-0.3766,0.1058,0],"r":-90,"t":0,"s":0.155},{"w":0,"p":[0.0628,0.1139,-0.1362],"r":150,"t":0,"s":0.155},{"w":1,"p":[0.3766,0.1076,-0.0091],"r":90,"t":0,"s":0.11},{"w":3,"p":[-0.009,0.107,0.3542],"r":0,"t":0,"s":0.085},{"w":3,"p":[0.1255,0.0793,-0.3088],"r":165,"t":0,"s":0.085},{"w":4,"p":[-0.1435,0.0898,-0.4359],"r":-165,"t":0,"s":0.065},{"w":4,"p":[-0.1166,0.0209,0.3996],"r":-15,"t":0,"s":0.065},{"w":4,"p":[0.2601,0.108,0],"r":90,"t":0,"s":0.065},{"w":4,"p":[0.1255,0.0899,0.327],"r":15,"t":0,"s":0.065},{"w":4,"p":[-0.2152,0.1087,0.0454],"r":-75,"t":0,"s":0.065}]};
+const MOUNTS_DEFAULT = {"e0":[{"w":3,"p":[-0.2228,0.0067,0.4183],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0537,0.0061,0.4124],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.2754,0.0084,-0.399],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0413,0.0077,-0.3914],"r":0,"t":0,"s":0.06},{"w":1,"p":[0.2806,-0.0199,0.026],"r":90,"t":0,"s":0.1},{"w":1,"p":[-0.2735,0.0042,0.1191],"r":0,"t":0,"s":0.09},{"w":2,"p":[0.0267,0.008,-0.1556],"r":90,"t":0,"s":0.08},{"w":2,"p":[-0.0268,0.0058,0.2526],"r":90,"t":0,"s":0.08}],"e1":[{"w":0,"p":[0.0011,-0.034,0.1198],"r":0,"t":0,"s":0.21},{"w":0,"p":[0,0.0026,-0.0498],"r":0,"t":0,"s":0.23},{"w":0,"p":[0.0024,-0.0168,-0.425],"r":180,"t":0,"s":0.22},{"w":1,"p":[0,-0.0325,0.3484],"r":0,"t":0,"s":0.11},{"w":1,"p":[-0.0908,-0.0359,-0.1025],"r":-90,"t":0,"s":0.12},{"w":1,"p":[0.0908,-0.0372,-0.1025],"r":90,"t":0,"s":0.12},{"w":3,"p":[-0.0803,-0.0331,-0.0325],"r":0,"t":0,"s":0.07},{"w":3,"p":[0.0803,-0.033,-0.0325],"r":0,"t":0,"s":0.07},{"w":3,"p":[-0.0731,-0.0169,-0.2987],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0731,-0.0184,-0.2987],"r":0,"t":0,"s":0.06},{"w":2,"p":[-0.1066,-0.0725,-0.0272],"r":0,"t":90,"s":0.09},{"w":2,"p":[0.1074,-0.0725,-0.0272],"r":0,"t":-90,"s":0.09}],"e2":[{"w":1,"p":[0.0021,0.0383,0.1152],"r":0,"t":0,"s":0.2},{"w":1,"p":[0,0.0508,-0.2987],"r":180,"t":0,"s":0.2},{"w":5,"p":[0,0.0251,0.3484],"r":0,"t":0,"s":0.14},{"w":4,"p":[-0.0732,-0.023,0.1998],"r":0,"t":90,"s":0.1},{"w":4,"p":[0.0732,-0.023,0.1998],"r":0,"t":-90,"s":0.1},{"w":3,"p":[-0.0763,0.024,-0.112],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0763,0.024,-0.112],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0951,-0.0202,-0.2966],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0951,-0.0202,-0.2966],"r":0,"t":0,"s":0.06}],"e3":[{"w":1,"p":[0,0.0065,0.0373],"r":0,"t":0,"s":0.17},{"w":5,"p":[0,-0.0145,0.2738],"r":0,"t":0,"s":0.16},{"w":3,"p":[-0.0498,-0.0163,0.1182],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0498,-0.0162,0.1182],"r":0,"t":0,"s":0.06},{"w":4,"p":[-0.0918,-0.0663,0.0552],"r":0,"t":90,"s":0.1},{"w":4,"p":[0.0918,-0.0663,0.0552],"r":0,"t":-90,"s":0.1}],"e4":[{"w":3,"p":[0,0.1175,-0.1493],"r":0,"t":0,"s":0.1},{"w":3,"p":[-0.0062,0.0507,0],"r":0,"t":0,"s":0.09},{"w":3,"p":[-0.1536,-0.0602,-0.1293],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.1536,-0.0602,-0.1293],"r":0,"t":0,"s":0.06},{"w":1,"p":[0,0.0479,0.1867],"r":0,"t":0,"s":0.1},{"w":3,"p":[0.0013,0.0424,-0.2941],"r":0,"t":0,"s":0.0775}],"a0":[{"w":3,"p":[-0.1099,-0.0025,0.2318],"r":0,"t":0,"s":0.04},{"w":3,"p":[0.1099,-0.0025,0.2318],"r":0,"t":0,"s":0.04},{"w":3,"p":[0.1207,0.0258,-0.1493],"r":0,"t":0,"s":0.06},{"w":1,"p":[-0.1019,0.0246,-0.0185],"r":0,"t":0,"s":0.09},{"w":2,"p":[0.1167,0.0212,-0.3088],"r":0,"t":0,"s":0.06},{"w":2,"p":[0.1453,0.0202,0.0053],"r":0,"t":0,"s":0.06}],"a1":[{"w":0,"p":[0,0,0.1717],"r":0,"t":0,"s":0.125},{"w":0,"p":[0,0.0059,0.0436],"r":0,"t":0,"s":0.16},{"w":0,"p":[0,0.0191,-0.0871],"r":0,"t":0,"s":0.24},{"w":5,"p":[-0.0021,-0.0021,0.3843],"r":0,"t":0,"s":0.14},{"w":3,"p":[-0.0799,-0.0108,-0.3858],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0799,-0.0105,-0.3858],"r":0,"t":0,"s":0.06},{"w":2,"p":[-0.0907,-0.0202,-0.0809],"r":0,"t":0,"s":0.06},{"w":2,"p":[-0.0907,-0.0209,-0.1556],"r":0,"t":0,"s":0.06},{"w":2,"p":[0.0874,-0.0204,-0.0809],"r":0,"t":0,"s":0.06},{"w":2,"p":[0.0874,-0.0208,-0.1556],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0586,-0.003,0.0249],"r":0,"t":0,"s":0.05},{"w":3,"p":[0.0586,-0.0041,0.0249],"r":0,"t":0,"s":0.05}],"a2":[{"w":1,"p":[-0.0015,-0.0002,-0.3467],"r":180,"t":0,"s":0.125},{"w":1,"p":[0,-0.0045,0.1618],"r":0,"t":0,"s":0.15},{"w":2,"p":[0,0.0059,0.0498],"r":0,"t":0,"s":0.06},{"w":2,"p":[0,0.0113,-0.0187],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.056,-0.0085,0.0249],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.056,-0.0085,-0.056],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0498,-0.0025,0.0249],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0498,-0.0037,-0.056],"r":0,"t":0,"s":0.06},{"w":4,"p":[-0.0964,-0.0434,-0.0384],"r":0,"t":90,"s":0.08},{"w":4,"p":[0.0964,-0.0434,-0.0384],"r":0,"t":-90,"s":0.08}],"a3":[{"w":5,"p":[-0.0037,0.0668,-0.3181],"r":0,"t":0,"s":0.28},{"w":1,"p":[0.0003,0.0501,0.0171],"r":0,"t":0,"s":0.12},{"w":3,"p":[-0.0732,0.0566,-0.1825],"r":0,"t":0,"s":0.055},{"w":3,"p":[0.0732,0.0566,-0.1825],"r":0,"t":0,"s":0.055},{"w":2,"p":[-0.0871,0.0375,0],"r":0,"t":0,"s":0.06},{"w":2,"p":[0.0871,0.038,0],"r":0,"t":0,"s":0.06},{"w":4,"p":[-0.1556,0.023,-0.1742],"r":0,"t":0,"s":0.09},{"w":4,"p":[0.1556,0.023,-0.1742],"r":0,"t":0,"s":0.09}],"a4":[{"w":3,"p":[0,0.134,-0.1333],"r":0,"t":0,"s":0.1},{"w":3,"p":[0.3149,0.0227,-0.1327],"r":0,"t":0,"s":0.07},{"w":3,"p":[-0.3149,0.0227,-0.1327],"r":0,"t":0,"s":0.07},{"w":1,"p":[0,0.1264,0.3333],"r":0,"t":0,"s":0.1},{"w":2,"p":[0.0035,0.1214,-0.2862],"r":0,"t":0,"s":0.08}],"m0":[{"w":3,"p":[-0.1049,0.021,-0.4217],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.1067,0.0216,-0.4165],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.1024,0.0352,-0.3182],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0965,0.021,0.1577],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.082,0.0316,0.1698],"r":0,"t":0,"s":0.06},{"w":5,"p":[-0.1206,0.0382,-0.0535],"r":-275,"t":0,"s":0.18}],"m1":[{"w":0,"p":[0.0034,0,0.1781],"r":0,"t":0,"s":0.2},{"w":2,"p":[0.0427,0.0316,-0.346],"r":0,"t":0,"s":0.08},{"w":2,"p":[-0.0427,0.0316,-0.346],"r":0,"t":0,"s":0.08},{"w":5,"p":[-0.0062,0.031,-0.255],"r":0,"t":0,"s":0.18},{"w":3,"p":[-0.1066,0.0148,-0.0612],"r":0,"t":0,"s":0.06},{"w":0,"p":[0.0057,0.0349,0.0185],"r":0,"t":0,"s":0.2}],"m2":[{"w":0,"p":[-0.017,0.0309,0.2219],"r":0,"t":0,"s":0.2},{"w":1,"p":[-0.0052,0.0204,0.3871],"r":0,"t":0,"s":0.12},{"w":4,"p":[-0.0968,-0.0613,0.1992],"r":0,"t":90,"s":0.09},{"w":4,"p":[0.0983,-0.0623,0.2003],"r":0,"t":-90,"s":0.09},{"w":2,"p":[0.0254,0.0974,-0.0315],"r":0,"t":0,"s":0.08},{"w":2,"p":[-0.0254,0.0974,-0.0315],"r":0,"t":0,"s":0.08},{"w":0,"p":[0.0064,0.0295,-0.3086],"r":185,"t":0,"s":0.2},{"w":3,"p":[0.1253,-0.03,-0.129],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.1253,-0.03,-0.129],"r":0,"t":0,"s":0.06}],"m3":[{"w":3,"p":[0.0299,0.1161,-0.0697],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0331,0.1158,-0.0636],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0363,0.1143,0.0196],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0423,0.1172,0.0157],"r":0,"t":0,"s":0.06},{"w":5,"p":[-0.0024,0.0674,0.4236],"r":0,"t":0,"s":0.18},{"w":2,"p":[0.1616,0.0886,-0.0341],"r":0,"t":0,"s":0.08},{"w":2,"p":[-0.1663,0.0836,-0.0368],"r":0,"t":0,"s":0.08},{"w":1,"p":[0.0024,0.1113,0.1617],"r":0,"t":0,"s":0.12}],"m4":[{"w":1,"p":[0.0006,0.1228,0.3613],"r":0,"t":0,"s":0.12},{"w":5,"p":[-0.0029,0.1375,0.0774],"r":0,"t":0,"s":0.18},{"w":2,"p":[-0.0044,0.1343,-0.1106],"r":0,"t":0,"s":0.08},{"w":2,"p":[0.0051,0.1147,-0.2566],"r":0,"t":0,"s":0.08},{"w":3,"p":[-0.3829,0.0012,-0.1212],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.3878,0.0009,-0.1302],"r":0,"t":0,"s":0.06},{"w":4,"p":[0.3658,-0.0688,-0.1092],"r":0,"t":-180,"s":0.09},{"w":4,"p":[0.267,-0.0686,-0.0987],"r":0,"t":165,"s":0.09},{"w":4,"p":[-0.2676,-0.0683,-0.1066],"r":0,"t":-180,"s":0.09},{"w":4,"p":[-0.3664,-0.068,-0.1096],"r":0,"t":-165,"s":0.09}],"c0":[{"w":5,"p":[0.099,0.0355,-0.066],"r":0,"t":0,"s":0.09},{"w":5,"p":[0.099,0.0358,-0.23],"r":0,"t":0,"s":0.09},{"w":5,"p":[0.099,0.0343,-0.3],"r":0,"t":0,"s":0.09}],"c1":[{"w":0,"p":[0,0.0334,0.12],"r":0,"t":0,"s":0.14},{"w":0,"p":[0,0.0455,0],"r":0,"t":0,"s":0.14}],"c2":[{"w":1,"p":[0,0.0349,0.198],"r":0,"t":0,"s":0.13},{"w":1,"p":[0,0.0243,-0.32],"r":0,"t":0,"s":0.12},{"w":2,"p":[0.18,0.0031,-0.06],"r":0,"t":0,"s":0.13},{"w":2,"p":[-0.18,0.0023,-0.06],"r":0,"t":0,"s":0.13}],"c3":[{"w":3,"p":[0,0.0515,0.289],"r":0,"t":0,"s":0.26},{"w":4,"p":[0.08,0.0634,-0.07],"r":0,"t":0,"s":0.15},{"w":4,"p":[-0.08,0.0614,-0.07],"r":0,"t":0,"s":0.15}],"c4":[{"w":1,"p":[0,0.1659,-0.1],"r":0,"t":0,"s":0.11},{"w":2,"p":[0.2,0.0502,-0.08],"r":0,"t":0,"s":0.1},{"w":2,"p":[-0.2,0.0467,-0.08],"r":0,"t":0,"s":0.1}],"r0":[{"w":4,"p":[-0.135,0.0069,-0.008],"r":0,"t":0,"s":0.06},{"w":4,"p":[0.135,0.0069,-0.008],"r":0,"t":0,"s":0.06},{"w":4,"p":[-0.135,0.007,-0.231],"r":0,"t":0,"s":0.06},{"w":4,"p":[0.135,0.0071,-0.231],"r":0,"t":0,"s":0.06}],"r1":[{"w":0,"p":[0,0.0819,-0.008],"r":0,"t":0,"s":0.14},{"w":0,"p":[0,0.0822,-0.165],"r":0,"t":0,"s":0.14},{"w":0,"p":[0,0.0825,-0.293],"r":0,"t":0,"s":0.14}],"r2":[{"w":0,"p":[0,0.0879,0.099],"r":0,"t":0,"s":0.12},{"w":0,"p":[0,0.1013,-0.289],"r":0,"t":0,"s":0.12}],"r3":[{"w":2,"p":[0,0.0073,0.3],"r":0,"t":0,"s":0.4},{"w":3,"p":[-0.2,0.0043,0],"r":0,"t":0,"s":0.16},{"w":3,"p":[0.2,0.0042,0],"r":0,"t":0,"s":0.16}],"r4":[{"w":0,"p":[0,0.1539,-0.107],"r":0,"t":0,"s":0.11},{"w":3,"p":[-0.21,0.0973,-0.08],"r":0,"t":0,"s":0.17},{"w":3,"p":[0.21,0.0994,-0.08],"r":0,"t":0,"s":0.17}],"i0":[{"w":1,"p":[-0.083,-0.0038,0.046],"r":0,"t":0,"s":0.07},{"w":1,"p":[-0.073,0.0038,-0.223],"r":0,"t":0,"s":0.07},{"w":1,"p":[-0.094,0.0045,-0.28],"r":0,"t":0,"s":0.07},{"w":1,"p":[0.063,0.0034,-0.223],"r":0,"t":0,"s":0.07},{"w":1,"p":[0.088,0.0045,-0.28],"r":0,"t":0,"s":0.07}],"i1":[{"w":0,"p":[0,0.024,0.157],"r":0,"t":0,"s":0.13},{"w":0,"p":[0,0.0486,0.025],"r":0,"t":0,"s":0.13},{"w":1,"p":[-0.078,0.0253,-0.066],"r":0,"t":0,"s":0.07},{"w":1,"p":[-0.078,0.0241,-0.149],"r":0,"t":0,"s":0.07},{"w":1,"p":[0.079,0.0247,-0.066],"r":0,"t":0,"s":0.07},{"w":1,"p":[0.079,0.0234,-0.149],"r":0,"t":0,"s":0.07},{"w":0,"p":[0,0.0404,-0.256],"r":180,"t":0,"s":0.13}],"i2":[{"w":1,"p":[0,0.0718,0.284],"r":0,"t":0,"s":0.09}],"i3":[{"w":2,"p":[0,0.0216,0.355],"r":0,"t":0,"s":0.22},{"w":1,"p":[0,0.038,0.1],"r":0,"t":0,"s":0.08},{"w":4,"p":[0.12,0.0329,-0.05],"r":0,"t":0,"s":0.13},{"w":4,"p":[-0.12,0.0308,-0.05],"r":0,"t":0,"s":0.13}],"i4":[{"w":1,"p":[0,0.1045,-0.098],"r":0,"t":0,"s":0.09},{"w":5,"p":[-0.15,0.0181,0.11],"r":0,"t":0,"s":0.15},{"w":5,"p":[0.15,0.0163,0.11],"r":0,"t":0,"s":0.15}],"b0":[],"b1":[{"w":0,"p":[0,0.1582,-0.074],"r":0,"t":0,"s":0.18},{"w":0,"p":[0,0.1577,-0.245],"r":0,"t":0,"s":0.18}],"b2":[{"w":0,"p":[-0.078,0.0704,-0.017],"r":0,"t":0,"s":0.13},{"w":0,"p":[0.078,0.0691,-0.017],"r":0,"t":0,"s":0.13}],"b3":[{"w":2,"p":[0,0.0007,0.34],"r":0,"t":0,"s":0.3}],"b4":[{"w":3,"p":[0,0.1569,-0.066],"r":0,"t":0,"s":0.14}],"as0":[{"w":0,"p":[0,-0.0396,0.3065],"r":0,"t":0,"s":0.208},{"w":0,"p":[0,-0.0389,-0.3246],"r":180,"t":0,"s":0.196},{"w":0,"p":[-0.3205,-0.0396,-0.009],"r":-90,"t":0,"s":0.184},{"w":0,"p":[0.3205,-0.0394,-0.018],"r":90,"t":0,"s":0.184},{"w":1,"p":[0,0.1538,-0.0451],"r":180,"t":0,"s":0.11},{"w":1,"p":[0.1958,-0.0241,0.0721],"r":75,"t":0,"s":0.11},{"w":2,"p":[-0.0534,-0.0303,-0.4508],"r":180,"t":0,"s":0.085},{"w":3,"p":[-0.0623,-0.0337,0.4598],"r":-15,"t":0,"s":0.065},{"w":3,"p":[0.0623,-0.0339,-0.4598],"r":165,"t":0,"s":0.065},{"w":3,"p":[-0.454,-0.0328,-0.0631],"r":-105,"t":0,"s":0.065}],"as1":[{"w":0,"p":[0,0.0714,0.0364],"r":0,"t":0,"s":0.245},{"w":1,"p":[-0.179,0.0361,-0.1364],"r":-120,"t":0,"s":0.108},{"w":0,"p":[0.0948,0.0941,-0.3],"r":165,"t":0,"s":0.155},{"w":1,"p":[0.4107,0.0854,0.0273],"r":90,"t":0,"s":0.11},{"w":2,"p":[-0.4423,0.0875,0.0545],"r":-90,"t":0,"s":0.085},{"w":2,"p":[0.516,0.0691,0.0455],"r":90,"t":0,"s":0.085},{"w":3,"p":[0.0105,0.0436,0.4455],"r":0,"t":0,"s":0.065},{"w":3,"p":[-0.0737,0.0938,-0.3273],"r":-165,"t":0,"s":0.065},{"w":3,"p":[-0.3686,0.086,0.0545],"r":-75,"t":0,"s":0.065},{"w":3,"p":[0.4001,-0.0077,0.1545],"r":75,"t":0,"s":0.065}],"as2":[{"w":1,"p":[0.0878,0.0924,0.19],"r":30,"t":0,"s":0.121},{"w":1,"p":[-0.0933,0.0918,-0.19],"r":-150,"t":0,"s":0.121},{"w":1,"p":[0.0878,0.0918,-0.181],"r":150,"t":0,"s":0.121},{"w":1,"p":[-0.0878,0.0924,0.19],"r":-30,"t":0,"s":0.121},{"w":0,"p":[0.0165,0.1146,-0.3258],"r":180,"t":0,"s":0.155},{"w":0,"p":[0,0.0994,0.3077],"r":0,"t":0,"s":0.155},{"w":2,"p":[-0.1043,0.0857,-0.3801],"r":-165,"t":0,"s":0.085},{"w":2,"p":[0.1866,0.0712,0.1629],"r":45,"t":0,"s":0.085},{"w":3,"p":[0.0878,0.0965,0.4615],"r":15,"t":0,"s":0.065},{"w":3,"p":[0.1152,0.0894,-0.4163],"r":165,"t":0,"s":0.065},{"w":3,"p":[-0.2744,-0.0427,-0.1719],"r":-120,"t":0,"s":0.065},{"w":3,"p":[-0.0823,0.0965,0.4615],"r":-15,"t":0,"s":0.065},{"w":3,"p":[0.2689,-0.0427,0.1357],"r":60,"t":0,"s":0.065}],"bs0":[{"w":0,"p":[0,0.1264,0],"r":0,"t":0,"s":0.3},{"w":0,"p":[0.242,0.0725,-0.2455],"r":135,"t":0,"s":0.151},{"w":0,"p":[0.233,0.0746,0.2455],"r":45,"t":0,"s":0.151},{"w":0,"p":[-0.251,0.0755,0.2455],"r":-45,"t":0,"s":0.151},{"w":3,"p":[-0.251,0.0617,-0.2364],"r":-135,"t":0,"s":0.073},{"w":2,"p":[-0.3047,0.0947,-0.3],"r":-135,"t":0,"s":0.085},{"w":3,"p":[0.0627,0.0514,0.3818],"r":15,"t":0,"s":0.065},{"w":3,"p":[0.3675,0.052,-0.0818],"r":105,"t":0,"s":0.065}],"bs1":[{"w":0,"p":[0,0.1895,0],"r":-90,"t":0,"s":0.155},{"w":0,"p":[0.2066,0.015,0.2347],"r":45,"t":0,"s":0.155},{"w":1,"p":[0.2515,0.0095,-0.009],"r":90,"t":0,"s":0.11},{"w":2,"p":[-0.2515,0.0095,0.0181],"r":-90,"t":0,"s":0.085},{"w":3,"p":[-0.3952,0.0129,0.316],"r":-45,"t":0,"s":0.065},{"w":3,"p":[0.3952,0.0128,-0.316],"r":135,"t":0,"s":0.065},{"w":3,"p":[0.3952,0.0114,0.316],"r":45,"t":0,"s":0.065},{"w":3,"p":[-0.2425,0.0108,-0.3611],"r":-150,"t":0,"s":0.065}],"bs2":[{"w":0,"p":[-0.289,0.0698,-0.1636],"r":-120,"t":0,"s":0.3},{"w":0,"p":[-0.289,0.0688,0.1545],"r":-60,"t":0,"s":0.3},{"w":0,"p":[-0.01,0.0754,0.3273],"r":0,"t":0,"s":0.278},{"w":0,"p":[-0.1894,0.0905,-0.3364],"r":-150,"t":0,"s":0.151},{"w":1,"p":[-0.4684,0.0961,0],"r":-90,"t":0,"s":0.11},{"w":1,"p":[0.309,0.0767,-0.3273],"r":135,"t":0,"s":0.11},{"w":1,"p":[0.3887,0.0634,0.2636],"r":60,"t":0,"s":0.11},{"w":2,"p":[-0.2292,0.0921,0.4091],"r":-30,"t":0,"s":0.085},{"w":2,"p":[0.3987,0.0649,-0.2545],"r":120,"t":0,"s":0.085},{"w":3,"p":[0.2193,0.0854,-0.4273],"r":150,"t":0,"s":0.065},{"w":3,"p":[-0.3289,0.068,0.3455],"r":-45,"t":0,"s":0.065},{"w":3,"p":[0.3289,0.0658,0.3364],"r":45,"t":0,"s":0.065},{"w":3,"p":[-0.309,0.067,-0.3636],"r":-135,"t":0,"s":0.065},{"w":3,"p":[0.4385,0.0649,-0.1364],"r":105,"t":0,"s":0.065}],"cs0":[{"w":0,"p":[0.0089,0.1029,-0.339],"r":180,"t":0,"s":0.241},{"w":0,"p":[-0.3394,0.1028,0.0089],"r":-90,"t":0,"s":0.241},{"w":0,"p":[0,0.1071,0.339],"r":0,"t":0,"s":0.241},{"w":0,"p":[0.3394,0.1066,0],"r":90,"t":0,"s":0.241},{"w":0,"p":[0.0089,0.1804,0],"r":90,"t":0,"s":0.133},{"w":1,"p":[-0.259,0.0763,-0.2587],"r":-135,"t":0,"s":0.11},{"w":5,"p":[-0.1965,0.1154,-0.3568],"r":-150,"t":0,"s":0.065},{"w":5,"p":[0.1786,0.121,0.3568],"r":30,"t":0,"s":0.065},{"w":5,"p":[0.3573,0.1279,-0.1695],"r":120,"t":0,"s":0.065}],"cs1":[{"w":0,"p":[-0.1484,0.0232,-0.1089],"r":-120,"t":0,"s":0.133},{"w":0,"p":[0.1484,0.0231,-0.1089],"r":120,"t":0,"s":0.133},{"w":1,"p":[-0.1425,0.009,0.2179],"r":-30,"t":0,"s":0.127},{"w":1,"p":[0.1543,0.0222,0.0091],"r":90,"t":0,"s":0.127},{"w":1,"p":[0.1484,0.0086,0.2179],"r":30,"t":0,"s":0.114},{"w":2,"p":[-0.0119,0.061,0.2088],"r":0,"t":0,"s":0.085},{"w":5,"p":[0.0237,0.0602,0.463],"r":0,"t":0,"s":0.065},{"w":5,"p":[0.0534,0.0312,-0.4358],"r":180,"t":0,"s":0.065},{"w":5,"p":[-0.2909,-0.1075,0.0182],"r":-90,"t":0,"s":0.065},{"w":5,"p":[0.2909,-0.1075,0.0182],"r":90,"t":0,"s":0.065}],"cs2":[{"w":0,"p":[-0.0057,0.1531,-0.1266],"r":180,"t":0,"s":0.155},{"w":0,"p":[0.1077,0.0964,0.0633],"r":60,"t":0,"s":0.155},{"w":0,"p":[-0.102,0.0948,0.0633],"r":-60,"t":0,"s":0.155},{"w":0,"p":[0.2096,0.0953,-0.1809],"r":135,"t":0,"s":0.155},{"w":1,"p":[-0.1473,0.0792,-0.2984],"r":-150,"t":0,"s":0.11},{"w":1,"p":[-0.2493,0.0705,-0.1899],"r":-120,"t":0,"s":0.11},{"w":5,"p":[0.2323,0.0313,-0.3889],"r":150,"t":0,"s":0.065},{"w":5,"p":[0.085,0.0726,0.3527],"r":15,"t":0,"s":0.065},{"w":5,"p":[-0.2323,0.0642,0],"r":-90,"t":0,"s":0.065},{"w":5,"p":[0.2323,0.0634,0],"r":90,"t":0,"s":0.065},{"w":5,"p":[-0.085,0.079,0.3437],"r":-15,"t":0,"s":0.065}],"es0":[{"w":0,"p":[0.1698,-0.0654,-0.2636],"r":150,"t":0,"s":0.258},{"w":0,"p":[-0.4032,-0.066,0.2545],"r":-60,"t":0,"s":0.258},{"w":0,"p":[-0.4032,-0.0633,-0.2636],"r":-120,"t":0,"s":0.246},{"w":0,"p":[0.1592,-0.0612,0.2636],"r":30,"t":0,"s":0.233},{"w":1,"p":[-0.4987,-0.0253,-0.0182],"r":-90,"t":0,"s":0.11},{"w":1,"p":[0.3608,-0.031,-0.0182],"r":90,"t":0,"s":0.11},{"w":2,"p":[-0.2016,0.0736,0.0727],"r":-75,"t":0,"s":0.085},{"w":3,"p":[-0.1592,-0.0513,0.4091],"r":-15,"t":0,"s":0.065},{"w":3,"p":[-0.1486,-0.0251,-0.4],"r":-165,"t":0,"s":0.065},{"w":3,"p":[-0.3926,-0.0269,0],"r":-90,"t":0,"s":0.065}],"es1":[{"w":0,"p":[-0.252,-0.0654,0.2806],"r":-45,"t":0,"s":0.16},{"w":0,"p":[0.2457,-0.0614,-0.2625],"r":135,"t":0,"s":0.16},{"w":0,"p":[-0.252,-0.0653,-0.2625],"r":-135,"t":0,"s":0.147},{"w":0,"p":[0.2583,-0.0661,0.2897],"r":45,"t":0,"s":0.147},{"w":1,"p":[0.126,0.0315,0.1086],"r":45,"t":0,"s":0.106},{"w":1,"p":[-0.0504,0.0234,-0.4074],"r":180,"t":0,"s":0.11},{"w":2,"p":[0.0693,0.0258,-0.4164],"r":165,"t":0,"s":0.085},{"w":2,"p":[-0.1512,0.039,0.1901],"r":-45,"t":0,"s":0.085},{"w":3,"p":[-0.0756,-0.0112,0.3531],"r":-15,"t":0,"s":0.065},{"w":3,"p":[0.1197,0.0345,-0.0905],"r":120,"t":0,"s":0.065},{"w":3,"p":[0.0693,-0.0112,0.344],"r":15,"t":0,"s":0.065},{"w":3,"p":[-0.1449,0.0399,0.0634],"r":-60,"t":0,"s":0.065}],"es2":[{"w":0,"p":[0.2617,-0.0545,-0.2087],"r":135,"t":0,"s":0.221},{"w":0,"p":[-0.2617,-0.0545,-0.1905],"r":-120,"t":0,"s":0.209},{"w":1,"p":[0.1584,0.0169,0.1633],"r":45,"t":0,"s":0.082},{"w":0,"p":[0.0069,0.0144,0.3538],"r":0,"t":0,"s":0.155},{"w":0,"p":[-0.0069,0.0471,-0.3175],"r":180,"t":0,"s":0.155},{"w":1,"p":[-0.0758,0.0198,0.1905],"r":-15,"t":0,"s":0.11},{"w":2,"p":[0.0069,0.0818,-0.1633],"r":180,"t":0,"s":0.085},{"w":2,"p":[0.0826,0.02,0.2087],"r":15,"t":0,"s":0.085},{"w":3,"p":[-0.3306,-0.0551,-0.0635],"r":-105,"t":0,"s":0.065},{"w":3,"p":[-0.0895,0.0144,0.0816],"r":-45,"t":0,"s":0.065}],"is0":[{"w":2,"p":[0.2659,-0.026,-0.3],"r":135,"t":0,"s":0.094},{"w":0,"p":[0.2469,-0.0117,0.2818],"r":45,"t":0,"s":0.155},{"w":0,"p":[-0.2754,-0.0131,-0.3],"r":-135,"t":0,"s":0.155},{"w":2,"p":[-0.3229,-0.0109,0.2909],"r":-45,"t":0,"s":0.11},{"w":3,"p":[0,0.0259,0.4273],"r":0,"t":0,"s":0.085},{"w":1,"p":[0.0095,0.0402,0.3455],"r":0,"t":0,"s":0.065},{"w":1,"p":[-0.2849,-0.0702,-0.1636],"r":-120,"t":0,"s":0.065},{"w":1,"p":[0.2659,-0.0711,-0.1636],"r":120,"t":0,"s":0.065}],"is1":[{"w":2,"p":[-0.3921,0.0971,0.0091],"r":-90,"t":0,"s":0.094},{"w":2,"p":[-0.3454,0.0961,-0.3545],"r":-135,"t":0,"s":0.094},{"w":2,"p":[0.3454,0.0966,-0.3545],"r":135,"t":0,"s":0.084},{"w":0,"p":[-0.028,0.1344,0.1091],"r":-15,"t":0,"s":0.155},{"w":0,"p":[0.028,-0.0378,0.4182],"r":0,"t":0,"s":0.155},{"w":3,"p":[0.0093,0.1826,-0.2182],"r":180,"t":0,"s":0.085},{"w":3,"p":[-0.1494,0.0761,0.3818],"r":-15,"t":0,"s":0.085},{"w":1,"p":[0.252,0.0894,-0.3455],"r":150,"t":0,"s":0.065},{"w":1,"p":[-0.252,0.0876,-0.3455],"r":-150,"t":0,"s":0.065},{"w":1,"p":[0.028,0.1213,0.2273],"r":0,"t":0,"s":0.065},{"w":1,"p":[0.308,0.0937,0.0091],"r":90,"t":0,"s":0.065}],"is2":[{"w":2,"p":[-0.4099,0.0285,-0.1364],"r":-105,"t":0,"s":0.094},{"w":2,"p":[0.4099,0.0314,-0.1364],"r":105,"t":0,"s":0.094},{"w":2,"p":[0.4195,0.0326,0.2273],"r":60,"t":0,"s":0.084},{"w":2,"p":[-0.4195,0.0333,0.2273],"r":-60,"t":0,"s":0.084},{"w":0,"p":[0,0.0766,0.2182],"r":0,"t":0,"s":0.155},{"w":3,"p":[0,0.1374,-0.2182],"r":180,"t":0,"s":0.085},{"w":3,"p":[0.4385,0.0333,0.3909],"r":45,"t":0,"s":0.085},{"w":1,"p":[-0.429,0.0282,0.4273],"r":-45,"t":0,"s":0.065},{"w":1,"p":[0.4099,0.0445,0.3182],"r":45,"t":0,"s":0.065},{"w":1,"p":[-0.1144,0.0757,-0.2273],"r":-150,"t":0,"s":0.065},{"w":1,"p":[-0.0572,0.0452,0.4],"r":-15,"t":0,"s":0.065},{"w":1,"p":[0.286,0.0139,-0.1],"r":105,"t":0,"s":0.065}],"ms0":[{"w":1,"p":[0.437,0.0014,0],"r":90,"t":0,"s":0.086},{"w":1,"p":[0,0.0032,-0.4369],"r":180,"t":0,"s":0.086},{"w":3,"p":[-0.437,0.0115,0],"r":-90,"t":0,"s":0.06},{"w":3,"p":[0,0.0113,0.4369],"r":0,"t":0,"s":0.06},{"w":0,"p":[-0.0091,0.0702,0],"r":-90,"t":0,"s":0.155},{"w":2,"p":[-0.2367,0.0384,0],"r":-90,"t":0,"s":0.085},{"w":3,"p":[0.0091,0.0383,-0.2367],"r":180,"t":0,"s":0.065}],"ms1":[{"w":0,"p":[0.3541,0.0265,0.3727],"r":45,"t":0,"s":0.213},{"w":0,"p":[-0.3305,0.0155,-0.3727],"r":-135,"t":0,"s":0.188},{"w":0,"p":[0.3659,0.0158,-0.3727],"r":135,"t":0,"s":0.188},{"w":0,"p":[-0.3423,0.017,0.3818],"r":-45,"t":0,"s":0.188},{"w":1,"p":[-0.5548,0.177,0],"r":-90,"t":0,"s":0.11},{"w":1,"p":[0.5784,0.1349,0.0273],"r":90,"t":0,"s":0.11},{"w":2,"p":[-0.4603,0.172,0.0455],"r":-90,"t":0,"s":0.085},{"w":2,"p":[0.5194,0.1326,-0.0636],"r":90,"t":0,"s":0.085},{"w":3,"p":[-0.4603,0.1667,-0.0455],"r":-90,"t":0,"s":0.065},{"w":3,"p":[0.4013,0.0062,-0.2182],"r":120,"t":0,"s":0.065},{"w":3,"p":[0.4013,0.006,0.2182],"r":60,"t":0,"s":0.065},{"w":3,"p":[-0.3659,0.0222,0.2182],"r":-60,"t":0,"s":0.065}],"ms2":[{"w":0,"p":[0.2106,0.0233,-0.2818],"r":150,"t":0,"s":0.163},{"w":0,"p":[-0.2808,0.0067,0.2091],"r":-60,"t":0,"s":0.138},{"w":1,"p":[0.2106,0.0281,0.2364],"r":45,"t":0,"s":0.122},{"w":1,"p":[-0.1604,0.0265,-0.2818],"r":-150,"t":0,"s":0.122},{"w":0,"p":[0.01,0.1304,0],"r":90,"t":0,"s":0.155},{"w":0,"p":[0,0.0754,0.3091],"r":0,"t":0,"s":0.155},{"w":1,"p":[-0.371,0.0804,0],"r":-90,"t":0,"s":0.11},{"w":2,"p":[0.2106,0.1591,-0.0091],"r":90,"t":0,"s":0.085},{"w":2,"p":[-0.4913,0.0302,-0.1273],"r":-105,"t":0,"s":0.085},{"w":3,"p":[0.5114,0.0407,-0.1091],"r":105,"t":0,"s":0.065},{"w":3,"p":[-0.4813,0.0351,0.1],"r":-75,"t":0,"s":0.065},{"w":3,"p":[-0.1604,0.0315,-0.4091],"r":-165,"t":0,"s":0.065},{"w":3,"p":[0.0201,-0.0702,0.4545],"r":0,"t":0,"s":0.065},{"w":3,"p":[0.4913,0.0401,0.1091],"r":75,"t":0,"s":0.065}],"rs0":[{"w":0,"p":[0.273,-0.0133,-0.2542],"r":135,"t":0,"s":0.224},{"w":0,"p":[0.2639,-0.012,0.2724],"r":45,"t":0,"s":0.224},{"w":0,"p":[-0.2639,-0.0117,-0.2633],"r":-135,"t":0,"s":0.224},{"w":0,"p":[-0.2821,-0.01,0.2542],"r":-45,"t":0,"s":0.213},{"w":1,"p":[0,0.2061,-0.2361],"r":180,"t":0,"s":0.11},{"w":1,"p":[-0.0091,0.0393,0.4267],"r":0,"t":0,"s":0.11},{"w":3,"p":[-0.0273,0.2058,-0.118],"r":-165,"t":0,"s":0.085},{"w":4,"p":[0.4186,-0.0021,-0.3269],"r":135,"t":0,"s":0.065},{"w":4,"p":[-0.4186,-0.0022,0.3269],"r":-45,"t":0,"s":0.065},{"w":4,"p":[-0.3458,-0.0022,-0.3904],"r":-135,"t":0,"s":0.065}],"rs1":[{"w":0,"p":[-0.4416,0.0976,-0.0182],"r":-90,"t":0,"s":0.168},{"w":0,"p":[0.2551,0.0818,0.2182],"r":45,"t":0,"s":0.157},{"w":0,"p":[0.4318,0.0976,-0.0182],"r":90,"t":0,"s":0.146},{"w":1,"p":[0.4023,0.168,-0.3091],"r":135,"t":0,"s":0.11},{"w":1,"p":[-0.3925,0.1459,0.3455],"r":-45,"t":0,"s":0.11},{"w":3,"p":[0.3631,0.1709,-0.2],"r":120,"t":0,"s":0.085},{"w":3,"p":[-0.3729,0.1174,-0.3545],"r":-135,"t":0,"s":0.085},{"w":4,"p":[0.3729,0.1164,0.3182],"r":45,"t":0,"s":0.065},{"w":4,"p":[0.0589,0.1005,-0.4636],"r":180,"t":0,"s":0.065},{"w":4,"p":[-0.3631,0.1181,0.2455],"r":-60,"t":0,"s":0.065},{"w":4,"p":[-0.3337,0.1369,-0.2818],"r":-135,"t":0,"s":0.065}],"rs2":[{"w":0,"p":[0.0807,0.0835,0.0817],"r":45,"t":0,"s":0.123},{"w":1,"p":[-0.0986,0.0832,-0.0999],"r":-135,"t":0,"s":0.085},{"w":1,"p":[-0.0986,0.083,0.0908],"r":-45,"t":0,"s":0.085},{"w":0,"p":[-0.0359,0.1086,-0.3451],"r":180,"t":0,"s":0.155},{"w":0,"p":[-0.3766,0.1058,0],"r":-90,"t":0,"s":0.155},{"w":0,"p":[0.0628,0.1139,-0.1362],"r":150,"t":0,"s":0.155},{"w":1,"p":[0.3766,0.1076,-0.0091],"r":90,"t":0,"s":0.11},{"w":3,"p":[-0.009,0.107,0.3542],"r":0,"t":0,"s":0.085},{"w":3,"p":[0.1255,0.0793,-0.3088],"r":165,"t":0,"s":0.085},{"w":4,"p":[-0.1435,0.0898,-0.4359],"r":-165,"t":0,"s":0.065},{"w":4,"p":[-0.1166,0.0209,0.3996],"r":-15,"t":0,"s":0.065},{"w":4,"p":[0.2601,0.108,0],"r":90,"t":0,"s":0.065},{"w":4,"p":[0.1255,0.0899,0.327],"r":15,"t":0,"s":0.065},{"w":4,"p":[-0.2152,0.1087,0.0454],"r":-75,"t":0,"s":0.065}]};
 
 // ═══════════════════════ 武器：掛點資料、2D 疊圖、配置編輯器 ═══════════════════════
 // 掛點用船體模型座標（船長＝1，船頭＋z、上＋y、右＋x）。3D 直接當實例畫在船上；
@@ -7072,6 +7243,10 @@ const WEAPON_NAMES = [
   ['感染主砲塔', '甲殼包覆雙聯裝砲塔', '骨顎寄生主砲', '感染飛彈發射區', '膿囊魚雷管', '骨翼飛彈掛架'],
   ['生物砲囊', '毒刺尾砲', '生物刺槍口器', '酸液噴射孔群', '巨顎衝角', '生物戰機'],
 ];
+// 3D 武器動畫（順序同 WEAPON_NAMES）：t＝砲塔（整座轉向目標、抬仰角、開火後座）、f＝固定砲（只做小角度修正＋後座）、
+// l＝發射器（不轉；有艙蓋的模型會開蓋，沒有的只有輕微後座）、n＝不動。WEAPON_GK＝跟著哪一種砲的開火：m 主砲、s 副砲、a 防空、x 飛彈
+const WEAPON_RIG = ['ttftlf', 'ttltlf', 'tfltln', 'ttlflt', 'tfflln', 'ttflll', 'tfflnn'];
+const WEAPON_GK = ['mssaxm', 'msxaxm', 'mmxaxm', 'msxmxa', 'mmmxam', 'msmxxx', 'msmaxm'];
 // 武器配置可選的風格（模型鍵字首，順序＝陣營編號）：帝國、聯盟、傭兵，以及只當敵軍外觀的四個風格
 const STYLES = [['e', '帝國軍'], ['a', '聯盟軍'], ['m', '傭兵'], ['c', '機械改造人類'], ['r', '機械智慧族'], ['i', '蟲族感染人類'], ['b', '蟲族']];
 const STATION_NAMES = ['太空站・小', '太空站・中', '太空站・大'];   // 鍵＝風格＋s＋0～2（例如 es1）
@@ -17199,6 +17374,7 @@ function capMain(s, t) {
   const sd = h.s, tf = sd / M.spd;
   const ex = ox + D[0] * sd, ey = oy + D[1] * sd, ez = oz + D[2] * sd, side = CAP.side;
   spawnBeam(ox, oy, oz, ex, ey, ez, t, tf, side, M.dmg >= 50 ? 1.8 : 1.3, Math.min(1, (M.dmg >= 50 ? 24 : 12) / Math.max(1, sd)), SIDE_FAC[side]);
+  rigFire(s.i, 'main', t, ex, ey, ez);   // 3D 砲塔轉向、後座
   spawnFx(ox, oy, oz, side, s.L * (M.dmg >= 50 ? 0.22 : 0.12), 30);
   CAP.stats.shots++; capSig(s, t);
   if (h.k === 'f') pending.push({ kind: 'ak', a: 1, t: t + tf, i: h.i, dmg: M.dmg * 0.5, side });
@@ -17217,6 +17393,7 @@ function capMissile(s, t, pressed) {
   if (s.lockT < M.lockT) { if (pressed) capFeed(Math.hypot(tp.x - s.x, tp.y - s.y, tp.z - s.z) > M.range ? '飛彈：目標在射程外' : '飛彈：鎖定中…', 'hint'); return; }
   s.mslN--; s.mslCd = M.cd; s.aiMslT = t + 2.5; CAP.stats.msl++; capSig(s, t);
   const ox = s.x + s.U[0] * s.L * 0.12, oy = s.y + s.U[1] * s.L * 0.12, oz = s.z + s.U[2] * s.L * 0.12;
+  rigFire(s.i, 'msl', t, tp.x, tp.y, tp.z);
   if (T.k === 's') launchMissileAt(ox, oy, oz, CAP.side, s.q, T.i, M.dmg, t, 1, 1.2);
   else CAP.msl.push({ x: ox, y: oy, z: oz, vx: s.vx * 0.5, vy: 9, vz: s.vz * 0.5, gi: T.k === 'g' ? T.i : -1, ms: T.k === 'ms' ? T.i : -1, dmg: M.dmg, life: 22, age: 0, n: 0 });
   if (ctl && (pressed || s.mslN % 4 === 0)) capFeed(`飛彈發射 → ${capTgtName(T)}（剩 ${s.mslN} 枚）`, 'ok');
@@ -17260,6 +17437,7 @@ function capPD(s, dt, t) {
     const lead = d / 600, tx = o.x + o.vx * lead + (hit ? 0 : (capRnd() - 0.5) * 6), ty = o.y + o.vy * lead + (hit ? 0 : (capRnd() - 0.5) * 4), tz = o.z + o.vz * lead + (hit ? 0 : (capRnd() - 0.5) * 6);
     const dur = Math.hypot(tx - mx, ty - my, tz - mz) / 600;
     spawnBeam(mx, my, mz, tx, ty, tz, t, dur, CAP.side, 0.5, Math.min(0.5, 6 / Math.max(1, d)), SIDE_FAC[CAP.side]);
+    rigFire(s.i, 'aa', t, tx, ty, tz);
     if (hit) pending.push({ kind: 'ak', t: t + dur, a: o.a, i: o.i, g: o.g, dmg: o.a === 0 ? 1 : P.dmg, side: CAP.side });
     capSig(s, t, 0.5);
   }
@@ -17305,6 +17483,7 @@ function capTurretShot(s, m, T, tg, t) {
   if (!hit) { const o = 1.5 + capRnd() * 3; tx += (capRnd() - 0.5) * o * 2; tz += (capRnd() - 0.5) * o * 2; ty += (capRnd() - 0.5) * o; }
   const dur = Math.hypot(tx - mx, ty - my, tz - mz) / 620;
   spawnBeam(mx, my, mz, tx, ty, tz, t, dur, side, 0.75, Math.min(0.3, 30 / Math.max(1, d)), SIDE_FAC[side]);
+  rigFire(s.i, 'sec', t, tx, ty, tz);
   capSig(s, t);
   if (!hit) { if (tg.k !== 'f' && GRD) pending.push({ kind: 'sp', t: t + dur, x: tx, y: Math.max(ty, terrainHAt(tx, tz)), z: tz, side, r: 0.15 }); return; }
   if (tg.k === 'ms') pending.push({ kind: 'ms', t: t + dur, id: tg.i, dmg: T.dmg, side, x: tx, y: ty, z: tz });
@@ -19087,6 +19266,7 @@ function renderSettings() {
       <label class="set-row set-chk"><span>2D 畫面顯示武器<br><small class="g-dim">依「武器配置」的掛點，疊在船體貼圖上</small></span><input type="checkbox" id="set-w2d" ${SETTINGS.weapons2D !== false ? 'checked' : ''}></label>
       <label class="set-row set-chk"><span>3D 畫面顯示武器<br><small class="g-dim">船夠近（細節前三級）才畫；大軍遠景時關掉可以省效能</small></span><input type="checkbox" id="set-w3d" ${SETTINGS.weapons3D !== false ? 'checked' : ''}></label>
       <div class="set-row"><span>武器掛點<br><small class="g-dim">調整、新增每種船的武器位置</small></span><button class="g-btn sm" id="set-wed">武器配置…</button></div>
+      <div class="set-row"><span>貼圖繪製<br><small class="g-dim">直接在船體、武器、艦載機的 3D 模型上畫貼圖，存回伺服器</small></span><button class="g-btn sm" id="set-paint">貼圖繪製…</button></div>
       <div class="set-row"><span>畫面</span><span class="g-row"><button class="g-btn sm ${mode3D ? '' : 'pri'}" data-rm="2d">2D 像素</button><button class="g-btn sm ${mode3D ? 'pri' : ''}" data-rm="3d">3D 模型</button></span></div>`;
   } else {
     body = `<div class="set-row"><span>介面大小<br><small class="g-dim">文字、按鈕與面板間距一起放大縮小</small></span>
@@ -19117,6 +19297,7 @@ function renderSettings() {
   if (q('#set-w2d')) q('#set-w2d').onchange = (e) => { SETTINGS.weapons2D = e.target.checked; saveSettings(); applyWeapon2D(); };
   if (q('#set-w3d')) q('#set-w3d').onchange = (e) => { SETTINGS.weapons3D = e.target.checked; saveSettings(); };
   if (q('#set-wed')) q('#set-wed').onclick = () => { closeSettings(); openWeaponEditor(GAME.phase === 'menu' ? showMenu : null); };
+  if (q('#set-paint')) q('#set-paint').onclick = () => { closeSettings(); openPaintLink(); };
   if (q('#set-brpause')) q('#set-brpause').onchange = (e) => { SETTINGS.bridgePause = e.target.checked; saveSettings(); };
   for (const k of ['stat', 'pip']) if (q('#set-pin-' + k)) q('#set-pin-' + k).onchange = (e) => { SETTINGS.brPins[k] = e.target.checked; saveSettings(); };
   qa('[data-rm]').forEach((b) => (b.onclick = () => { setRenderMode(b.dataset.rm); setTimeout(renderSettings, 50); }));
@@ -19141,6 +19322,90 @@ addEventListener('keydown', (e) => {
   saveSettings(); renderSettings();
 }, true);
 
+// ═════ 貼圖繪製（移植自 rubicon-protocol 的 rubicon_paint，網頁在 web/paint/）═════
+// 這裡列出伺服器模型資料夾的模型；「繪製」開繪圖視窗（paint/index.html#lib），以 postMessage 傳 GLB：
+//   繪圖視窗送 rp-ready（同名視窗已經開著時不會重新載入，所以這邊會一直送 rp-ping 問到它回答）
+//   → 這邊送 rp-open { slot: 模型鍵, set, setName, slotName, name, buf }
+//   →「存回遊戲」時繪圖視窗送 rp-save { id, slot, buf } → 這邊 PUT api/models/<鍵>/glb → 回 rp-saved { id, ok, msg }
+// 伺服器把原檔備份到 models/_原始/ 再覆蓋，重算遠景網格；「還原原始」放回原檔。遊戲重新整理後才會用到新貼圖。
+const PNT = { el: null, win: null, man: null, canEdit: null, pending: null, ping: 0, msg: '', busy: false };
+const PNT_KIND = { hull: '船體', weapon: '武器', fighter: '艦載機', station: '太空站' };
+const plEsc = (v) => String(v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+async function openPaintLink() {
+  if (!PNT.el) {
+    PNT.el = document.createElement('div'); PNT.el.id = 'paintlink'; document.body.appendChild(PNT.el);
+    PNT.el.addEventListener('click', (e) => { if (e.target === PNT.el) closePaintLink(); });
+  }
+  PNT.el.hidden = false; PNT.msg = '讀取模型清單…'; renderPaintLink();
+  await plRefresh();
+}
+function closePaintLink() { if (PNT.el) PNT.el.hidden = true; }
+async function plRefresh() {
+  try {
+    const [man, ce] = await Promise.all([fetch('api/models', { cache: 'no-cache' }).then((r) => r.json()), API.get('api/models/can-edit').catch(() => ({ ok: false }))]);
+    PNT.man = man.models || {}; PNT.canEdit = ce;
+    PNT.msg = ce.ok ? '' : (ce.mode === 'off' ? '伺服器設定不允許存回模型（config.json 的 modelEdit）。仍然可以畫，用繪圖視窗的「匯出 GLB」存成檔案。' : '只有在伺服器那台電腦上玩才能存回模型（config.json 的 modelEdit 改成 "all" 就能從別台存）。仍然可以畫，用「匯出 GLB」存成檔案。');
+  } catch (e) { PNT.msg = '讀不到模型清單：' + e.message; }
+  renderPaintLink();
+}
+function renderPaintLink() {
+  if (!PNT.el || PNT.el.hidden) return;
+  const man = PNT.man || {}, order = Object.keys(PNT_KIND), rank = (k) => { const i = order.indexOf(man[k].kind); return i < 0 ? 9 : i; };
+  const groups = STYLES.map(([p, n]) => [n, Object.keys(man).filter((k) => k[0] === p).sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : 1))]).filter((g) => g[1].length);
+  const row = (k) => { const m = man[k]; return `<div class="pl-row"><span class="pl-name">${plEsc(m.name || k)}${m.painted ? '<span class="pl-tag">已改</span>' : ''}<br><small class="g-dim">${k}・${PNT_KIND[m.kind] || m.kind}・${plEsc(m.file)}</small></span>
+    <span class="g-row">${m.painted && PNT.canEdit && PNT.canEdit.ok ? `<button class="g-btn sm" data-plr="${k}">還原原始</button>` : ''}<button class="g-btn sm pri" data-plp="${k}">繪製</button></span></div>`; };
+  PNT.el.innerHTML = `<div class="set-card pl-card"><div class="g-head" style="margin-bottom:10px"><h2>貼圖繪製</h2><span class="crumb">直接在 3D 模型上畫貼圖（移植自 Rubicon Paint）</span><span class="g-sp"></span><button class="g-btn" id="pl-close">完成</button></div>
+    <p class="g-dim pl-note">選一個模型開啟繪圖視窗：筆刷、圖層、貼圖片、AO 烘焙，畫好按視窗上方的「存回遊戲」。存回後重新整理遊戲（其他玩家也是）才會看到新貼圖；2D 像素畫面用的是預先算好的圖，不會變。</p>
+    ${PNT.msg ? `<p class="pl-msg">${plEsc(PNT.msg)}</p>` : ''}
+    ${groups.map(([n, keys]) => `<div class="set-h">${n}</div>${keys.map(row).join('')}`).join('')}</div>`;
+  const q = (s) => PNT.el.querySelector(s);
+  q('#pl-close').onclick = closePaintLink;
+  PNT.el.querySelectorAll('[data-plp]').forEach((b) => (b.onclick = () => plOpen(b.dataset.plp)));
+  PNT.el.querySelectorAll('[data-plr]').forEach((b) => (b.onclick = () => plRestore(b.dataset.plr)));
+}
+async function plOpen(key) {
+  const m = PNT.man && PNT.man[key]; if (!m) return;
+  // 先開視窗（要在點擊當下開，否則會被擋），再下載 GLB
+  if (!PNT.win || PNT.win.closed) PNT.win = window.open('paint/index.html#lib', 'star-paint');
+  if (!PNT.win) { PNT.msg = '瀏覽器擋下了彈出視窗：請允許這個網站開新視窗後再按一次。'; renderPaintLink(); return; }
+  PNT.win.focus();
+  PNT.msg = `下載「${m.name}」…`; renderPaintLink();
+  try {
+    const r = await fetch(m.glb, { cache: 'no-cache' }); if (!r.ok) throw new Error('HTTP ' + r.status);
+    PNT.pending = { t: 'rp-open', slot: key, set: 'server', setName: '伺服器模型', slotName: m.name || key, name: m.file.split(/[\\/]/).pop(), buf: await r.arrayBuffer() };
+  } catch (e) { PNT.msg = '下載失敗：' + e.message; renderPaintLink(); return; }
+  PNT.msg = `已在繪圖視窗開啟「${m.name}」。`; renderPaintLink();
+  clearInterval(PNT.ping); let n = 0;
+  PNT.ping = setInterval(() => { if (!PNT.pending || !PNT.win || PNT.win.closed || ++n > 60) { clearInterval(PNT.ping); return; } PNT.win.postMessage({ t: 'rp-ping' }, '*'); }, 300);
+  PNT.win.postMessage({ t: 'rp-ping' }, '*');
+}
+async function plRestore(key) {
+  const m = PNT.man[key]; if (!m || PNT.busy) return;
+  if (!confirm(`把「${m.name}」換回原本的 GLB？畫過的貼圖會不見（繪圖視窗裡的圖層還留著）。`)) return;
+  PNT.busy = true;
+  try { await API.post(`api/models/${key}/restore`); PNT.msg = `已還原「${m.name}」。重新整理遊戲後套用。`; } catch (e) { PNT.msg = '還原失敗：' + e.message; }
+  PNT.busy = false; await plRefresh();
+}
+async function plSave(d) {
+  const reply = (ok, msg) => { if (PNT.win && !PNT.win.closed) PNT.win.postMessage({ t: 'rp-saved', id: d.id, ok, msg }, '*'); };
+  if (!PNT.man || !PNT.man[d.slot] || !(d.buf instanceof ArrayBuffer)) return reply(false, '遊戲裡沒有這個模型');
+  try {
+    const r = await fetch(`api/models/${d.slot}/glb`, { method: 'PUT', headers: { ...API.headers(), 'Content-Type': 'model/gltf-binary' }, body: d.buf });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return reply(false, j.error || 'HTTP ' + r.status);
+    PNT.man[d.slot] = j.model || PNT.man[d.slot];
+    PNT.msg = `已存回「${PNT.man[d.slot].name}」。重新整理遊戲後套用。`; renderPaintLink();
+    reply(true);
+  } catch (e) { reply(false, e.message); }
+}
+addEventListener('message', (e) => {
+  const d = e.data;
+  if (!PNT.win || e.source !== PNT.win || !d || typeof d.t !== 'string') return;
+  if (d.t === 'rp-ready' && PNT.pending) { const p = PNT.pending; PNT.pending = null; clearInterval(PNT.ping); PNT.win.postMessage(p, '*', [p.buf]); }
+  else if (d.t === 'rp-save') plSave(d);
+});
+
 // ═══════════════════════ 啟動 ═══════════════════════
 newBattle(12345);
 resize();
@@ -19161,6 +19426,7 @@ document.getElementById('tb-queue').onclick = () => { queueToggle = !queueToggle
 document.getElementById('set-btn').onclick = () => openSettings();
 applyUISettings();
 Object.assign(window.__demo, { cStats, C_SRC, rocks: () => ROCKS, shipWorld3(i) { shipWorldCPU(i, _a); return [_a.x, _a.y, _a.z]; }, fleetMods, U: () => U.uTime.value, gunStats: () => gunStats, pending: () => pending, wInfo: () => ({ dmg: wDmg.map((a) => a.map(Math.round)), w: wStats.map((s) => Object.fromEntries(Object.entries(s).map(([k, v]) => [k, Math.round(v)]))), air: [aliveF[0].length, aliveF[1].length], alive: [sideAlive(0), sideAlive(1)] }), SETTINGS, openSettings, closeSettings, keyOf, BR, enterBridge, exitBridge, ships: () => ships, bridgeLook, bridgeConsoleK, camera: () => camera });
+Object.assign(window.__demo, { RIG, rigFire });   // 武器動畫的除錯：開火紀錄、手動觸發
 Object.assign(window.__demo, { CUT, CUT_STYLES, cutPlay, cutPrepare, cutEncode, cutLayout, cutDraw, openCutStudio });
 Object.assign(window.__demo, { MOUNTS: () => MOUNTS, mountsOf, openWeaponEditor, closeWeaponEditor, WE, WA, buildWeaponAtlas, shipMat, getModel, MODEL_SRC, MODEL_LOAD, STORE: () => STORE, showRecords, showCampaign, showCampBriefing, campLoad, campStage, campEnemy, showTavern, storyUnlock, showStory, storyBriefing, storyScenario, storyLoad, STORY_STAGES, STORY_WAR, roster: () => ROSTER, fleets: () => fleets, skills: () => SKILLS, sideFac: () => SIDE_FAC, COMMANDERS });
 // 載入伺服器模型資料夾裡的模型（啟動畫面顯示進度），完成後才進選單
