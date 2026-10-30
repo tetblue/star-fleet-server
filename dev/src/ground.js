@@ -618,7 +618,7 @@ function groundScar(x, y, z, r = 2) {
     }
   }
   const S = GV.scars;
-  if (S && low) { const k = S.head; S.head = (S.head + 1) % SCAR_MAX; S.s.array[k * 4] = x; S.s.array[k * 4 + 1] = z; S.s.array[k * 4 + 2] = r * 1.2; S.s.array[k * 4 + 3] = t; S.y.array[k] = gy; S.dirty = true; }
+  if (S && low) { const k = S.head; S.head = (S.head + 1) % SCAR_MAX; S.s.array[k * 4] = x; S.s.array[k * 4 + 1] = z; S.s.array[k * 4 + 2] = r * 1.2; S.s.array[k * 4 + 3] = t; S.y.array[k] = GRD.hf ? terrainSurfaceAt(GRD, x, z) : gy; S.dirty = true; }   // 焦痕貼著畫出來的地表
 }
 // 直接炸毀某一棟建築（武器打到它）；回傳有沒有炸掉
 function groundBldKill(i) {
@@ -1018,26 +1018,6 @@ function groundFar(P, kind, seed, ex) {
   g.computeVertexNormals(); g.setAttribute('color', new THREE.BufferAttribute(cols, 3)); g.setAttribute('aWin', new THREE.BufferAttribute(new Float32Array(pos.count), 1));
   const m = new THREE.Mesh(g, groundMat(P)); m.frustumCulled = false; return m;
 }
-// 群山：高度格的網格（顏色依高度與坡度：草、岩、雪）
-function groundHfMesh(P, D) {
-  const N1 = GROUND_N + 1, g = new THREE.PlaneGeometry(GROUND_EXT * 2, GROUND_EXT * 2, GROUND_N, GROUND_N); g.rotateX(-Math.PI / 2);
-  const pos = g.attributes.position;
-  for (let i = 0; i < pos.count; i++) {
-    const ix = Math.round((pos.getX(i) + GROUND_EXT) / GROUND_CELL), iz = Math.round((pos.getZ(i) + GROUND_EXT) / GROUND_CELL);
-    pos.setY(i, GROUND_Y + D.hf[iz * N1 + ix]);
-  }
-  g.computeVertexNormals();
-  const nrm = g.attributes.normal, cols = new Float32Array(pos.count * 3), sn = D.extra.snow;
-  for (let i = 0; i < pos.count; i++) {
-    const h = pos.getY(i) - GROUND_Y, sl = 1 - nrm.getY(i), k = 0.85 + 0.3 * gNoise(pos.getX(i) / 40, pos.getZ(i) / 40, 5);
-    let c = h < sn * 0.3 ? [0.06, 0.09, 0.045] : [0.11, 0.1, 0.085];
-    if (sl > 0.35) c = [0.13, 0.12, 0.11];
-    const snow = gSmooth(sn * 0.8, sn * 1.05, h) * (1 - gSmooth(0.45, 0.7, sl));
-    cols[i * 3] = (c[0] * (1 - snow) + 0.42 * snow) * k; cols[i * 3 + 1] = (c[1] * (1 - snow) + 0.44 * snow) * k; cols[i * 3 + 2] = (c[2] * (1 - snow) + 0.5 * snow) * k;
-  }
-  g.setAttribute('color', new THREE.BufferAttribute(cols, 3)); g.setAttribute('aWin', new THREE.BufferAttribute(new Float32Array(pos.count), 1));
-  const m = new THREE.Mesh(g, groundMat(P)); m.frustumCulled = false; return m;
-}
 // 警示燈（巨型結構頂端的紅燈、燈塔）：閃爍的光點
 function groundBeacons(list) {
   if (!list.length) return null;
@@ -1068,7 +1048,7 @@ function groundSync() {
     if (D.scene === 'harbor') { GV.group.add(groundSea(P, GROUND_Y - 0.05)); GV.group.add(groundFloorMesh(P, 1, GROUND_Y + 0.15, D.extra.coastF)); }
     else GV.group.add(groundFloorMesh(P, P.plane, GROUND_Y - (D.hf ? 1 : 0)));
     if (D.far) GV.group.add(groundFar(P, D.far, D.seed, D.extra));
-    if (D.hf) GV.group.add(groundHfMesh(P, D));
+    if (D.hf) GV.group.add(terrainBuild(P, D));   // 起伏地形（terrain.js）
     for (const b of D.boxes) gbBox(gOf(b), b);
     for (const c of D.cyl) { gbCyl(gOf(c), c.x, c.y0, c.z, c.r, c.h, c.col, c.r > 2 ? 20 : 8, true, c.win || 0); if (c.beacon) beacons.push({ x: c.x, y: c.y0 + c.h + 0.3, z: c.z, kind: c.beacon, ms: c.ms }); }
     for (const d of D.domes) gbDome(gOf(d), d.x, d.y0, d.z, d.r, d.col, d.r > 5 ? 24 : 10, d.r > 5 ? 8 : 4);

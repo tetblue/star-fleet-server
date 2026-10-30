@@ -5240,13 +5240,13 @@ const UI_OPTS = [
   ['compass', '艦橋方位儀', '指揮官視角上方的方位刻度與各艦隊方位'],
 ];
 const SETTINGS = (() => {
-  const d = { keyVer: 4, keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, pilotRadar: 'right', ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
+  const d = { keyVer: 4, keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, pilotRadar: 'right', terrain: 'splat', ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
   try { const s = JSON.parse(STORE.getItem('fleet.settings') || 'null'); if (s) { const k0 = { ...(s.keys || {}) };
       // 第 2 版按鍵（指令卡）：舊存檔的鏡頭旋轉 Q／E／R／T、艦橋 B 會和指令卡衝突，沒改過的換成新的預設
       if (!(s.keyVer >= 2)) for (const [id, old] of [['cam_yaw_l', 'KeyQ'], ['cam_yaw_r', 'KeyE'], ['cam_pitch_up', 'KeyR'], ['cam_pitch_dn', 'KeyT'], ['bridge', 'KeyB']]) if (k0[id] === old) delete k0[id];
       if (!(s.keyVer >= 3) && k0.bridge === 'F2') delete k0.bridge;   // 第 3 版：F2 改成全選，艦橋移到 F3
       if (!(s.keyVer >= 4)) for (const id of Object.keys(k0)) if (id.startsWith('cap_')) delete k0[id];   // 第 4 版：艦長改成 A/D 轉向、Q/E 平移、F 技能、G 護航機
-      Object.assign(d.keys, k0); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin', 'pilotRadar']) if (s[k] != null) d[k] = s[k]; } } catch (e) { /* 用預設值 */ }
+      Object.assign(d.keys, k0); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin', 'pilotRadar', 'terrain']) if (s[k] != null) d[k] = s[k]; } } catch (e) { /* 用預設值 */ }
   return d;
 })();
 function saveSettings() { try { STORE.setItem('fleet.settings', JSON.stringify(SETTINGS)); } catch (e) { /* 只在本次有效 */ } }
@@ -5429,6 +5429,8 @@ $('b-replay').onclick = () => {
 document.querySelectorAll('[data-preset]').forEach((b) => (b.onclick = () => goPreset(b.dataset.preset)));
 $('h-gpuname').textContent = gpuName;
 $('n-res').addEventListener('change', (e) => { resScale = +e.target.value; applyResolution(); });
+$('n-terrain').value = SETTINGS.terrain;
+$('n-terrain').addEventListener('change', (e) => { SETTINGS.terrain = terrainUse(e.target.value); saveSettings(); });   // 地形畫法（terrain.js）
 $('t-msaa').checked = true;
 $('t-msaa').addEventListener('change', (e) => setMSAA(e.target.checked));
 $('panel-toggle').onclick = () => document.body.classList.toggle('panel-hidden');
