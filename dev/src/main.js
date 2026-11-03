@@ -2593,6 +2593,7 @@ function killShip(i, t, x, y, z, mul = 1) {
   if (i === q.flagship) q.flagLost = true;
   const sc = TYPE_W[ships.type[i]] * 1.6 * (ships.type[i] <= 1 ? 1.4 : 1) * mul;
   spawnFx(x, y, z, ships.side[i], sc, 18 + rnd() * 6);
+  debrisShipKill(i, t, x, y, z);   // 碎片、燃燒殘骸（debris.js，只是畫面）
   salvageKill(i, t, x, z);
   swarmInfectKill(i, t, x, y, z);
 }
@@ -3567,7 +3568,7 @@ function processHits() {
       continue;
     }
     if (e.kind === 'mh' && e.mi != null) { if (!misLive[e.mi] || misGen[e.mi] !== e.g) continue; misLive[e.mi] = 0; }   // 半路被打下了
-    if (e.kind === 'sp') { spawnFx(e.x, e.y, e.z, e.side, 1.4, 20); if (GRD && e.bi != null) groundBldKill(e.bi); if (GRD && e.r !== -1) groundScar(e.x, e.y, e.z, e.r != null ? e.r : 1.6); continue; }   // 近地：打到地面＝炸毀建築（r＝-1：不炸；bi＝直接打中的那一棟）
+    if (e.kind === 'sp') { spawnFx(e.x, e.y, e.z, e.side, 1.4, 20); if (!GRD && ROCKS.length) debrisRockHit(e.x, e.y, e.z); if (GRD && e.bi != null) groundBldKill(e.bi, e.x, e.z); if (GRD && e.r !== -1) groundScar(e.x, e.y, e.z, e.r != null ? e.r : 1.6); continue; }   // 近地：打到地面＝炸毀建築（r＝-1：不炸；bi＝直接打中的那一棟）
     if (e.kind === 'ms') { groundMsHit(e); continue; }   // 近地：打中巨型結構
     if (e.kind === 'tu') { turretHit(e); continue; }   // 近地：打中地面砲台
     if (e.kind === 'gt') { groundTargetHit(e); continue; }   // 駕駛：打中地面目標   // 光束打在岩石上的火花
@@ -3956,6 +3957,7 @@ function newBattle(seed = battleSeed, setup = null) {
   dmgDealt.fill(0); cStatReset(); ffStats.forEach((a) => a.fill(0)); rayStats.forEach((a) => a.fill(0)); deflStats.forEach((a) => a.fill(0)); ffHold.fill(0);
   beamPow.fill(0); beamShots.fill(0); beamLastT.fill(-99); hitAvg.fill(0); for (const g of gunStats) for (const k in g) g[k].fill(0); for (const a of airStats) a.shots = a.hits = 0; for (const f of ftrStats) f.fill(0); fireAcc = [0, 0]; aaAcc = 0;
   cmdQueue.length = 0; cmdLog.length = 0; simTick = 0; simAcc = 0; U.uTime.value = 0;
+  debrisReset();   // 碎片清空、小行星復原（debris.js）
   simAlt = opts.altitude ? 1 : 0;
   battleRules = Object.fromEntries(SIM_RULES.map((k) => [k, opts[k]]));
   if (typeof selected !== 'undefined') selected.clear();
@@ -5240,13 +5242,13 @@ const UI_OPTS = [
   ['compass', '艦橋方位儀', '指揮官視角上方的方位刻度與各艦隊方位'],
 ];
 const SETTINGS = (() => {
-  const d = { keyVer: 4, keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, pilotRadar: 'right', terrain: 'splat', ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
+  const d = { keyVer: 4, keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, pilotRadar: 'right', terrain: 'splat', debris: 'high', ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
   try { const s = JSON.parse(STORE.getItem('fleet.settings') || 'null'); if (s) { const k0 = { ...(s.keys || {}) };
       // 第 2 版按鍵（指令卡）：舊存檔的鏡頭旋轉 Q／E／R／T、艦橋 B 會和指令卡衝突，沒改過的換成新的預設
       if (!(s.keyVer >= 2)) for (const [id, old] of [['cam_yaw_l', 'KeyQ'], ['cam_yaw_r', 'KeyE'], ['cam_pitch_up', 'KeyR'], ['cam_pitch_dn', 'KeyT'], ['bridge', 'KeyB']]) if (k0[id] === old) delete k0[id];
       if (!(s.keyVer >= 3) && k0.bridge === 'F2') delete k0.bridge;   // 第 3 版：F2 改成全選，艦橋移到 F3
       if (!(s.keyVer >= 4)) for (const id of Object.keys(k0)) if (id.startsWith('cap_')) delete k0[id];   // 第 4 版：艦長改成 A/D 轉向、Q/E 平移、F 技能、G 護航機
-      Object.assign(d.keys, k0); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin', 'pilotRadar', 'terrain']) if (s[k] != null) d[k] = s[k]; } } catch (e) { /* 用預設值 */ }
+      Object.assign(d.keys, k0); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin', 'pilotRadar', 'terrain', 'debris']) if (s[k] != null) d[k] = s[k]; } } catch (e) { /* 用預設值 */ }
   return d;
 })();
 function saveSettings() { try { STORE.setItem('fleet.settings', JSON.stringify(SETTINGS)); } catch (e) { /* 只在本次有效 */ } }
@@ -5431,6 +5433,8 @@ $('h-gpuname').textContent = gpuName;
 $('n-res').addEventListener('change', (e) => { resScale = +e.target.value; applyResolution(); });
 $('n-terrain').value = SETTINGS.terrain;
 $('n-terrain').addEventListener('change', (e) => { SETTINGS.terrain = terrainUse(e.target.value); saveSettings(); });   // 地形畫法（terrain.js）
+$('n-debris').value = SETTINGS.debris;
+$('n-debris').addEventListener('change', (e) => { SETTINGS.debris = e.target.value; saveSettings(); });   // 殘骸與碎片（debris.js）
 $('t-msaa').checked = true;
 $('t-msaa').addEventListener('change', (e) => setMSAA(e.target.checked));
 $('panel-toggle').onclick = () => document.body.classList.toggle('panel-hidden');
@@ -5581,6 +5585,7 @@ function frame() {
   apply3DVisibility();
   if (mode3D) { if (R3.sky) R3.sky.position.copy(camera.position); update3D(); }
   groundFrame();   // 近地：天空、砲台、電梯車廂
+  debrisFrame();   // 碎片、燃燒殘骸（debris.js）
 
   renderer.info.reset();
   const gq = gpuBegin();

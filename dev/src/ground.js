@@ -526,7 +526,9 @@ function groundMat(P) {
   GV.mats.push(m);
   return m;
 }
-// 一般建築（實例化的方塊）：被炸毀時往下塌、燒一陣子、變成瓦礫
+// 往側邊倒的建築：倒下的時間＝T0＋√高度×TK 秒，最後停在 TH 弧度（不到 90°，靠在瓦礫上）
+const BLD_FALL_T0 = 0.9, BLD_FALL_TK = 0.45, BLD_FALL_TH = 1.48;
+// 一般建築（實例化的方塊）：被炸毀時原地塌下或往側邊倒（壓垮倒向路上的建築）、燒一陣子、變成瓦礫
 function groundBldMesh(P, D) {
   const n = D.bldArr.length / 10; if (!n) return null;
   const base = new THREE.BoxGeometry(1, 1, 1); base.translate(0, 0.5, 0);
@@ -546,13 +548,25 @@ function groundBldMesh(P, D) {
     vertexShader: /* glsl */`
       attribute vec4 iA; attribute vec4 iB; attribute vec4 iC; uniform float uTime;
       varying vec3 vW; varying vec3 vN; varying vec3 vC; varying float vWin; varying float vBurn; varying float vTop;
+      vec3 rotK(vec3 v, vec3 k, float a){ float c = cos(a), s = sin(a); return v * c + cross(k, v) * s + k * dot(k, v) * (1. - c); }
       void main(){
         float h = iB.x, dt = iC.y >= 0. ? uTime - iC.y : -1.;
         vBurn = 0.;
-        if (dt >= 0.) { h *= mix(1., .12, clamp(dt * 1.2, 0., 1.)); vBurn = clamp(1. - (dt - 1.) / 25., 0., 1.); }
         if (iB.x <= 0.) { gl_Position = vec4(2., 2., 2., 1.); return; }
-        vec3 w = vec3(iA.x + position.x * iA.z, iC.z + position.y * max(h, .02), iA.y + position.z * iA.w);
-        vW = w; vN = normal; vC = dt >= 0. ? iB.yzw * .35 : iB.yzw; vWin = dt >= 0. ? 0. : iC.x; vTop = position.y;
+        bool tip = dt >= 0. && iC.w > .5;   // iC.w＝1＋倒下的方向（弧度）；0＝原地塌下
+        if (dt >= 0.) { if (!tip) h *= mix(1., .12, clamp(dt * 1.2, 0., 1.)); vBurn = clamp(1. - (dt - 1.) / 25., 0., 1.) * (tip ? .15 : 1.); }   // 倒下的整棟不要全身發紅
+        vec3 v = vec3(position.x * iA.z, position.y * max(h, .02), position.z * iA.w), n = normal;
+        if (tip) {   // 往側邊倒：以倒向那一側的牆腳為軸轉下去（越倒越快），落地後壓扁成一長條瓦礫
+          vec2 d = vec2(cos(iC.w - 1.), sin(iC.w - 1.));
+          float s = .5 * (abs(d.x) * iA.z + abs(d.y) * iA.w), T = ${BLD_FALL_T0.toFixed(2)} + sqrt(iB.x) * ${BLD_FALL_TK.toFixed(2)}, u = clamp(dt / T, 0., 1.);
+          float al = dot(v.xz, d), k = mix(1., .45, clamp((dt - T) * 1.5, 0., 1.));
+          v.xz += d * (s - (s - al) * k - al);   // 落地後往地面那一側壓扁
+          vec3 P = vec3(d.x * s, 0., d.y * s), K = vec3(d.y, 0., -d.x);
+          float th = ${BLD_FALL_TH.toFixed(2)} * u * u;
+          v = P + rotK(v - P, K, th); n = rotK(n, K, th);
+        }
+        vec3 w = vec3(iA.x, iC.z, iA.y) + v;
+        vW = w; vN = n; vC = dt >= 0. ? iB.yzw * .35 : iB.yzw; vWin = dt >= 0. ? 0. : iC.x; vTop = position.y;
         gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.);
       }`,
     fragmentShader: GROUND_FOG_GLSL + /* glsl */`
@@ -613,17 +627,78 @@ function groundScar(x, y, z, r = 2) {
         if (B.ic.array[i * 4 + 1] >= 0 || B.iB[i * 4] <= 0) continue;
         const y0 = B.ic.array[i * 4 + 2]; if (y > y0 + B.iB[i * 4] + r || y < y0 - r) continue;   // 爆炸不在這棟建築的高度範圍內
         const dx = Math.max(0, Math.abs(B.iA[i * 4] - x) - B.iA[i * 4 + 2] / 2), dz = Math.max(0, Math.abs(B.iA[i * 4 + 1] - z) - B.iA[i * 4 + 3] / 2);
-        if (dx * dx + dz * dz <= r * r) { B.ic.array[i * 4 + 1] = t; B.dirty.push(i); }
+        if (dx * dx + dz * dz <= r * r) groundBldDown(i, t, x, z, 0);
       }
     }
   }
   const S = GV.scars;
   if (S && low) { const k = S.head; S.head = (S.head + 1) % SCAR_MAX; S.s.array[k * 4] = x; S.s.array[k * 4 + 1] = z; S.s.array[k * 4 + 2] = r * 1.2; S.s.array[k * 4 + 3] = t; S.y.array[k] = GRD.hf ? terrainSurfaceAt(GRD, x, z) : gy; S.dirty = true; }   // 焦痕貼著畫出來的地表
 }
-// 直接炸毀某一棟建築（武器打到它）；回傳有沒有炸掉
-function groundBldKill(i) {
+// 直接炸毀某一棟建築（武器打到它、船撞上它）；sx, sz＝打擊來的位置（往反方向倒，省略＝隨機）；回傳有沒有炸掉
+function groundBldKill(i, sx = null, sz = null) {
   const B = GV.bld; if (!B || !GRD || GV.key !== GRD.key || B.ic.array[i * 4 + 1] >= 0 || B.iB[i * 4] <= 0) return false;
-  B.ic.array[i * 4 + 1] = U.uTime.value; B.dirty.push(i); return true;
+  groundBldDown(i, U.uTime.value, sx, sz, 0); return true;
+}
+// 一棟建築倒下：細高的比較會往側邊倒（方向＝離開打擊點，加一點亂數），倒向路上的建築會被壓垮（可能連鎖）
+//   只是畫面（艦隊戰的玩法只看地形高度格），用 Math.random
+function groundBldDown(i, t, sx, sz, depth, dir = null) {
+  const B = GV.bld, c = B.ic.array;
+  if (c[i * 4 + 1] >= 0 || B.iB[i * 4] <= 0) return;
+  const cx = B.iA[i * 4], cz = B.iA[i * 4 + 1], w = B.iA[i * 4 + 2], d = B.iA[i * 4 + 3], h = B.iB[i * 4], slim = h / Math.max(0.1, Math.min(w, d));
+  c[i * 4 + 1] = t; c[i * 4 + 3] = 0;
+  const p = (slim > 2.2 ? 0.6 : slim > 1.2 ? 0.35 : 0.1) * (depth ? 0.8 : 1);
+  if (h > 0.6 && Math.random() < p) {
+    let a = dir;
+    if (a == null) a = sx != null && Math.hypot(cx - sx, cz - sz) > 0.3 ? Math.atan2(cz - sz, cx - sx) + (Math.random() - 0.5) * 1.0 : Math.random() * TAU;
+    a = ((a % TAU) + TAU) % TAU;
+    c[i * 4 + 3] = 1 + a;
+    groundBldCrush(i, t, a, depth);
+  }
+  B.dirty.push(i); debrisBld(i);
+}
+// 倒下的建築掃過的地方：比它矮的建築在被碰到的那一刻壓垮（高的不一定），落地時揚起一排塵土
+const BLD_CHAIN_MAX = 4, BLD_CHAIN_N = 30;
+function groundBldCrush(i, t, a, depth) {
+  const B = GV.bld, Q = GV.bldQ || (GV.bldQ = []);
+  const cx = B.iA[i * 4], cz = B.iA[i * 4 + 1], w = B.iA[i * 4 + 2], d = B.iA[i * 4 + 3], h = B.iB[i * 4], y0 = B.ic.array[i * 4 + 2];
+  const dx = Math.cos(a), dz = Math.sin(a), s = 0.5 * (Math.abs(dx) * w + Math.abs(dz) * d), hw = 0.5 * (Math.abs(dz) * w + Math.abs(dx) * d);
+  const px = cx + dx * s, pz = cz + dz * s, T = BLD_FALL_T0 + Math.sqrt(h) * BLD_FALL_TK, L = h * Math.sin(BLD_FALL_TH);
+  Q.push({ land: true, t: t + T, x: px, z: pz, dx, dz, L, hw });
+  if (depth >= BLD_CHAIN_MAX || Q.length > 400) return;
+  const seen = new Set(); let n = 0;
+  for (let r = 0; r <= L + 10; r += 5) for (let o = -1; o <= 1; o++) {
+    const qx = px + dx * r - dz * o * (hw + 3), qz = pz + dz * r + dx * o * (hw + 3);
+    const L2 = B.idx.get(Math.floor(qx / 10) * 4099 + Math.floor(qz / 10)); if (!L2) continue;
+    for (const j of L2) {
+      if (j === i || seen.has(j)) continue; seen.add(j);
+      if (B.ic.array[j * 4 + 1] >= 0 || B.iB[j * 4] <= 0) continue;
+      const ex = B.iA[j * 4] - px, ez = B.iA[j * 4 + 1] - pz, along = ex * dx + ez * dz, perp = Math.abs(ex * dz - ez * dx), e = 0.4 * Math.max(B.iA[j * 4 + 2], B.iA[j * 4 + 3]);
+      if (along < -e || along > L + e || perp > hw + e) continue;
+      const hn = B.ic.array[j * 4 + 2] + B.iB[j * 4] - y0;   // 對方頂端比倒下那棟的牆腳高多少
+      if (hn <= 0.05 || (hn > h * 0.9 && Math.random() > 0.3)) continue;   // 太高的大樓擋得住（多半）
+      const th = Math.min(BLD_FALL_TH, Math.atan2(Math.max(0.1, along - e), hn));   // 碰到對方頂端的角度
+      Q.push({ i: j, t: t + T * Math.sqrt(th / BLD_FALL_TH), a: a + (Math.random() - 0.5) * 0.6, depth: depth + 1, x: px + dx * along, z: pz + dz * along });
+      if (++n >= BLD_CHAIN_N) return;
+    }
+  }
+}
+// 每幀：到時間的壓垮、落地塵土
+function groundBldQStep(t) {
+  const Q = GV.bldQ; if (!Q || !Q.length || !GV.bld) return;
+  for (let k = Q.length - 1; k >= 0; k--) {
+    const q = Q[k]; if (q.t > t) continue;
+    Q.splice(k, 1);
+    if (q.land) {   // 落地：沿著倒下的長度揚起塵土
+      const n = Math.min(10, 2 + Math.round(q.L / 3));
+      for (let m = 0; m < n; m++) {
+        const r = q.L * (m + 0.5) / n, x = q.x + q.dx * r + (Math.random() - 0.5) * q.hw, z = q.z + q.dz * r + (Math.random() - 0.5) * q.hw, y = terrainHAt(x, z) + 0.3;
+        smokePuff(x, y, z, t, 9 + Math.random() * 6, 0.6 + q.hw * 0.3, 2.5 + q.hw * 1.6 + Math.random() * 2, 0.5, WIND[0] * 0.4 + q.dx * 0.6, WIND[1] * 0.4 + q.dz * 0.6, 1.25);
+      }
+      continue;
+    }
+    if (GV.bld.ic.array[q.i * 4 + 1] >= 0) continue;   // 已經倒了
+    groundBldDown(q.i, t, q.x, q.z, q.depth, Math.random() < 0.7 ? q.a : null);   // 多半順著被壓的方向倒
+  }
 }
 // (x, z) 半徑 r 內、高度範圍跟 [y0, y1] 重疊、還沒倒的建築：f(編號, 頂端高度)
 function groundBldEach(x, z, r, y0, y1, f) {
@@ -728,7 +803,7 @@ function groundMsFrame(t) {
 }
 // 新的一場：建築復原、焦痕清掉
 function groundRestore() {
-  const B = GV.bld; if (B) { for (let i = 1; i < B.ic.array.length; i += 4) B.ic.array[i] = -1; B.ic.clearUpdateRanges(); B.ic.needsUpdate = true; B.dirty.length = 0; }
+  const B = GV.bld; if (B) { for (let i = 1; i < B.ic.array.length; i += 4) { B.ic.array[i] = -1; B.ic.array[i + 2] = 0; } B.ic.clearUpdateRanges(); B.ic.needsUpdate = true; B.dirty.length = 0; }
   const S = GV.scars; if (S) { S.s.array.fill(0); S.s.clearUpdateRanges(); S.s.needsUpdate = true; S.head = 0; }
   for (const [id, g] of (GV.ms || []).entries()) if (g && GRD && GRD.ms[id]) { g.visible = true; g.position.set(GRD.ms[id].x, GROUND_Y, GRD.ms[id].z); g.rotation.set(0, 0, 0); }
   for (const c of GV.climb) c.m.visible = true;
@@ -807,7 +882,7 @@ function groundWreck(x, y, z, type, side) {
   GV.wrecks.push({ x, y, z, vx, vz, t0: t, T, gy: terrainHAt(x + vx * T, z + vz * T), sz: TYPE_W[type] || 4, side, acc: 0 });
 }
 function groundFxReset() {
-  GV.strays = []; GV.wrecks = []; GV.plumes = []; GV.fxT = U.uTime.value;
+  GV.strays = []; GV.wrecks = []; GV.plumes = []; GV.bldQ = []; GV.fxT = U.uTime.value;
   const S = GV.smoke; if (S) { S.iQ.array.fill(0); S.iQ.needsUpdate = true; S.iP.needsUpdate = true; S.iR.needsUpdate = true; S.head = 0; S.dirty = false; }
   if (!GRD) return;
   // 開戰前就在燒的地方（城裡已經打過仗）：煙柱與周圍的廢墟
@@ -839,7 +914,7 @@ function groundFxStep() {
       GV.wrecks.splice(k, 1);
       const x = w.x + w.vx * w.T, z = w.z + w.vz * w.T;
       spawnFx(x, w.gy + 1, z, w.side, 3 + w.sz * 0.8, 22);
-      groundScar(x, w.gy, z, 1.2 + w.sz * 0.45);
+      groundScar(x, w.gy, z, 1.2 + w.sz * 0.45); debrisCrash(x, w.gy, z, w.sz, w.side);   // 留下燒著的船殼（debris.js）
       if (Math.random() < 0.4) groundPlume(x, z, t, 40 + Math.random() * 80, 8 + w.sz * 1.5, 1.2);
       continue;
     }
@@ -856,6 +931,7 @@ function groundFxStep() {
     p.acc += dt * p.rate;
     while (p.acc >= 1) { p.acc -= 1; plumePuff(p, t - Math.random() * dt); }
   }
+  groundBldQStep(t);   // 被倒下的建築壓垮、落地塵土
   if (GV.plumes.length > 20) GV.plumes = GV.plumes.filter((p) => p.t1 > t);
   if (S.dirty) { S.iP.needsUpdate = S.iQ.needsUpdate = S.iR.needsUpdate = true; S.dirty = false; }
 }

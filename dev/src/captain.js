@@ -649,7 +649,7 @@ function capGunAim(s, dt, P) {
 function capRam(s, t) {
   if (!GV.bld) return;
   const bot = s.y - s.L * 0.13, top = s.y + s.L * 0.08; let n = 0;
-  for (const k of [-0.35, 0, 0.35]) groundBldEach(s.x + s.F[0] * s.L * k, s.z + s.F[2] * s.L * k, s.L * 0.16, bot, top, (i) => { if (groundBldKill(i)) n++; });
+  for (const k of [-0.35, 0, 0.35]) groundBldEach(s.x + s.F[0] * s.L * k, s.z + s.F[2] * s.L * k, s.L * 0.16, bot, top, (i) => { if (groundBldKill(i, s.x, s.z)) n++; });
   if (!n) return;
   spawnFx(s.x + s.F[0] * s.L * 0.4, bot + 0.2, s.z + s.F[2] * s.L * 0.4, CAP.side, s.L * 0.12, 24);
   s.vx *= 0.96; s.vz *= 0.96;

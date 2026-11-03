@@ -620,7 +620,7 @@ function rectLine(r, color, op) {
 }
 // 3D 地形：星雲、小行星帶是半透明的球；巨大小行星是實體（凹凸的岩塊，光影直接烤在頂點顏色裡，2D／3D 都看得到）
 function rockMesh(tr) {
-  const geo = new THREE.IcosahedronGeometry(tr.r, 4), P = geo.attributes.position, n = new THREE.Vector3();
+  const geo = new THREE.IcosahedronGeometry(tr.r, 14), P = geo.attributes.position, n = new THREE.Vector3();
   const sd = (tr.x * 0.013 + tr.z * 0.029) % 7;
   for (let i = 0; i < P.count; i++) {
     n.fromBufferAttribute(P, i).normalize();
@@ -637,10 +637,11 @@ function rockMesh(tr) {
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false }));
   m.position.set(tr.x, tr.y || 0, tr.z); m.renderOrder = 1;
+  debRockReg(m, tr);   // 被打中會炸出凹坑（debris.js）
   return m;
 }
 function drawField(showZones) {
-  fieldGroup.clear();
+  fieldGroup.clear(); debRockClear();
   for (const tr of terrainList()) {
     const def = TERRAIN_TYPES[tr.type], y = tr.y || 0, has3 = tr.y != null || def.solid;
     if (def.solid) fieldGroup.add(rockMesh(tr));

@@ -2593,6 +2593,7 @@ function killShip(i, t, x, y, z, mul = 1) {
   if (i === q.flagship) q.flagLost = true;
   const sc = TYPE_W[ships.type[i]] * 1.6 * (ships.type[i] <= 1 ? 1.4 : 1) * mul;
   spawnFx(x, y, z, ships.side[i], sc, 18 + rnd() * 6);
+  debrisShipKill(i, t, x, y, z);   // 碎片、燃燒殘骸（debris.js，只是畫面）
   salvageKill(i, t, x, z);
   swarmInfectKill(i, t, x, y, z);
 }
@@ -3567,7 +3568,7 @@ function processHits() {
       continue;
     }
     if (e.kind === 'mh' && e.mi != null) { if (!misLive[e.mi] || misGen[e.mi] !== e.g) continue; misLive[e.mi] = 0; }   // 半路被打下了
-    if (e.kind === 'sp') { spawnFx(e.x, e.y, e.z, e.side, 1.4, 20); if (GRD && e.bi != null) groundBldKill(e.bi); if (GRD && e.r !== -1) groundScar(e.x, e.y, e.z, e.r != null ? e.r : 1.6); continue; }   // 近地：打到地面＝炸毀建築（r＝-1：不炸；bi＝直接打中的那一棟）
+    if (e.kind === 'sp') { spawnFx(e.x, e.y, e.z, e.side, 1.4, 20); if (!GRD && ROCKS.length) debrisRockHit(e.x, e.y, e.z); if (GRD && e.bi != null) groundBldKill(e.bi, e.x, e.z); if (GRD && e.r !== -1) groundScar(e.x, e.y, e.z, e.r != null ? e.r : 1.6); continue; }   // 近地：打到地面＝炸毀建築（r＝-1：不炸；bi＝直接打中的那一棟）
     if (e.kind === 'ms') { groundMsHit(e); continue; }   // 近地：打中巨型結構
     if (e.kind === 'tu') { turretHit(e); continue; }   // 近地：打中地面砲台
     if (e.kind === 'gt') { groundTargetHit(e); continue; }   // 駕駛：打中地面目標   // 光束打在岩石上的火花
@@ -3956,6 +3957,7 @@ function newBattle(seed = battleSeed, setup = null) {
   dmgDealt.fill(0); cStatReset(); ffStats.forEach((a) => a.fill(0)); rayStats.forEach((a) => a.fill(0)); deflStats.forEach((a) => a.fill(0)); ffHold.fill(0);
   beamPow.fill(0); beamShots.fill(0); beamLastT.fill(-99); hitAvg.fill(0); for (const g of gunStats) for (const k in g) g[k].fill(0); for (const a of airStats) a.shots = a.hits = 0; for (const f of ftrStats) f.fill(0); fireAcc = [0, 0]; aaAcc = 0;
   cmdQueue.length = 0; cmdLog.length = 0; simTick = 0; simAcc = 0; U.uTime.value = 0;
+  debrisReset();   // 碎片清空、小行星復原（debris.js）
   simAlt = opts.altitude ? 1 : 0;
   battleRules = Object.fromEntries(SIM_RULES.map((k) => [k, opts[k]]));
   if (typeof selected !== 'undefined') selected.clear();
@@ -5240,13 +5242,13 @@ const UI_OPTS = [
   ['compass', '艦橋方位儀', '指揮官視角上方的方位刻度與各艦隊方位'],
 ];
 const SETTINGS = (() => {
-  const d = { keyVer: 4, keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, pilotRadar: 'right', terrain: 'splat', ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
+  const d = { keyVer: 4, keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, pilotRadar: 'right', terrain: 'splat', debris: 'high', ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
   try { const s = JSON.parse(STORE.getItem('fleet.settings') || 'null'); if (s) { const k0 = { ...(s.keys || {}) };
       // 第 2 版按鍵（指令卡）：舊存檔的鏡頭旋轉 Q／E／R／T、艦橋 B 會和指令卡衝突，沒改過的換成新的預設
       if (!(s.keyVer >= 2)) for (const [id, old] of [['cam_yaw_l', 'KeyQ'], ['cam_yaw_r', 'KeyE'], ['cam_pitch_up', 'KeyR'], ['cam_pitch_dn', 'KeyT'], ['bridge', 'KeyB']]) if (k0[id] === old) delete k0[id];
       if (!(s.keyVer >= 3) && k0.bridge === 'F2') delete k0.bridge;   // 第 3 版：F2 改成全選，艦橋移到 F3
       if (!(s.keyVer >= 4)) for (const id of Object.keys(k0)) if (id.startsWith('cap_')) delete k0[id];   // 第 4 版：艦長改成 A/D 轉向、Q/E 平移、F 技能、G 護航機
-      Object.assign(d.keys, k0); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin', 'pilotRadar', 'terrain']) if (s[k] != null) d[k] = s[k]; } } catch (e) { /* 用預設值 */ }
+      Object.assign(d.keys, k0); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin', 'pilotRadar', 'terrain', 'debris']) if (s[k] != null) d[k] = s[k]; } } catch (e) { /* 用預設值 */ }
   return d;
 })();
 function saveSettings() { try { STORE.setItem('fleet.settings', JSON.stringify(SETTINGS)); } catch (e) { /* 只在本次有效 */ } }
@@ -5431,6 +5433,8 @@ $('h-gpuname').textContent = gpuName;
 $('n-res').addEventListener('change', (e) => { resScale = +e.target.value; applyResolution(); });
 $('n-terrain').value = SETTINGS.terrain;
 $('n-terrain').addEventListener('change', (e) => { SETTINGS.terrain = terrainUse(e.target.value); saveSettings(); });   // 地形畫法（terrain.js）
+$('n-debris').value = SETTINGS.debris;
+$('n-debris').addEventListener('change', (e) => { SETTINGS.debris = e.target.value; saveSettings(); });   // 殘骸與碎片（debris.js）
 $('t-msaa').checked = true;
 $('t-msaa').addEventListener('change', (e) => setMSAA(e.target.checked));
 $('panel-toggle').onclick = () => document.body.classList.toggle('panel-hidden');
@@ -5581,6 +5585,7 @@ function frame() {
   apply3DVisibility();
   if (mode3D) { if (R3.sky) R3.sky.position.copy(camera.position); update3D(); }
   groundFrame();   // 近地：天空、砲台、電梯車廂
+  debrisFrame();   // 碎片、燃燒殘骸（debris.js）
 
   renderer.info.reset();
   const gq = gpuBegin();
@@ -6583,7 +6588,9 @@ function groundMat(P) {
   GV.mats.push(m);
   return m;
 }
-// 一般建築（實例化的方塊）：被炸毀時往下塌、燒一陣子、變成瓦礫
+// 往側邊倒的建築：倒下的時間＝T0＋√高度×TK 秒，最後停在 TH 弧度（不到 90°，靠在瓦礫上）
+const BLD_FALL_T0 = 0.9, BLD_FALL_TK = 0.45, BLD_FALL_TH = 1.48;
+// 一般建築（實例化的方塊）：被炸毀時原地塌下或往側邊倒（壓垮倒向路上的建築）、燒一陣子、變成瓦礫
 function groundBldMesh(P, D) {
   const n = D.bldArr.length / 10; if (!n) return null;
   const base = new THREE.BoxGeometry(1, 1, 1); base.translate(0, 0.5, 0);
@@ -6603,13 +6610,25 @@ function groundBldMesh(P, D) {
     vertexShader: /* glsl */`
       attribute vec4 iA; attribute vec4 iB; attribute vec4 iC; uniform float uTime;
       varying vec3 vW; varying vec3 vN; varying vec3 vC; varying float vWin; varying float vBurn; varying float vTop;
+      vec3 rotK(vec3 v, vec3 k, float a){ float c = cos(a), s = sin(a); return v * c + cross(k, v) * s + k * dot(k, v) * (1. - c); }
       void main(){
         float h = iB.x, dt = iC.y >= 0. ? uTime - iC.y : -1.;
         vBurn = 0.;
-        if (dt >= 0.) { h *= mix(1., .12, clamp(dt * 1.2, 0., 1.)); vBurn = clamp(1. - (dt - 1.) / 25., 0., 1.); }
         if (iB.x <= 0.) { gl_Position = vec4(2., 2., 2., 1.); return; }
-        vec3 w = vec3(iA.x + position.x * iA.z, iC.z + position.y * max(h, .02), iA.y + position.z * iA.w);
-        vW = w; vN = normal; vC = dt >= 0. ? iB.yzw * .35 : iB.yzw; vWin = dt >= 0. ? 0. : iC.x; vTop = position.y;
+        bool tip = dt >= 0. && iC.w > .5;   // iC.w＝1＋倒下的方向（弧度）；0＝原地塌下
+        if (dt >= 0.) { if (!tip) h *= mix(1., .12, clamp(dt * 1.2, 0., 1.)); vBurn = clamp(1. - (dt - 1.) / 25., 0., 1.) * (tip ? .15 : 1.); }   // 倒下的整棟不要全身發紅
+        vec3 v = vec3(position.x * iA.z, position.y * max(h, .02), position.z * iA.w), n = normal;
+        if (tip) {   // 往側邊倒：以倒向那一側的牆腳為軸轉下去（越倒越快），落地後壓扁成一長條瓦礫
+          vec2 d = vec2(cos(iC.w - 1.), sin(iC.w - 1.));
+          float s = .5 * (abs(d.x) * iA.z + abs(d.y) * iA.w), T = ${BLD_FALL_T0.toFixed(2)} + sqrt(iB.x) * ${BLD_FALL_TK.toFixed(2)}, u = clamp(dt / T, 0., 1.);
+          float al = dot(v.xz, d), k = mix(1., .45, clamp((dt - T) * 1.5, 0., 1.));
+          v.xz += d * (s - (s - al) * k - al);   // 落地後往地面那一側壓扁
+          vec3 P = vec3(d.x * s, 0., d.y * s), K = vec3(d.y, 0., -d.x);
+          float th = ${BLD_FALL_TH.toFixed(2)} * u * u;
+          v = P + rotK(v - P, K, th); n = rotK(n, K, th);
+        }
+        vec3 w = vec3(iA.x, iC.z, iA.y) + v;
+        vW = w; vN = n; vC = dt >= 0. ? iB.yzw * .35 : iB.yzw; vWin = dt >= 0. ? 0. : iC.x; vTop = position.y;
         gl_Position = projectionMatrix * viewMatrix * vec4(w, 1.);
       }`,
     fragmentShader: GROUND_FOG_GLSL + /* glsl */`
@@ -6670,17 +6689,78 @@ function groundScar(x, y, z, r = 2) {
         if (B.ic.array[i * 4 + 1] >= 0 || B.iB[i * 4] <= 0) continue;
         const y0 = B.ic.array[i * 4 + 2]; if (y > y0 + B.iB[i * 4] + r || y < y0 - r) continue;   // 爆炸不在這棟建築的高度範圍內
         const dx = Math.max(0, Math.abs(B.iA[i * 4] - x) - B.iA[i * 4 + 2] / 2), dz = Math.max(0, Math.abs(B.iA[i * 4 + 1] - z) - B.iA[i * 4 + 3] / 2);
-        if (dx * dx + dz * dz <= r * r) { B.ic.array[i * 4 + 1] = t; B.dirty.push(i); }
+        if (dx * dx + dz * dz <= r * r) groundBldDown(i, t, x, z, 0);
       }
     }
   }
   const S = GV.scars;
   if (S && low) { const k = S.head; S.head = (S.head + 1) % SCAR_MAX; S.s.array[k * 4] = x; S.s.array[k * 4 + 1] = z; S.s.array[k * 4 + 2] = r * 1.2; S.s.array[k * 4 + 3] = t; S.y.array[k] = GRD.hf ? terrainSurfaceAt(GRD, x, z) : gy; S.dirty = true; }   // 焦痕貼著畫出來的地表
 }
-// 直接炸毀某一棟建築（武器打到它）；回傳有沒有炸掉
-function groundBldKill(i) {
+// 直接炸毀某一棟建築（武器打到它、船撞上它）；sx, sz＝打擊來的位置（往反方向倒，省略＝隨機）；回傳有沒有炸掉
+function groundBldKill(i, sx = null, sz = null) {
   const B = GV.bld; if (!B || !GRD || GV.key !== GRD.key || B.ic.array[i * 4 + 1] >= 0 || B.iB[i * 4] <= 0) return false;
-  B.ic.array[i * 4 + 1] = U.uTime.value; B.dirty.push(i); return true;
+  groundBldDown(i, U.uTime.value, sx, sz, 0); return true;
+}
+// 一棟建築倒下：細高的比較會往側邊倒（方向＝離開打擊點，加一點亂數），倒向路上的建築會被壓垮（可能連鎖）
+//   只是畫面（艦隊戰的玩法只看地形高度格），用 Math.random
+function groundBldDown(i, t, sx, sz, depth, dir = null) {
+  const B = GV.bld, c = B.ic.array;
+  if (c[i * 4 + 1] >= 0 || B.iB[i * 4] <= 0) return;
+  const cx = B.iA[i * 4], cz = B.iA[i * 4 + 1], w = B.iA[i * 4 + 2], d = B.iA[i * 4 + 3], h = B.iB[i * 4], slim = h / Math.max(0.1, Math.min(w, d));
+  c[i * 4 + 1] = t; c[i * 4 + 3] = 0;
+  const p = (slim > 2.2 ? 0.6 : slim > 1.2 ? 0.35 : 0.1) * (depth ? 0.8 : 1);
+  if (h > 0.6 && Math.random() < p) {
+    let a = dir;
+    if (a == null) a = sx != null && Math.hypot(cx - sx, cz - sz) > 0.3 ? Math.atan2(cz - sz, cx - sx) + (Math.random() - 0.5) * 1.0 : Math.random() * TAU;
+    a = ((a % TAU) + TAU) % TAU;
+    c[i * 4 + 3] = 1 + a;
+    groundBldCrush(i, t, a, depth);
+  }
+  B.dirty.push(i); debrisBld(i);
+}
+// 倒下的建築掃過的地方：比它矮的建築在被碰到的那一刻壓垮（高的不一定），落地時揚起一排塵土
+const BLD_CHAIN_MAX = 4, BLD_CHAIN_N = 30;
+function groundBldCrush(i, t, a, depth) {
+  const B = GV.bld, Q = GV.bldQ || (GV.bldQ = []);
+  const cx = B.iA[i * 4], cz = B.iA[i * 4 + 1], w = B.iA[i * 4 + 2], d = B.iA[i * 4 + 3], h = B.iB[i * 4], y0 = B.ic.array[i * 4 + 2];
+  const dx = Math.cos(a), dz = Math.sin(a), s = 0.5 * (Math.abs(dx) * w + Math.abs(dz) * d), hw = 0.5 * (Math.abs(dz) * w + Math.abs(dx) * d);
+  const px = cx + dx * s, pz = cz + dz * s, T = BLD_FALL_T0 + Math.sqrt(h) * BLD_FALL_TK, L = h * Math.sin(BLD_FALL_TH);
+  Q.push({ land: true, t: t + T, x: px, z: pz, dx, dz, L, hw });
+  if (depth >= BLD_CHAIN_MAX || Q.length > 400) return;
+  const seen = new Set(); let n = 0;
+  for (let r = 0; r <= L + 10; r += 5) for (let o = -1; o <= 1; o++) {
+    const qx = px + dx * r - dz * o * (hw + 3), qz = pz + dz * r + dx * o * (hw + 3);
+    const L2 = B.idx.get(Math.floor(qx / 10) * 4099 + Math.floor(qz / 10)); if (!L2) continue;
+    for (const j of L2) {
+      if (j === i || seen.has(j)) continue; seen.add(j);
+      if (B.ic.array[j * 4 + 1] >= 0 || B.iB[j * 4] <= 0) continue;
+      const ex = B.iA[j * 4] - px, ez = B.iA[j * 4 + 1] - pz, along = ex * dx + ez * dz, perp = Math.abs(ex * dz - ez * dx), e = 0.4 * Math.max(B.iA[j * 4 + 2], B.iA[j * 4 + 3]);
+      if (along < -e || along > L + e || perp > hw + e) continue;
+      const hn = B.ic.array[j * 4 + 2] + B.iB[j * 4] - y0;   // 對方頂端比倒下那棟的牆腳高多少
+      if (hn <= 0.05 || (hn > h * 0.9 && Math.random() > 0.3)) continue;   // 太高的大樓擋得住（多半）
+      const th = Math.min(BLD_FALL_TH, Math.atan2(Math.max(0.1, along - e), hn));   // 碰到對方頂端的角度
+      Q.push({ i: j, t: t + T * Math.sqrt(th / BLD_FALL_TH), a: a + (Math.random() - 0.5) * 0.6, depth: depth + 1, x: px + dx * along, z: pz + dz * along });
+      if (++n >= BLD_CHAIN_N) return;
+    }
+  }
+}
+// 每幀：到時間的壓垮、落地塵土
+function groundBldQStep(t) {
+  const Q = GV.bldQ; if (!Q || !Q.length || !GV.bld) return;
+  for (let k = Q.length - 1; k >= 0; k--) {
+    const q = Q[k]; if (q.t > t) continue;
+    Q.splice(k, 1);
+    if (q.land) {   // 落地：沿著倒下的長度揚起塵土
+      const n = Math.min(10, 2 + Math.round(q.L / 3));
+      for (let m = 0; m < n; m++) {
+        const r = q.L * (m + 0.5) / n, x = q.x + q.dx * r + (Math.random() - 0.5) * q.hw, z = q.z + q.dz * r + (Math.random() - 0.5) * q.hw, y = terrainHAt(x, z) + 0.3;
+        smokePuff(x, y, z, t, 9 + Math.random() * 6, 0.6 + q.hw * 0.3, 2.5 + q.hw * 1.6 + Math.random() * 2, 0.5, WIND[0] * 0.4 + q.dx * 0.6, WIND[1] * 0.4 + q.dz * 0.6, 1.25);
+      }
+      continue;
+    }
+    if (GV.bld.ic.array[q.i * 4 + 1] >= 0) continue;   // 已經倒了
+    groundBldDown(q.i, t, q.x, q.z, q.depth, Math.random() < 0.7 ? q.a : null);   // 多半順著被壓的方向倒
+  }
 }
 // (x, z) 半徑 r 內、高度範圍跟 [y0, y1] 重疊、還沒倒的建築：f(編號, 頂端高度)
 function groundBldEach(x, z, r, y0, y1, f) {
@@ -6785,7 +6865,7 @@ function groundMsFrame(t) {
 }
 // 新的一場：建築復原、焦痕清掉
 function groundRestore() {
-  const B = GV.bld; if (B) { for (let i = 1; i < B.ic.array.length; i += 4) B.ic.array[i] = -1; B.ic.clearUpdateRanges(); B.ic.needsUpdate = true; B.dirty.length = 0; }
+  const B = GV.bld; if (B) { for (let i = 1; i < B.ic.array.length; i += 4) { B.ic.array[i] = -1; B.ic.array[i + 2] = 0; } B.ic.clearUpdateRanges(); B.ic.needsUpdate = true; B.dirty.length = 0; }
   const S = GV.scars; if (S) { S.s.array.fill(0); S.s.clearUpdateRanges(); S.s.needsUpdate = true; S.head = 0; }
   for (const [id, g] of (GV.ms || []).entries()) if (g && GRD && GRD.ms[id]) { g.visible = true; g.position.set(GRD.ms[id].x, GROUND_Y, GRD.ms[id].z); g.rotation.set(0, 0, 0); }
   for (const c of GV.climb) c.m.visible = true;
@@ -6864,7 +6944,7 @@ function groundWreck(x, y, z, type, side) {
   GV.wrecks.push({ x, y, z, vx, vz, t0: t, T, gy: terrainHAt(x + vx * T, z + vz * T), sz: TYPE_W[type] || 4, side, acc: 0 });
 }
 function groundFxReset() {
-  GV.strays = []; GV.wrecks = []; GV.plumes = []; GV.fxT = U.uTime.value;
+  GV.strays = []; GV.wrecks = []; GV.plumes = []; GV.bldQ = []; GV.fxT = U.uTime.value;
   const S = GV.smoke; if (S) { S.iQ.array.fill(0); S.iQ.needsUpdate = true; S.iP.needsUpdate = true; S.iR.needsUpdate = true; S.head = 0; S.dirty = false; }
   if (!GRD) return;
   // 開戰前就在燒的地方（城裡已經打過仗）：煙柱與周圍的廢墟
@@ -6896,7 +6976,7 @@ function groundFxStep() {
       GV.wrecks.splice(k, 1);
       const x = w.x + w.vx * w.T, z = w.z + w.vz * w.T;
       spawnFx(x, w.gy + 1, z, w.side, 3 + w.sz * 0.8, 22);
-      groundScar(x, w.gy, z, 1.2 + w.sz * 0.45);
+      groundScar(x, w.gy, z, 1.2 + w.sz * 0.45); debrisCrash(x, w.gy, z, w.sz, w.side);   // 留下燒著的船殼（debris.js）
       if (Math.random() < 0.4) groundPlume(x, z, t, 40 + Math.random() * 80, 8 + w.sz * 1.5, 1.2);
       continue;
     }
@@ -6913,6 +6993,7 @@ function groundFxStep() {
     p.acc += dt * p.rate;
     while (p.acc >= 1) { p.acc -= 1; plumePuff(p, t - Math.random() * dt); }
   }
+  groundBldQStep(t);   // 被倒下的建築壓垮、落地塵土
   if (GV.plumes.length > 20) GV.plumes = GV.plumes.filter((p) => p.t1 > t);
   if (S.dirty) { S.iP.needsUpdate = S.iQ.needsUpdate = S.iR.needsUpdate = true; S.dirty = false; }
 }
@@ -7377,6 +7458,266 @@ function terrainUse(v) {
   TERRAIN.impl = v;
   if (GRD && GRD.hf && GV.group) { GV.key = ''; groundSync(); }
   return TERRAIN.impl;
+}
+
+// ═══════════════════════ 場景破壞與殘留物（只管畫面）═══════════════════════
+// 被擊沉的船、被打中的小行星、倒塌的建築留下的東西。全部用 Math.random，不碰模擬的 rnd()，回放時細節可能不同
+//   碎片：每塊一個 instance，位置在 GPU 上依時間算（太空＝漂走、慢慢減速、一直翻滾；近地＝拋物線落地後停住）
+//         剛炸開時邊緣燒紅、幾秒後冷卻；壽命到了縮小消失（環形緩衝，滿了就蓋掉最舊的）
+//   燃燒殘骸：大船沉沒時留下 1～2 塊大殘骸，持續冒火花（近地：落地後起火冒煙）
+//   小行星凹坑：打在實體小行星上的光束把表面炸凹、燒黑，噴出碎石（新的一場復原）
+//   建築瓦礫：近地建築倒塌時噴出水泥塊
+// 對外：debrisShipKill、debrisRockHit、debrisBld、debrisCrash（由戰鬥結算呼叫）、debrisFrame（每幀）、debrisReset（新的一場）
+// 設定：SETTINGS.debris＝'high'｜'low'｜'off'（畫面設定的「殘骸與碎片」）
+const DEB_MAX = 12000, DEB_G = 1.6;   // 碎片上限、近地的重力（世界單位／秒²，跟墜落殘骸的速度差不多）
+const DEB = { head: 0, lo: -1, hi: -1, hulks: [], fxT: 0, bldBudget: 0, rocks: [] };
+const debOn = () => (typeof SETTINGS === 'undefined' ? 'high' : SETTINGS.debris || 'high') !== 'off';
+const debMul = () => ((typeof SETTINGS !== 'undefined' && SETTINGS.debris === 'low') ? 0.45 : 1);
+
+const debGeo = new THREE.InstancedBufferGeometry();
+const debA = new Float32Array(DEB_MAX * 4), debB = new Float32Array(DEB_MAX * 4), debC = new Float32Array(DEB_MAX * 4), debD = new Float32Array(DEB_MAX * 4), debE = new Float32Array(DEB_MAX * 4);
+{
+  // 一塊不規則的碎片：二十面體的頂點亂推，展開成平面著色（每個面自己的法線）
+  const ico = new THREE.IcosahedronGeometry(1, 0), P = ico.attributes.position, R = mulberry32(9137);
+  const jit = new Map();
+  for (let i = 0; i < P.count; i++) {
+    const k = `${P.getX(i).toFixed(3)},${P.getY(i).toFixed(3)},${P.getZ(i).toFixed(3)}`;
+    if (!jit.has(k)) jit.set(k, 0.55 + R() * 0.6);
+    const s = jit.get(k); P.setXYZ(i, P.getX(i) * s, P.getY(i) * s, P.getZ(i) * s);
+  }
+  ico.computeVertexNormals();
+  debGeo.setAttribute('position', ico.attributes.position); debGeo.setAttribute('normal', ico.attributes.normal);
+  for (const [n, a] of [['iA', debA], ['iB', debB], ['iC', debC], ['iD', debD], ['iE', debE]]) debGeo.setAttribute(n, new THREE.InstancedBufferAttribute(a, 4).setUsage(THREE.DynamicDrawUsage));
+  debGeo.instanceCount = DEB_MAX;
+}
+const debMat = new THREE.ShaderMaterial({
+  uniforms: { uTime: U.uTime, uSun: { value: new THREE.Vector3(-0.5, 0.8, 0.35).normalize() }, uG: { value: DEB_G } },
+  vertexShader: /* glsl */`
+    uniform float uTime; uniform vec3 uSun; uniform float uG;
+    attribute vec4 iA; attribute vec4 iB; attribute vec4 iC; attribute vec4 iD; attribute vec4 iE;
+    varying vec3 vN; varying vec3 vCol; varying float vHeat; varying float vSeed; varying vec3 vL; varying vec3 vF; varying float vEmb;
+    float h1(float n){ return fract(sin(n * 127.1) * 43758.5453); }
+    vec3 rot(vec3 v, vec3 k, float a){ float c = cos(a), s = sin(a); return v * c + cross(k, v) * s + k * dot(k, v) * (1. - c); }
+    void main(){
+      // iA＝起點、誕生時間；iB＝速度、大小；iC＝種子、轉速、落地時間（＜0＝太空）、壽命；iD＝落地點、熱度；iE＝顏色、形狀（0 塊狀、1 板狀）
+      float age = uTime - iA.w;
+      if (iB.w <= 0. || age < 0. || age > iC.w) { gl_Position = vec4(2., 2., 2., 1.); return; }
+      vec3 p; float ang;
+      if (iC.z < 0.) {   // 太空：開始很快、慢慢減速，最後保留一點漂移
+        float k = .45;
+        p = iA.xyz + iB.xyz * ((1. - exp(-k * age)) / k + .04 * age);
+        ang = iC.y * (age * .35 + (1. - exp(-age)) * 1.5);
+      } else {           // 近地：拋物線，落地後停住
+        float ta = min(age, iC.z);
+        p = age >= iC.z ? iD.xyz : iA.xyz + iB.xyz * ta - vec3(0., .5 * uG * ta * ta, 0.);
+        ang = iC.y * ta;
+      }
+      float sd = iC.x;
+      vec3 ax = normalize(vec3(h1(sd) - .5, h1(sd + 1.3) - .5, h1(sd + 2.7) - .5) + 1e-3);
+      vec3 sc = iB.w * (iE.w > .5 ? vec3(.9 + .6 * h1(sd + 4.), .12 + .1 * h1(sd + 5.), .7 + .5 * h1(sd + 6.))   // 板狀（船殼、牆）
+                                  : vec3(.6 + .8 * h1(sd + 4.), .4 + .6 * h1(sd + 5.), .6 + .8 * h1(sd + 6.)));
+      sc *= smoothstep(iC.w, iC.w - 4., age);   // 壽命到了縮小消失
+      vec3 v = rot(position * sc, ax, ang + sd * 6.283);
+      vN = normalize(rot(normal / max(sc, vec3(1e-4)), ax, ang + sd * 6.283));
+      gl_Position = projectionMatrix * viewMatrix * vec4(p + v, 1.);
+      vCol = iE.rgb; vSeed = sd; vL = uSun; vF = normal; vEmb = iD.w > 1.5 ? 1. : 0.;
+      // 熱度：剛炸開燒紅（iD.w 1＝金屬），＞1.5＝燃燒殘骸（長時間閃爍）
+      vHeat = iD.w > 1.5 ? (.55 + .45 * sin(uTime * (5. + 4. * h1(sd + 8.)) + sd * 40.)) * (1. - smoothstep(18., 32., age)) * 1.6
+                         : iD.w * exp(-age / 2.5) * 1.6;
+    }`,
+  fragmentShader: /* glsl */`
+    varying vec3 vN; varying vec3 vCol; varying float vHeat; varying float vSeed; varying vec3 vL; varying vec3 vF; varying float vEmb;
+    void main(){
+      vec3 N = normalize(vN);
+      float d = max(dot(N, vL), 0.), back = max(-N.y, 0.) * .15;
+      vec3 col = vCol * (.22 + .95 * d + back);
+      float hf = fract(sin(dot(floor(vF * 4. + .5), vec3(12.9898, 78.233, 37.719)) + vSeed) * 43758.5);   // 每個面固定的亂數：殘骸只有部分的面在燒
+      float face = vEmb > .5 ? smoothstep(.55, .75, hf) : .35 + .65 * hf;
+      col += vec3(1., .42, .12) * vHeat * face * (.45 + .55 * (1. - abs(N.y)));   // 燒紅的面（側面較亮，像裂開的斷面）
+      gl_FragColor = vec4(col, 1.);
+    }`,
+});
+const debMesh = new THREE.Mesh(debGeo, debMat);
+debMesh.frustumCulled = false; debMesh.renderOrder = 2;
+scene.add(debMesh);
+
+// 一塊碎片：起點、速度、大小、顏色、壽命；ground＝近地拋物線（自動算落地點）；heat 0 冷、1 燒紅、2 燃燒殘骸；plate＝板狀
+function debPiece(x, y, z, vx, vy, vz, t0, size, col, life, ground, heat = 0, plate = false, spin = 1) {
+  const i = DEB.head; DEB.head = (DEB.head + 1) % DEB_MAX;
+  debA.set([x, y, z, t0], i * 4);
+  debB.set([vx, vy, vz, size], i * 4);
+  let tl = -1, lx = 0, ly = 0, lz = 0;
+  if (ground) {   // 落地時間：解 y0 + vy·t − g t²/2 = 地表高度（地表高度用落點附近的，算兩次就夠準）
+    let gy = debGround(x, z) + size * 0.25;
+    for (let k = 0; k < 3; k++) {
+      const dy = y - gy, s = vy * vy + 2 * DEB_G * dy;
+      tl = s > 0 ? (vy + Math.sqrt(s)) / DEB_G : 0.05;
+      lx = x + vx * tl; lz = z + vz * tl; gy = debGround(lx, lz) + size * 0.25;
+    }
+    ly = gy;
+  }
+  debC.set([Math.random() * 100, (Math.random() < 0.5 ? -1 : 1) * (0.4 + Math.random() * 1.6) * spin, tl, life], i * 4);
+  debD.set([lx, ly, lz, heat], i * 4);
+  debE.set([col[0], col[1], col[2], plate ? 1 : 0], i * 4);
+  if (DEB.lo < 0) DEB.lo = DEB.hi = i; else { DEB.lo = Math.min(DEB.lo, i); DEB.hi = Math.max(DEB.hi, i); }   // 繞回開頭時整段更新
+  return i;
+}
+// 碎片在 t 時的位置（CPU 版，給燃燒殘骸冒火用；和著色器一樣的算式）
+function debPos(i, t, out) {
+  const age = t - debA[i * 4 + 3], tl = debC[i * 4 + 2];
+  if (tl < 0) { const k = 0.45, f = (1 - Math.exp(-k * age)) / k + 0.04 * age; out.x = debA[i * 4] + debB[i * 4] * f; out.y = debA[i * 4 + 1] + debB[i * 4 + 1] * f; out.z = debA[i * 4 + 2] + debB[i * 4 + 2] * f; return false; }
+  if (age >= tl) { out.x = debD[i * 4]; out.y = debD[i * 4 + 1]; out.z = debD[i * 4 + 2]; return true; }
+  out.x = debA[i * 4] + debB[i * 4] * age; out.y = debA[i * 4 + 1] + debB[i * 4 + 1] * age - 0.5 * DEB_G * age * age; out.z = debA[i * 4 + 2] + debB[i * 4 + 2] * age;
+  return false;
+}
+function debGround(x, z) { return !GRD ? -1e9 : GRD.hf ? terrainSurfaceAt(GRD, x, z) : terrainHAt(x, z); }
+const _debV = new THREE.Vector3(), _debC = new THREE.Color();
+// 隨機方向（單位球面）
+function debDir() { const u = Math.random() * 2 - 1, a = Math.random() * TAU, s = Math.sqrt(1 - u * u); _debV.set(s * Math.cos(a), u, s * Math.sin(a)); return _debV; }
+// 船殼顏色：深灰金屬，帶一點陣營色
+function debHullCol(side) {
+  _debC.set(FACTION[SIDE_FAC[side]] ? FACTION[SIDE_FAC[side]].ui : '#999');
+  const v = 0.75 + Math.random() * 0.4;
+  return [(0.06 + _debC.r * 0.05) * v, (0.065 + _debC.g * 0.05) * v, (0.075 + _debC.b * 0.05) * v];
+}
+
+// ── 船被擊沉：碎片四散，大船留下燃燒的殘骸 ──
+const DEB_N = [16, 13, 9, 6, 4, 8];   // 航母 戰列 巡洋 驅逐 護衛 補給：每艘的碎片數
+function debrisShipKill(i, t, x, y, z) {
+  if (!debOn()) return;
+  const ty = ships.type[i], side = ships.side[i], W = TYPE_W[ty] || 4, gnd = !!GRD;
+  const n = Math.max(2, Math.round(DEB_N[ty] * debMul())), life = gnd ? 240 : 70 + Math.random() * 40;
+  // 船原本的移動方向：碎片會帶著它（看起來是從移動中的船上剝落）
+  const q = squadrons[ships.sq[i]], h = q ? q.h || 0 : 0, mx = Math.sin(h) * 0.8, mz = Math.cos(h) * 0.8;
+  for (let k = 0; k < n; k++) {
+    const d = debDir(), s = (1.5 + Math.random() * 3.5) * (0.6 + W * 0.12), sz = W * (0.035 + Math.random() * 0.06);
+    debPiece(x + d.x * W * 0.2, y + d.y * W * 0.15, z + d.z * W * 0.2, d.x * s + mx, d.y * s * (gnd ? 0.5 : 0.6) + (gnd ? 1.5 : 0), d.z * s + mz, t, sz, debHullCol(side), life, gnd, Math.random() < 0.6 ? 1 : 0, Math.random() < 0.45);
+  }
+  if (ty <= 2 || ty === 5) {   // 大船：斷成兩截的殘骸，慢慢漂開、冒火
+    const nh = ty <= 1 ? 2 : 1;
+    for (let k = 0; k < nh; k++) {
+      const a = h + (k ? Math.PI : 0) + (Math.random() - 0.5) * 0.6, s = 0.5 + Math.random() * 0.6;
+      const j = debPiece(x + Math.sin(a) * W * 0.15, y, z + Math.cos(a) * W * 0.15, Math.sin(a) * s + mx * 0.6, (Math.random() - 0.5) * 0.3 + (gnd ? 0.6 : 0), Math.cos(a) * s + mz * 0.6, t, W * (0.17 + Math.random() * 0.06), debHullCol(side).map((c) => c * 0.7), gnd ? 300 : 110, gnd, 2, Math.random() < 0.5, 0.25);
+      DEB.hulks.push({ i: j, side, t0: debA[j * 4 + 3], until: t + (gnd ? 60 : 28) + Math.random() * 10, acc: Math.random(), W });
+    }
+    if (DEB.hulks.length > 60) DEB.hulks.splice(0, DEB.hulks.length - 60);
+  }
+}
+
+// ── 小行星被打中：表面炸凹、燒黑，噴出碎石 ──
+// drawField 建好的實體小行星網格（rockMesh 會登記在這裡）
+const DEB_ROCK_L = new THREE.Vector3(-0.5, 0.8, 0.35).normalize();   // 跟 rockMesh 烤進頂點色的光一樣
+function debRockReg(mesh, tr) { DEB.rocks.push({ mesh, tr, craters: [], orig: null }); }
+function debRockClear() { DEB.rocks.length = 0; }
+function debrisRockHit(x, y, z) {
+  if (!debOn() || GRD) return;
+  let R = null, d = 0;
+  for (const r of DEB.rocks) {
+    const tr = r.tr, dd = Math.hypot(x - tr.x, y - (tr.y || 0), z - tr.z);
+    if (Math.abs(dd - tr.r) < tr.r * 0.3 + 4) { R = r; d = dd; break; }
+  }
+  if (!R) return;
+  const tr = R.tr, cy = tr.y || 0, nx = (x - tr.x) / (d || 1), ny = (y - cy) / (d || 1), nz = (z - tr.z) / (d || 1), t = U.uTime.value;
+  const base = new THREE.Color(TERRAIN_TYPES[tr.type].color);
+  // 碎石：沿著表面法線噴出去
+  const n = Math.max(1, Math.round((3 + Math.random() * 3) * debMul()));
+  for (let k = 0; k < n; k++) {
+    const r = debDir(), s = 2 + Math.random() * 5, v = 0.6 + Math.random() * 0.5;
+    debPiece(x, y, z, (nx + r.x * 0.7) * s, (ny + r.y * 0.7) * s, (nz + r.z * 0.7) * s, t, 0.25 + Math.random() * 0.7, [base.r * v, base.g * v, base.b * v], 40 + Math.random() * 30, false, Math.random() < 0.3 ? 0.6 : 0);
+  }
+  // 凹坑：太多、或離舊的太近就不再挖（只噴碎石）
+  const cr = Math.max(3, Math.min(16, tr.r * (0.07 + Math.random() * 0.07)));
+  if (R.craters.length >= 60 || R.craters.some((c) => (c[0] - nx) ** 2 + (c[1] - ny) ** 2 + (c[2] - nz) ** 2 < (cr / tr.r * 0.7) ** 2)) return;
+  R.craters.push([nx, ny, nz]);
+  const geo = R.mesh.geometry, P = geo.attributes.position, C = geo.attributes.color, A = P.array;
+  if (!R.orig) { R.orig = [A.slice(), C.array.slice()]; R.burn = new Float32Array(P.count).fill(1); }
+  const depth = cr * 0.45, rim = cr * 1.4, tris = new Set();
+  for (let k = 0; k < P.count; k++) {
+    const px = A[k * 3], py = A[k * 3 + 1], pz = A[k * 3 + 2], L = Math.hypot(px, py, pz) || 1;
+    const dd = Math.hypot(nx * L - px, ny * L - py, nz * L - pz);
+    if (dd > rim) continue;
+    const u = dd / cr;
+    let push;
+    if (u < 1) { push = -depth * (1 - u * u); R.burn[k] *= 0.45 + 0.55 * u * u; }   // 坑底最黑
+    else push = depth * 0.25 * (1 - (dd - cr) / (rim - cr));   // 坑緣隆起
+    const f = Math.max(tr.r * 0.6, L + push) / L;
+    A[k * 3] = px * f; A[k * 3 + 1] = py * f; A[k * 3 + 2] = pz * f;
+    tris.add((k / 3) | 0);
+  }
+  // 重新打光：被推動的三角面用新的面法線（跟 rockMesh 一樣的光，坑壁才看得出凹下去）
+  const Ld = DEB_ROCK_L;
+  for (const f of tris) {
+    const a = f * 9;
+    const ux = A[a + 3] - A[a], uy = A[a + 4] - A[a + 1], uz = A[a + 5] - A[a + 2], vx = A[a + 6] - A[a], vy = A[a + 7] - A[a + 1], vz = A[a + 8] - A[a + 2];
+    let cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx; const cl = Math.hypot(cx, cy, cz) || 1; cx /= cl; cy /= cl; cz /= cl;
+    const sh = 0.18 + 0.82 * Math.max(0, cx * Ld.x + cy * Ld.y + cz * Ld.z) + 0.08 * Math.max(0, -cy);
+    for (let m = 0; m < 3; m++) {
+      const k = f * 3 + m, s = sh * (0.9 + 0.2 * Math.sin(k * 1.7)) * R.burn[k];
+      C.array[k * 3] = base.r * s; C.array[k * 3 + 1] = base.g * s; C.array[k * 3 + 2] = base.b * s * 0.95;
+    }
+  }
+  P.needsUpdate = true; C.needsUpdate = true;
+  spawnFx(x + nx, y + ny, z + nz, 0, 1.2 + cr * 0.5, 20);   // 炸開的塵土
+}
+
+// ── 近地：建築倒塌噴出瓦礫；墜落的殘骸撞地時留下燒著的船殼 ──
+function debrisBld(i) {
+  const B = GV.bld; if (!debOn() || !B || DEB.bldBudget <= 0) return;
+  DEB.bldBudget--;
+  const x = B.iA[i * 4], z = B.iA[i * 4 + 1], w = B.iA[i * 4 + 2], dp = B.iA[i * 4 + 3], h = B.iB[i * 4], y0 = B.ic.array[i * 4 + 2], t = U.uTime.value;
+  const n = Math.max(1, Math.round(Math.min(7, 2 + h / 3) * debMul())), sz = Math.min(w, dp);
+  for (let k = 0; k < n; k++) {
+    const a = Math.random() * TAU, s = 0.8 + Math.random() * 2.2, v = 0.55 + Math.random() * 0.35;
+    debPiece(x + (Math.random() - 0.5) * w * 0.6, y0 + h * (0.3 + Math.random() * 0.6), z + (Math.random() - 0.5) * dp * 0.6, Math.cos(a) * s, 1 + Math.random() * 2.5, Math.sin(a) * s, t,
+      Math.max(0.25, sz * (0.08 + Math.random() * 0.12)), [0.36 * v, 0.35 * v, 0.33 * v], 300, true, Math.random() < 0.2 ? 0.5 : 0, Math.random() < 0.4);
+  }
+}
+function debrisCrash(x, gy, z, sz, side) {
+  if (!debOn()) return;
+  const t = U.uTime.value, n = Math.max(2, Math.round(6 * debMul()));
+  for (let k = 0; k < n; k++) {
+    const a = Math.random() * TAU, s = 1 + Math.random() * 3;
+    debPiece(x, gy + 0.5, z, Math.cos(a) * s, 2 + Math.random() * 3, Math.sin(a) * s, t, sz * (0.06 + Math.random() * 0.08), debHullCol(side), 300, true, 1, Math.random() < 0.5);
+  }
+  const j = debPiece(x, gy + 0.3, z, 0, 0.4, 0, t, sz * 0.3, debHullCol(side).map((c) => c * 0.6), 400, true, 2, false, 0.1);
+  DEB.hulks.push({ i: j, side, t0: debA[j * 4 + 3], until: t + 60 + Math.random() * 30, acc: 0, W: sz });
+}
+
+// ── 每幀：更新有變動的碎片、燃燒殘骸冒火冒煙 ──
+const _debP = { x: 0, y: 0, z: 0 };
+function debrisFrame() {
+  debMesh.visible = debOn();
+  DEB.bldBudget = 40;
+  if (DEB.lo >= 0) {
+    const n = DEB.hi - DEB.lo + 1;
+    for (const nm of ['iA', 'iB', 'iC', 'iD', 'iE']) { const a = debGeo.getAttribute(nm); a.clearUpdateRanges(); a.addUpdateRange(DEB.lo * 4, n * 4); a.needsUpdate = true; }
+    DEB.lo = DEB.hi = -1;
+  }
+  const t = U.uTime.value; let dt = t - DEB.fxT; DEB.fxT = t;
+  if (dt < 0 || dt > 2) dt = dt < 0 ? 0 : 2;
+  if (!DEB.hulks.length || dt === 0) return;
+  for (let k = DEB.hulks.length - 1; k >= 0; k--) {
+    const H = DEB.hulks[k];
+    if (t > H.until || debA[H.i * 4 + 3] !== H.t0) { DEB.hulks.splice(k, 1); continue; }   // 燒完了、或那一格已經被新的碎片蓋掉
+    H.acc += dt * (GRD ? 2.5 : 3.5);
+    while (H.acc >= 1) {
+      H.acc -= 1;
+      const landed = debPos(H.i, t, _debP), j = () => (Math.random() - 0.5) * H.W * 0.35;
+      if (GRD && typeof smokePuff === 'function') {   // 近地：黑煙（落地後更濃），加上火光
+        smokePuff(_debP.x + j(), _debP.y + 0.3, _debP.z + j(), t, landed ? 14 + Math.random() * 8 : 6, H.W * 0.15, H.W * (landed ? 1.6 : 0.8), landed ? 1.6 : 0.5, WIND[0] * 0.5, WIND[1] * 0.5, 0.6);
+        if (Math.random() < 0.5) smokePuff(_debP.x + j(), _debP.y + 0.2, _debP.z + j(), t, 0.7, H.W * 0.12, H.W * 0.22, 0.6, 0, 0, 2);
+      } else if (Math.random() < 0.6) spawnFx(_debP.x + j(), _debP.y + j() * 0.5, _debP.z + j(), H.side, 0.35 + Math.random() * H.W * 0.12, 16 + Math.random() * 8);   // 太空：零星的小爆炸、火花
+    }
+  }
+}
+// 新的一場：碎片清空、小行星復原
+function debrisReset() {
+  debB.fill(0); DEB.head = 0; DEB.lo = 0; DEB.hi = DEB_MAX - 1; DEB.hulks.length = 0; DEB.fxT = U.uTime.value;
+  for (const r of DEB.rocks) {
+    if (!r.orig) continue;
+    const g = r.mesh.geometry; g.attributes.position.array.set(r.orig[0]); g.attributes.color.array.set(r.orig[1]);
+    g.attributes.position.needsUpdate = g.attributes.color.needsUpdate = true; r.orig = null; r.craters.length = 0;
+  }
 }
 
 // 預設武器掛點（船體模型座標：船長＝1，船頭＋z、上＋y）；w＝武器編號，r＝轉向（度），t＝側傾（度），s＝尺寸
@@ -8491,7 +8832,7 @@ function rectLine(r, color, op) {
 }
 // 3D 地形：星雲、小行星帶是半透明的球；巨大小行星是實體（凹凸的岩塊，光影直接烤在頂點顏色裡，2D／3D 都看得到）
 function rockMesh(tr) {
-  const geo = new THREE.IcosahedronGeometry(tr.r, 4), P = geo.attributes.position, n = new THREE.Vector3();
+  const geo = new THREE.IcosahedronGeometry(tr.r, 14), P = geo.attributes.position, n = new THREE.Vector3();
   const sd = (tr.x * 0.013 + tr.z * 0.029) % 7;
   for (let i = 0; i < P.count; i++) {
     n.fromBufferAttribute(P, i).normalize();
@@ -8508,10 +8849,11 @@ function rockMesh(tr) {
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false }));
   m.position.set(tr.x, tr.y || 0, tr.z); m.renderOrder = 1;
+  debRockReg(m, tr);   // 被打中會炸出凹坑（debris.js）
   return m;
 }
 function drawField(showZones) {
-  fieldGroup.clear();
+  fieldGroup.clear(); debRockClear();
   for (const tr of terrainList()) {
     const def = TERRAIN_TYPES[tr.type], y = tr.y || 0, has3 = tr.y != null || def.solid;
     if (def.solid) fieldGroup.add(rockMesh(tr));
@@ -17507,7 +17849,7 @@ function capGunAim(s, dt, P) {
 function capRam(s, t) {
   if (!GV.bld) return;
   const bot = s.y - s.L * 0.13, top = s.y + s.L * 0.08; let n = 0;
-  for (const k of [-0.35, 0, 0.35]) groundBldEach(s.x + s.F[0] * s.L * k, s.z + s.F[2] * s.L * k, s.L * 0.16, bot, top, (i) => { if (groundBldKill(i)) n++; });
+  for (const k of [-0.35, 0, 0.35]) groundBldEach(s.x + s.F[0] * s.L * k, s.z + s.F[2] * s.L * k, s.L * 0.16, bot, top, (i) => { if (groundBldKill(i, s.x, s.z)) n++; });
   if (!n) return;
   spawnFx(s.x + s.F[0] * s.L * 0.4, bot + 0.2, s.z + s.F[2] * s.L * 0.4, CAP.side, s.L * 0.12, 24);
   s.vx *= 0.96; s.vz *= 0.96;
@@ -19577,7 +19919,7 @@ window.__demo = { view, updateCamera, volley, turn, opts, goPreset, changeFormat
 document.getElementById('sand-exit').onclick = () => showMenu();
 Object.assign(window.__demo, { GAME, TAC, SV, svH, svV, groupNodes, SIM, showSim, simStart, simSwitch, simSetup, simEditMid, simGo, simReset, opLevel, setOpLevel, applyOp, OP_LEVELS, ffStats, ffHold, rayStats, deflStats, facStats, maxHp, fleets: () => fleets, showMenu, showSingle, showRandom, showCampaign, showBriefing, showWatch, watchGo, showLoadout, startDeploy, startBattle, showReport, startReplay, SCENARIOS, sideAlive, TUT, TUT_LESSONS, tutStart, showTraining, showManual });
 // 除錯：命令、干擾、補給、地形與統計
-Object.assign(window.__demo, { PL, step: (n = 1) => { for (let k = 0; k < n && !GAME.result; k++) stepSim(); pushSquadronUniforms(); gameFrame(0.2); }, issue, setSelection, squadrons: () => squadrons, ships: () => ships, jammed, seenSq, playerFogged, FOW: () => FOW, FT: () => FT, rockBlock, rocks: () => ROCKS, wStats, ftrStats, ammoRatio, supplyStock });
+Object.assign(window.__demo, { PL, step: (n = 1) => { for (let k = 0; k < n && !GAME.result; k++) stepSim(); pushSquadronUniforms(); gameFrame(0.2); }, issue, setSelection, squadrons: () => squadrons, ships: () => ships, jammed, seenSq, playerFogged, FOW: () => FOW, FT: () => FT, rockBlock, rocks: () => ROCKS, DEB, debrisRockHit, groundBldKill, debPosOf: (i) => { const o = {}; debPos(i, U.uTime.value, o); return o; }, drawField, wStats, ftrStats, ammoRatio, supplyStock });
 document.getElementById('tb-attack').onclick = armAttack;
 document.getElementById('tb-queue').onclick = () => { queueToggle = !queueToggle; document.getElementById('tb-queue').classList.toggle('on', queueToggle); };
 document.getElementById('set-btn').onclick = () => openSettings();
