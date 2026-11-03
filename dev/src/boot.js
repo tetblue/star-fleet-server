@@ -20,7 +20,7 @@ applyUISettings();
 Object.assign(window.__demo, { cStats, C_SRC, rocks: () => ROCKS, shipWorld3(i) { shipWorldCPU(i, _a); return [_a.x, _a.y, _a.z]; }, fleetMods, U: () => U.uTime.value, gunStats: () => gunStats, pending: () => pending, wInfo: () => ({ dmg: wDmg.map((a) => a.map(Math.round)), w: wStats.map((s) => Object.fromEntries(Object.entries(s).map(([k, v]) => [k, Math.round(v)]))), air: [aliveF[0].length, aliveF[1].length], alive: [sideAlive(0), sideAlive(1)] }), SETTINGS, openSettings, closeSettings, keyOf, BR, enterBridge, exitBridge, ships: () => ships, bridgeLook, bridgeConsoleK, camera: () => camera });
 Object.assign(window.__demo, { RIG, rigFire });   // 武器動畫的除錯：開火紀錄、手動觸發
 Object.assign(window.__demo, { CUT, CUT_STYLES, cutPlay, cutPrepare, cutEncode, cutLayout, cutDraw, openCutStudio });
-Object.assign(window.__demo, { MOUNTS: () => MOUNTS, mountsOf, openWeaponEditor, closeWeaponEditor, WE, WA, buildWeaponAtlas, shipMat, getModel, MODEL_SRC, MODEL_LOAD, STORE: () => STORE, showRecords, showCampaign, showCampBriefing, campLoad, campStage, campEnemy, showTavern, storyUnlock, showStory, storyBriefing, storyScenario, storyLoad, STORY_STAGES, STORY_WAR, roster: () => ROSTER, fleets: () => fleets, skills: () => SKILLS, sideFac: () => SIDE_FAC, COMMANDERS });
+Object.assign(window.__demo, { MOUNTS: () => MOUNTS, mountsOf, openWeaponEditor, closeWeaponEditor, WE, WA, buildWeaponAtlas, shipMat, getModel, MODEL_SRC, MODEL_LOAD, STORE: () => STORE, showRecords, showCampaign, showCampBriefing, campLoad, campStage, campEnemy, showTavern, storyUnlock, showStory, showStoryLine, storyTalk, storyBriefing, storyScenario, storyLoad, STORY_STAGES, STORY_WAR, roster: () => ROSTER, fleets: () => fleets, skills: () => SKILLS, sideFac: () => SIDE_FAC, COMMANDERS });
 // 載入伺服器模型資料夾裡的模型（啟動畫面顯示進度），完成後才進選單
 (async () => {
   const B = window.BOOT;
@@ -58,6 +58,7 @@ async function autoStory(id, o = {}) {
       f.commander.level = lv; if (o.like) delete f.commander.tal; else f.commander.tal = {}; f.commander.skills = c.skills.slice();
       f.ai = { tactic: tac, level: o.ai || 3 };
     }
+    GAME.reportShown = true;   // 不跳結算畫面（不然上一場的結算計時器會在下一場代打中途切走畫面）
     GAME.watch = true; GAME.replaying = false; GAME.result = null; GAME.lineK = 0; GAME.dlineK = 0; GAME.log = []; GAME.simCtl = null; GAME.phase = 'battle';
     newBattle(sc.seed + 1, setup); setRule('fire', true); setRule('advance', false);
     GAME.init = [sideAlive(0), sideAlive(1)];

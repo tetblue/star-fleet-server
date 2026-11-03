@@ -188,22 +188,27 @@ function makeSetup(sc, lo, attempt) {
   }
   // 劇情戰役的護送目標（不能部署，跟著第一艦隊；損失太多就敗北）
   if (sc.vip) fleetsS.push({ ...supplySetup(0, sc.vip, lo.fleets.length ? 0 : -1, sc.vip.name), vip: true });
-  // 劇情戰役的友軍（傭兵外觀）：AI 自己打、玩家不能指揮；defectAt 秒後倒戈成敵軍
-  for (const a of sc.allies || []) fleetsS.push({ side: 0, fac: a.fac, name: a.name, ax: a.x, az: a.z, ay: 0, h: a.h, formation: a.formation, comp: a.comp.slice(),
-    commander: { ...a.commander }, ai: { tactic: a.tactic, level: sc.level }, ally: true, defectAt: a.defectAt });
+  // 劇情戰役的友軍（傭兵外觀）：AI 自己打、玩家不能指揮；defectAt 秒後倒戈成敵軍；arrive＝[秒, 'left'／'right']：戰鬥中途才從側翼進場
+  for (const a of sc.allies || []) {
+    const sx = a.arrive && a.arrive[1] === 'left' ? -1 : 1;
+    fleetsS.push({ side: 0, fac: a.fac, name: a.name, ax: a.arrive ? sx * 800 : a.x, az: a.arrive ? -60 : a.z, ay: 0, h: a.arrive ? (sx < 0 ? Math.PI / 2 : -Math.PI / 2) : a.h, formation: a.formation, comp: a.comp.slice(),
+      commander: { ...a.commander }, ai: { tactic: a.tactic, level: sc.level }, ally: true, defectAt: a.defectAt, ...(a.arrive ? { reserve: true, activateAt: a.arrive[0] } : {}) });
+  }
+  // 救援（〈星海之外〉第 7 關）：撤離船團先放在場外，時間到了才從地表起飛（rescueTick）
+  if (sc.rescue) sc.rescue.at.forEach((_, k) => fleetsS.push({ ...supplySetup(0, { comp: sc.rescue.comp, formation: 'ring', x: 0, z: MAP_BOUNDS.z0 - 900, h: Math.PI }, -1, `${sc.rescue.name} ${k + 1}`), ally: true, reserve: true, activateAt: null }));
   const e0 = fleetsS.length;
-  sc.enemy.forEach((ef) => fleetsS.push({ side: 1, name: ef.name, ax: ef.x, az: ef.z, ay: ef.y || 0, h: ef.h, formation: ef.formation, comp: ef.comp.slice(),
-    commander: { ...ef.commander }, ai: { tactic: ef.tactic, level: sc.level } }));
+  sc.enemy.forEach((ef) => fleetsS.push({ side: 1, ...(ef.fac != null ? { fac: ef.fac } : {}), name: ef.name, ax: ef.x, az: ef.z, ay: ef.y || 0, h: ef.h, formation: ef.formation, comp: ef.comp.slice(),
+    commander: { ...ef.commander }, ai: { tactic: ef.tactic, level: sc.level } }));   // fac：這支艦隊自己的外觀（例如蟲族與感染人類混編）
   if (sc.enemySupply && sc.enemy.length) fleetsS.push(supplySetup(1, sc.enemySupply, e0 + Math.min(sc.enemySupply.follow || 0, sc.enemy.length - 1)));
   // 突發事件：開戰前就抽好（同一個 attempt 回放時一樣）
   const R = mulberry32(sc.seed * 31 + attempt * 977);
   for (const ev of sc.events) {
     if (ev.type !== 'reinforce' || R() >= ev.chance) continue;
     const at = ev.at[0] + R() * (ev.at[1] - ev.at[0]), sx = ev.edge === 'left' ? -1 : 1;
-    fleetsS.push({ side: 1, name: ev.name, ax: sx * 800, az: -140 + R() * 200, ay: Math.round((R() - 0.5) * 240), h: sx < 0 ? Math.PI / 2 : -Math.PI / 2, formation: ev.formation, comp: ev.comp.slice(),
+    fleetsS.push({ side: 1, ...(ev.fac != null ? { fac: ev.fac } : {}), name: ev.name, ax: sx * 800, az: -140 + R() * 200, ay: Math.round((R() - 0.5) * 240), h: sx < 0 ? Math.PI / 2 : -Math.PI / 2, formation: ev.formation, comp: ev.comp.slice(),
       commander: ev.commander ? { ...ev.commander } : reinforceCmdr(sc), reserve: true, activateAt: at, ai: { tactic: 'push', level: sc.level } });
   }
-  return { bg: false, terrain: sc.terrain, ...(sc.ground ? { ground: { ...sc.ground } } : {}), fleets: fleetsS, scenario: sc.id, timeLimit: sc.timeLimit, level: sc.level, factions: sc.enemyFac != null ? [lo.faction || 0, sc.enemyFac] : (lo.faction || 0) === 1 ? [1, 0] : [0, 1], ...(sc.goal ? { goal: sc.goal } : {}), ...(sc.lines ? { lines: sc.lines } : {}), ...(sc.dlines ? { dlines: sc.dlines } : {}), ...(sc.defect ? { defect: sc.defect } : {}), ...(sc.aiOmni ? { omni: [false, true] } : {}), ...(sc.untimed ? { untimed: true } : {}) };   // untimed：沒有時限（timeLimit 只當目標時間）；aiOmni：這一關的 AI 不受戰爭迷霧限制
+  return { bg: false, terrain: sc.terrain, ...(sc.ground ? { ground: { ...sc.ground } } : {}), fleets: fleetsS, scenario: sc.id, timeLimit: sc.timeLimit, level: sc.level, factions: sc.enemyFac != null ? [lo.faction || 0, sc.enemyFac] : (lo.faction || 0) === 1 ? [1, 0] : [0, 1], ...(sc.goal ? { goal: sc.goal } : {}), ...(sc.lines ? { lines: sc.lines } : {}), ...(sc.dlines ? { dlines: sc.dlines } : {}), ...(sc.defect ? { defect: sc.defect } : {}), ...(sc.aiOmni ? { omni: [false, true] } : {}), ...(sc.untimed ? { untimed: true } : {}), ...(sc.doom ? { doom: sc.doom } : {}), ...(sc.rescue ? { rescue: sc.rescue } : {}) };   // doom：劇情強制擊沉（m8 杜蘭的旗艦）；rescue：救援任務；untimed：沒有時限（timeLimit 只當目標時間）；aiOmni：這一關的 AI 不受戰爭迷霧限制
 }
 
 // ───── 技能（命令 'skill'） ─────
@@ -312,11 +317,12 @@ function skillKey(id) {
 function activateReserve(f) {
   f.reserve = false;
   for (const q of f.sqs) { q.bg = false; q.hidden = false; if (q.group) q.group.inactive = false; if (q.label) q.label.classList.remove('bg'); }
-  GAME.init[f.side] += f.initial;
+  if (!f.ally) GAME.init[f.side] += f.initial;   // 友軍不算進勝負（sideAlive），兵力基準也不加
   // 呼叫來的增援：進場後開往指定的位置
   if (f.entryGoal) { const g = f.sqs[0].group; execCommand({ tick: simTick, side: f.side, type: 'move', auto: true, sqs: fleetAlive(f).map((q) => squadrons.indexOf(q)), x: f.entryGoal.x, z: f.entryGoal.z, H: g ? g.to : null, pivot: false, width: null, uturn: 'auto' }); }
   if (typeof TAC !== 'undefined' && TAC.open && f.side === GAME.playerSide) buildTacSide();   // 戰術面板加上這支艦隊的卡片
-  if (f.side === GAME.playerSide) toast(f.entryGoal ? `增援：${f.name}進場` : `增援：${f.name}抵達${f.sqs[0].x < 0 ? '左' : '右'}翼`);
+  if (f.entryNote) toast(f.entryNote, 'story');
+  else if (f.side === GAME.playerSide) toast(f.entryGoal ? `增援：${f.name}進場` : `增援：${f.name}抵達${f.sqs[0].x < 0 ? '左' : '右'}翼`);
   else toast(`警告：${f.name}出現在${f.sqs[0].x < 0 ? '左' : '右'}翼！`, 'bad');
   for (let k = 0; k < 12; k++) { const q = f.sqs[k % f.sqs.length]; spawnFx(q.x + (rnd() - 0.5) * 60, 0, q.z + (rnd() - 0.5) * 60, 1, 8, 16); }
 }
@@ -561,19 +567,61 @@ function checkVictory() {
   const t = U.uTime.value, tl = battleSetup.timeLimit, G = battleSetup.goal;
   const a0 = sideAlive(0), a1 = sideAlive(1), p = a0 / Math.max(1, GAME.init[0]), e = a1 / Math.max(1, GAME.init[1]);
   let r = null;
-  const pend = fleets.some((f) => f.ally && f.defectAt != null && !f.reserve);   // 還有友軍沒倒戈（劇情的倒戈）：先不判勝利，等倒戈發生
+  const pend = fleets.some((f) => f.ally && f.defectAt != null && !f.reserve) || (battleSetup.doom && t < battleSetup.doom.at + 4);   // 劇情演出（倒戈、強制擊沉）還沒發生：先不判勝利   // 還有友軍沒倒戈（劇情的倒戈）：先不判勝利，等倒戈發生
   if (a1 === 0 && !pend) r = ['win', '殲滅敵軍'];
   else if (e < ROUT_AT && !noRout(1) && !pend) r = ['win', '敵軍潰走'];
   else if (a0 === 0) r = ['lose', '我軍全滅'];
   else if (p < ROUT_AT && !noRout(0)) r = ['lose', '我軍潰走'];
   else if (G && G.type === 'escort' && vipLost()) r = ['lose', `${G.name}損失過重`];
+  else if (G && G.type === 'target' && !fleets.some((f) => f.side === 1 && f.name === G.name && fleetAlive(f).length)) r = ['win', `${G.name}被擊沉`];
+  else if (G && G.type === 'rescue' && t >= rescuePurgeAt()) { const n = rescueCount(); r = n.saved >= G.need ? ['win', `淨化開始・救出了 ${n.saved} 批倖存者`] : ['lose', `淨化開始・只救出 ${n.saved} 批倖存者（至少要 ${G.need} 批）`]; }
   else if (G && G.type === 'cut' && !fleets.some((f) => f.side === 1 && f.supply && !f.reserve && fleetAlive(f).length)) r = ['win', '敵軍補給艦全滅・補給線切斷'];
   else if (t >= tl && G && (G.type === 'survive' || G.type === 'escort')) r = ['win', G.type === 'escort' ? `時間到・${G.name}撐到了最後` : '時間到・撐過了敵軍的攻勢'];
   else if (t >= tl && !battleSetup.untimed) {
     const lp = 1 - p, le = 1 - e;
     r = le - lp > 0.08 ? ['win', '時間到・判定勝利（敵方損失較重）'] : lp - le > 0.08 ? ['lose', '時間到・判定敗北（我方損失較重）'] : ['draw', '時間到・平手'];
   }
-  if (r) GAME.result = battleResult(r[0], r[1]);
+  if (r) { const RS = battleSetup.rescue, n = RS && rescueCount(); GAME.result = battleResult(r[0], r[1], RS ? { rescued: r[0] === 'win' && !r[1].startsWith('淨化') ? RS.at.length - n.lost : n.saved, waves: RS.at.length } : undefined); }   // 救援：在淨化前打贏（殲滅、潰走）＝還沒被擊沉的船團都能撤離
+}
+// ───── 救援任務（〈星海之外〉第 7 關〈不一樣的機械〉）─────
+// battleSetup.rescue＝{ name, at: [各批起飛秒數], from: [起飛點 {x, z}…], toZ: 撤離點（後方）的 z, comp, ext: 每次延後幾秒, per: 每擊沉多少比例的敵軍延後一次, max: 最多延後幾次 }
+// 狀態都從模擬算出來（回放一致）：撤離完成的船團 f.evac、淨化時間＝時限＋延後
+const rescueFleets = () => { const R = battleSetup.rescue; return R ? fleets.filter((f) => f.side === 0 && f.name.startsWith(R.name + ' ')) : []; };
+function rescueCount() { let saved = 0, lost = 0; for (const f of rescueFleets()) { if (f.evac) saved++; else if (!f.reserve && !fleetAlive(f).length) lost++; } return { saved, lost }; }
+function rescueExt() { const R = battleSetup.rescue, k = 1 - sideAlive(1) / Math.max(1, GAME.init[1]); return Math.min(R.max, Math.floor(k / R.per)); }
+function rescuePurgeAt() { return battleSetup.timeLimit + battleSetup.rescue.ext * rescueExt(); }
+let RESCUE_UI = { fl: null, ext: 0, warn: 0 };   // 只管提示（不影響模擬）
+function rescueTick(t) {
+  const R = battleSetup.rescue;
+  for (const f of rescueFleets()) {
+    const k = +f.name.slice(R.name.length + 1) - 1, g = f.sqs[0] && f.sqs[0].group;
+    if (f.reserve && !f.evac && f.activateAt == null && t >= R.at[k] && g) {   // 起飛：移到地表的起飛點，進場後開往撤離點
+      const P = R.from[k % R.from.length];   // 起飛點輪流用（地表上的幾處據點），撤離點在同一個 x 的後方
+      warpGroup(g, P.x, P.z, Math.atan2(0, R.toZ - P.z));
+      f.activateAt = t; f.entryGoal = { x: P.x, z: R.toZ }; f.entryNote = `${f.name}從地表起飛了，掩護它到後方的撤離點！`;
+    } else if (!f.reserve && !f.evac) {
+      const C = centerOf(fleetAlive(f));
+      if (C && C.z > R.toZ - 70) {   // 到了撤離點：離開戰場
+        f.evac = true; f.reserve = true; f.activateAt = null;   // activateAt 清掉：不然會被當成增援又叫回來
+        for (const q of f.sqs) { q.bg = true; q.hidden = true; selected.delete(q); if (q.group) q.group.inactive = true; if (q.label) q.label.classList.add('bg'); }
+        if (g) warpGroup(g, 0, MAP_BOUNDS.z1 + 900, Math.PI);
+        toast(`${f.name}脫離戰場・已救出 ${rescueCount().saved} 批`, 'story');
+      }
+    }
+  }
+  if (RESCUE_UI.fl !== fleets) RESCUE_UI = { fl: fleets, ext: 0, warn: 0 };
+  const e = rescueExt(), left = Math.round(rescuePurgeAt() - t);
+  if (e > RESCUE_UI.ext) { RESCUE_UI.ext = e; toast(`賽弗：靜默節點同意把淨化延後 ${R.ext} 秒。距離淨化還有 ${left} 秒`, 'story'); }
+  const w = left <= 20 ? 20 : left <= 60 ? 60 : 0;
+  if (w && RESCUE_UI.warn !== w) { RESCUE_UI.warn = w; toast(`靜默節點：淨化倒數 ${left} 秒`, 'bad'); }
+}
+// 劇情強制擊沉（m8：杜蘭的旗艦）：battleSetup.doom＝{ name: 友軍艦隊名, at: 秒 }，時間到就擊沉那支艦隊的旗艦分艦隊
+const _doomV = new THREE.Vector3();
+function doomTick(t) {
+  const DM = battleSetup.doom; if (t < DM.at || t > DM.at + 2) return;
+  const f = fleets.find((o) => o.side === 0 && o.name === DM.name); if (!f) return;
+  const q = f.sqs.find((o) => o.flagship >= 0) || f.sqs[0]; if (!q) return;
+  for (const i of q.list) if (ships.alive[i]) { shipWorldCPU(i, _doomV); killShip(i, t, _doomV.x, _doomV.y, _doomV.z, 1.4); }
 }
 function battleResult(kind, why, extra) {
   const a0 = sideAlive(0), a1 = sideAlive(1);
@@ -592,6 +640,8 @@ function gameTick() {
   const end = GAME.replaying && GAME.replayEnd;
   if (end && simTick >= end.tick) { GAME.result = battleResult(end.kind, end.why, { retreat: !!end.retreat }); return; }
   const t = U.uTime.value;
+  if (battleSetup.rescue) rescueTick(t);
+  if (battleSetup.doom) doomTick(t);
   for (const f of fleets) if (f.reserve && f.activateAt != null && t >= f.activateAt) activateReserve(f);
   // 倒戈的觸發（劇情）：敵軍剩下的比例夠低、或快到原本的倒戈秒數，就排定 lead 秒後倒戈（defT＝倒戈的時間，台詞跟著它走）
   const DF = battleSetup.defect;

@@ -16,7 +16,18 @@ const STORY_LINE = {
   m: { side: 2, name: '番外・雙星之外', ending: '雙星之外', cast: '賽隆、「鏽牙」杜蘭、「快手」莎夏、「鐵顎」柯爾', extra: true,
     blurb: '帝國和聯盟都雇用過他們，也都追殺過他們。收錢辦事的灰鴉傭兵團，看見了這場戰爭帳本的另一面。',
     note: '番外篇的前半段跟主線第一、二章的事件（包括灰鴉的支線）是同一批事件，後半段會揭露主線第三章以後的內幕。沒玩過主線也能直接玩，但建議先玩過主線的第一、二章。' },
+  // 新主線〈星海之外〉：番外篇的延續（打完番外篇第 8 關才開放）；自己的星圖（新伊甸星系，map: 'eden'）與章節（chs），杜蘭不能派（absent）
+  x: { side: 2, name: '星海之外', title: '星海之外', ending: '向外', cast: '賽隆、「快手」莎夏、「鐵顎」柯爾、賽弗、米拉・哈特、「老錨」歐文', sequel: true, req: 'm8', map: 'eden', absent: ['duran'],
+    blurb: '被堵在人類星域之外的灰鴉，在三十年前失蹤的殖民船團的目的地，遇見了人類以外的存在。',
+    note: '番外篇〈雙星之外〉的延續。打完番外篇的第 8 關〈雙星之外〉後開放。',
+    chs: [{ no: '第一幕', name: '潰退' }, { no: '第二幕', name: '接觸' }, { no: '第三幕', name: '新伊甸' }, { no: '第四幕', name: '歸航' }],
+    marks: [{ name: '新伊甸', sub: '恆星・殖民船團的目的地', x: 1090, y: 470, cls: 'neu', kind: 'star', lp: 'down' },
+      { name: '人類星域', sub: '星圖邊緣的另一側', x: 70, y: 470, cls: 'mer', kind: 'capital', lp: 'right' }] },
 };
+// 章節：每一篇可以有自己的章節（STORY_LINE.chs），沒有的用 STORY_CH
+const storyChs = (line) => (STORY_LINE[line] && STORY_LINE[line].chs) || STORY_CH;
+const storyChOf = (s) => storyChs(s.line)[s.ch];
+const storyLineOpen = (p, k) => !STORY_LINE[k].req || !!p.done[STORY_LINE[k].req];
 // 番外篇的 {V}：贏得戰爭的一方（玩家打過的結局；兩個都打過就看最近的那一個，都沒打過就是「新政府」）
 function storyVictor() { const p = storyLoad(), e = p.done['21e'] || 0, a = p.done['21a'] || 0; return !e && !a ? '新政府' : e >= a ? '帝國' : '聯盟'; }
 const storyText = (t) => (t ? t.split('{V}').join(storyVictor()) : t);
@@ -147,7 +158,47 @@ const STORY_STAGES = [
     when: '主線結局之後',
     story: '灰鴉的一半成了{V}的傭兵編隊，另一半跟著杜蘭當了宇宙海盜。第一份任務就是追捕杜蘭。賽隆追著他的訊號，一路追出了星圖。',
     inter: '戰爭結束了。{V}的星圖上，人類星域第一次只剩下一種顏色。',
-    ending: '帝國與聯盟的戰爭結束了，人類以為星空終於屬於自己。灰鴉的一半成了{V}的傭兵編隊，另一半成了被通緝的宇宙海盜。而在星圖的邊緣，那些沒有活人的船，還在朝這裡航行。' },
+    ending: '帝國與聯盟的戰爭結束了，人類以為星空終於屬於自己。灰鴉的一半成了{V}的傭兵編隊，「鏽牙」杜蘭死在了星圖的邊緣。而賽隆和剩下的人，被那些沒有活人的船堵在了人類星域之外。（新主線〈星海之外〉開放）' },
+  // ── 新主線〈星海之外〉：灰鴉傭兵團（玩家是傭兵陣營）。ch＝第幾幕（STORY_LINE.x.chs）；talk＝只有劇情、沒有戰鬥（scenes：[說話的人（null＝旁白）, 內容]）──
+  { id: 'x1', ch: 0, merc: true, line: 'x', name: '斷後', place: '星圖邊緣', x: 210, y: 440, cast: ['ceron', 'kol'], goal: '掩護受損艦突圍',
+    story: '退路被堵死了。灰鴉帶著受損的船和鏽牙的殘部，往星圖之外的未知星域突圍。',
+    inter: '人類星域那邊，{V}的情報部把灰鴉列為「失聯」。沒有人打算去找他們。' },
+  { id: 'x2', ch: 0, merc: true, line: 'x', name: '消耗', place: '未知星域・灰燼星雲', x: 400, y: 340, cast: ['ceron', 'sasha'], goal: '撐到時限',
+    story: '甩不掉。廢棄艦隊不會累，也不需要補給。灰鴉的彈藥和船，一天比一天少。' },
+  { id: 'x3', ch: 0, merc: true, line: 'x', name: '千鈞一髮', place: '未知星域・碎環', x: 560, y: 540, cast: ['ceron', 'sasha', 'kol'], goal: '殲滅廢棄艦隊',
+    story: '最後一道防線。灰鴉被逼進一片碎裂的小行星環，沒有地方可以再退了。' },
+  { id: 'x4', ch: 1, merc: true, line: 'x', name: '第一句話', place: '新伊甸外圍', x: 720, y: 400, cast: ['ceron'], goal: '跟不明艦隊一起清掉感染艦',
+    story: '救了灰鴉的不明艦隊自稱「機械智慧族」。它們的聯絡個體賽弗提議：先一起清掉附近的感染艦，再談。' },
+  { id: 'x5', ch: 2, merc: true, line: 'x', name: '殖民地的燈', place: '新伊甸 II・殖民地', x: 900, y: 280, cast: ['ceron', 'kol'], goal: '擊潰地面據點的守軍', joins: ['mira'],
+    story: '新伊甸的第二顆行星上，還有微弱的人類訊號。感染體在地表建起了據點，還有防空砲台。',
+    inter: '賽弗說明了新伊甸的狀況：三十年前抵達的殖民者，大部分已經被感染。但機械智慧族的探測器，還收得到地表的人類訊號。' },
+  { id: 'x6', ch: 2, merc: true, line: 'x', name: '方舟', place: '新伊甸 II・軌道', x: 1040, y: 220, cast: ['ceron', 'mira'], goal: '護送倖存者船團突破封鎖', joins: ['owen'],
+    story: '倖存者藏在殖民船團的舊船裡。船還能飛，但要穿過感染艦的封鎖線。' },
+  { id: 'x7', ch: 2, merc: true, line: 'x', name: '不一樣的機械', place: '新伊甸 III', x: 1230, y: 280, cast: ['ceron', 'mira', 'owen'], goal: '淨化開始前救出更多人',
+    story: '另一派機械智慧族「靜默節點」抵達了新伊甸的第三顆行星。它們決定把整顆行星連同感染體一起淨化，包括地表上還活著的人。',
+    inter: '賽弗說，機械智慧族不是一個整體。「靜默節點」不恨人類，它們只是永遠選擇成本最低的做法。' },
+  { id: 'x8', ch: 2, merc: true, line: 'x', name: '第一次看見蟲', place: '新伊甸外環', x: 1400, y: 420, cast: ['ceron', 'sasha', 'kol'], goal: '殲滅蟲群',
+    story: '新伊甸外環出現了不一樣的訊號。不是被感染的人類船，是蟲族本身。' },
+  { id: 'x9', ch: 2, merc: true, line: 'x', name: '熟悉的戰法', place: '新伊甸 IV', x: 1260, y: 620, cast: ['ceron', 'sasha', 'mira'], goal: '擊退感染艦隊', joins: ['seph'],
+    story: '一支感染艦隊在第四顆行星附近伏擊了機械智慧族的補給線。這一次，牠們的打法不一樣了。' },
+  { id: 'x10', ch: 2, merc: true, line: 'x', name: '母巢', place: '新伊甸・母巢', x: 1420, y: 760, cast: ['ceron', 'kol', 'seph'], goal: '擊沉母巢',
+    story: '新伊甸的蟲族都從同一個巢穴出來。打掉母巢，這個星系就能清乾淨。' },
+  { id: 'x11', ch: 3, merc: true, line: 'x', name: '回家的路', place: '星圖邊緣・回程', x: 760, y: 720, cast: ['ceron', 'owen', 'seph'], goal: '護送倖存者船團回到人類星域',
+    story: '新伊甸清乾淨了。灰鴉帶著倖存者和機械智慧族，踏上回人類星域的航道。蟲族的殘部還在後面追。',
+    inter: '阿瑪蘭和杜蘭撤出了新伊甸。賽弗說，蟲族從來不會真的放棄一塊土地，牠們只是換個地方播種。' },
+  { id: 'x12', ch: 3, merc: true, line: 'x', name: '不速之客', place: '人類星域邊境', x: 330, y: 760, cast: ['ceron', 'mira', 'seph'], goal: '協助邊境部隊平定叛亂',
+    story: '灰鴉帶著倖存者和機械智慧族回到人類星域。邊境要塞正被不肯接受新秩序的殘黨圍攻。' },
+  { id: 'x13', ch: 3, merc: true, line: 'x', talk: true, name: '向外', place: '人類星域', x: 160, y: 620, cast: ['ceron'], goal: '劇情（沒有戰鬥）',
+    story: '{V}願意聽賽隆說話了。灰鴉要讓人類知道外面的世界，還有正在等著他們的東西。',
+    scenes: [[null, '{V}的首都。賽隆站在議事廳中央，身後的螢幕上是新伊甸燃燒的行星，和母巢沉沒前最後的影像。'],
+      ['賽隆', '三十年前失蹤的殖民船團，不是失蹤。它們被吃掉了。外面有蟲族，有機械，還有我們不知道的東西。'],
+      ['賽弗', '補充：蟲族的指揮個體阿瑪蘭仍然存活。它的下一個播種地點，機率最高的是你們。'],
+      [null, '議事廳安靜了很久。然後，有人站了起來。'],
+      ['米拉・哈特', '新伊甸防衛軍，還活著的人都在這裡。我們會去。'],
+      ['「老錨」歐文', '老錨的船隊也去。這把老骨頭，還能再飛一次。'],
+      [null, '消息傳開之後，志願艦從人類星域的每個角落趕來：帝國的老兵、聯盟的退役艦長、走投無路的海盜、想看看星圖之外的年輕人。灰鴉的船塢第一次排不下。'],
+      ['「快手」莎夏', '團長，這次的雇主是誰？'], ['賽隆', '我們自己。'], ['「鐵顎」柯爾', '報酬呢？'], ['賽隆', '活下去。']],
+    ending: '人類第一次把目光投向星圖之外。灰鴉、機械智慧族和各地的志願艦，組成了第一支遠征艦隊。在某個遙遠的星系裡，阿瑪蘭和杜蘭也在等著。' },
   // ── 支線：灰鴉傭兵團（第一章；不打也能繼續主線）。req＝要先打完的關、at＝劇情時間點（在哪一關之後：決定誰已經退場）、merc＝跟傭兵有關的任務 ──
   { id: 's1', sub: true, merc: true, req: ['5'], at: '5', ch: 1, line: 'e', name: '鏽色的海盜', place: '卡德倫外緣', x: 340, y: 170, cast: ['kas'], goal: '擊退海盜艦隊',
     story: '卡德倫的補給線接連被「海盜」劫掠。卡斯追了上去，才發現對方的陣形和裝備都不像海盜。',
@@ -200,11 +251,11 @@ function storyMarkBox(m) {   // 地標（首都、要塞）的圖示＋名稱佔
 function storyLayoutAll() {
   if (STORY_POS) return STORY_POS;
   STORY_POS = {};
-  const tw = (t, px) => [...t].length * px, PAD = 10, obs = STORY_MARKS.map(storyMarkBox);
+  const tw = (t, px) => [...t].length * px, PAD = 10;
   for (const line of Object.keys(STORY_LINE)) {
-    const seq = storySeq(line);
+    const seq = storySeq(line), obs = (STORY_LINE[line].marks || STORY_MARKS).map(storyMarkBox);
     const it = storyNodes(line).map((n) => {
-      const s = STORY_BY[n.key], r = n.sub ? 16 : 22, ch = STORY_CH[s.ch], first = !n.sub && seq.find((id) => STORY_BY[id].ch === s.ch) === n.key;
+      const s = STORY_BY[n.key], r = n.sub ? 16 : 22, ch = storyChOf(s), first = !n.sub && seq.find((id) => STORY_BY[id].ch === s.ch) === n.key;
       const w = Math.max(70, tw(s.name, 21) + 8, first ? tw(ch.no + ch.name, 17) + 34 : 0) * 1.3;   // 節點群組放大 1.3 倍畫
       return { id: n.key, x: s.x * STORY_K, y: s.y * STORY_K, x0: s.x * STORY_K, y0: s.y * STORY_K, w, top: (r + 30 + (first ? 24 : 0)) * 1.3, bot: (r + 32) * 1.3 };
     });
@@ -315,10 +366,11 @@ function storyMapSVG(p, sel, vb = STORY_VB, curCh = -1) {
   }).join('');
   const regions = [['奧瑞利安帝國', 300, 120, 'emp'], ['自由星系聯盟', 1310, 140, 'all'], ['洛珊自治領', 1260, 860, 'neu'], ['暗黑星雲帶', 800, 640, 'dust']]
     .map(([t, x, y, c]) => `<text class="st-region ${c}" x="${x}" y="${y}">${t}</text>`).join('');
-  const marks = STORY_MARKS.map((m) => {
-    const side = m.flip && m.flip.some((id) => p.done[id]) ? 1 : ended >= 0 && m.side < 2 ? ended : m.side, c = ['emp', 'all', 'neu'][side];
+  const L = STORY_LINE[line];
+  const marks = (L.marks || STORY_MARKS).map((m) => {
+    const side = m.flip && m.flip.some((id) => p.done[id]) ? 1 : ended >= 0 && m.side < 2 ? ended : m.side, c = m.cls || ['emp', 'all', 'neu'][side];
     const mx = m.x * STORY_K, my = m.y * STORY_K;
-    const icon = m.kind === 'fortress' ? `<path class="st-mk ${c}" d="M${mx} ${my - 16}l14 8v16l-14 8l-14-8v-16z"/>`
+    const icon = m.kind === 'star' ? `<circle class="st-sun" cx="${mx}" cy="${my}" r="26"/>` : m.kind === 'fortress' ? `<path class="st-mk ${c}" d="M${mx} ${my - 16}l14 8v16l-14 8l-14-8v-16z"/>`
       : `<circle class="st-mk ${c}" cx="${mx}" cy="${my}" r="12"/><circle class="st-mk-c ${c}" cx="${mx}" cy="${my}" r="5"/>`;
     const [dx, dy, an] = { up: [0, -44, 'middle'], down: [0, 40, 'middle'], right: [22, -2, 'start'], left: [-22, -2, 'end'] }[m.lp];
     return `<g class="st-mark" text-anchor="${an}">${icon}<text class="st-mk-t" x="${mx + dx}" y="${my + dy}">${m.name}</text><text class="st-mk-s" x="${mx + dx}" y="${my + dy + 19}">${m.sub}</text></g>`;
@@ -336,7 +388,7 @@ function storyMapSVG(p, sel, vb = STORY_VB, curCh = -1) {
     const s = storyNodeStage(p, n), st = storyNodeState(p, n), [x, y] = storyPos(n.key);
     const c = STORY_SIDE[s.side].cls, label = st === 'locked' ? '' : s.name;
     const no = n.sub ? '支' : storySeq(line).indexOf(n.key) + 1, r = n.sub ? 16 : 22;   // 支線：小一號的節點
-    const seq = storySeq(line), ch = STORY_CH[s.ch], first = !n.sub && seq.find((id) => STORY_BY[id].ch === s.ch) === n.key;   // 這一章的第一關：標出章名
+    const seq = storySeq(line), ch = storyChOf(s), first = !n.sub && seq.find((id) => STORY_BY[id].ch === s.ch) === n.key;   // 這一章的第一關：標出章名
     const next = st === 'avail' && !n.sub, far = curCh >= 0 && s.ch !== curCh ? 'far' : '';
     const tip = `${storyNo(s)}${st === 'locked' ? '・？？？' : `〈${s.name}〉`}　${ch.no} ${ch.name}　${{ done: '已完成（可以重打）', avail: n.sub ? '可以打的支線（不打也能繼續主線）' : '下一場作戰：點選查看', locked: '還沒開放' }[st]}`;
     const tags = [next ? `<text class="st-next" y="${-r - 12}">▼ 下一場</text>` : st === 'avail' ? `<text class="st-next sub" y="${-r - 10}">支線</text>` : '', first ? `<text class="st-cht" y="${-r - (next ? 34 : 12)}">${ch.no}　${ch.name}</text>` : ''].join('');
@@ -352,19 +404,34 @@ function storyMapSVG(p, sel, vb = STORY_VB, curCh = -1) {
       <radialGradient id="stg-all"><stop offset="0" stop-color="#7cc4ff" stop-opacity=".16"/><stop offset="1" stop-color="#7cc4ff" stop-opacity="0"/></radialGradient>
       <radialGradient id="stg-neu"><stop offset="0" stop-color="#8fd9b6" stop-opacity=".15"/><stop offset="1" stop-color="#8fd9b6" stop-opacity="0"/></radialGradient>
       <radialGradient id="stg-ame"><stop offset="0" stop-color="#b48cff" stop-opacity=".35"/><stop offset="1" stop-color="#b48cff" stop-opacity="0"/></radialGradient>
+      <radialGradient id="stg-sun"><stop offset="0" stop-color="#ffd88a" stop-opacity=".3"/><stop offset="1" stop-color="#ffd88a" stop-opacity="0"/></radialGradient>
+      <radialGradient id="stg-inf"><stop offset="0" stop-color="#c47cff" stop-opacity=".28"/><stop offset="1" stop-color="#c47cff" stop-opacity="0"/></radialGradient>
+      <radialGradient id="stg-ash"><stop offset="0" stop-color="#e2735a" stop-opacity=".12"/><stop offset="1" stop-color="#e2735a" stop-opacity="0"/></radialGradient>
       <filter id="stf-blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="28"/></filter>
     </defs>
     <g transform="scale(${STORY_K})">
     <g class="st-stars">${stars}</g>
-    ${blobs}
+    ${L.map === 'eden' ? storyEdenBG() : `${blobs}
     <g class="st-dust2" filter="url(#stf-blur)">${dust(mulberry32(11))}</g>
     <g class="st-dust" filter="url(#stf-blur)">${dust(mulberry32(7))}</g>
     <ellipse cx="835" cy="290" rx="120" ry="80" fill="url(#stg-ame)"/>
     <path class="st-lane" d="M590 380C680 395 720 430 800 420S940 400 1010 410"/><text class="st-lane-t" x="920" y="455">阿刻戎走廊</text>
     <path class="st-lane" d="M470 560C520 690 660 790 830 820S1100 720 1180 560"/><text class="st-lane-t" x="1110" y="700">洛珊航道</text>
-    ${regions}</g>
+    ${regions}`}</g>
     ${links}${marks}${nodes}
   </svg>`;
+}
+
+// 〈星海之外〉的星圖背景：新伊甸星系（中央的恆星、軌道、小行星環），東南是蟲族的巢穴，西邊的航道通往人類星域
+function storyEdenBG() {
+  const R = mulberry32(31), cx = 1090, cy = 470;
+  const ast = Array.from({ length: 110 }, () => { const a = R() * Math.PI * 2, r = 330 + R() * 45; return `<circle cx="${(cx + Math.cos(a) * r * 1.15).toFixed(0)}" cy="${(cy + Math.sin(a) * r * 0.62).toFixed(0)}" r="${(0.8 + R() * 2).toFixed(1)}"/>`; }).join('');
+  return `<ellipse cx="${cx}" cy="${cy}" rx="300" ry="220" fill="url(#stg-sun)"/>
+    <g class="st-orbit">${[150, 250, 470].map((r) => `<ellipse cx="${cx}" cy="${cy}" rx="${r * 1.15}" ry="${r * 0.62}"/>`).join('')}</g>
+    <g class="st-ast">${ast}</g>
+    <ellipse cx="1380" cy="720" rx="280" ry="180" fill="url(#stg-inf)"/><ellipse cx="420" cy="430" rx="320" ry="220" fill="url(#stg-ash)"/>
+    <path class="st-lane" d="M70 470C260 430 420 520 600 480S900 420 ${cx} ${cy}"/><text class="st-lane-t" x="600" y="455">殖民船團的航道</text>
+    <text class="st-region mer" x="420" y="140">未知星域</text><text class="st-region neu" x="1150" y="110">新伊甸星系</text><text class="st-region inf" x="1330" y="880">蟲族的巢穴</text>`;
 }
 
 // ───── 畫面 ─────
@@ -373,24 +440,24 @@ function storyPanel(p, key, chs = '') {
   const s = STORY_BY[key], chBox = chs ? `<div class="st-chs"><div class="st-chs-h">章節</div>${chs}</div>` : '';
   if (!s || s.line !== storyLineOf(p)) return `<div class="st-panel g-card"><div class="g-dim">點選星圖上的星系查看作戰。</div>${chBox}</div>`;
   const st = storyState(p, s.id);
-  const side = STORY_SIDE[s.side], ch = STORY_CH[s.ch], open = st !== 'locked';
+  const side = STORY_SIDE[s.side], ch = storyChOf(s), open = st !== 'locked';
   const cast = s.cast.map((id) => { const c = storyCmdrDef(id); return c ? `${c.title} ${c.name}` : id; }).join('、');
   return `<div class="st-panel g-card ${side.cls}">
     <div class="st-ch">${ch.no}　${ch.name}・${storyNo(s)}</div>
     <h3 class="st-h">${open ? s.name : '？？？'}</h3>
     <div class="st-meta"><span class="g-${side.cls}">${side.name}</span>・${s.place}</div>
     ${open && s.when ? `<div class="st-when">時間點：${s.when}</div>` : ''}
-    ${open ? `<p>${storyText(s.story)}</p><dl class="kv"><dt>出擊指揮官</dt><dd>${cast}</dd><dt>作戰目標</dt><dd>${s.goal}</dd><dt>建議等級</dt><dd>Lv ${storyRec(s.id)} 以上</dd>${s.reward ? `<dt>獎勵</dt><dd>${s.reward}</dd>` : ''}</dl>`
+    ${open ? `<p>${storyText(s.story)}</p><dl class="kv">${s.talk ? '' : `<dt>出擊指揮官</dt><dd>${cast}</dd>`}<dt>${s.talk ? '內容' : '作戰目標'}</dt><dd>${s.goal}</dd>${s.talk ? '' : `<dt>建議等級</dt><dd>Lv ${storyRec(s.id)} 以上</dd>`}${s.reward ? `<dt>獎勵</dt><dd>${s.reward}</dd>` : ''}</dl>`
       : `<p class="g-dim">${s.sub ? `完成${s.req.map((q) => (STORY_BY[q].sub ? `支線「${STORY_BY[q].name}」` : storyNo(STORY_BY[q]))).join('、')}後開放。支線不打也能繼續主線。` : '完成前一場作戰後開放。'}</p>`}
     ${st === 'done' && s.ending ? `<div class="st-end"><b>結局</b><p>${storyText(s.ending)}</p></div>` : ''}
-    <div class="g-row" style="margin-top:12px"><span class="g-sp"></span>${open ? `<button class="g-btn ${st === 'done' ? '' : 'pri'}" data-go="${s.id}">${st === 'done' ? '重打這一關' : '出擊 →'}</button>` : ''}</div>
+    <div class="g-row" style="margin-top:12px"><span class="g-sp"></span>${open ? `<button class="g-btn ${st === 'done' ? '' : 'pri'}" data-go="${s.id}">${s.talk ? (st === 'done' ? '再看一次' : '觀看 →') : st === 'done' ? '重打這一關' : '出擊 →'}</button>` : ''}</div>
     ${chBox}
   </div>`;
 }
 function showStory() {
   const V = GAME.storyView || (GAME.storyView = { sel: null });
   const p = storyLoad();
-  if (!STORY_LINE[p.line]) { showStoryLine(); return; }   // 第一次進來：先選篇章（陣營）
+  if (!STORY_LINE[p.line] || !storyLineOpen(p, p.line)) { showStoryLine(); return; }   // 第一次進來：先選篇章（陣營）
   if (p.diff == null) { showStoryDiff(); return; }        // 再選難度
   const line = p.line, L = STORY_LINE[line], NODES = storyNodes(line);
   V.selBy = V.selBy || {};
@@ -402,14 +469,14 @@ function showStory() {
   const curCh = STORY_BY[V.sel] ? STORY_BY[V.sel].ch : -1;
   const chIds = (k) => NODES.map((n) => n.key).filter((id) => STORY_BY[id].ch === k);
   if (fresh) V.focus = chIds(curCh).concat([V.sel]);
-  const chs = STORY_CH.map((c, k) => {
+  const chs = storyChs(line).map((c, k) => {
     const ids = storySeq(line).filter((id) => STORY_BY[id].ch === k), d = ids.filter((id) => p.done[id]).length;
     const subs = STORY_SUBS.filter((s) => s.ch === k && s.line === line), sd = subs.filter((s) => p.done[s.id]).length;
     if (!ids.length) return '';   // 番外篇：沒有關卡的章節不顯示
     return `<button class="st-chb ${d === ids.length ? 'done' : d ? 'on' : ''} ${k === curCh ? 'cur' : ''}" data-ch="${k}"><span>${c.no}</span><b>${c.name}</b><i>${d}／${ids.length}${subs.length ? `・支線 ${sd}／${subs.length}` : ''}</i></button>`;
   }).join('');
   overlay(`<div class="g-wrap st-wrap">
-    <div class="g-head"><h2>雙星記</h2><span class="crumb"><span class="g-${STORY_SIDE[L.side].cls}">${L.name}</span>・${storyCount(p, line)}／${storySeq(line).length} 場作戰</span><span class="g-sp"></span><button class="g-btn sm" id="st-line" title="換到另一個篇章（兩篇的進度分開保存）">切換篇章</button><button class="g-btn sm" id="st-diff" title="更改難度（進度不會重置）">難度：${storyDiffOf(p).name}</button><button class="g-btn sm" id="st-reset">重新開始${L.name}</button><button class="g-btn" id="st-back">← 單人戰鬥</button></div>
+    <div class="g-head"><h2>${L.title || '雙星記'}</h2><span class="crumb"><span class="g-${STORY_SIDE[L.side].cls}">${L.name}</span>・${storyCount(p, line)}／${storySeq(line).length} 場作戰</span><span class="g-sp"></span><button class="g-btn sm" id="st-line" title="換到另一個篇章（兩篇的進度分開保存）">切換篇章</button><button class="g-btn sm" id="st-diff" title="更改難度（進度不會重置）">難度：${storyDiffOf(p).name}</button><button class="g-btn sm" id="st-reset">重新開始${L.name}</button><button class="g-btn" id="st-back">← 單人戰鬥</button></div>
     <div class="st-main"><div class="st-map">${storyMapSVG(p, V.sel, V.vb || STORY_VB, curCh)}<div class="st-help">點選星系查看作戰・滾輪縮放・拖曳移動・雙擊看整張</div><div class="st-zoom"><button class="g-btn sm" data-z="in" title="放大（滾輪也可以）">＋</button><button class="g-btn sm" data-z="out" title="縮小">－</button><button class="g-btn sm" data-z="reset" title="整張星圖（雙擊星圖也可以）">⟲</button></div></div>${storyPanel(p, V.sel, chs)}</div>
   </div>`);
   gEl('st-back').onclick = showSingle;
@@ -436,9 +503,9 @@ function showStoryLine(change) {
   const p = storyLoad();
   setPhase('briefing');
   const card = (k) => {
-    const L = STORY_LINE[k], cls = STORY_SIDE[L.side].cls, n = storyCount(p, k), all = storySeq(k).length, cur = change && p.line === k;
+    const L = STORY_LINE[k], cls = STORY_SIDE[L.side].cls, n = storyCount(p, k), all = storySeq(k).length, cur = change && p.line === k, lock = !storyLineOpen(p, k);
     const nx = STORY_BY[storySeq(k).find((id) => !p.done[id])];
-    return `<button class="sp-mode st-linepick ${cls} ${cur ? 'on' : ''}" data-l="${k}"><span class="sp-en">${L.extra ? '番外篇・' : ''}${STORY_SIDE[L.side].name}${cur ? '・目前' : ''}</span><b class="g-${cls}">${L.name}</b><span class="sp-desc">${L.blurb}</span>
+    return `<button class="sp-mode st-linepick ${cls} ${cur ? 'on' : ''} ${lock ? 'locked' : ''}" data-l="${k}" ${lock ? 'disabled title="打完番外篇〈雙星之外〉的第 8 關後開放"' : ''}><span class="sp-en">${L.extra ? '番外篇・' : L.sequel ? `新主線・${lock ? '尚未開放・' : ''}` : ''}${STORY_SIDE[L.side].name}${cur ? '・目前' : ''}</span><b class="g-${cls}">${L.name}</b><span class="sp-desc">${L.blurb}</span>
       ${L.note ? `<span class="sp-desc st-note">${L.note}</span>` : ''}<span class="sp-st"><span class="g-dim">主要人物</span>　${L.cast}</span><span class="sp-st"><span class="g-dim">進度</span>　${n ? `${n}／${all} 場作戰${p.done[storySeq(k)[all - 1]] ? `・已看過結局〈${L.ending}〉` : nx ? `・下一場：${storyNo(nx)}〈${nx.name}〉` : ''}` : `尚未開始・共 ${all} 場作戰`}</span></button>`;
   };
   overlay(`<div class="g-wrap sp-wrap">
@@ -447,10 +514,12 @@ function showStoryLine(change) {
     <div class="st-lines">${card('e')}${card('a')}</div>
     <h3 class="st-xh">番外篇</h3>
     <div class="st-lines one">${card('m')}</div>
+    <h3 class="st-xh">新主線</h3>
+    <div class="st-lines one">${card('x')}</div>
   </div>`);
   gEl('sl-back').onclick = change ? () => showStory() : showSingle;
   document.querySelectorAll('.st-lines [data-l]').forEach((b) => { b.onclick = () => {
-    const q = storyLoad(); q.line = b.dataset.l; storySave(q); if (GAME.storyView) { GAME.storyView.sel = null; GAME.storyView.vb = null; } showStory();
+    const q = storyLoad(); if (!storyLineOpen(q, b.dataset.l)) return; q.line = b.dataset.l; storySave(q); if (GAME.storyView) { GAME.storyView.sel = null; GAME.storyView.vb = null; } showStory();
   }; });
 }
 // 難度選擇：第一次進劇情（或重新開始）時一定會先到這裡；之後可以從星圖再進來改（進度保留）
@@ -458,8 +527,8 @@ function showStoryDiff(change) {
   const p = storyLoad(), cur = p.diff != null ? p.diff : -1, line = storyLineOf(p), L = STORY_LINE[line];
   setPhase('briefing');
   // 各章的建議等級（同一章取最低～最高；只算目前篇章）
-  const recs = (D) => STORY_CH.map((c, k) => {
-    const v = STORY_STAGES.filter((s) => s.ch === k && s.line === line).map((s) => storyRec(s.id, D));
+  const recs = (D) => storyChs(line).map((c, k) => {
+    const v = STORY_STAGES.filter((s) => s.ch === k && s.line === line && STORY_WAR[s.id]).map((s) => storyRec(s.id, D));
     if (!v.length) return '';
     const lo = Math.min(...v), hi = Math.max(...v);
     return `<span>${c.no} <b>Lv ${lo === hi ? lo : `${lo}～${hi}`}</b></span>`;

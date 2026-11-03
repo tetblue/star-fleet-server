@@ -39,7 +39,7 @@ rosterApply();
 // 劇情加入的指揮官（STORY_CMDRS）：放進 hired，之後就跟招募來的一樣；已經在名單裡（或被解雇過又回來）就只補回名單
 function storyJoin(id) {
   const d = STORY_CMDRS.find((o) => o.id === id); if (!d || COMMANDERS.some((o) => o.id === id)) return false;
-  const def = { id: d.id, name: d.name, title: d.title, trait: d.trait, skills: d.skills.slice(), faction: d.faction, story: true, bio: d.bio };
+  const def = { id: d.id, name: d.name, title: d.title, trait: d.trait, skills: d.skills.slice(), faction: d.faction, story: true, bio: d.bio, ...(d.leads ? { leads: d.leads.slice() } : {}) };
   ROSTER.hired.push(def); COMMANDERS.push(def);
   if (!CMDR_SAVE[id]) { CMDR_SAVE[id] = { xp: XP_PER_LEVEL * (d.lv - 1), tal: {} }; saveCmdrs(CMDR_SAVE); }
   rosterSave();

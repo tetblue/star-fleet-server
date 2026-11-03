@@ -187,12 +187,16 @@ const STORY_CMDRS = [
   { id: 'duran', name: '「鏽牙」杜蘭', title: '傭兵', trait: 'dmg', skills: ['charge', 'focus'], faction: 2, lv: 3, bio: '灰鴉的突擊隊長。打法粗暴，最討厭跟商人做生意。' },
   { id: 'sasha', name: '「快手」莎夏', title: '傭兵', trait: 'speed', skills: ['charge', 'rapid'], faction: 2, lv: 2, bio: '灰鴉的游擊隊長。飛彈艦隊用得最好的人。' },
   { id: 'kol', name: '「鐵顎」柯爾', title: '傭兵', trait: 'shield', skills: ['wall', 'focus'], faction: 2, lv: 3, bio: '灰鴉的守備隊長。話不多，守住的地方從來沒丟過。' },
+  // 新主線〈星海之外〉：救出的新伊甸倖存者（傭兵陣營）與機械智慧族的聯絡個體（leads：可以替哪些陣營出擊，艦隊是機械智慧族的船與特性）
+  { id: 'mira', name: '米拉・哈特', title: '上尉', trait: 'shield', skills: ['wall', 'focus'], faction: 2, lv: 7, bio: '新伊甸殖民地防衛軍的倖存軍官。守了三十年的殖民地，最後只剩她還站著。' },
+  { id: 'owen', name: '「老錨」歐文', title: '船長', trait: 'shield', skills: ['wall', 'jam'], faction: 2, lv: 7, bio: '殖民船團的老船長。打仗不是他的本行，但他比誰都懂怎麼讓船隊活下去。' },
+  { id: 'seph', name: '賽弗', title: '聯絡個體', trait: 'dmg', skills: ['focus', 'jam'], faction: 4, leads: [2], lv: 8, bio: '機械智慧族派來的聯絡個體。說話平板、凡事講機率，正在學人類的說話方式。' },
 ];
 const STORY_MERCS = STORY_CMDRS.filter((c) => c.faction === 2).map((c) => c.id);
 const FACTION_NAME = ['帝國軍', '聯盟軍', '灰鴉傭兵團', '機械改造人類', '機械智慧族', '蟲族感染人類', '蟲族', '帝國攝政派'];   // 7＝帝國攝政派：帝國內戰的敵軍，船與特性同帝國，只有顏色不同   // 2＝傭兵：只有劇情番外篇〈雙星之外〉是玩家的陣營，傭兵指揮官可以替兩個陣營出擊；3～6 目前只當敵軍外觀
 const FACTION_CLS = ['emp', 'all', 'mer', 'cyb', 'mai', 'inf', 'bug', 'reg'];
 // 指揮官能不能替這個陣營出擊（傭兵兩邊都行）
-const canLead = (c, faction) => (c.faction || 0) === faction || (c.faction === 2 && faction < 2);
+const canLead = (c, faction) => (c.faction || 0) === faction || (c.faction === 2 && faction < 2) || !!(c.leads && c.leads.includes(faction));   // leads：劇情指揮官另外可以替哪些陣營出擊（賽弗替灰鴉）
 // 指揮官只帶自己風格的艦隊：傭兵指揮官替帝國／聯盟出擊時，艦隊是灰鴉的船、用傭兵的種族特性（setup 的 fleet.fac）
 const ownFac = (c, sideFac) => (c && c.faction != null && c.faction !== sideFac ? { fac: c.faction } : {});
 const TRAIT_NAME = { dmg: '攻擊', shield: '防禦', speed: '機動' };
