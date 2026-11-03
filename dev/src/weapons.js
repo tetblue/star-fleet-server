@@ -48,7 +48,7 @@ function readMounts(obj) {   // 不認得的鍵、壞掉的項目都略過；沒
 }
 let MOUNTS = (() => { try { return readMounts(JSON.parse(STORE.getItem(MOUNT_STORE) || 'null')); } catch (e) { return readMounts(null); } })();
 function saveMounts() { try { STORE.setItem(MOUNT_STORE, JSON.stringify({ v: 3, m: MOUNTS })); } catch (e) { /* 只在本次有效 */ } }
-function mountsOf(hk) { return (MOUNTS[hk] || []).map((m) => ({ ...m, hk })); }
+function mountsOf(hk) { return (MOUNTS[hk] || MOUNTS[baseKey(hk)] || []).map((m) => ({ ...m, hk })); }   // 攝政派（v）用帝國的掛點，武器鍵還是 v 開頭（換色的材質）
 function mountsChanged(hk) { saveMounts(); R3.version = -1; scheduleWeaponAtlas(hk); }
 
 // ───── 主題色：每個風格一個顏色，船體、武器（3D 與 2D）一起換色（著色器在 main.js 的 THEME_GLSL）─────
@@ -56,7 +56,7 @@ const THEME_STORE = 'fleet.theme';
 const THEME_SW = [['', '原色'], ['#d8413a', '紅'], ['#ee8a2a', '橙'], ['#e8c04a', '金'], ['#5cc45a', '綠'], ['#3ec8c0', '青'], ['#3f86e8', '藍'], ['#8a5ae0', '紫'], ['#e070b0', '粉'], ['#e8ecf2', '白'], ['#3a3f4a', '黑']];
 const validHex = (h) => typeof h === 'string' && /^#[0-9a-f]{6}$/i.test(h);
 let THEME = (() => { try { const o = JSON.parse(STORE.getItem(THEME_STORE) || '{}'); return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; } })();
-function themeOf(f) { const h = THEME[FAC_KEY[f]]; return validHex(h) ? h.toLowerCase() : ''; }
+function themeOf(f) { const h = THEME[FAC_KEY[f]] || (FACTION[f] && FACTION[f].theme); return validHex(h) ? h.toLowerCase() : ''; }
 function applyThemeU(f) { const h = themeOf(f), v = THEME_V[f]; if (!h) { v.set(0, 0, 0, 0); return; } const c = new THREE.Color(h); v.set(c.r, c.g, c.b, 1); }   // Color 會把 sRGB 轉成線性
 for (let f = 0; f < FAC_N; f++) applyThemeU(f);
 // save＝false：取色器拖曳中，只更新畫面

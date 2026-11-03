@@ -40,6 +40,7 @@ Object.assign(window.__demo, { frame, setPaused(v) { paused = v; }, pilotLayout,
 // 測試用：劇情關卡自動代打（玩家那一邊也交給 AI）。不畫畫面，直接跑模擬到分出勝負
 // o：diff 難度序號（預設普通）、lv 玩家指揮官等級（預設＝建議等級）、ai 玩家 AI 難度 1～5（預設 3）、tactic 玩家 AI 打法（預設照關卡目標挑）
 //    like：玩家的特性加成改成跟敵方一樣照等級算（對照組，大約是「天賦有點」的強度）
+//    peek：只跑到第幾秒就停，留在戰場畫面（截圖用）
 // 玩家指揮官預設不點天賦（只有固定 +8% 的特性加成、固有技能），也不帶增援、傭兵支援
 async function autoStory(id, o = {}) {
   const di = o.diff != null ? o.diff : 1; GAME.storyDiffForce = di;
@@ -60,14 +61,15 @@ async function autoStory(id, o = {}) {
     GAME.watch = true; GAME.replaying = false; GAME.result = null; GAME.lineK = 0; GAME.dlineK = 0; GAME.log = []; GAME.simCtl = null; GAME.phase = 'battle';
     newBattle(sc.seed + 1, setup); setRule('fire', true); setRule('advance', false);
     GAME.init = [sideAlive(0), sideAlive(1)];
-    const cap = (sc.untimed ? sc.timeLimit * 3 : sc.timeLimit + 30) * SIM_HZ, t0 = performance.now();
+    const cap = o.peek ? o.peek * SIM_HZ : (sc.untimed ? sc.timeLimit * 3 : sc.timeLimit + 30) * SIM_HZ, t0 = performance.now();
     while (!GAME.result && simTick < cap) { for (let k = 0; k < 600 && !GAME.result; k++) stepSim(); await new Promise((r) => { const ch = new MessageChannel(); ch.port1.onmessage = r; ch.port2.postMessage(0); }); }   // 不用 setTimeout：背景分頁會被降速
     const R = GAME.result || { kind: 'none', why: '沒有分出勝負', t: U.uTime.value, ratio: [sideAlive(0) / GAME.init[0], sideAlive(1) / GAME.init[1]] };
     const vip = fleets.find((f) => f.vip), vipLeft = vip ? vip.sqs.reduce((a, x) => a + x.alive, 0) / vip.initial : null;
     return { id, name: s.name, line: s.line, diff: STORY_DIFF[di].name, lv, ai: o.ai || 3, like: !!o.like, formation: o.formation || 'line', tac, goal: G || 'kill', kind: R.kind, why: R.why, t: Math.round(R.t), limit: sc.timeLimit,
       me: Math.round(R.ratio[0] * 100), foe: Math.round(R.ratio[1] * 100), vip: vipLeft != null ? Math.round(vipLeft * 100) : null, init: GAME.init.slice(), defT: (fleets.find((f) => f.defSched) || {}).defT, ...(o.log ? { said } : {}), wall: Math.round((performance.now() - t0) / 1000) };
   } finally {
-    toast = toast0; paused = paused0; GAME.watch = false; GAME.phase = 'menu'; GAME.storyDiffForce = null;
+    toast = toast0; paused = paused0; GAME.storyDiffForce = null;
+    if (!o.peek) { GAME.watch = false; GAME.phase = 'menu'; }
   }
 }
 Object.assign(window.__demo, { autoStory, queueMode });

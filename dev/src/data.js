@@ -189,8 +189,8 @@ const STORY_CMDRS = [
   { id: 'kol', name: '「鐵顎」柯爾', title: '傭兵', trait: 'shield', skills: ['wall', 'focus'], faction: 2, lv: 3, bio: '灰鴉的守備隊長。話不多，守住的地方從來沒丟過。' },
 ];
 const STORY_MERCS = STORY_CMDRS.filter((c) => c.faction === 2).map((c) => c.id);
-const FACTION_NAME = ['帝國軍', '聯盟軍', '灰鴉傭兵團', '機械改造人類', '機械智慧族', '蟲族感染人類', '蟲族'];   // 2＝傭兵：只有劇情番外篇〈雙星之外〉是玩家的陣營，傭兵指揮官可以替兩個陣營出擊；3～6 目前只當敵軍外觀
-const FACTION_CLS = ['emp', 'all', 'mer', 'cyb', 'mai', 'inf', 'bug'];
+const FACTION_NAME = ['帝國軍', '聯盟軍', '灰鴉傭兵團', '機械改造人類', '機械智慧族', '蟲族感染人類', '蟲族', '帝國攝政派'];   // 7＝帝國攝政派：帝國內戰的敵軍，船與特性同帝國，只有顏色不同   // 2＝傭兵：只有劇情番外篇〈雙星之外〉是玩家的陣營，傭兵指揮官可以替兩個陣營出擊；3～6 目前只當敵軍外觀
+const FACTION_CLS = ['emp', 'all', 'mer', 'cyb', 'mai', 'inf', 'bug', 'reg'];
 // 指揮官能不能替這個陣營出擊（傭兵兩邊都行）
 const canLead = (c, faction) => (c.faction || 0) === faction || (c.faction === 2 && faction < 2);
 // 指揮官只帶自己風格的艦隊：傭兵指揮官替帝國／聯盟出擊時，艦隊是灰鴉的船、用傭兵的種族特性（setup 的 fleet.fac）
@@ -280,6 +280,8 @@ const FAC_TAL_SWAP = [{}, {}, {},
     shield: { name: '甲殼增生', desc: (r) => `船體再生速度 +${r * 20}%（取代護盾強化：蟲族沒有護盾）` },
     energy: { name: '甲殼硬化', desc: (r) => `被光束打中時 ${Math.round(r * SWARM_RULE.harden * 100)}% 機率傷害減半（取代能量調度：蟲族沒有護盾）` },
     damage: { name: '快速癒合' }, s_jam: { name: '費洛蒙干擾' }, survey: { name: '偵察孢子' }, hangar: { name: '孵化加速' } }];
+// 7 帝國攝政派：特性、天賦都同帝國
+FAC_TRAIT[7] = FAC_TRAIT[0]; FAC_TALENT[7] = FAC_TALENT[0]; FAC_TAL_SWAP[7] = FAC_TAL_SWAP[0];
 // 依陣營取天賦的實際名稱與說明
 function talFor(t, fac) {
   const f = fac || 0;

@@ -19,7 +19,8 @@ const CAP = { on: false, byI: null, ships: [] };   // 艦長：玩家的特種�
 let MIS_SPD = 1;   // 飛彈速度倍率（艦長模式放慢，點防禦才攔得到）
 function FTR_SPD() { return PL.on ? PILOT_SPEED : CAP.on ? CAP_RULE.ftrSpd : 1; }   // 艦載機速度倍率（駕駛、艦長模式都放慢）
 function capShip(i) { return CAP.on && CAP.byI && i < CAP.byI.length ? CAP.byI[i] : -1; }
-// 陣營（外觀）與模擬的「邊」分開：邊 0＝玩家（畫面下方）、邊 1＝對手；SIDE_FAC[邊]＝那一邊用哪個陣營（0 帝國、1 聯盟、2 傭兵、3 機械改造人類、4 機械智慧族、5 蟲族感染人類、6 蟲族；玩家只能是 0、1，劇情番外篇是 2）
+// 陣營（外觀）與模擬的「邊」分開：邊 0＝玩家（畫面下方）、邊 1＝對手；SIDE_FAC[邊]＝那一邊用哪個陣營（0 帝國、1 聯盟、2 傭兵、3 機械改造人類、4 機械智慧族、5 蟲族感染人類、6 蟲族、7 帝國攝政派；玩家只能是 0、1，劇情番外篇是 2）
+// 7 帝國攝政派＝帝國內戰的另一邊：船型、特效、種族特性都借帝國（FAC_BASE），只有顏色（光束、標籤、船體換色）是自己的
 // 單一艦隊也可以有自己的外觀（fleet.fac，例如友軍傭兵、傭兵支援）；畫船、光束、飛彈、艦載機都用 sqFac／shipFac
 let SIDE_FAC = [0, 1];
 // 作戰介面跟著玩家的陣營換主題（顏色、紋飾）
@@ -29,12 +30,14 @@ function applyPlayerTheme() {   // 傭兵等不是玩家陣營：對手是這些
   if (ef >= 2 && FACTION[ef]) document.body.style.setProperty('--ec', FACTION[ef].ui); else document.body.style.removeProperty('--ec');
   if (f >= 2 && FACTION[f]) document.body.style.setProperty('--pc', FACTION[f].ui); else document.body.style.removeProperty('--pc');   // 番外篇：玩家是傭兵
 }
-const FAC_KEY = ['e', 'a', 'm', 'c', 'r', 'i', 'b'];   // 模型鍵的字首（依陣營編號）
+const FAC_KEY = ['e', 'a', 'm', 'c', 'r', 'i', 'b', 'v'];   // 模型鍵的字首（依陣營編號）；v（攝政派）的模型是帝國模型的別名，材質另外換色
+const FAC_BASE = [0, 1, 2, 3, 4, 5, 6, 0];   // 船型、貼圖、種族特性借哪個陣營的
+const baseKey = (k) => (k && k[0] === 'v' ? 'e' + k.slice(1) : k);   // 模型、掛點鍵 → 真正有檔案的鍵
 const sqFac = (sq) => (sq.fleet && sq.fleet.fac != null ? sq.fleet.fac : SIDE_FAC[sq.side]);
 const shipFac = (i) => sqFac(squadrons[ships.sq[i]]);
 const fxFac = (side) => (SIDE_FAC[side] === 1 ? 1 : 0);   // 爆炸、護盾特效只有帝國、聯盟兩套：傭兵用帝國的
 function applySideNames() {
-  document.querySelectorAll('[data-fn]').forEach((el) => { const f = SIDE_FAC[+el.dataset.fn]; el.textContent = el.dataset.short ? FACTION[f].name[0] : FACTION[f].name; });
+  document.querySelectorAll('[data-fn]').forEach((el) => { const f = SIDE_FAC[+el.dataset.fn]; el.textContent = el.dataset.short ? FACTION[f].short || FACTION[f].name[0] : FACTION[f].name; });
   document.querySelectorAll('[data-fs]').forEach((el) => { const f = SIDE_FAC[+el.dataset.fs]; FAC_KEY.forEach((k, i) => el.classList.toggle(k, f === i)); });
 }   // 指揮官視角狀態（內容在 bridge.js）
 const CAM_DIR = new THREE.Vector3(0, Math.sin(ELEV), Math.cos(ELEV)); // 目標點 → 相機
@@ -50,6 +53,7 @@ const FACTION = [
   { name: '機械智慧族', beam: new THREE.Color(0.30, 1.0, 0.86), glow: new THREE.Color(0.2, 0.95, 0.8), ui: '#4ff0d8' },
   { name: '蟲族感染人類', beam: new THREE.Color(0.80, 0.42, 1.0), glow: new THREE.Color(0.72, 0.3, 1.0), ui: '#c47cff' },
   { name: '蟲族', beam: new THREE.Color(0.62, 1.0, 0.30), glow: new THREE.Color(0.55, 0.95, 0.2), ui: '#9be35a' },
+  { name: '帝國攝政派', beam: new THREE.Color(0.86, 0.9, 1.0), glow: new THREE.Color(0.72, 0.8, 1.0), ui: '#cfd8ea', theme: '#e8ecf2', short: '攝' },   // 銀白；theme＝預設的船體換色（玩家沒在武器配置設定時）
 ];
 const FAC_N = FACTION.length;
 // 各風格的主題色（在武器配置裡選，內容在 weapons.js）：xyz＝線性色、w＝1 才換色。2D 貼圖的著色器、3D 船體與武器的材質共用
@@ -248,7 +252,7 @@ const shipMat = new THREE.ShaderMaterial({
       clip.xy += position.xy * sizePx * 2. / uRes * clip.w;
       gl_Position = clip;
       float dir = dirIndex(hShip);
-      float fac = floor(aInfo.z + 0.5);   // 陣營 f：x＝(f%2)×8 格、y＝⌊f/2⌋×1024 px（見 atlasXY）
+      float fac = floor(aInfo.z + 0.5); if (fac > 6.5) fac = 0.;   // 攝政派借帝國的格子（換色看 vFac）；陣營 f：x＝(f%2)×8 格、y＝⌊f/2⌋×1024 px（見 atlasXY）
       float col = mod(fac, 2.) * 8. + dir;
       float row = floor(aInfo.y);
       vAlt = fract(aInfo.y);
@@ -269,6 +273,7 @@ const shipMat = new THREE.ShaderMaterial({
       vec4 c = texture2D(uTex, vUv);
       c.rgb = themeCol(c.rgb, uTheme[int(clamp(floor(vFac + 0.5), 0., ${FAC_N - 1}.))]);   // 武器疊圖是 3D 材質畫的，已經換過色
       vec4 w = vAlt > 0.25 ? vec4(0.) : texture2D(uWTex, vUv);   // 武器（預乘透明度）；借用外觀的艦種（補給艦）不畫別人的砲
+      if (vFac > 6.5) w.rgb = themeCol(w.rgb, uTheme[7]);   // 攝政派借的是帝國的武器疊圖：再換一次色
       c.rgb = c.rgb * (1. - w.a) + w.rgb; c.a = max(c.a, w.a);
       if (c.a < 0.32) discard;
       vec3 col = c.rgb * vBright;
@@ -313,7 +318,7 @@ const glowMat = new THREE.ShaderMaterial({
       vFac = aInfo.z;
     }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uFac[7]; vec3 facCol(float f){ return uFac[int(clamp(floor(f + 0.5), 0., 6.))]; }
+    uniform vec3 uFac[${FAC_N}]; vec3 facCol(float f){ return uFac[int(clamp(floor(f + 0.5), 0., ${FAC_N - 1}.))]; }
     varying vec2 vUv; varying float vI; varying float vFac;
     void main(){
       float d = length(vUv);
@@ -368,7 +373,7 @@ const beamMat = new THREE.ShaderMaterial({
       vFac = floor(aT.z); vFade *= fract(aT.z);
     }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uFac[7]; vec3 facCol(float f){ return uFac[int(clamp(floor(f + 0.5), 0., 6.))]; }
+    uniform vec3 uFac[${FAC_N}]; vec3 facCol(float f){ return uFac[int(clamp(floor(f + 0.5), 0., ${FAC_N - 1}.))]; }
     varying vec2 vUv; varying float vFade; varying float vFac;
     void main(){
       float y = abs(vUv.y);
@@ -2106,7 +2111,7 @@ function fleetMods(fleet) {
   const m = { dmg: 1, shield: 0, shTaken: 1, taken: 1, speed: 1, fwd: 1, mcd: 1, aa: 0, repair: 1, ftrRegen: 1, ftrDmg: 1, morph: 1, fireCd: 1, acc: 1, ffP: 1, defl: 0,
     rot: 'shield', rotDur: ROTATE_RULE.dur, shRegen: 1, repN: FIELD_REPAIR.n, repCap: 0, fac: 0, facR: 0, armor: 0, shMul: 1, shDelay: 1, hpMul: 1, regen: 0, harden: 0 };   // fac＝種族特性用的陣營、facR＝專屬天賦的階數；armor 裝甲厚度倍率（0＝沒有）、shMul 護盾容量、shDelay 護盾回充延遲
   if (!fleet) return m;
-  m.fac = fleet.fac != null ? fleet.fac : SIDE_FAC[fleet.side] || 0;
+  m.fac = FAC_BASE[fleet.fac != null ? fleet.fac : SIDE_FAC[fleet.side] || 0] ?? 0;   // 攝政派用帝國的特性
   const c = fleet.commander;
   if (c) {
     const b = c.tal ? 0.08 : traitBonus(c.trait, c.level || 1);   // 玩家：固有特性固定 +8%，其餘靠天賦；敵方：照等級
@@ -2797,7 +2802,7 @@ const MIS_GLSL = /* glsl */`
   attribute vec3 aM0; attribute vec3 aM1; attribute vec3 aM2; attribute vec4 aMT;
   vec3 bez(float u){ float a = 1. - u; return a * a * aM0 + 2. * a * u * aM1 + u * u * aM2; }
 `;
-const MIS_COL = [new THREE.Color(1.0, 0.42, 0.14), new THREE.Color(0.55, 0.85, 1.0), new THREE.Color(1.0, 0.3, 0.3), new THREE.Color(1.0, 0.32, 0.45), new THREE.Color(0.35, 1.0, 0.88), new THREE.Color(0.78, 0.45, 1.0), new THREE.Color(0.6, 1.0, 0.3)];
+const MIS_COL = [new THREE.Color(1.0, 0.42, 0.14), new THREE.Color(0.55, 0.85, 1.0), new THREE.Color(1.0, 0.3, 0.3), new THREE.Color(1.0, 0.32, 0.45), new THREE.Color(0.35, 1.0, 0.88), new THREE.Color(0.78, 0.45, 1.0), new THREE.Color(0.6, 1.0, 0.3), new THREE.Color(0.85, 0.9, 1.0)];
 const misTrailMat = new THREE.ShaderMaterial({
   uniforms: { uTime: U.uTime, uRes: U.uRes, uFac: { value: MIS_COL } },
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
@@ -2824,7 +2829,7 @@ const misTrailMat = new THREE.ShaderMaterial({
       vS = s; vY = position.y * 2.; vI = 1. - k; vFac = floor(aMT.z);
     }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uFac[7]; vec3 facCol(float f){ return uFac[int(clamp(floor(f + 0.5), 0., 6.))]; }
+    uniform vec3 uFac[${FAC_N}]; vec3 facCol(float f){ return uFac[int(clamp(floor(f + 0.5), 0., ${FAC_N - 1}.))]; }
     varying float vS; varying float vY; varying float vI; varying float vFac;
     void main(){
       float y = abs(vY);
@@ -2851,7 +2856,7 @@ const misHeadMat = new THREE.ShaderMaterial({
       vI = 0.8 + 0.2 * sin(uTime * 40. + aMT.x * 97.);
     }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uFac[7]; vec3 facCol(float f){ return uFac[int(clamp(floor(f + 0.5), 0., 6.))]; }
+    uniform vec3 uFac[${FAC_N}]; vec3 facCol(float f){ return uFac[int(clamp(floor(f + 0.5), 0., ${FAC_N - 1}.))]; }
     varying vec2 vUv; varying float vFac; varying float vI;
     void main(){
       float d = length(vUv);
@@ -3045,7 +3050,7 @@ const ftrSpriteMat = new THREE.ShaderMaterial({
       float h = atan(aFV.x, aFV.z);
       float dir = mod(floor(-h / (PI / 4.) + 0.5) + 16., 8.);
       vec2 uv = position.xy + 0.5;
-      float fac = floor(aFI.x + 0.5); vUv = vec2((mod(fac, 2.) * 8. + dir + uv.x) / 16., 1. - (floor(fac / 2.) + 1. - uv.y) * 0.25);   // 陣營 f：第 ⌊f/2⌋ 排（共 4 排）、左右各一個陣營
+      float fac = floor(aFI.x + 0.5); if (fac > 6.5) fac = 0.; vUv = vec2((mod(fac, 2.) * 8. + dir + uv.x) / 16., 1. - (floor(fac / 2.) + 1. - uv.y) * 0.25);   // 陣營 f：第 ⌊f/2⌋ 排（共 4 排）、左右各一個陣營
       vDie = die;
       vFog = uFog * smoothstep(-260., 620., dot(aFP, -uCamDir)) * 0.6;
     }`,
@@ -3059,7 +3064,7 @@ const ftrSpriteMat = new THREE.ShaderMaterial({
       gl_FragColor = vec4(col, 1.);
     }`,
 });
-const FTR_COL = [new THREE.Color(1.0, 0.55, 0.25), new THREE.Color(0.5, 0.8, 1.0), new THREE.Color(1.0, 0.4, 0.3), new THREE.Color(1.0, 0.4, 0.5), new THREE.Color(0.4, 1.0, 0.9), new THREE.Color(0.8, 0.5, 1.0), new THREE.Color(0.65, 1.0, 0.35)];
+const FTR_COL = [new THREE.Color(1.0, 0.55, 0.25), new THREE.Color(0.5, 0.8, 1.0), new THREE.Color(1.0, 0.4, 0.3), new THREE.Color(1.0, 0.4, 0.5), new THREE.Color(0.4, 1.0, 0.9), new THREE.Color(0.8, 0.5, 1.0), new THREE.Color(0.65, 1.0, 0.35), new THREE.Color(0.85, 0.9, 1.0)];
 const ftrTrailMat = new THREE.ShaderMaterial({
   uniforms: { uTime: U.uTime, uRes: U.uRes, uCamDir: U.uCamDir, uFog: U.uFog, uFac: { value: FTR_COL }, uTrailMax: { value: 1e6 } },   // uTrailMax：尾焰最長幾單位（駕駛模式＝機身的幾倍，見 pilot.js）
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
@@ -3079,10 +3084,10 @@ const ftrTrailMat = new THREE.ShaderMaterial({
       vec2 s = mix(st, sh, t) + vec2(-dn.y, dn.x) * position.y * w + dn * position.x * w * 0.6;
       c.xy = s / (uRes * 0.5) * c.w;
       gl_Position = c;
-      vUv = vec2(t, position.y * 2.); vFac = kind > 0.5 ? 9. : aFI.x;   // 9＝維修機（綠色尾焰）；0～6＝陣營
+      vUv = vec2(t, position.y * 2.); vFac = kind > 0.5 ? 9. : aFI.x;   // 9＝維修機（綠色尾焰）；0～7＝陣營
     }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uFac[7]; vec3 facCol(float f){ return uFac[int(clamp(floor(f + 0.5), 0., 6.))]; } varying vec2 vUv; varying float vFac;
+    uniform vec3 uFac[${FAC_N}]; vec3 facCol(float f){ return uFac[int(clamp(floor(f + 0.5), 0., ${FAC_N - 1}.))]; } varying vec2 vUv; varying float vFac;
     void main(){
       float y = abs(vUv.y);
       vec3 c = vFac > 8.5 ? vec3(0.45, 1.0, 0.6) : facCol(vFac);
@@ -4036,7 +4041,8 @@ async function loadAllModels(onProgress = () => {}) {
 function ensureModels(keys) {   // 晚載入的模型；已經有、或伺服器沒有的鍵直接略過
   const man = MODEL_LOAD.man; if (!man) return Promise.resolve();
   if (!MODEL_LOAD.loader) MODEL_LOAD.loader = new GLTFLoader();
-  return Promise.all(keys.map((k) => {
+  return Promise.all(keys.map((k0) => {
+    const k = MODEL_SRC[k0] ? k0 : baseKey(k0);
     if (MODEL_SRC[k] || !man.models[k]) return null;
     return MODEL_LOAD.pending[k] || (MODEL_LOAD.pending[k] = loadOneModel(k, man.models[k], MODEL_LOAD.loader, () => {}).finally(() => { delete MODEL_LOAD.pending[k]; }));
   }));
@@ -4080,6 +4086,7 @@ async function loadOneModel(key, m, loader, onBytes) {
       })];
       for (const g of lods) R3.geomBytes += g.attributes.position.count * 32 + (g.index ? g.index.count * 4 : 0);
       MODEL_SRC[key] = { kind: m.kind, tex, lods, min: m.min, max: m.max, name: m.name };
+      if (key[0] === 'e') MODEL_SRC['v' + key.slice(1)] = MODEL_SRC[key];   // 攝政派：同一份網格，getModel 另外做換色的材質
     } catch (e) { MODEL_LOAD.err.push(`${key}：${e.message}`); console.warn('模型載入失敗', key, e); }
   }
 }
@@ -4147,7 +4154,7 @@ function rigOBC(shader) {
 }
 // 武器的動畫設定：mode＝t／f／l／n、g＝跟著的砲種（0 主砲 1 副砲 2 防空 3 飛彈）
 function rigSpec(wk) {
-  const f = 'eamcrib'.indexOf(wk[0]), w = +wk.slice(2);
+  const f = 'eamcrib'.indexOf(baseKey(wk)[0]), w = +wk.slice(2);
   if (f < 0 || !(w >= 0 && w < 6) || typeof WEAPON_RIG === 'undefined') return { mode: 'n', g: 0 };
   return { mode: WEAPON_RIG[f][w] || 'n', g: RIG_GKC[WEAPON_GK[f][w]] ?? 0 };
 }
@@ -5839,8 +5846,8 @@ const STORY_CMDRS = [
   { id: 'kol', name: '「鐵顎」柯爾', title: '傭兵', trait: 'shield', skills: ['wall', 'focus'], faction: 2, lv: 3, bio: '灰鴉的守備隊長。話不多，守住的地方從來沒丟過。' },
 ];
 const STORY_MERCS = STORY_CMDRS.filter((c) => c.faction === 2).map((c) => c.id);
-const FACTION_NAME = ['帝國軍', '聯盟軍', '灰鴉傭兵團', '機械改造人類', '機械智慧族', '蟲族感染人類', '蟲族'];   // 2＝傭兵：只有劇情番外篇〈雙星之外〉是玩家的陣營，傭兵指揮官可以替兩個陣營出擊；3～6 目前只當敵軍外觀
-const FACTION_CLS = ['emp', 'all', 'mer', 'cyb', 'mai', 'inf', 'bug'];
+const FACTION_NAME = ['帝國軍', '聯盟軍', '灰鴉傭兵團', '機械改造人類', '機械智慧族', '蟲族感染人類', '蟲族', '帝國攝政派'];   // 7＝帝國攝政派：帝國內戰的敵軍，船與特性同帝國，只有顏色不同   // 2＝傭兵：只有劇情番外篇〈雙星之外〉是玩家的陣營，傭兵指揮官可以替兩個陣營出擊；3～6 目前只當敵軍外觀
+const FACTION_CLS = ['emp', 'all', 'mer', 'cyb', 'mai', 'inf', 'bug', 'reg'];
 // 指揮官能不能替這個陣營出擊（傭兵兩邊都行）
 const canLead = (c, faction) => (c.faction || 0) === faction || (c.faction === 2 && faction < 2);
 // 指揮官只帶自己風格的艦隊：傭兵指揮官替帝國／聯盟出擊時，艦隊是灰鴉的船、用傭兵的種族特性（setup 的 fleet.fac）
@@ -5930,6 +5937,8 @@ const FAC_TAL_SWAP = [{}, {}, {},
     shield: { name: '甲殼增生', desc: (r) => `船體再生速度 +${r * 20}%（取代護盾強化：蟲族沒有護盾）` },
     energy: { name: '甲殼硬化', desc: (r) => `被光束打中時 ${Math.round(r * SWARM_RULE.harden * 100)}% 機率傷害減半（取代能量調度：蟲族沒有護盾）` },
     damage: { name: '快速癒合' }, s_jam: { name: '費洛蒙干擾' }, survey: { name: '偵察孢子' }, hangar: { name: '孵化加速' } }];
+// 7 帝國攝政派：特性、天賦都同帝國
+FAC_TRAIT[7] = FAC_TRAIT[0]; FAC_TALENT[7] = FAC_TALENT[0]; FAC_TAL_SWAP[7] = FAC_TAL_SWAP[0];
 // 依陣營取天賦的實際名稱與說明
 function talFor(t, fac) {
   const f = fac || 0;
@@ -7774,7 +7783,7 @@ function readMounts(obj) {   // 不認得的鍵、壞掉的項目都略過；沒
 }
 let MOUNTS = (() => { try { return readMounts(JSON.parse(STORE.getItem(MOUNT_STORE) || 'null')); } catch (e) { return readMounts(null); } })();
 function saveMounts() { try { STORE.setItem(MOUNT_STORE, JSON.stringify({ v: 3, m: MOUNTS })); } catch (e) { /* 只在本次有效 */ } }
-function mountsOf(hk) { return (MOUNTS[hk] || []).map((m) => ({ ...m, hk })); }
+function mountsOf(hk) { return (MOUNTS[hk] || MOUNTS[baseKey(hk)] || []).map((m) => ({ ...m, hk })); }   // 攝政派（v）用帝國的掛點，武器鍵還是 v 開頭（換色的材質）
 function mountsChanged(hk) { saveMounts(); R3.version = -1; scheduleWeaponAtlas(hk); }
 
 // ───── 主題色：每個風格一個顏色，船體、武器（3D 與 2D）一起換色（著色器在 main.js 的 THEME_GLSL）─────
@@ -7782,7 +7791,7 @@ const THEME_STORE = 'fleet.theme';
 const THEME_SW = [['', '原色'], ['#d8413a', '紅'], ['#ee8a2a', '橙'], ['#e8c04a', '金'], ['#5cc45a', '綠'], ['#3ec8c0', '青'], ['#3f86e8', '藍'], ['#8a5ae0', '紫'], ['#e070b0', '粉'], ['#e8ecf2', '白'], ['#3a3f4a', '黑']];
 const validHex = (h) => typeof h === 'string' && /^#[0-9a-f]{6}$/i.test(h);
 let THEME = (() => { try { const o = JSON.parse(STORE.getItem(THEME_STORE) || '{}'); return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; } })();
-function themeOf(f) { const h = THEME[FAC_KEY[f]]; return validHex(h) ? h.toLowerCase() : ''; }
+function themeOf(f) { const h = THEME[FAC_KEY[f]] || (FACTION[f] && FACTION[f].theme); return validHex(h) ? h.toLowerCase() : ''; }
 function applyThemeU(f) { const h = themeOf(f), v = THEME_V[f]; if (!h) { v.set(0, 0, 0, 0); return; } const c = new THREE.Color(h); v.set(c.r, c.g, c.b, 1); }   // Color 會把 sRGB 轉成線性
 for (let f = 0; f < FAC_N; f++) applyThemeU(f);
 // save＝false：取色器拖曳中，只更新畫面
@@ -10505,7 +10514,7 @@ function showStoryDiff(change) {
 // foes：[艦隊名, 指揮官, 特性, 等級, 技能, 艦隊類型（CAMP_ARCHETYPES 的 key）, 兵力（預算的倍數）, 陣型, 打法, x（省略＝平均排開）]
 // goal：省略＝殲滅或潰走；survive＝撐到時限；escort＝護送目標（vip）撐到時限；cut＝擊沉敵方所有補給艦（要有 supply）
 // ev：增援 [名稱, 指揮官 [名, 特性, 等級, 技能] 或 null, 兵力, 艦隊類型, 陣型, 進場邊 left/right, 進場時間 [a, b], 機率（省略＝1）]
-// intel：[準確度, 看不到的項目]；decoy：假情報（簡報只顯示第一支艦隊，兵力 × decoy，也看不到增援）；enemyFac：敵軍外觀的陣營（2＝灰鴉傭兵團；不要設成跟玩家同陣營：標籤顏色和船型會分不出來）
+// intel：[準確度, 看不到的項目]；decoy：假情報（簡報只顯示第一支艦隊，兵力 × decoy，也看不到增援）；enemyFac：敵軍外觀的陣營（2＝灰鴉傭兵團、7＝帝國攝政派：帝國的船換成銀白色，帝國內戰用；不要設成跟玩家同陣營：標籤顏色和船型會分不出來）
 // allies：AI 友軍 [艦隊名, 指揮官, 特性, 等級, 技能, 艦隊類型, 兵力, 陣型, 打法, x, 倒戈秒數（省略／null＝不倒戈）, 外觀的陣營（省略＝2 傭兵）]
 // lines：戰鬥中的通訊 [秒, 誰, 台詞]；after：打贏後的結語；supply：敵方補給艦隊（預算的倍數，跟著第一支艦隊）
 // defect：倒戈的觸發 { left: 敵軍剩下的比例, lead: 觸發後幾秒才倒戈 }：敵軍剩到 left 以下、或到了友軍的倒戈秒數減 lead，就排定 lead 秒後倒戈（取先到的）
@@ -10588,7 +10597,7 @@ const STORY_WAR = {
     ev: [['身分不明的增援', null, 0.3, 'balanced', 'crescent', 'left', [60, 100]]],
     lines: [[3, '亞倫', '情報說只有一支小型艦隊……'], [40, '通訊官', '敵艦數量是情報的兩倍以上！'], [43, '亞倫', '情報是假的。全艦，準備突圍。'], [200, '亞倫', '有人不想讓這場戰爭結束。']],
     after: '亞倫突圍成功。那份戰前情報的簽發單位是聯盟參謀本部，而它的抄本，同時出現在赫爾墨斯集團的帳簿裡。' },
-  '13': { budget: 4800, time: 480, fleets: 3, lv: 4, intel: [0.7, ['events']], supply: 0.6,
+  '13': { budget: 4800, time: 480, fleets: 3, lv: 4, enemyFac: 7, intel: [0.7, ['events']], supply: 0.6,
     terrain: [stT('nebula', 300, -100, 200), stT('rock', -250, -40, 80, -50), stT('rock', 100, 150, 55, 60)],
     foes: [['攝政派先鋒艦隊', '格倫', 'dmg', 6, ['charge', 'focus'], 'raider', 0.5, 'spindle', 'breakthrough'],
       ['凡德林公爵直屬艦隊', '布勞', 'shield', 5, ['wall'], 'heavy', 0.45, 'line', 'push']],
@@ -10615,7 +10624,7 @@ const STORY_WAR = {
     ev: [['帝國包圍艦隊', null, 0.25, 'raider', 'wedge', 'left', [90, 140]]],
     lines: [[3, '葛瑞絲', '亞倫，主力交給你了。這個缺口，我來開。'], [7, '亞倫', '（通訊）葛瑞絲，等等——'], [11, '葛瑞絲', '火力集中就是一切。你常說我太衝動……這次就讓我衝一次吧。'], [230, '葛瑞絲', '（通訊）缺口……打開了。快走。'], [280, '通訊官', '葛瑞絲・卡特萊准將的旗艦……失去聯繫。']],
     after: '遠征軍主力從缺口撤了出去。葛瑞絲・卡特萊沒有回來。撤退途中，亞倫一句話也沒有說。' },
-  '17': { budget: 5600, time: 480, fleets: 3, lv: 5, intel: [0.7, ['events']], supply: 0.7,
+  '17': { budget: 5600, time: 480, fleets: 3, lv: 5, enemyFac: 7, intel: [0.7, ['events']], supply: 0.7,
     terrain: [stT('rock', -320, -200, 90, 60), stT('rock', 320, -180, 80, -40), stT('nebula', 0, 60, 180)],
     foes: [['凡德林公爵艦隊', '凡德林公爵', 'shield', 8, ['wall', 'jam'], 'heavy', 0.4, 'ring', 'kite'],
       ['近衛艦隊', '西格', 'dmg', 7, ['focus', 'rapid'], 'balanced', 0.35, 'line', 'push'],
@@ -19947,6 +19956,7 @@ Object.assign(window.__demo, { frame, setPaused(v) { paused = v; }, pilotLayout,
 // 測試用：劇情關卡自動代打（玩家那一邊也交給 AI）。不畫畫面，直接跑模擬到分出勝負
 // o：diff 難度序號（預設普通）、lv 玩家指揮官等級（預設＝建議等級）、ai 玩家 AI 難度 1～5（預設 3）、tactic 玩家 AI 打法（預設照關卡目標挑）
 //    like：玩家的特性加成改成跟敵方一樣照等級算（對照組，大約是「天賦有點」的強度）
+//    peek：只跑到第幾秒就停，留在戰場畫面（截圖用）
 // 玩家指揮官預設不點天賦（只有固定 +8% 的特性加成、固有技能），也不帶增援、傭兵支援
 async function autoStory(id, o = {}) {
   const di = o.diff != null ? o.diff : 1; GAME.storyDiffForce = di;
@@ -19967,14 +19977,15 @@ async function autoStory(id, o = {}) {
     GAME.watch = true; GAME.replaying = false; GAME.result = null; GAME.lineK = 0; GAME.dlineK = 0; GAME.log = []; GAME.simCtl = null; GAME.phase = 'battle';
     newBattle(sc.seed + 1, setup); setRule('fire', true); setRule('advance', false);
     GAME.init = [sideAlive(0), sideAlive(1)];
-    const cap = (sc.untimed ? sc.timeLimit * 3 : sc.timeLimit + 30) * SIM_HZ, t0 = performance.now();
+    const cap = o.peek ? o.peek * SIM_HZ : (sc.untimed ? sc.timeLimit * 3 : sc.timeLimit + 30) * SIM_HZ, t0 = performance.now();
     while (!GAME.result && simTick < cap) { for (let k = 0; k < 600 && !GAME.result; k++) stepSim(); await new Promise((r) => { const ch = new MessageChannel(); ch.port1.onmessage = r; ch.port2.postMessage(0); }); }   // 不用 setTimeout：背景分頁會被降速
     const R = GAME.result || { kind: 'none', why: '沒有分出勝負', t: U.uTime.value, ratio: [sideAlive(0) / GAME.init[0], sideAlive(1) / GAME.init[1]] };
     const vip = fleets.find((f) => f.vip), vipLeft = vip ? vip.sqs.reduce((a, x) => a + x.alive, 0) / vip.initial : null;
     return { id, name: s.name, line: s.line, diff: STORY_DIFF[di].name, lv, ai: o.ai || 3, like: !!o.like, formation: o.formation || 'line', tac, goal: G || 'kill', kind: R.kind, why: R.why, t: Math.round(R.t), limit: sc.timeLimit,
       me: Math.round(R.ratio[0] * 100), foe: Math.round(R.ratio[1] * 100), vip: vipLeft != null ? Math.round(vipLeft * 100) : null, init: GAME.init.slice(), defT: (fleets.find((f) => f.defSched) || {}).defT, ...(o.log ? { said } : {}), wall: Math.round((performance.now() - t0) / 1000) };
   } finally {
-    toast = toast0; paused = paused0; GAME.watch = false; GAME.phase = 'menu'; GAME.storyDiffForce = null;
+    toast = toast0; paused = paused0; GAME.storyDiffForce = null;
+    if (!o.peek) { GAME.watch = false; GAME.phase = 'menu'; }
   }
 }
 Object.assign(window.__demo, { autoStory, queueMode });
