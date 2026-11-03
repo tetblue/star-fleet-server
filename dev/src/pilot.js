@@ -886,6 +886,7 @@ function pilotHurt(dmg, e, self) {
   pilotHitFx(e, dmg > 0);
   PL.hp -= dmg;
   sndPilotHurt(dmg > 0, PL.hp <= 0);
+  if (dmg > 0) pfxShakeOwn(PL.hp <= 0 ? 0.8 : 0.3);   // 機體受損：鏡頭震一下
   if (PL.hp > 0) return;
   PL.hp = 0; PL.dead = true; PL.deadT = t; PL.stats.deaths++;
   const j = PL.j; FT.state[j] = 3; FT.t0[j] = t; spawnFx(fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2], PL.side, PILOT_FTR_LEN * 6, 24);   // 爆炸照機體大小（鏡頭很近，太大會蓋滿畫面）

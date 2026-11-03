@@ -58,6 +58,10 @@ function renderSettings() {
       <label class="set-row set-chk"><span>低頭看戰術台時自動暫停<br><small class="g-dim">只限單人模式；預設不暫停，邊看戰場邊下令</small></span><input type="checkbox" id="set-brpause" ${SETTINGS.bridgePause ? 'checked' : ''}></label>
       <label class="set-row set-chk"><span>「戰況」視窗固定在畫面上<br><small class="g-dim">不勾＝放在艦橋左側，轉頭才看得到</small></span><input type="checkbox" id="set-pin-stat" ${SETTINGS.brPins.stat ? 'checked' : ''}></label>
       <label class="set-row set-chk"><span>「各艦隊旗艦」視窗固定在畫面上<br><small class="g-dim">不勾＝放在艦橋右側，轉頭才看得到</small></span><input type="checkbox" id="set-pin-pip" ${SETTINGS.brPins.pip ? 'checked' : ''}></label>
+      <div class="set-h">特效</div>
+      <div class="set-row"><span>粒子特效<br><small class="g-dim">爆炸的火球、火花、殘煙、衝擊環、護盾的電弧（疊在原本的爆炸動畫上）；拉遠時自動省略</small></span>
+        <select class="g-sel" id="set-pfx">${[['high', '完整（預設）'], ['low', '精簡'], ['off', '關閉']].map(([v, n]) => `<option value="${v}" ${(SETTINGS.particles || 'high') === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+      <label class="set-row set-chk"><span>鏡頭震動<br><small class="g-dim">附近的大船、旗艦沉沒，駕駛的機受損時</small></span><input type="checkbox" id="set-shake" ${SETTINGS.shake !== false ? 'checked' : ''}></label>
       <div class="set-h">武器模型</div>
       <label class="set-row set-chk"><span>2D 畫面顯示武器<br><small class="g-dim">依「武器配置」的掛點，疊在船體貼圖上</small></span><input type="checkbox" id="set-w2d" ${SETTINGS.weapons2D !== false ? 'checked' : ''}></label>
       <label class="set-row set-chk"><span>3D 畫面顯示武器<br><small class="g-dim">船夠近（細節前三級）才畫；大軍遠景時關掉可以省效能</small></span><input type="checkbox" id="set-w3d" ${SETTINGS.weapons3D !== false ? 'checked' : ''}></label>
@@ -92,6 +96,8 @@ function renderSettings() {
   q('#set-close').onclick = closeSettings;
   qa('[data-tab]').forEach((b) => (b.onclick = () => { SET.tab = b.dataset.tab; SET.capture = null; SET.msg = ''; renderSettings(); }));
   qa('.set-key').forEach((b) => (b.onclick = () => { SET.capture = b.dataset.k; SET.msg = ''; renderSettings(); }));
+  if (q('#set-pfx')) q('#set-pfx').onchange = (e) => { SETTINGS.particles = e.target.value; saveSettings(); };
+  if (q('#set-shake')) q('#set-shake').onchange = (e) => { SETTINGS.shake = e.target.checked; saveSettings(); };
   if (q('#set-snd-on')) q('#set-snd-on').onchange = (e) => { SETTINGS.audio.on = e.target.checked; saveSettings(); SND.setVol(); };
   for (const k of ['m', 's', 'u']) if (q('#set-snd-' + k)) q('#set-snd-' + k).oninput = (e) => { SETTINGS.audio[k] = +e.target.value / 100; q('#set-snd-' + k + '-v').textContent = e.target.value + '%'; saveSettings(); SND.setVol(); };
   if (q('#set-snd-test')) q('#set-snd-test').onclick = () => { SND.init(); setTimeout(() => sndCue('test'), 60); };

@@ -2599,6 +2599,7 @@ function killShip(i, t, x, y, z, mul = 1) {
   const sc = TYPE_W[ships.type[i]] * 1.6 * (ships.type[i] <= 1 ? 1.4 : 1) * mul;
   spawnFx(x, y, z, ships.side[i], sc, 18 + rnd() * 6);
   sndKill(i, x, y, z, t, i === q.flagship);   // 爆炸聲（audio.js；旗艦更大）
+  pfxKill(i, x, y, z, i === q.flagship);   // 粒子：火球、火花、殘煙、衝擊環、鏡頭震動（particles.js）
   debrisShipKill(i, t, x, y, z);   // 碎片、燃燒殘骸（debris.js，只是畫面）
   salvageKill(i, t, x, z);
   swarmInfectKill(i, t, x, y, z);
@@ -3553,7 +3554,7 @@ function processHits() {
     pending[k] = pending[pending.length - 1]; pending.pop();
     if (e.kind === 'mi') {   // 撞上岩石，或沒命中、在目標後方自爆（半路被打下的就不再爆一次）
       if (e.mi != null) { if (!misLive[e.mi] || misGen[e.mi] !== e.g) continue; misLive[e.mi] = 0; }
-      spawnFx(e.x, e.y, e.z, e.side, 3.2, 26); sndEv('mx', e.x, e.y, e.z, t); if (GRD) { groundScar(e.x, e.y, e.z, 2.5); groundStray(e.x, e.y, e.z, e.t, true); } continue;
+      spawnFx(e.x, e.y, e.z, e.side, 3.2, 26); sndEv('mx', e.x, e.y, e.z, t); pfxHit('mx', e.x, e.y, e.z, e.side); if (GRD) { groundScar(e.x, e.y, e.z, 2.5); groundStray(e.x, e.y, e.z, e.t, true); } continue;
     }
     if (e.kind === 'ak') {   // 防空／副砲打中飛彈或艦載機
       if (e.a === 0) {
@@ -3561,21 +3562,21 @@ function processHits() {
         if (misLive[i] && misGen[i] === e.g) {
           misLive[i] = 0; const t0 = misT[i * 4], dur = misT[i * 4 + 1], u = Math.min(1, Math.max(0, (t - t0) / dur));
           misT[i * 4 + 3] = u; misCut = true; wStats[misSide[i]].mInt++;
-          bezCPU(i, u, _c); spawnFx(_c.x, _c.y, _c.z, misSide[i], 3.2, 26); sndEv('ix', _c.x, _c.y, _c.z, t);
+          bezCPU(i, u, _c); spawnFx(_c.x, _c.y, _c.z, misSide[i], 3.2, 26); sndEv('ix', _c.x, _c.y, _c.z, t); pfxHit('ix', _c.x, _c.y, _c.z, misSide[i]);
         }
       } else {
         const j = e.i;
         if (PL.on && j === PL.j) { if (FT.state[j] === 2) pilotHurt(e.dmg, e); continue; }   // 打中玩家的機：先扣護盾
         if (FT.state[j] === 2) {
           FT.hp[j] -= e.dmg;
-          if (FT.hp[j] <= 0) { FT.state[j] = 3; FT.t0[j] = t; if (!FT.kind[j]) wStats[FT.side[j]].fLost++; spawnFx(fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2], FT.side[j], 2.6, 26); sndEv('fd', fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2], t); if (e.pl) pilotCredit('ftr', j, 0, true, e.pl); if (CAP.on && FT.side[j] !== CAP.side) capCreditF(j); }
+          if (FT.hp[j] <= 0) { FT.state[j] = 3; FT.t0[j] = t; if (!FT.kind[j]) wStats[FT.side[j]].fLost++; spawnFx(fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2], FT.side[j], 2.6, 26); sndEv('fd', fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2], t); pfxHit('fd', fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2], FT.side[j]); if (e.pl) pilotCredit('ftr', j, 0, true, e.pl); if (CAP.on && FT.side[j] !== CAP.side) capCreditF(j); }
           else if (e.pl) pilotCredit('hitF', j, 0, false, e.pl);
         }
       }
       continue;
     }
     if (e.kind === 'mh' && e.mi != null) { if (!misLive[e.mi] || misGen[e.mi] !== e.g) continue; misLive[e.mi] = 0; }   // 半路被打下了
-    if (e.kind === 'sp') { spawnFx(e.x, e.y, e.z, e.side, 1.4, 20); sndEv(GRD ? 'gx' : 'rk', e.x, e.y, e.z, t);if (!GRD && ROCKS.length) debrisRockHit(e.x, e.y, e.z); if (GRD && e.bi != null) groundBldKill(e.bi, e.x, e.z); if (GRD && e.r !== -1) groundScar(e.x, e.y, e.z, e.r != null ? e.r : 1.6); continue; }   // 近地：打到地面＝炸毀建築（r＝-1：不炸；bi＝直接打中的那一棟）
+    if (e.kind === 'sp') { spawnFx(e.x, e.y, e.z, e.side, 1.4, 20); sndEv(GRD ? 'gx' : 'rk', e.x, e.y, e.z, t); pfxHit(GRD ? 'gx' : 'rk', e.x, e.y, e.z, e.side); if (!GRD && ROCKS.length) debrisRockHit(e.x, e.y, e.z); if (GRD && e.bi != null) groundBldKill(e.bi, e.x, e.z); if (GRD && e.r !== -1) groundScar(e.x, e.y, e.z, e.r != null ? e.r : 1.6); continue; }   // 近地：打到地面＝炸毀建築（r＝-1：不炸；bi＝直接打中的那一棟）
     if (e.kind === 'ms') { groundMsHit(e); continue; }   // 近地：打中巨型結構
     if (e.kind === 'tu') { turretHit(e); continue; }   // 近地：打中地面砲台
     if (e.kind === 'gt') { groundTargetHit(e); continue; }   // 駕駛：打中地面目標   // 光束打在岩石上的火花
@@ -3629,7 +3630,11 @@ function processHits() {
     const eff = shD + hullD;
     e.kill = ships.hp[ti] <= 0;
     e.hull = hullD > 0;
-    if (!e.kill && (shD > 0 || hullD > 0)) sndEv(e.kind === 'mh' ? 'mh' : e.hull ? 'hh' : 'hs', e.x, e.y, e.z, t, e.pl && PL.on ? 2 : e.gk === 'main' ? 1 : 0);   // 命中的聲音（擊沉的另外在 killShip）
+    if (!e.kill && (shD > 0 || hullD > 0)) {   // 命中的聲音、粒子（擊沉的另外在 killShip）
+      const hk = e.kind === 'mh' ? 'mh' : e.hull ? 'hh' : 'hs';
+      sndEv(hk, e.x, e.y, e.z, t, e.pl && PL.on ? 2 : e.gk === 'main' ? 1 : 0);
+      pfxHit(hk, e.x, e.y, e.z, tSide, e.kind === 'mh' || e.gk === 'main', ships.type[ti]);
+    }
     if (e.pl) pilotCredit('ship', ti, shD + hullD, e.kill, e.pl);   // 玩家打出的傷害、擊沉
     if (CAP.on) { if (tSide === CAP.side) capHurt(ti, e, shD, hullD); else capCreditShip(ti, shD + hullD, e.kill); }   // 艦長：受擊方向、戰果
     if (e.asp != null) {
@@ -5254,13 +5259,13 @@ const UI_OPTS = [
   ['compass', '艦橋方位儀', '指揮官視角上方的方位刻度與各艦隊方位'],
 ];
 const SETTINGS = (() => {
-  const d = { keyVer: 4, keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, pilotRadar: 'right', terrain: 'splat', debris: 'high', audio: { on: true, m: 0.8, s: 1, u: 0.7 }, ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
+  const d = { keyVer: 4, keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, pilotRadar: 'right', terrain: 'splat', debris: 'high', particles: 'high', shake: true, audio: { on: true, m: 0.8, s: 1, u: 0.7 }, ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
   try { const s = JSON.parse(STORE.getItem('fleet.settings') || 'null'); if (s) { const k0 = { ...(s.keys || {}) };
       // 第 2 版按鍵（指令卡）：舊存檔的鏡頭旋轉 Q／E／R／T、艦橋 B 會和指令卡衝突，沒改過的換成新的預設
       if (!(s.keyVer >= 2)) for (const [id, old] of [['cam_yaw_l', 'KeyQ'], ['cam_yaw_r', 'KeyE'], ['cam_pitch_up', 'KeyR'], ['cam_pitch_dn', 'KeyT'], ['bridge', 'KeyB']]) if (k0[id] === old) delete k0[id];
       if (!(s.keyVer >= 3) && k0.bridge === 'F2') delete k0.bridge;   // 第 3 版：F2 改成全選，艦橋移到 F3
       if (!(s.keyVer >= 4)) for (const id of Object.keys(k0)) if (id.startsWith('cap_')) delete k0[id];   // 第 4 版：艦長改成 A/D 轉向、Q/E 平移、F 技能、G 護航機
-      Object.assign(d.keys, k0); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin', 'pilotRadar', 'terrain', 'debris']) if (s[k] != null) d[k] = s[k];
+      Object.assign(d.keys, k0); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin', 'pilotRadar', 'terrain', 'debris', 'particles', 'shake']) if (s[k] != null) d[k] = s[k];
       if (s.audio) Object.assign(d.audio, s.audio); } } catch (e) { /* 用預設值 */ }
   return d;
 })();
@@ -5535,6 +5540,7 @@ function frame() {
   updateStalks();
   gameFrame(dt);
   sndFrame(dt);      // 聲音：播到時間的事件、循環音（audio.js）
+  pfxFrame();        // 粒子：時鐘、預算（particles.js）
   const t = U.uTime.value;
   const fogNow = playerFogged();   // 被干擾：敵方標籤只顯示「？？？」
 
@@ -5603,7 +5609,9 @@ function frame() {
 
   renderer.info.reset();
   const gq = gpuBegin();
+  pfxShakeApply(dt);   // 鏡頭震動：只在畫這一幀時偏移（particles.js）
   composer.render(dt);
+  pfxShakeRestore();
   bridgePips();   // 其他艦隊旗艦的子畫面
   gpuEnd(gq);
   gpuPoll();
