@@ -824,9 +824,10 @@
   .wb-t { display: flex; justify-content: space-between; } .wb-f small { display: block; color: var(--dim); font-size: calc(10.5px * var(--ui)); }
   .wb-f i { display: block; font-style: normal; color: #ffd27a; margin-top: 2px; }
   /* 模擬室編輯面板 */
-  #simbar { display: none; position: fixed; right: 12px; top: 12px; bottom: 12px; width: calc(420px * var(--ui)); max-width: calc(100vw - calc(24px * var(--ui))); z-index: 20; overflow: auto; background: rgba(6,10,20,.95); border: 1px solid var(--line); border-radius: 6px; padding: calc(10px * var(--sp)) calc(12px * var(--sp)); font-size: calc(12.5px * var(--ui)); }
+  #simbar, #bldbar { display: none; position: fixed; right: 12px; top: 12px; bottom: 12px; width: calc(420px * var(--ui)); max-width: calc(100vw - calc(24px * var(--ui))); z-index: 20; overflow: auto; background: rgba(6,10,20,.95); border: 1px solid var(--line); border-radius: 6px; padding: calc(10px * var(--sp)) calc(12px * var(--sp)); font-size: calc(12.5px * var(--ui)); }
   body.game-simedit #simbar { display: block; }
-  #simbar .wed-seg button.on { background: rgba(255,255,255,.1); color: var(--text); }
+  body.game-bldedit #bldbar { display: block; } body.game-bldedit #selbar, body.game-bldedit #status, body.game-bldedit #touchbar { display: none !important; } .bld-dirty { color: #ffd27a; font-size: calc(11.5px * var(--ui)); } .bld-list { max-height: calc(220px * var(--ui)); overflow: auto; }
+  #simbar .wed-seg button.on, #bldbar .wed-seg button.on { background: rgba(255,255,255,.1); color: var(--text); }
   .sim-head { display: flex; align-items: center; gap: calc(8px * var(--sp)); margin-bottom: calc(8px * var(--sp)); } .sim-head b { letter-spacing: .14em; } .sim-head .g-in { flex: 1; min-width: 0; }
   .sim-tabs { margin-bottom: calc(8px * var(--sp)); } .sim-tabs button { flex: 1; }
   .sim-sec { border-top: 1px solid var(--line); padding: calc(8px * var(--sp)) 0; }
@@ -1083,6 +1084,7 @@
 <div id="skillbar" hidden></div>
 <div id="deploybar" hidden></div>
 <div id="simbar"></div>
+<div id="bldbar"></div>
 <div id="toasts"></div>
 <div id="fpsbadge"></div>
 <div id="boxsel"></div>

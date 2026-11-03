@@ -185,7 +185,7 @@ function randStage(o) {
   const lk = RAND_LOOK[o.look].fac, L = mulberry32(campHash(o.seed, 7));
   if (lk === 'rand') sc.enemyFac = 2 + Math.floor(L() * 5); else if (lk != null) sc.enemyFac = lk;
   const ge = GROUND_ENV[o.env].g;   // 近地作戰：不放太空地形，改成地表場景（敵軍是防守方）
-  if (ge) { const G = mulberry32(campHash(o.seed, o.env, 21)); sc.terrain = []; sc.ground = { scene: groundPick(ge, G), seed: campHash(o.seed, o.env, 23), def: 1 }; }
+  if (ge) { const G = mulberry32(campHash(o.seed, o.env, 21)); sc.terrain = []; sc.ground = { scene: groundPick(ge, G), seed: campHash(o.seed, o.env, 23), def: 1, ...groundExtra(ge) }; }
   return sc;
 }
 // 編成沿用上一場（指揮官、陣型、機庫）；預算不同時兵力等比例縮放

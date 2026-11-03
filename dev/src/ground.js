@@ -47,7 +47,11 @@ const GROUND_SCENES = {
 const GROUND_KEYS = Object.keys(GROUND_SCENES);
 // 隨機戰役、無限戰場的「戰場」選項
 const GROUND_ENV = [{ name: '太空', g: null }, ...GROUND_KEYS.map((k) => ({ name: GROUND_SCENES[k].name, g: k })), { name: '近地隨機', g: 'rand' }];
-function groundPick(g, R) { return g === 'rand' ? GROUND_KEYS[Math.floor(R() * GROUND_KEYS.length)] : g; }
+function groundPick(g, R) { return g === 'rand' ? GROUND_KEYS[Math.floor(R() * GROUND_KEYS.length)] : bldMapOf(g) ? bldMapOf(g).scene : g; }
+// 戰場選項 → battleSetup.ground 的其他欄位：自訂地圖（building.js）＝地圖自己的種子＋整份建築配置（回放、多人都不必再查伺服器）
+function groundExtra(g) { const M = bldMapOf(g); return M ? { seed: M.seed >>> 0, cmap: bldSnapshot(M) } : {}; }
+// 同一個地形的鍵：場景＋種子（＋自訂地圖內容的雜湊）
+function groundKey(g) { return `${g.scene}:${g.seed >>> 0}${g.cmap ? ':' + bldHash(g.cmap) : ''}`; }
 const gKm = (u) => Math.round(u * GROUND_KM * 10) / 10;
 
 // 簡報用：近地規則說明
@@ -73,15 +77,15 @@ let SOLID = false;  // 有沒有實體障礙（小行星或近地）：射線、
 const GRD_CACHE = { key: '', tex: null }, GRD_DATA = new Map();
 function groundSpec() { const g = battleSetup && battleSetup.ground; return g && GROUND_SCENES[g.scene] ? g : null; }
 function groundData(g) {   // 生成過的地形（保留最近幾個）
-  const key = `${g.scene}:${g.seed >>> 0}`;
+  const key = groundKey(g);
   let D = GRD_DATA.get(key);
-  if (!D) { D = groundGen(g.scene, g.seed >>> 0); GRD_DATA.set(key, D); if (GRD_DATA.size > 4) GRD_DATA.delete(GRD_DATA.keys().next().value); }
+  if (!D) { D = groundGen(g.scene, g.seed >>> 0, g.cmap); GRD_DATA.set(key, D); if (GRD_DATA.size > 4) GRD_DATA.delete(GRD_DATA.keys().next().value); }
   return D;
 }
 function setGround() {
   const g = groundSpec();
   if (!g) { GRD = null; U.uGrd.value.w = 0; U.uPilN.value = 0; groundSync(); return; }
-  const key = `${g.scene}:${g.seed >>> 0}`, D = groundData(g);
+  const key = groundKey(g), D = groundData(g);
   if (GRD_CACHE.key !== key) {
     GRD_CACHE.key = key;
     if (GRD_CACHE.tex) GRD_CACHE.tex.dispose();
@@ -279,10 +283,11 @@ const gCol = (r, g, b, R, j = 0.12) => { const k = 1 - j + R() * j * 2; return [
 // 一般建築（畫面用、可被炸毀）：每一棟 10 個數字 x, z, w, d, h, y0, r, g, b, 窗戶種子
 function gAdd(B, x, z, w, d, h, y0, col, win = 0) { B.a.push(x, z, w, d, h, y0, col[0], col[1], col[2], win); B.n++; }
 
-function groundGen(scene, seed) {
+function groundGen(scene, seed, cmap = null) {
   const R = mulberry32((seed ^ 0x6a09e667) >>> 0 || 1), H = new Float32Array(GROUND_N * GROUND_N).fill(GROUND_Y);
-  const D = { scene, seed, boxes: [], cyl: [], domes: [], pil: [], rocks: [], ms: [], spotsN: [], spotsP: [], hf: null, far: 0, extra: {}, bld: { a: [], n: 0 }, title: GROUND_SCENES[scene].name, obst: '' };
+  const D = { scene, seed, boxes: [], cyl: [], domes: [], pil: [], rocks: [], ms: [], spotsN: [], spotsP: [], hf: null, far: 0, extra: {}, bld: { a: [], n: 0 }, glb: [], title: GROUND_SCENES[scene].name, obst: '' };
   GROUND_GEN[scene](D, R, H);
+  if (cmap) bldApplyMap(D, cmap);   // 自訂地圖：放 GLB 建築（可選擇拿掉原本的巨型結構），building.js
   D.H0 = H.slice();   // 壓入碰撞箱之前的高度（巨型結構被摧毀時還原用）
   for (const b of D.boxes) if (b.coll) gRaster(H, b);
   groundTargetGen(D, H);   // 駕駛模式的地面目標（ground_pilot.js）
@@ -941,6 +946,7 @@ function gbNew() { return { p: [], n: [], c: [], w: [] }; }
 function gbTri(G, a, b, c, n, col, win) { for (const v of [a, b, c]) { G.p.push(v[0], v[1], v[2]); G.n.push(n[0], n[1], n[2]); G.c.push(col[0], col[1], col[2]); G.w.push(win); } }
 function gbQuad(G, a, b, c, d, n, col, win) { gbTri(G, a, b, c, n, col, win); gbTri(G, a, c, d, n, col, win); }
 function gbBox(G, b) {
+  if (b.hide) return;   // 只算碰撞（GLB 建築的碰撞箱）
   const x0 = b.x - b.w / 2, x1 = b.x + b.w / 2, z0 = b.z - b.d / 2, z1 = b.z + b.d / 2, y0 = b.y0, y1 = b.y0 + b.h, c = b.col, t = b.top || b.col, w = b.win || 0;
   gbQuad(G, [x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0], [0, 1, 0], t, 0);
   gbQuad(G, [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], [0, 0, 1], c, w);
@@ -1145,6 +1151,7 @@ function groundSync() {
     GV.group.add(gbMesh(G, mat));
     GV.ms = [];   // 巨型結構：以底部中心為支點的群組（倒塌時往下沉、傾斜）
     for (const [id, g] of MG) { const M = D.ms[id], grp = new THREE.Group(), m = gbMesh(g, mat); grp.position.set(M.x, GROUND_Y, M.z); m.position.set(-M.x, -GROUND_Y, -M.z); grp.add(m); GV.group.add(grp); GV.ms[id] = grp; }
+    if (D.glb.length) bldGroundModels(P, D);   // 自訂地圖的 GLB 建築（非同步載入，building.js）
     const bm = groundBldMesh(P, D); if (bm) GV.group.add(bm);
     GV.group.add(groundScarMesh(P));
     GV.group.add(groundSmokeMesh(P));   // 戰火的煙
@@ -1200,7 +1207,7 @@ function groundFrame() {
 // 簡報的小地圖底圖：地形、建築密度、海、巨型結構（PNG data URL，同一個地形只畫一次）
 const GROUND_IMG = {};
 function groundMinimapImg(g) {
-  const key = `${g.scene}:${g.seed >>> 0}`; if (GROUND_IMG[key]) return GROUND_IMG[key];
+  const key = groundKey(g); if (GROUND_IMG[key]) return GROUND_IMG[key];
   const D = groundData(g), W = 120, Hh = 120, cv = document.createElement('canvas'); cv.width = W; cv.height = Hh;
   const cx = cv.getContext('2d'), im = cx.createImageData(W, Hh), H = D.H, dens = new Float32Array(W * Hh);
   const px = (x) => (x - MAP_BOUNDS.x0) / (MAP_BOUNDS.x1 - MAP_BOUNDS.x0) * W, pz = (z) => (z - MAP_BOUNDS.z0) / (MAP_BOUNDS.z1 - MAP_BOUNDS.z0) * Hh;

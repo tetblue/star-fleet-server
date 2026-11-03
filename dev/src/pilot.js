@@ -287,7 +287,7 @@ function pilotLayout(p) {
       comp: aiSupplyComp(S.budget), hangar: HANGAR_DEFAULT.slice(), formation: 'ring', orderly: false, layers: 1,
       x: 0, z: side ? -360 - SUPPLY_RULE.follow : 360 + SUPPLY_RULE.follow, y: 0, h: side ? 0 : Math.PI, ai: null, reserve: false, at: 60 });
   }
-  if (scene) { m.terrain = []; m.ground = { scene, seed: campHash(p.seed, 79), def: 1, pilot: true }; }
+  if (scene) { m.terrain = []; m.ground = { scene, seed: campHash(p.seed, 79), def: 1, pilot: true, ...groundExtra(ge) }; }
   m.name = `${PILOT_MIS[mis.type].name}・${S.name}・${WATCH_LV[li].name}${scene ? `・${GROUND_SCENES[scene].name}` : ''}`;
   return m;
 }

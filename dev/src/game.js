@@ -6,7 +6,7 @@ const GAME = {
   phase: 'menu', playerSide: 0, sc: null, intel: null, loadout: null, attempt: 0,
   init: [0, 0], result: null, skillArm: null, deploySel: 0, drag: null, replaying: false, reportShown: false,
 };
-const PHASE_ON = ['deploy', 'battle', 'report', 'simedit'];
+const PHASE_ON = ['deploy', 'battle', 'report', 'simedit', 'bldedit'];
 const gEl = (id) => document.getElementById(id);
 const fmtN = (n) => Math.round(n).toLocaleString();
 const ships5 = (icons) => fmtN(icons * opts.rep);
@@ -688,8 +688,9 @@ function setPhase(ph) {
   if (PL.on && ph !== 'battle') pilotEnd();   // 離開作戰＝結束駕駛
   if (CAP.on && ph !== 'battle') capEnd();   // 離開作戰＝結束艦長模式
   if (BR.on && ph !== 'battle' && ph !== 'replay') exitBridge();   // 離開作戰＝離開艦橋
+  if (GAME.phase === 'bldedit' && ph !== 'bldedit') bldLeave();   // 離開建築編輯器
   GAME.phase = ph;
-  if (GAME.forced3D && ph !== 'battle' && ph !== 'deploy' && ph !== 'simedit') { GAME.forced3D = false; if (mode3D) setRenderMode('2d', false); }   // 離開作戰：回到原本的 2D
+  if (GAME.forced3D && ph !== 'battle' && ph !== 'deploy' && ph !== 'simedit' && ph !== 'bldedit') { GAME.forced3D = false; if (mode3D) setRenderMode('2d', false); }   // 離開作戰：回到原本的 2D
   { const op = opNow(), on = ph === 'battle' || ph === 'deploy';
     document.body.classList.toggle('op-flat', on && op === 0); document.body.classList.toggle('op-adv', op >= 1); document.body.classList.toggle('op-sim', op === 2); }
   document.body.classList.toggle('game-on', PHASE_ON.includes(ph) || ph === 'replay');
@@ -699,8 +700,10 @@ function setPhase(ph) {
   document.body.classList.remove('hg-on');   // 王牌飛行員的機庫（hangar.js）：進機庫畫面時再加回來
   document.body.classList.toggle('game-sand', ph === 'sandbox');
   document.body.classList.toggle('game-simedit', ph === 'simedit');
+  document.body.classList.toggle('game-bldedit', ph === 'bldedit');
   document.body.classList.toggle('game-watch', !!GAME.watch && (ph === 'battle' || ph === 'replay'));
   if (ph !== 'simedit') { const sb = gEl('simbar'); if (sb) sb.innerHTML = ''; SIM.drag = null; }
+  if (ph !== 'bldedit') { const bb = gEl('bldbar'); if (bb) bb.innerHTML = ''; }
   gEl('battlehud').hidden = !(ph === 'battle' || ph === 'replay');
   gEl('skillbar').hidden = ph !== 'battle';
   gEl('deploybar').hidden = ph !== 'deploy';
@@ -734,6 +737,7 @@ const MENU_ICONS = {
   watch: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   tal: '<path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6l-5.4 2.9 1.2-6-4.5-4.2 6.1-.7z"/>',
   tav: '<path d="M5 9h10v10a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z"/><path d="M15 11h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-2M5 9c0-2 1.3-3.2 3-3.2C8.6 4.6 9.7 4 11 4s2.6.8 3 2c1 .2 1 1.5 1 3"/>',
+  bld: '<path d="M3 21h18M5 21V9l4-3v15M9 21V4l6-2v19M15 21V10l4 2v9"/><path d="M11.5 7h1M11.5 10.5h1M11.5 14h1"/>',
   hang: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3 17.8V21h3.2l6.3-6.3a4 4 0 0 0 5.2-5.4l-2.6 2.6-2.5-.6-.6-2.5z"/>',
 };
 function menuIcon(k) { return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${MENU_ICONS[k] || ''}</svg>`; }
@@ -764,6 +768,7 @@ function showMenu() {
         ${T('m-set', 'set', '設定', '按鍵綁定、遊戲速度、介面資訊')}
         ${T('m-save', 'save', '存檔管理', '3 個雲端存檔欄位：儲存、讀取進度，也可以匯出成檔案或從檔案匯入')}
         ${T('m-test', 'test', '遊戲測試', '大軍畫面、效能與戰鬥數值（射程、側背受擊倍率等）的測試場')}
+        ${T('m-bld', 'bld', '建築編輯器', '匯入建築 GLB、調整大小與碰撞，在近地戰場擺放建築、存成自訂地圖')}
       </div>
     </div>
     <div class="mm-note" id="mm-note"></div>
@@ -778,6 +783,7 @@ function showMenu() {
   if (window.API) { gEl('m-out').onclick = () => API.logout(); gEl('m-acct').onclick = () => showAccount(); }
   gEl('m-set').onclick = () => openSettings();
   gEl('m-save').onclick = () => (window.API ? showSaves() : (gEl('mm-note').textContent = '存檔管理要連上伺服器才能用。'));
+  gEl('m-bld').onclick = () => showBldEditor();
   gEl('m-test').onclick = () => { overlay(null); setPhase('sandbox'); newBattle(12345); setCmdSide(0); };   // 原本的測試場（數值、畫面）
 }
 // 單人戰鬥：先選模式（指揮官、王牌飛行員…），再進該模式的大廳。GAME.spMode＝目前所在的模式（戰鬥、子畫面返回時回到同一個大廳）
@@ -1121,6 +1127,7 @@ function dpCanon(p) { return GAME.sc && GAME.sc.mp && GAME.playerSide ? { x: -p.
 // 遊戲層攔截滑鼠／觸控：部署時放置艦隊、技能選目標
 function gamePointer(type, e) {
   if (GAME.phase === 'simedit') return simPointer(type, e);   // 模擬室編輯：選取、移動、放置
+  if (GAME.phase === 'bldedit') return bldPointer(type, e);   // 建築編輯器：選取、移動、放置建築
   // 技能選目標：左鍵（或觸控）點敵方分艦隊；右鍵取消
   if (GAME.skillArm && type === 'down' && e.pointerType !== 'touch' && e.button === 2) { skillEsc(); return true; }
   if (GAME.skillArm && GAME.skillArm.point && type === 'down' && (e.pointerType === 'touch' || e.button === 0)) {

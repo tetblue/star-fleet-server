@@ -292,6 +292,35 @@ async function api(req, res, url) {
     }
     return json(res, 405, { error: '方法不對' });
   }
+  // 建築編輯器：建築種類（GLB 對位、碰撞、耐久）與自訂近地地圖都存在 models/建築/buildings.json；GLB 也放在 models/建築/
+  if (p === '/api/buildings' && m === 'GET') {
+    const d = readJSON(bldFile(), null) || { version: 1, types: {}, maps: {} };
+    let files = [];
+    try { files = fs.readdirSync(BLD_DIR).filter((x) => /\.glb$/i.test(x)).map((x) => { const st = fs.statSync(path.join(BLD_DIR, x)); return { file: x, bytes: st.size, mtime: Math.round(st.mtimeMs) }; }); } catch (e) { /* 資料夾還沒建 */ }
+    return json(res, 200, { ...d, files, canEdit: canEditModels(req) });
+  }
+  if (p.startsWith('/api/buildings') && !canEditModels(req)) return json(res, 403, { error: CFG.modelEdit === 'off' ? '伺服器設定不允許修改建築（config.json 的 modelEdit）' : '只有在伺服器那台電腦上才能存建築（config.json 的 modelEdit 改成 "all" 就能從別台電腦存）' });
+  if (p === '/api/buildings' && m === 'PUT') {
+    const b = await readBody(req, 8 * 1048576);
+    const obj = (o) => o && typeof o === 'object' && !Array.isArray(o);
+    if (!obj(b.types) || !obj(b.maps)) return json(res, 400, { error: '建築資料格式錯誤' });
+    fs.mkdirSync(BLD_DIR, { recursive: true });
+    if (fs.existsSync(bldFile())) fs.copyFileSync(bldFile(), bldFile() + '.bak');   // 上一版留一份
+    writeAtomic(bldFile(), JSON.stringify({ version: 1, types: b.types, maps: b.maps }, null, 1));
+    log(`建築編輯器：${me.name} 存了 ${Object.keys(b.types).length} 種建築、${Object.keys(b.maps).length} 張地圖`);
+    return json(res, 200, { ok: true });
+  }
+  if (p === '/api/buildings/glb' && m === 'PUT') {
+    const name = String(url.searchParams.get('name') || '').normalize('NFC').trim();
+    if (!/^[^\\/:*?"<>|\u0000-\u001f]{1,80}\.glb$/i.test(name) || name.startsWith('.')) return json(res, 400, { error: '檔名不對（要 .glb，不能有 \\ / : * ? " < > |）' });
+    const buf = await readRaw(req, 256 * 1048576);
+    if (buf.length < 20 || buf.readUInt32LE(0) !== 0x46546c67) return json(res, 400, { error: '不是 GLB 檔' });
+    try { parseGLB(buf); } catch (e) { return json(res, 400, { error: 'GLB 讀不出來：' + e.message }); }
+    fs.mkdirSync(BLD_DIR, { recursive: true });
+    writeAtomic(path.join(BLD_DIR, name), buf);
+    log(`建築編輯器：${me.name} 匯入 ${name}（${(buf.length / 1048576).toFixed(1)} MB）`);
+    return json(res, 200, { ok: true, file: name, bytes: buf.length, mtime: Math.round(fs.statSync(path.join(BLD_DIR, name)).mtimeMs) });
+  }
   // 多人戰鬥：串流收訊息、POST 送動作
   if (p === '/api/mp/stream' && m === 'GET') return MULTI.stream(req, res, me);
   if (p === '/api/mp/act' && m === 'POST') { const r = MULTI.act(me, await readBody(req, 1048576)); return json(res, r.error ? 400 : 200, r); }
@@ -324,6 +353,8 @@ async function api(req, res, url) {
 
 // ───── 模型清單 ─────
 const origFile = (rel) => path.join(MODELS_DIR, '_原始', rel);
+let BLD_DIR = '';
+const bldFile = () => path.join(BLD_DIR, 'buildings.json');
 function modelEntry(k) {
   const v = MODELS[k];
   return { ...v, glb: '/models/' + v.file.split(/[\\/]/).map(encodeURIComponent).join('/') + '?v=' + v.mtime, lod: `/lod/${k}.bin?v=${v.mtime}-${v.lodBytes}`, painted: fs.existsSync(origFile(v.file)) };
@@ -374,7 +405,7 @@ async function main() {
   console.log(`資料夾：${BASE}\n`);
   CFG = loadConfig();
   DATA = path.resolve(BASE, CFG.dataDir); PLAYERS_DIR = path.join(DATA, 'players'); BACKUP_DIR = path.join(DATA, 'backups'); CACHE_DIR = path.join(DATA, 'cache');
-  MODELS_DIR = path.resolve(BASE, CFG.modelsDir); WEB_DIR = path.resolve(BASE, CFG.webDir);
+  MODELS_DIR = path.resolve(BASE, CFG.modelsDir); WEB_DIR = path.resolve(BASE, CFG.webDir); BLD_DIR = path.join(MODELS_DIR, '建築');
   for (const d of [DATA, PLAYERS_DIR, BACKUP_DIR, CACHE_DIR]) fs.mkdirSync(d, { recursive: true });
   loadSessions();
   log(`讀取模型資料夾：${MODELS_DIR}`);

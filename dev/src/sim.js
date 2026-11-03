@@ -139,7 +139,7 @@ function simFieldHtml(m) {
     <div class="sim-row"><span>我方陣營</span><div class="wed-seg" id="sim-fac"><button data-v="0" class="${m.fac === 0 ? 'on emp' : ''}">帝國軍</button><button data-v="1" class="${m.fac === 1 ? 'on all' : ''}">聯盟軍</button></div></div>
     <div class="sim-row"><span>操作難度</span>${opSeg('sim-op')}</div>
     <div class="g-dim sim-note">${OP_LEVELS[opLevel()].desc}（與單人戰鬥共用同一個設定）</div>
-    <div class="sim-row"><span>戰場</span><div class="wed-seg" id="sim-env"><button data-v="" class="${!m.ground ? 'on' : ''}">太空</button>${GROUND_KEYS.map((k) => `<button data-v="${k}" class="${m.ground && m.ground.scene === k ? 'on' : ''}">${GROUND_SCENES[k].name}</button>`).join('')}</div></div>
+    <div class="sim-row"><span>戰場</span><div class="wed-seg" id="sim-env"><button data-v="" class="${!m.ground ? 'on' : ''}">太空</button>${GROUND_KEYS.map((k) => `<button data-v="${k}" class="${m.ground && !m.ground.cmap && m.ground.scene === k ? 'on' : ''}">${GROUND_SCENES[k].name}</button>`).join('')}${bldMapList().map((M) => `<button data-v="map:${M.id}" class="${m.ground && m.ground.cmap && m.ground.cmap.id === M.id ? 'on' : ''}">自訂：${escH(M.name)}</button>`).join('')}</div></div>
     ${m.ground ? `<div class="g-dim sim-note">${GROUND_SCENES[m.ground.scene].desc}（近地戰場不使用太空地形）</div>
     <div class="sim-row"><span>地面砲台</span><div class="wed-seg" id="sim-gdef"><button data-v="-1" class="${m.ground.def === -1 ? 'on' : ''}">沒有</button><button data-v="0" class="${m.ground.def === 0 ? 'on' : ''}">${simSideName(m, 0)}</button><button data-v="1" class="${m.ground.def === 1 ? 'on' : ''}">${simSideName(m, 1)}</button></div></div>
     <div class="sim-row"><span>地形種子</span><input class="g-in" type="number" id="sim-gseed" value="${m.ground.seed}" style="width:110px"><button class="g-btn sm" id="sim-gre">換一個</button></div>` : ''}
@@ -216,7 +216,7 @@ function simBind(el) {
   // 戰場設定
   q('#sim-fac [data-v]').forEach((b) => (b.onclick = () => { m.fac = +b.dataset.v; simChanged(); }));
   q('#sim-ctl [data-v]').forEach((b) => (b.onclick = () => { m.ctl = +b.dataset.v; simChanged(false); }));
-  q('#sim-env [data-v]').forEach((b) => (b.onclick = () => { const k = b.dataset.v; m.ground = k ? { scene: k, seed: (m.ground && m.ground.seed) || ((Math.random() * 1e6) | 0) + 1, def: m.ground ? m.ground.def : 1 } : null; simChanged(); }));   // 近地作戰
+  q('#sim-env [data-v]').forEach((b) => (b.onclick = () => { const k = b.dataset.v, cm = bldMapOf(k); m.ground = cm ? { scene: cm.scene, seed: cm.seed >>> 0, def: cm.def, cmap: bldSnapshot(cm) } : k ? { scene: k, seed: (m.ground && m.ground.seed) || ((Math.random() * 1e6) | 0) + 1, def: m.ground ? m.ground.def : 1 } : null; simChanged(); }));   // 近地作戰
   q('#sim-gdef [data-v]').forEach((b) => (b.onclick = () => { m.ground.def = +b.dataset.v; simChanged(); }));
   on('sim-gseed', 'onchange', (e) => { m.ground.seed = Math.max(1, simNum(e.target.value, 1) | 0); simChanged(); });
   on('sim-gre', 'onclick', () => { m.ground.seed = ((Math.random() * 1e6) | 0) + 1; simChanged(); });
