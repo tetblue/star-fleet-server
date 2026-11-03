@@ -34,7 +34,7 @@ function closeSettings() {
   saveSettings(); applyUISettings();
 }
 function renderSettings() {
-  const tabs = [['keys', '按鍵綁定'], ['game', '遊戲'], ['ui', '介面資訊']];
+  const tabs = [['keys', '按鍵綁定'], ['game', '遊戲'], ['sound', '聲音'], ['ui', '介面資訊']];
   let body = '';
   if (SET.tab === 'keys') {
     const groups = [...new Set(KEY_ACTIONS.map((a) => a[2]))];
@@ -65,6 +65,16 @@ function renderSettings() {
       <div class="set-row"><span>貼圖繪製<br><small class="g-dim">直接在船體、武器、艦載機的 3D 模型上畫貼圖，存回伺服器</small></span><button class="g-btn sm" id="set-paint">貼圖繪製…</button></div>
       <div class="set-row"><span>模型工坊<br><small class="g-dim">修正 GLB：船頭朝向、原點、合併成一個網格、減面、刪除多餘的面</small></span><button class="g-btn sm" id="set-mtool">模型工坊…</button></div>
       <div class="set-row"><span>畫面</span><span class="g-row"><button class="g-btn sm ${mode3D ? '' : 'pri'}" data-rm="2d">2D 像素</button><button class="g-btn sm ${mode3D ? 'pri' : ''}" data-rm="3d">3D 模型</button></span></div>`;
+  } else if (SET.tab === 'sound') {
+    const A = sndOpts(), sl = (id, v, name, desc) => `<div class="set-row"><span>${name}<br><small class="g-dim">${desc}</small></span>
+        <span class="g-row"><input type="range" min="0" max="100" step="5" id="${id}" value="${Math.round(v * 100)}"><span class="g-dim" id="${id}-v" style="min-width:3em;text-align:right">${Math.round(v * 100)}%</span></span></div>`;
+    body = `<label class="set-row set-chk"><span>聲音<br><small class="g-dim">關掉＝完全靜音（戰場、介面都沒有聲音）</small></span><input type="checkbox" id="set-snd-on" ${A.on ? 'checked' : ''}></label>
+      ${sl('set-snd-m', A.m, '主音量', '全部聲音的音量')}
+      ${sl('set-snd-s', A.s, '戰場音效', '開火、命中、爆炸、推進器；看得越近越大聲，左右依畫面位置')}
+      ${sl('set-snd-u', A.u, '介面音效', '按鈕、下令、開戰與結算的提示音')}
+      <div class="set-row"><span>試聽<br><small class="g-dim">${SND.ctx ? (SND.pack ? '素材已載入' : '素材載入中…（先用合成音）') : '點一下任何地方後才會啟用聲音'}</small></span><button class="g-btn sm" id="set-snd-test">播放</button></div>
+      <div class="set-h">音效授權</div>
+      <p class="g-dim set-note">${SND_CREDITS.join('<br>')}</p>`;
   } else {
     body = `<div class="set-row"><span>介面大小<br><small class="g-dim">文字、按鈕與面板間距一起放大縮小</small></span>
         <select class="g-sel" id="set-uiscale">${UI_SCALES.map(([v, n]) => `<option value="${v}" ${(SETTINGS.uiScale || 1.2) === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
@@ -82,6 +92,9 @@ function renderSettings() {
   q('#set-close').onclick = closeSettings;
   qa('[data-tab]').forEach((b) => (b.onclick = () => { SET.tab = b.dataset.tab; SET.capture = null; SET.msg = ''; renderSettings(); }));
   qa('.set-key').forEach((b) => (b.onclick = () => { SET.capture = b.dataset.k; SET.msg = ''; renderSettings(); }));
+  if (q('#set-snd-on')) q('#set-snd-on').onchange = (e) => { SETTINGS.audio.on = e.target.checked; saveSettings(); SND.setVol(); };
+  for (const k of ['m', 's', 'u']) if (q('#set-snd-' + k)) q('#set-snd-' + k).oninput = (e) => { SETTINGS.audio[k] = +e.target.value / 100; q('#set-snd-' + k + '-v').textContent = e.target.value + '%'; saveSettings(); SND.setVol(); };
+  if (q('#set-snd-test')) q('#set-snd-test').onclick = () => { SND.init(); setTimeout(() => sndCue('test'), 60); };
   if (q('#set-pradar')) q('#set-pradar').onchange = (e) => { SETTINGS.pilotRadar = e.target.value; saveSettings(); };
   if (q('#set-qmod')) q('#set-qmod').onchange = (e) => { SETTINGS.queueMod = e.target.value; saveSettings(); };
   if (q('#set-kreset')) q('#set-kreset').onclick = () => { for (const a of KEY_ACTIONS) SETTINGS.keys[a[0]] = a[3]; SETTINGS.queueMod = 'Shift'; SET.msg = '已恢復預設按鍵。'; saveSettings(); renderSettings(); };

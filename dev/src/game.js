@@ -225,6 +225,7 @@ function useSkill(f, id, target, pt) {
   const who = GAME.watch ? `${FACTION_NAME[SIDE_FAC[f.side]]}・${f.name}　` : f.side === GAME.playerSide ? '' : '敵方';   // 觀摩：兩邊都是 AI，用陣營名稱
   toast(`${who}${f.commander ? f.commander.name : f.name}：${def.name}${target ? ` → ${target.fleet ? target.fleet.name + ' ' : ''}${target.name}` : ''}`, f.side === GAME.playerSide ? '' : 'enemy');
   if (id === 'focus') for (const g of groups) if (g.side === f.side && !g.inactive) g.target = target;
+  if (f.side === GAME.playerSide && !GAME.replaying) sndCue('skill');
   return true;
 }
 // 呼叫增援：把準備好的增援艦隊（還在場外）移到離 pt 最近的地圖邊緣外側，delay 秒後進場、開往 pt
@@ -1199,7 +1200,7 @@ function startBattle() {
   paused = false; setSpeed(SETTINGS.speedIdx);
   force3D(); if (GAME.op === 2) enterBridge();   // 擬真：開戰直接上艦橋
   if (opts.fow && SETTINGS.autoScan === false) issue('autoscan', { on: false });   // 戰爭迷霧：玩家關掉了自動掃描（記在命令裡）
-  cutPlay(cutSpecStart(GAME.sc));
+  cutPlay(cutSpecStart(GAME.sc)); sndCue('start');
   toast(`${GAME.sc.name}　開戰！${GAME.op ? `（${OP_LEVELS[GAME.op].name}難度）` : ''}（${keyText('pause')} 暫停、${keyText('speed_up')}／${keyText('speed_down')} 調速度、${keyText('attack')}＋左鍵點敵軍＝指定攻擊）`);
 }
 const _fmtT = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -1285,6 +1286,7 @@ function gameFrame(dt) {
     // 結算切入（回放、觀戰不播）；玩家在第 1 邊（多人）時換成自己這一方的角度
     const R = GAME.result, kind = GAME.playerSide === 1 ? { win: 'lose', lose: 'win' }[R.kind] || R.kind : R.kind;
     const ms = GAME.replaying || (NET.on && NET.spec) || (GAME.sc && GAME.sc.sim) ? 0 : cutPlay(cutSpecResult(kind, R.why));
+    if (!GAME.replaying) sndCue(kind === 'win' || kind === 'lose' ? kind : 'draw');
     setTimeout(() => (GAME.replaying ? endReplay() : showReport()), Math.max(1100, ms - 300));
   }
   if (_hudAcc < 0.15) return;

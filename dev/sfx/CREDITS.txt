@@ -1,0 +1,26 @@
+Star Fleet sound effects
+========================
+Taken from RUBICON PROTOCOL (https://github.com/tetblue/rubicon-protocol, MIT, (c) 2026 Loren Hsu),
+which sliced, trimmed, normalized and re-encoded them as mono MP3 (scripts/sfx-prep.py there).
+Only CC0 and CC-BY sources are used. The build packs this folder into web/assets/sfx.js (base64).
+
+CC-BY (attribution required; shown in the game's 音效授權 list):
+- Sounds (c) by Michel Baradari apollo-music.de - "2 High Quality Explosions" (exA, exMini), CC-BY 3.0
+  https://opengameart.org/content/2-high-quality-explosions
+- Blender Foundation - "Big Explosion" (DeathFlash, Elephants Dream / apricot) (exHuge), CC-BY 3.0
+  https://opengameart.org/content/big-explosion
+- JC Sounds - "Sci-Fi Pack Vol 1", CC-BY 4.0 (some of the base sci-fi set)
+- dklon - "Big Explosion", CC-BY 3.0 (explodeBig)
+  https://opengameart.org/content/big-explosion-0
+
+CC0 (public domain, https://creativecommons.org/publicdomain/zero/1.0/):
+- Black Lodge Games - "50 Free SciFi SFX" (beam*, eLow*, eMid*, eHi*, wobble, fly*, flyHi*, warnA, warnB)
+- Black Lodge Games - "27 Metal Audio Samples" (mHit*, mHvy*)
+- rubberduck - "50 CC0 sci-fi SFX" (rLaser, sciBoom, rocket), "25 CC0 bang / firework SFX" (cannon*, boomLow, bang*),
+  "100 CC0 SFX", "100 CC0 SFX 2", "30 CC0 SFX loops"
+- Kenney - "63 Digital Sound Effects" (lzA*, lzB*, zap*, phUp, phDown), Impact Sounds, Sci-Fi Sounds, Interface Sounds (kenney.nl)
+- Still North Media - "The Free Firearm Sound Library" (hvyN*, hvyF*, mg)
+- qubodup - "Impact" (impStone, impMetal)
+- elnineo / NenadSimic explosions, EZduzziteh thruster, Spring Spring "Mechanical Explosion"
+
+Synthesized sounds (keys starting with ~, dev/src/audio.js) are generated in code and have no source files.

@@ -1,3 +1,500 @@
+// ═══════════════════════ 聲音：音效引擎（移植自 rubicon-protocol 的 src/audio，MIT） ═══════════════════════
+// 樣本：dev/sfx（CC0／CC-BY，出處見 dev/sfx/CREDITS.txt）→ 建置時打包成 web/assets/sfx.js（window.__SFX＝{鍵: base64 mp3}），
+//   第一次點擊或按鍵時建立 AudioContext，再用 <script> 載入解碼。合成音（~ 開頭：低頻重擊、雷射、EMP、推進器）在程式裡算。
+// 模擬裡只記「事件」（sndEv：種類、位置、遊戲時間）：同一幀、同種類、畫面上同一區塊、同一刻的事件直接合併成一群（只記數量），
+//   每一幀 sndFrame 把到時間的群依優先度播最多 SND_GROUPS 群；同時最多 SND_VOICES 個聲音，滿了搶走優先度最低的。
+// 不用遊戲的 rnd()、不改任何遊戲狀態：回放、多人、模擬的結果不受影響。
+// 混音：sfx（戰場）→ world（音效音量）→ duck（大爆炸時壓低）→ master → 壓縮 → 限幅；ui（介面）、amb（環境）各自進 master。
+
+const SND_VOICES = 40;   // 同時發聲上限
+const SND_KEY_MAX = 4;   // 同一個樣本同時最多幾個
+const SND_GROUPS = 12;   // 一幀最多播幾群事件
+const SND_STALE = 0.6;   // 事件過了這麼多秒（遊戲時間）還沒播＝丟掉（快轉、跳轉回放）
+const SND_PHASES = ['battle', 'replay', 'sandbox'];   // 這些畫面才有戰場的聲音（主選單後面的背景戰鬥不出聲）
+
+// 音效自己的亂數（音高、音量的變化、輪流選檔）：不碰遊戲的亂數
+let sndSeed = 0x5f3759df;
+function sndRnd() { sndSeed ^= sndSeed << 13; sndSeed ^= sndSeed >>> 17; sndSeed ^= sndSeed << 5; return (sndSeed >>> 0) / 4294967296; }
+const sndClamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+
+// ───── 合成音（純函式：取樣率、亂數 → Float32Array） ─────
+function sndSvf() {   // 狀態變數濾波器（帶通／低通／高通，頻率可以每個取樣改）
+  let lp = 0, bp = 0;
+  return (x, f, q, sr) => { const k = 2 * Math.sin(Math.PI * Math.min(f, sr * 0.45) / sr), hp = x - lp - q * bp; bp += k * hp; lp += k * bp; return { lp, bp, hp }; };
+}
+const sndEnv = (t, a, d) => (t < a ? t / a : Math.exp(-(t - a) / d));
+// 低頻重擊：正弦往下滑（f0 → f1）＋開頭一點雜訊
+function synThump(sr, rnd, f0, f1, dur) {
+  const n = Math.floor(sr * dur), y = new Float32Array(n); let ph = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / sr, f = f1 + (f0 - f1) * Math.exp(-t / dur * 5); ph += 2 * Math.PI * f / sr;
+    y[i] = (Math.sin(ph) * 0.9 + Math.sin(ph * 2) * 0.12) * sndEnv(t, 0.004, dur * 0.32) + (t < 0.006 ? (rnd() * 2 - 1) * (1 - t / 0.006) * 0.35 : 0);
+  }
+  return y;
+}
+// 雷射的「啾」：鋸齒波快速往下掃＋短雜訊
+function synZap(sr, rnd, f0, f1, dur) {
+  const n = Math.floor(sr * dur), y = new Float32Array(n), F = sndSvf(); let ph = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / sr, f = f1 + (f0 - f1) * Math.exp(-t / dur * 4); ph = (ph + f / sr) % 1;
+    const s = (ph * 2 - 1) * 0.7 + Math.sin(ph * Math.PI * 2) * 0.3 + (t < 0.01 ? (rnd() * 2 - 1) * 0.5 : 0);
+    y[i] = F(s, f * 4, 0.6, sr).lp * sndEnv(t, 0.002, dur * 0.4);
+  }
+  return y;
+}
+// EMP：低頻嗡聲＋電弧的雜訊爆裂
+function synEmp(sr, rnd, dur) {
+  const n = Math.floor(sr * dur), y = new Float32Array(n), F = sndSvf(); let ph = 0, crack = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / sr; ph += 2 * Math.PI * (62 - 20 * t / dur) / sr;
+    if (rnd() < 0.0018) crack = 1; crack *= 0.9965;
+    y[i] = ((Math.sin(ph) + 0.5 * Math.sin(ph * 2) + 0.25 * Math.sin(ph * 3)) * 0.5 + F(rnd() * 2 - 1, 2600, 0.3, sr).bp * crack * 1.5) * sndEnv(t, 0.03, dur * 0.45);
+  }
+  return y;
+}
+// 推進器的吸氣（加速前）：高通雜訊往上掃
+function synQbPre(sr, rnd) {
+  const dur = 0.09, n = Math.floor(sr * dur), y = new Float32Array(n), F = sndSvf(); let ph = 0;
+  for (let i = 0; i < n; i++) { const u = i / n; ph += 2 * Math.PI * (180 + 700 * u * u) / sr; y[i] = (F(rnd() * 2 - 1, 1200 + 5000 * u, 0.5, sr).hp * 0.7 + Math.sin(ph) * 0.25) * u * u; }
+  return y;
+}
+// 推進器的收尾：低通雜訊，濾波往下掃
+function synJetTail(sr, rnd, dur) {
+  const n = Math.floor(sr * dur), y = new Float32Array(n), F = sndSvf();
+  for (let i = 0; i < n; i++) { const u = i / n; y[i] = F(rnd() * 2 - 1, 3500 * (1 - u) + 250, 0.6, sr).lp * Math.pow(1 - u, 1.6) * 1.8; }
+  return y;
+}
+// 推進器的高頻層（可循環）：帶通雜訊慢慢起伏，頭尾交叉淡化
+function synJetLoop(sr, rnd, dur) {
+  const n = Math.floor(sr * dur), y = new Float32Array(n), F = sndSvf(), G = sndSvf();
+  for (let i = 0; i < n; i++) { const t = i / sr, f = 2600 + 700 * Math.sin(2 * Math.PI * t / dur) + 300 * Math.sin(2 * Math.PI * 3 * t / dur); y[i] = F(rnd() * 2 - 1, f, 0.5, sr).bp + G(rnd() * 2 - 1, 700, 0.8, sr).lp * 0.5; }
+  const m = Math.floor(sr * 0.08);
+  for (let i = 0; i < m; i++) y[n - m + i] = y[n - m + i] * (1 - i / m) + y[i] * (i / m);
+  return y.subarray(m);
+}
+// 重音（開戰、結算）：低音鈍擊＋鋸齒和弦經過下降的低通
+function synSting(sr, rnd, dur, root) {
+  const n = Math.floor(sr * dur), y = new Float32Array(n), F = sndSvf(), fr = [root, root * 1.5, root * 2, root * 2.52, root * 3], ph = fr.map(() => rnd());
+  for (let i = 0; i < n; i++) {
+    const t = i / sr; let s = 0;
+    for (let k = 0; k < fr.length; k++) { ph[k] = (ph[k] + fr[k] * (1 + 0.003 * Math.sin(t * 5 + k)) / sr) % 1; s += (ph[k] * 2 - 1) / (1 + k * 0.4); }
+    y[i] = (F(s * 0.4, 300 + 4200 * Math.exp(-t / dur * 4), 0.5, sr).lp + Math.sin(2 * Math.PI * root * 0.5 * t) * Math.exp(-t / 0.25) * 0.8) * sndEnv(t, 0.008, dur * 0.4);
+  }
+  return y;
+}
+const SND_SYNTH = {
+  '~thA': (sr, r) => synThump(sr, r, 72, 40, 0.22),   // 副砲、小爆炸
+  '~thB': (sr, r) => synThump(sr, r, 58, 32, 0.38),   // 主砲、中爆炸
+  '~thC': (sr, r) => synThump(sr, r, 48, 24, 0.7),    // 大爆炸、旗艦
+  '~zapA': (sr, r) => synZap(sr, r, 1600, 260, 0.16),
+  '~zapB': (sr, r) => synZap(sr, r, 900, 140, 0.28),
+  '~zapC': (sr, r) => synZap(sr, r, 2400, 600, 0.09),
+  '~emp': (sr, r) => synEmp(sr, r, 0.9),
+  '~qbPre': (sr, r) => synQbPre(sr, r),
+  '~jetTail': (sr, r) => synJetTail(sr, r, 0.5),
+  '~jetLoop': (sr, r) => synJetLoop(sr, r, 2.2),
+  '~sting': (sr, r) => synSting(sr, r, 1.3, 98),
+  '~stingL': (sr, r) => synSting(sr, r, 2.6, 73.4),
+};
+
+// ───── 武器的聲音配方：每一層＝[樣本清單（輪流）, 音量, 音高] ─────
+//   near 近距離  far 遠距離（交叉淡化）  body／low 自己的（艦長的船、駕駛的機）才疊的厚度與低頻
+//   fb 分層素材還沒載入時的備用  tail 反射的送出量  gap 同一配方的最短間隔（秒）  max 同一樣本同時上限
+const SND_GUN = {
+  main: { near: [['beam1', 'beam3'], 0.8, 0.8], far: [['lzA1', 'lzA2'], 0.5, 0.62], body: [['~zapB'], 0.45, 0.9], low: [['~thB'], 0.55, 1], tail: 0.45, fb: [['laserBig', 'laserBig2'], 0.75, 0.9] },
+  sec: { near: [['lzA1', 'lzA2', 'lzA3'], 0.6, 1], far: [['lzB1', 'lzB2'], 0.42, 0.8], body: [['~zapA'], 0.35, 1], low: [['~thA'], 0.35, 1.3], tail: 0.3, fb: [['laser', 'laser2'], 0.65, 1] },
+  aa: { near: [['zap1', 'zap2', 'rLaser'], 0.4, 1.25], far: [['lzB1', 'lzB2'], 0.28, 1.2], body: [['~zapC'], 0.3, 1], tail: 0.15, gap: 0.05, max: 4, fb: [['laser2'], 0.4, 1.5] },
+  msl: { near: [['rocket'], 0.55, 1.3], far: [['rocket'], 0.35, 1.1], body: [['missile'], 0.45, 1.15], low: [['~thA'], 0.35, 0.8], tail: 0.3, gap: 0.06, fb: [['missile'], 0.6, 1.2] },
+  // 王牌飛行員：自己的機
+  p_pulse: { near: [['zap1', 'zap2', 'lzB1'], 0.42, 1.35], body: [['~zapC'], 0.35, 1.2], gap: 0.07, max: 3, fb: [['laser2'], 0.45, 1.4] },
+  p_heavy: { near: [['beam2', 'beam1'], 0.7, 1.0], body: [['~zapB'], 0.45, 1.1], low: [['~thB'], 0.5, 1.1], fb: [['laserBig'], 0.7, 1] },
+  p_rocket: { near: [['rocket'], 0.5, 1.5], body: [['cannon3'], 0.25, 1.4], low: [['~thA'], 0.3, 1], gap: 0.1, fb: [['missile'], 0.5, 1.4] },
+  p_msl: { near: [['missile'], 0.6, 1.2], body: [['rocket'], 0.4, 1.4], low: [['~thA'], 0.3, 0.9], fb: [['missile'], 0.6, 1.2] },
+  p_torp: { near: [['rocket'], 0.7, 0.85], body: [['~zapB'], 0.3, 0.6], low: [['~thB'], 0.6, 0.8], fb: [['missile'], 0.7, 0.8] },
+};
+const SND_TYPE_RATE = [0.86, 0.86, 0.95, 1.05, 1.12, 1];   // 艦種的音高：大船低沉（航母 戰列 巡洋 驅逐 護衛 補給）
+const SND_KILL_W = [3, 3, 2, 1.2, 1, 1.5];   // 擊沉的份量（決定爆炸大小）
+const SND_CREDITS = [   // 設定裡的「音效授權」（CC-BY 需要署名）
+  'Michel Baradari（apollo-music.de）「2 High Quality Explosions」— CC-BY 3.0',
+  'Blender Foundation「Big Explosion」（Elephants Dream）— CC-BY 3.0',
+  'dklon「Big Explosion」— CC-BY 3.0',
+  'JC Sounds「Sci-Fi Pack Vol 1」— CC-BY 4.0',
+  'CC0：Black Lodge Games、rubberduck、Kenney、Still North Media、qubodup 等（OpenGameArt）',
+  '音效引擎與素材整理：RUBICON PROTOCOL（MIT）',
+];
+
+const SND = {
+  ctx: null, ok: true, live: false, buf: {}, pack: false, packLoading: false,
+  lastT: {}, voices: [], rr: {}, loops: {}, ev: new Map(), btnT: 0,
+  stat: { frames: 0, due: 0, played: 0, maxVoices: 0, ev: {} },   // 除錯用的統計（window.__snd）
+  // 第一次點擊／按鍵時建立（瀏覽器要求使用者操作之後才能出聲）
+  init() {
+    if (this.ctx || !this.ok) return;
+    try {
+      const c = (this.ctx = new (window.AudioContext || window.webkitAudioContext)());
+      const lim = c.createDynamicsCompressor(); lim.threshold.value = -3; lim.knee.value = 0; lim.ratio.value = 20; lim.attack.value = 0.001; lim.release.value = 0.12; lim.connect(c.destination);
+      const comp = c.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4; comp.connect(lim);
+      this.master = c.createGain(); this.master.connect(comp);
+      this.duckG = c.createGain(); this.duckG.connect(this.master);
+      this.world = c.createGain(); this.world.connect(this.duckG);
+      this.sfx = c.createGain(); this.sfx.connect(this.world);
+      this.amb = c.createGain(); this.amb.gain.value = 0; this.amb.connect(this.world);
+      this.uiBus = c.createGain(); this.uiBus.connect(this.master);
+      this.buildTail();
+      this.setVol();
+      const rnd = sndRnd;
+      for (const k in SND_SYNTH) {
+        const y = SND_SYNTH[k](c.sampleRate, rnd); let p = 0;
+        for (let i = 0; i < y.length; i++) p = Math.max(p, Math.abs(y[i]));
+        if (p > 0) for (let i = 0; i < y.length; i++) y[i] *= 0.9 / p;
+        const b = c.createBuffer(1, y.length, c.sampleRate); b.getChannelData(0).set(y); this.buf[k] = b;
+      }
+      this.loadPack();
+    } catch (e) { this.ok = false; this.ctx = null; }
+  },
+  // 音量（SETTINGS.audio：on 開關、m 主音量、s 戰場、u 介面，0～1）
+  setVol() {
+    if (!this.ctx) return;
+    const A = sndOpts(), t = this.ctx.currentTime;
+    this.master.gain.setTargetAtTime(A.on ? 0.8 * A.m : 0, t, 0.03);
+    this.world.gain.setTargetAtTime(A.s, t, 0.03);
+    this.uiBus.gain.setTargetAtTime(A.u, t, 0.03);
+  },
+  b64(s) { const bin = atob(s), arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i); return arr.buffer; },
+  loadPack() {
+    if (this.packLoading) return;
+    this.packLoading = true;
+    const go = () => {
+      const P = window.__SFX; if (!P) return;
+      const keys = Object.keys(P); let n = 0;
+      const done = () => { if (++n === keys.length) { this.pack = true; try { delete window.__SFX; } catch (e) { window.__SFX = null; } } };
+      for (const k of keys) this.ctx.decodeAudioData(this.b64(P[k]), (b) => { this.buf[k] = b; done(); }, done);
+    };
+    if (window.__SFX) return go();
+    const s = document.createElement('script');
+    s.src = (window.__ASSETS && window.__ASSETS.sfx) || 'assets/sfx.js';
+    s.onload = go; s.onerror = () => {};
+    document.head.appendChild(s);
+  },
+  // 太空裡沒有回音：只留一點很淡的反射，讓大的聲音有尾巴（兩條有回授的延遲線，左右分開）
+  buildTail() {
+    const c = this.ctx;
+    this.tailIn = c.createGain(); this.tailOut = c.createGain(); this.tailOut.gain.value = 0.18; this.tailOut.connect(this.world);
+    [[-0.7, 0.15], [0.7, 0.31]].forEach(([pan, dl]) => {
+      const d = c.createDelay(1), lp = c.createBiquadFilter(), hp = c.createBiquadFilter(), fb = c.createGain();
+      d.delayTime.value = dl; lp.type = 'lowpass'; lp.frequency.value = 1500; hp.type = 'highpass'; hp.frequency.value = 160; fb.gain.value = 0.15;
+      this.tailIn.connect(d); d.connect(lp); lp.connect(hp); hp.connect(fb); fb.connect(d);
+      let out = hp; if (c.createStereoPanner) { const p = c.createStereoPanner(); p.pan.value = pan; hp.connect(p); out = p; }
+      out.connect(this.tailOut);
+    });
+  },
+  // 大爆炸時把其他聲音暫時壓低（amt＝壓掉的比例）
+  duck(amt, dur = 0.35) {
+    if (!this.ctx) return;
+    const g = this.duckG.gain, t = this.ctx.currentTime;
+    g.cancelScheduledValues(t); g.setValueAtTime(g.value, t); g.linearRampToValueAtTime(1 - amt, t + 0.03); g.setTargetAtTime(1, t + dur, dur * 0.6);
+  },
+  // ---- 發聲上限：滿了搶走優先度最低的（12 ms 淡出）；同一個樣本最多 max 個（搶最舊的） ----
+  voiceKill(v, t) { try { v.g.gain.cancelScheduledValues(t); v.g.gain.setValueAtTime(v.g.gain.value, t); v.g.gain.linearRampToValueAtTime(0, t + 0.012); v.s.stop(t + 0.02); } catch (e) { /* 已經停了 */ } v.dead = true; },
+  voiceAdmit(k, pr, max, t) {
+    const V = (this.voices = this.voices.filter((v) => !v.dead && v.end > t));
+    let same = 0, oldest = null;
+    for (const v of V) if (v.k === k) { same++; if (!oldest || v.t0 < oldest.t0) oldest = v; }
+    if (same >= max && oldest) this.voiceKill(oldest, t);
+    if (V.length - (same >= max ? 1 : 0) < SND_VOICES) return true;
+    let low = null;
+    for (const v of V) if (!v.dead && (!low || v.pr < low.pr)) low = v;
+    if (!low || low.pr > pr) return false;
+    this.voiceKill(low, t); return true;
+  },
+  // 播一個樣本。sp＝位置（sndSpace 的結果：g 音量、pan 左右、f 低通；null＝不分位置）；bus 'ui'＝介面
+  // o：{ pr 優先度權重, hp 高通 Hz, send 反射送出量, vr 音量隨機（dB）, max 同樣本上限 }
+  play(k, vol = 1, rate = 1, detune = 0.06, minGap = 0.03, sp = null, delay = 0, o = null, bus = null) {
+    if (!this.ctx) return;
+    const b = this.buf[k]; if (!b) return;
+    const c = this.ctx, t = c.currentTime, gk = k + (sp ? '@' : '');
+    if (t - (this.lastT[gk] ?? -9) < minGap) return;
+    const rate1 = rate * (1 + (sndRnd() * 2 - 1) * detune);
+    const vr = o && o.vr != null ? o.vr : 1.5, vol1 = vol * Math.pow(10, (sndRnd() * 2 - 1) * vr / 20) * (sp ? sp.g : 1);
+    if (vol1 < 0.004) return;
+    if (c.state === 'suspended') c.resume();
+    const s = c.createBufferSource(); s.buffer = b; s.playbackRate.value = rate1;
+    const g = c.createGain(); g.gain.value = vol1;
+    if (bus === 'ui') { this.lastT[gk] = t; s.connect(g); g.connect(this.uiBus); s.start(t + delay); return; }
+    const pr = vol1 * ((o && o.pr) || (sp ? 1 : 3));
+    if (!this.voiceAdmit(k, pr, (o && o.max) || SND_KEY_MAX, t)) return;
+    this.lastT[gk] = t;
+    let head = s;
+    if (o && o.hp) { const h = c.createBiquadFilter(); h.type = 'highpass'; h.frequency.value = o.hp; s.connect(h); head = h; }
+    head.connect(g);
+    let out = g;
+    if (sp) {
+      if (c.createStereoPanner && sp.pan) { const p = c.createStereoPanner(); p.pan.value = sp.pan; out.connect(p); out = p; }
+      if (sp.f < 17000) { const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = sp.f; out.connect(lp); out = lp; }
+    }
+    out.connect(this.sfx);
+    if (o && o.send > 0) { const sg = c.createGain(); sg.gain.value = o.send; out.connect(sg); sg.connect(this.tailIn); }
+    const v = { s, g, k, pr, t0: t, end: t + delay + b.duration / Math.max(0.1, rate1) + 0.05 };
+    this.voices.push(v);
+    s.onended = () => { v.dead = true; try { out.disconnect(); } catch (e) { /* 已經斷了 */ } };
+    s.start(t + delay);
+  },
+  // 從清單裡輪流挑（不連續兩次同一個）；只挑已經載入的
+  pickKey(list) {
+    const ok = list.filter((k) => this.buf[k]);
+    if (!ok.length) return null;
+    if (ok.length === 1) return ok[0];
+    const id = list.join(','); let i = Math.floor(sndRnd() * ok.length);
+    if (ok[i] === this.rr[id]) i = (i + 1) % ok.length;
+    return (this.rr[id] = ok[i]);
+  },
+  pickPlay(list, vol, rate, sp, detune = 0.06, minGap = 0.03, delay = 0, o = null) { const k = this.pickKey(list); if (k) this.play(k, vol, rate, detune, minGap, sp, delay, o); },
+  layer(L, vk, rk, sp, o, delay = 0, detune = 0.05, gap = 0.012) {
+    if (!L || vk <= 0.003) return false;
+    const k = this.pickKey(L[0]); if (!k) return false;
+    this.play(k, L[1] * vk, L[2] * rk, detune, gap, sp, delay, o);
+    return true;
+  },
+  tone(f0, f1, dur, vol, type = 'square', delay = 0) {
+    if (!this.ctx) return;
+    const c = this.ctx, t = c.currentTime + delay, o = c.createOscillator(), g = c.createGain();
+    o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol * 0.4, t + 0.004); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(this.uiBus); o.start(t); o.stop(t + dur + 0.02);
+  },
+  // ---- 循環音（推進器、光矛、環境）：每幀呼叫，音量平滑；target≈0 一陣子就停掉 ----
+  loopSet(name, key, target, rate = 1, bus = null) {
+    if (!this.ctx) return;
+    let L = this.loops[name]; const b = this.buf[key];
+    if (L && L.key !== key) { try { L.s.stop(); } catch (e) { /* 已經停了 */ } delete this.loops[name]; L = null; }
+    if (!L) {
+      if (!b || target <= 0.01) return;
+      const s = this.ctx.createBufferSource(), g = this.ctx.createGain();
+      s.buffer = b; s.loop = true; s.loopStart = Math.min(0.05, b.duration * 0.1); s.loopEnd = b.duration - Math.min(0.05, b.duration * 0.1);
+      s.playbackRate.value = rate; g.gain.value = 0; s.connect(g); g.connect(bus === 'amb' ? this.amb : this.sfx);
+      s.start(this.ctx.currentTime, s.loopStart + sndRnd() * b.duration * 0.5);
+      L = this.loops[name] = { s, g, v: 0, key };
+    }
+    const t = this.ctx.currentTime;
+    L.v += (target - L.v) * 0.15;
+    L.g.gain.setTargetAtTime(L.v, t, 0.05); L.s.playbackRate.setTargetAtTime(rate, t, 0.1);
+    if (target <= 0.01 && L.v < 0.02) { try { L.s.stop(t + 0.1); } catch (e) { /* 已經停了 */ } delete this.loops[name]; }
+  },
+  stopLoops() { for (const k in this.loops) { try { this.loops[k].s.stop(); } catch (e) { /* 已經停了 */ } } this.loops = {}; },
+
+  // ───── 高階：武器、爆炸、命中 ─────
+  // R＝配方；sp＝位置（null＝自己的）；n＝這一群有幾發；rk＝音高倍率
+  shot(R, sp, n, rk = 1) {
+    const own = !sp, u = sp ? sp.u : 0, vk = (own ? 1.1 : 0.9) * sndCount(n), gap = R.gap || 0.025;
+    const o = { pr: own ? 3 : 1, hp: own ? 0 : 90, send: (R.tail || 0.3) * (own ? 0.5 : 0.8 + u * 0.6), max: R.max || SND_KEY_MAX };
+    let ok = false;
+    if (u < 1 || !R.far) ok = this.layer(R.near, vk * (R.far ? 1 - u : 1), rk, sp, o, 0, 0.05, gap);
+    if (u > 0 && R.far) ok = this.layer(R.far, vk * (0.35 + 0.65 * u), rk, sp, o, 0, 0.05, gap) || ok;
+    if (!ok) this.layer(R.fb, vk * (own ? 1 : 0.9), rk, sp, o, 0, 0.06, gap);
+    if (own) { this.layer(R.body, 1, rk, null, o, 0.004, 0.05, gap); this.layer(R.low, 1, 1, null, { pr: 3, max: 3 }, 0, 0.03, gap); }
+    else if (u < 0.5 && R.body) this.layer(R.body, vk * 0.35 * (1 - u * 2), rk, sp, o, 0.004, 0.05, gap);
+    if (n >= 4) this.layer(R.far || R.near, vk * 0.35, rk * 0.97, sp, o, 0.03 + sndRnd() * 0.07, 0.06, 0);   // 一整排同時開火：補一層稍晚的，聽起來是一陣齊射
+  },
+  // 爆炸：'small' 小船、'big' 大船、'huge' 旗艦（大的近距離時壓低其他聲音）
+  explode(size, sp, n = 1) {
+    const u = sp ? sp.u : 0, far = u > 0.5, cn = sndCount(n);
+    if (size === 'huge') {
+      this.play('explodeBig', 1.0 * cn, 0.8, 0.05, 0.03, sp, 0, { pr: 2.5, send: 0.9 });
+      this.play('exHuge', 0.9, 0.85, 0.05, 0.05, sp, 0, { pr: 2.5, send: 0.6 });
+      this.play('boom1', 1.0, 0.8, 0.05, 0.03, sp);
+      this.play('~thC', 1.0, 0.8, 0.03, 0.05, sp, 0, { pr: 2.5 });
+      this.play('debris', 0.8, 0.8, 0.05, 0.03, sp, 0.08);
+      this.pickPlay(['clatter1', 'clatter2'], 0.5, 0.7, sp, 0.06, 0.03, 0.2);
+      this.debrisRain(sp, 4, 0.35);
+      if (!sp || sp.g > 0.5) this.duck(0.5, 0.7);
+    } else if (size === 'big') {
+      if (!far) this.pickPlay(['crunch1', 'crunch2', 'crunch3'], 0.7, 0.9, sp);
+      this.play('explodeBig', 1.0 * cn, 0.95, 0.05, 0.03, sp, 0, { pr: 2, send: 0.7 });
+      this.play('exA', far ? 0.5 : 0.8, 0.9, 0.06, 0.04, sp, 0, { send: 0.5 });
+      this.play('boom2', 0.8, 1.0, 0.06, 0.05, sp);
+      if (!far) this.play('~thC', 0.8, 1, 0.04, 0.05, sp, 0, { pr: 2 });
+      this.play('distant', 0.5, 1.0, 0.05, 0.03, sp, 0.06, { send: 0.5 });
+      this.debrisRain(sp, 2, 0.25);
+      if (!sp || sp.g > 0.8) this.duck(0.3, 0.35);
+    } else {
+      this.pickPlay(['explode', 'explode2', 'explode3'], 0.8 * cn, 1.05, sp);
+      this.play('exMini', far ? 0.25 : 0.45, 1.15, 0.08, 0.04, sp, 0, { send: 0.45 });
+      if (!far) { this.pickPlay(['crunch1', 'crunch2', 'crunch3'], 0.35, 1.3, sp, 0.1, 0.05); this.play('~thB', 0.45, 1.2, 0.05, 0.05, sp, 0, { max: 3 }); }
+    }
+  },
+  // 爆炸之後打在船殼上的碎片（0.3～0.9 秒後，只有近的才聽得到）
+  debrisRain(sp, n, vol) {
+    if (sp && sp.u > 0.3) return;
+    for (let i = 0; i < n; i++) {
+      const k = this.pickKey(['mHit1', 'mHit3', 'mHit5', 'impMetal', 'impStone']);
+      if (k) this.play(k, vol * (0.6 + sndRnd() * 0.5), 0.6 + sndRnd() * 0.4, 0.1, 0.01, sp && { ...sp, pan: sndClamp(sp.pan + (sndRnd() - 0.5) * 0.5, -1, 1) }, 0.3 + sndRnd() * 0.6, { max: 6, pr: 0.4 });
+    }
+  },
+  hull(sp, n, heavy) {
+    const cn = sndCount(n);
+    this.pickPlay(['hit', 'hit2', 'hit3'], 0.45 * cn, heavy ? 0.8 : 1.0, sp);
+    this.pickPlay(['armor1', 'armor2', 'armor3'], 0.4, heavy ? 0.7 : 0.85, sp, 0.1, 0.04);
+    if (!sp || sp.u < 0.4) { const k = this.pickKey(heavy ? ['mHvy1', 'mHvy2', 'mHvy3'] : ['mHit1', 'mHit2', 'mHit3', 'mHit4']); if (k) this.play(k, 0.3, 0.75, 0.1, 0.03, sp, 0, { max: 5 }); }
+  },
+  shield(sp, n, heavy) {
+    this.pickPlay(['plate1', 'plate2'], (heavy ? 0.7 : 0.45) * sndCount(n), heavy ? 0.7 : 1.0, sp, 0.08, 0.04);
+    const k = this.pickKey(['eHi2', 'eHi3', 'dome1']); if (k) this.play(k, heavy ? 0.32 : 0.2, 1.3, 0.08, 0.06, sp);
+  },
+  // ---- 介面 ----
+  ui(kind) {
+    if (!this.ctx) return;
+    if ((!kind || kind === 'cmd') && this.ctx.currentTime - this.btnT < 0.08) return;   // 按鈕下的命令：按鈕聲已經響過
+    this.btnT = this.ctx.currentTime;
+    if (kind === 'back') this.play('uiBack', 0.7, 1.0, 0.02, 0.03, null, 0, null, 'ui');
+    else if (kind === 'ok') this.play('uiOk', 0.5, 1.0, 0.02, 0.05, null, 0, null, 'ui');
+    else if (kind === 'err') this.play('uiErr', 0.6, 1.0, 0.02, 0.05, null, 0, null, 'ui');
+    else if (kind === 'tog') this.play('uiTog', 0.6, 1.0, 0.04, 0.03, null, 0, null, 'ui');
+    else if (kind === 'cmd') this.play('uiSel', 0.5, 1.1, 0.04, 0.06, null, 0, null, 'ui');
+    else this.play('uiClick', 0.7, 1.0, 0.04, 0.03, null, 0, null, 'ui');
+  },
+};
+
+// 數量 → 音量倍率（一群越多發越大聲，但不會線性疊上去）
+function sndCount(n) { return Math.min(2, 1 + 0.4 * Math.log2(Math.max(1, n))); }
+function sndOpts() { const A = SETTINGS.audio || {}; return { on: A.on !== false, m: A.m ?? 0.8, s: A.s ?? 1, u: A.u ?? 0.7 }; }
+// 聽者：一般＝鏡頭看的那一點（拉得越遠、聽的範圍越大但整體小聲一點）；駕駛、艦長、艦橋＝鏡頭本身
+// 回傳 { g 音量, pan 左右（-1～1）, f 低通 Hz, u 遠近（0 近～1 遠） }；太遠＝null
+const _sndP = new THREE.Vector3();
+function sndRef() {
+  if ((PL.on && !PL.spec) || CAP.on || BR.on) return { close: true, ref: PL.on && !PL.spec ? 45 : CAP.on ? 70 : 140, zoom: 1 };
+  return { close: false, ref: view.height * 0.55, zoom: sndClamp(Math.pow(420 / view.height, 0.35), 0.55, 1.15) };
+}
+function sndDist(x, y, z, R) {
+  if (R.close) { const c = camera.position; return Math.hypot(x - c.x, y - c.y, z - c.z); }
+  return Math.hypot(x - view.target.x, (y - view.target.y) * 0.5, z - view.target.z);
+}
+function sndSpace(x, y, z, R) {
+  const ref = R.ref, d = sndDist(x, y, z, R), g = ref / (ref + 1.25 * Math.max(0, d - ref));
+  if (g < 0.03) return null;
+  _sndP.set(x, y, z).project(camera);
+  let pan = sndClamp(_sndP.x, -1.3, 1.3) / 1.3 * 0.85; if (_sndP.z > 1) pan = -pan;   // 在鏡頭後面：左右相反
+  return { g: g * R.zoom, pan, f: sndClamp(18000 * Math.pow(g, 0.8), 1400, 18000), u: sndClamp((d - ref) / (ref * 2), 0, 1) };
+}
+
+// ───── 事件：模擬裡呼叫（便宜：只做合併） ─────
+// k：f 開火（a＝砲種、b＝艦種）、hs 護盾命中、hh 船體命中（a：1＝主砲、2＝玩家打的）、mh 飛彈命中、mx 飛彈自爆、ix 攔截、
+//    fd 艦載機被擊落、rk 打到岩石、gx 打到地面、k 擊沉（a＝份量，旗艦 ≥10）、fl 艦載機出擊
+// own＝自己的（艦長的船、駕駛的機）：不分位置、完整的層
+let _sndR = null, _sndC = 100;
+function sndEv(k, x, y, z, t, a = 0, b = 0, own = false) {
+  if (!SND.live) return;
+  const R = _sndR;
+  let key, d = 0;
+  if (own) key = k + '|' + a + '|o|' + Math.floor(t * 8);
+  else {
+    d = sndDist(x, y, z, R);
+    if (d > R.ref * 9) return;   // 太遠：聽不到
+    key = k + '|' + (k === 'k' ? '' : a) + '|' + Math.floor(x / _sndC) + ',' + Math.floor(z / _sndC) + '|' + Math.floor(t * 8);
+  }
+  const E = SND.ev, g = E.get(key);
+  if (g) {
+    g.n++;
+    if (k === 'k') g.a = Math.max(g.a, a);
+    if (b < g.b) g.b = b;
+    if (d < g.d) { g.x = x; g.y = y; g.z = z; g.d = d; }
+    if (t < g.t) g.t = t;
+    return;
+  }
+  if (E.size > 3000) return;
+  E.set(key, { k, a, b, x, y, z, t, d, n: 1, own });
+}
+// 3D 砲塔的開火紀錄（main.js 的 rigFire）＝每一門砲開火：位置用分艦隊的中心（不必再算船的位置）
+function sndFire(i, gk, t0) {
+  if (!SND.live) return;
+  const q = squadrons[ships.sq[i]]; if (!q || q.bg) return;
+  sndEv('f', q.x, q.y || 0, q.z, t0, gk, ships.type[i], CAP.on && !!CAP.byI && CAP.byI[i] >= 0);
+}
+function sndKill(i, x, y, z, t, flag) { sndEv('k', x, y, z, t, (SND_KILL_W[ships.type[i]] || 1) + (flag ? 10 : 0)); }
+// 駕駛自己的武器（pilot.js）：W.id → 配方
+function sndPilotShot(id) { if (!SND.live) return; const R = SND_GUN['p_' + id]; if (R) SND.shot(R, null, 1); }
+// 駕駛被打中：護盾＝鏗、機體＝悶響；dead＝被擊墜
+function sndPilotHurt(hull, dead) {
+  if (!SND.live) return;
+  if (dead) { SND.explode('big', null); SND.duck(0.6, 1.0); return; }
+  if (hull) { SND.pickPlay(['hit', 'hit2', 'hit3'], 0.55, 0.9, null); SND.play('thud1', 0.4, 0.8, 0.08, 0.08); const k = SND.pickKey(['mHvy1', 'mHvy2', 'mHvy3']); if (k) SND.play(k, 0.35, 0.75, 0.08, 0.07); }
+  else { SND.pickPlay(['plate1', 'plate2'], 0.55, 1.1, null, 0.08, 0.05); SND.play('shield', 0.4, 1.2, 0.05, 0.06); }
+}
+// 事件提示：start 開戰、win／lose／draw 結算、skill 技能、test 試聽
+function sndCue(kind) {
+  if (!SND.ctx) return;
+  const P = (k, v, r, dl = 0) => SND.play(k, v, r, 0.02, 0.1, null, dl, null, 'ui');
+  if (kind === 'start') { P('alarmBig', 0.4, 0.8); P('~sting', 0.55, 1, 0.1); P('~thC', 0.5, 0.8, 0.1); }
+  else if (kind === 'win') { SND.tone(523, 523, 0.25, 0.3, 'triangle'); SND.tone(659, 659, 0.3, 0.3, 'triangle', 0.12); SND.tone(784, 784, 0.5, 0.3, 'triangle', 0.24); P('~sting', 0.5, 1.2, 0.05); }
+  else if (kind === 'lose') { P('~stingL', 0.6, 0.85); P('~thC', 0.5, 0.7); }
+  else if (kind === 'draw') { P('~sting', 0.45, 0.9); }
+  else if (kind === 'skill') { P('charge', 0.45, 1.1); P('phUp', 0.35, 0.9, 0.05); }
+  else if (kind === 'test') { SND.shot(SND_GUN.main, null, 1); setTimeout(() => SND.explode('big', null), 450); }
+}
+
+// ───── 每一幀（main.js 的 frame）：播到時間的事件群、循環音 ─────
+let _sndAmbT = 0;
+function sndFrame(dt) {
+  const C = SND.ctx;
+  SND.live = !!C && C.state === 'running' && sndOpts().on && SND_PHASES.includes(GAME.phase) && !document.hidden;
+  if (!SND.live) { if (SND.ev.size) SND.ev.clear(); if (C && Object.keys(SND.loops).length) SND.stopLoops(); return; }
+  _sndR = sndRef(); _sndC = Math.max(40, _sndR.ref * 0.6);   // 合併的區塊大小：跟著聽的範圍
+  const now = U.uTime.value, due = [];
+  for (const [key, g] of SND.ev) {
+    if (g.t > now) continue;
+    SND.ev.delete(key);
+    if (now - g.t > SND_STALE) continue;
+    const sp = g.own ? null : sndSpace(g.x, g.y, g.z, _sndR);
+    if (!g.own && !sp) continue;
+    g.sp = sp; g.pr = (SND_PRI[g.k] || 1) * (sp ? sp.g : 2) * sndCount(g.n);
+    due.push(g);
+  }
+  if (due.length > SND_GROUPS) due.sort((a, b) => b.pr - a.pr);
+  for (let i = 0; i < due.length && i < SND_GROUPS; i++) sndPlayGroup(due[i]);
+  const S = SND.stat; S.frames++; S.due += due.length; S.played += Math.min(due.length, SND_GROUPS); S.maxVoices = Math.max(S.maxVoices, SND.voices.length);
+  for (const g of due) S.ev[g.k] = (S.ev[g.k] || 0) + g.n;
+  // 環境：低沉的艦內嗡聲（作戰中），駕駛時換成推進器
+  const pil = PL.on && !PL.spec && !PL.dead && GAME.phase === 'battle';
+  _sndAmbT += dt;
+  SND.loopSet('amb1', 'ambHum', 0.22, 1, 'amb'); SND.loopSet('amb2', 'ambLow', 0.16, 1, 'amb');
+  if (SND.amb.gain.value < 0.99) SND.amb.gain.setTargetAtTime(1, C.currentTime, 0.8);
+  const Fr = PL.frame, sr = pil && Fr ? sndClamp(Math.abs(PL.speed) / (Fr.max || 1), 0, 1.2) : 0;
+  SND.loopSet('thr', 'thrustLoop', pil ? 0.12 + 0.3 * sr + (PL.boosting ? 0.15 : 0) : 0, 0.8 + 0.4 * sr);
+  SND.loopSet('jet', '~jetLoop', pil && PL.boosting ? 0.25 : 0, 1.1);
+  if (pil && PL.boosting && !SND.boostOn) { SND.play('~qbPre', 0.4, 1, 0.08, 0.2); SND.play('boostUp', 0.6, 1.1, 0.08, 0.2, null, 0.04); SND.play('thrBurst', 0.45, 1.1, 0.08, 0.2, null, 0.04); }
+  if (pil && !PL.boosting && SND.boostOn) SND.play('~jetTail', 0.3, 1, 0.08, 0.2);
+  SND.boostOn = pil && PL.boosting;
+  const lance = pil && PL.beam && now - PL.beam.t < 0.15;
+  SND.loopSet('lance', 'eLow2', lance ? 0.45 : 0, 1.15);
+}
+const SND_PRI = { k: 4, mh: 1.6, f: 1, hh: 1.1, hs: 0.9, mx: 0.8, ix: 0.7, fd: 0.8, rk: 0.5, gx: 0.8, fl: 0.6 };
+function sndPlayGroup(g) {
+  const sp = g.sp, n = g.n;
+  switch (g.k) {
+    case 'f': { const R = SND_GUN[g.a] || SND_GUN.sec; SND.shot(R, sp, n, SND_TYPE_RATE[g.b] || 1); break; }
+    case 'hs': SND.shield(sp, n, g.a === 1); break;
+    case 'hh': SND.hull(sp, n, g.a === 1); if (g.a === 2) SND.play('uiTick', 0.22, 1.25, 0.04, 0.045, null, 0, null, 'ui'); break;   // 玩家打中：命中確認
+    case 'mh': SND.explode('small', sp, n); SND.hull(sp, 1, true); break;
+    case 'mx': SND.pickPlay(['explode', 'explode2', 'explode3'], 0.5 * sndCount(n), 1.2, sp); break;
+    case 'gx': SND.explode('small', sp, n); break;
+    case 'ix': SND.play('exMini', 0.4 * sndCount(n), 1.4, 0.08, 0.04, sp); SND.pickPlay(['zap1', 'zap2'], 0.2, 1.3, sp); break;
+    case 'fd': SND.pickPlay(['explode2', 'explode3'], 0.45 * sndCount(n), 1.45, sp); SND.play('exMini', 0.3, 1.5, 0.08, 0.05, sp); break;
+    case 'rk': SND.pickPlay(['rock1', 'rock2'], 0.45 * sndCount(n), 1.0, sp, 0.1, 0.04); SND.play('impStone', 0.3, 0.8, 0.1, 0.05, sp); break;
+    case 'fl': SND.play('thrBurst', 0.35 * sndCount(n), 1.2, 0.08, 0.1, sp); SND.play('boostUp', 0.25, 1.4, 0.08, 0.1, sp, 0.05); break;
+    case 'k': SND.explode(g.a >= 10 ? 'huge' : g.a >= 3 || n >= 3 ? 'big' : 'small', sp, n); break;
+  }
+}
+
+window.__snd = { SND, SND_GUN, sndCue, sndEv, sndPlayGroup, sndPilotShot, sndPilotHurt };   // 除錯、測試用
+// ───── 啟動：第一次點擊／按鍵建立 AudioContext；按鈕、勾選的介面音 ─────
+function sndGesture() { if (!SND.ctx) SND.init(); else if (SND.ctx.state === 'suspended') SND.ctx.resume(); }
+addEventListener('pointerdown', sndGesture, true);
+addEventListener('keydown', sndGesture, true);
+addEventListener('click', (e) => {
+  const el = e.target && e.target.closest && e.target.closest('button, .g-btn, input[type=checkbox], select');
+  if (!el || el.disabled) return;
+  SND.ui(el.type === 'checkbox' ? 'tog' : /返回|關閉|取消|完成/.test(el.textContent || '') ? 'back' : '');
+}, true);
+
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
@@ -2598,6 +3095,7 @@ function killShip(i, t, x, y, z, mul = 1) {
   if (i === q.flagship) q.flagLost = true;
   const sc = TYPE_W[ships.type[i]] * 1.6 * (ships.type[i] <= 1 ? 1.4 : 1) * mul;
   spawnFx(x, y, z, ships.side[i], sc, 18 + rnd() * 6);
+  sndKill(i, x, y, z, t, i === q.flagship);   // 爆炸聲（audio.js；旗艦更大）
   debrisShipKill(i, t, x, y, z);   // 碎片、燃燒殘骸（debris.js，只是畫面）
   salvageKill(i, t, x, z);
   swarmInfectKill(i, t, x, y, z);
@@ -3127,6 +3625,7 @@ function launchCraft(i, n, kind, tgt = -1, t0 = U.uTime.value, role = 1, area = 
     launchCraft.last = j;
     got++;
   }
+  if (got && SND.live) { const q = squadrons[ships.sq[i]]; if (!q.bg) sndEv('fl', q.x, q.y || 0, q.z, t0); }   // 出擊的推進器聲
   return got;
 }
 // 舊的手動出擊（測試場用）
@@ -3551,7 +4050,7 @@ function processHits() {
     pending[k] = pending[pending.length - 1]; pending.pop();
     if (e.kind === 'mi') {   // 撞上岩石，或沒命中、在目標後方自爆（半路被打下的就不再爆一次）
       if (e.mi != null) { if (!misLive[e.mi] || misGen[e.mi] !== e.g) continue; misLive[e.mi] = 0; }
-      spawnFx(e.x, e.y, e.z, e.side, 3.2, 26); if (GRD) { groundScar(e.x, e.y, e.z, 2.5); groundStray(e.x, e.y, e.z, e.t, true); } continue;
+      spawnFx(e.x, e.y, e.z, e.side, 3.2, 26); sndEv('mx', e.x, e.y, e.z, t); if (GRD) { groundScar(e.x, e.y, e.z, 2.5); groundStray(e.x, e.y, e.z, e.t, true); } continue;
     }
     if (e.kind === 'ak') {   // 防空／副砲打中飛彈或艦載機
       if (e.a === 0) {
@@ -3559,21 +4058,21 @@ function processHits() {
         if (misLive[i] && misGen[i] === e.g) {
           misLive[i] = 0; const t0 = misT[i * 4], dur = misT[i * 4 + 1], u = Math.min(1, Math.max(0, (t - t0) / dur));
           misT[i * 4 + 3] = u; misCut = true; wStats[misSide[i]].mInt++;
-          bezCPU(i, u, _c); spawnFx(_c.x, _c.y, _c.z, misSide[i], 3.2, 26);
+          bezCPU(i, u, _c); spawnFx(_c.x, _c.y, _c.z, misSide[i], 3.2, 26); sndEv('ix', _c.x, _c.y, _c.z, t);
         }
       } else {
         const j = e.i;
         if (PL.on && j === PL.j) { if (FT.state[j] === 2) pilotHurt(e.dmg, e); continue; }   // 打中玩家的機：先扣護盾
         if (FT.state[j] === 2) {
           FT.hp[j] -= e.dmg;
-          if (FT.hp[j] <= 0) { FT.state[j] = 3; FT.t0[j] = t; if (!FT.kind[j]) wStats[FT.side[j]].fLost++; spawnFx(fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2], FT.side[j], 2.6, 26); if (e.pl) pilotCredit('ftr', j, 0, true, e.pl); if (CAP.on && FT.side[j] !== CAP.side) capCreditF(j); }
+          if (FT.hp[j] <= 0) { FT.state[j] = 3; FT.t0[j] = t; if (!FT.kind[j]) wStats[FT.side[j]].fLost++; spawnFx(fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2], FT.side[j], 2.6, 26); sndEv('fd', fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2], t); if (e.pl) pilotCredit('ftr', j, 0, true, e.pl); if (CAP.on && FT.side[j] !== CAP.side) capCreditF(j); }
           else if (e.pl) pilotCredit('hitF', j, 0, false, e.pl);
         }
       }
       continue;
     }
     if (e.kind === 'mh' && e.mi != null) { if (!misLive[e.mi] || misGen[e.mi] !== e.g) continue; misLive[e.mi] = 0; }   // 半路被打下了
-    if (e.kind === 'sp') { spawnFx(e.x, e.y, e.z, e.side, 1.4, 20); if (!GRD && ROCKS.length) debrisRockHit(e.x, e.y, e.z); if (GRD && e.bi != null) groundBldKill(e.bi, e.x, e.z); if (GRD && e.r !== -1) groundScar(e.x, e.y, e.z, e.r != null ? e.r : 1.6); continue; }   // 近地：打到地面＝炸毀建築（r＝-1：不炸；bi＝直接打中的那一棟）
+    if (e.kind === 'sp') { spawnFx(e.x, e.y, e.z, e.side, 1.4, 20); sndEv(GRD ? 'gx' : 'rk', e.x, e.y, e.z, t);if (!GRD && ROCKS.length) debrisRockHit(e.x, e.y, e.z); if (GRD && e.bi != null) groundBldKill(e.bi, e.x, e.z); if (GRD && e.r !== -1) groundScar(e.x, e.y, e.z, e.r != null ? e.r : 1.6); continue; }   // 近地：打到地面＝炸毀建築（r＝-1：不炸；bi＝直接打中的那一棟）
     if (e.kind === 'ms') { groundMsHit(e); continue; }   // 近地：打中巨型結構
     if (e.kind === 'tu') { turretHit(e); continue; }   // 近地：打中地面砲台
     if (e.kind === 'gt') { groundTargetHit(e); continue; }   // 駕駛：打中地面目標   // 光束打在岩石上的火花
@@ -3627,6 +4126,7 @@ function processHits() {
     const eff = shD + hullD;
     e.kill = ships.hp[ti] <= 0;
     e.hull = hullD > 0;
+    if (!e.kill && (shD > 0 || hullD > 0)) sndEv(e.kind === 'mh' ? 'mh' : e.hull ? 'hh' : 'hs', e.x, e.y, e.z, t, e.pl && PL.on ? 2 : e.gk === 'main' ? 1 : 0);   // 命中的聲音（擊沉的另外在 killShip）
     if (e.pl) pilotCredit('ship', ti, shD + hullD, e.kill, e.pl);   // 玩家打出的傷害、擊沉
     if (CAP.on) { if (tSide === CAP.side) capHurt(ti, e, shD, hullD); else capCreditShip(ti, shD + hullD, e.kill); }   // 艦長：受擊方向、戰果
     if (e.asp != null) {
@@ -4126,6 +4626,7 @@ function rigFire(i, gk, t0, x, y, z, tg = -1) {
   rigAlloc();
   const g = RIG_GK[gk] ?? 0, k = i * 4 + g;
   RIG.t[k] = t0; RIG.p[k * 3] = x; RIG.p[k * 3 + 1] = y; RIG.p[k * 3 + 2] = z; RIG.tg[k] = tg;
+  sndFire(i, gk, t0);   // 開火的聲音（audio.js）
 }
 const RIG_HEAD = /* glsl */`
   attribute vec4 aRig; attribute float aPart; attribute vec3 aPiv;
@@ -4704,6 +5205,7 @@ addEventListener('blur', () => { modHeld.Shift = modHeld.Control = modHeld.Alt =
 function queueMode() { return !!modHeld[SETTINGS.queueMod] || (queueToggle && lastPtr === 'touch'); }
 function sendCmd(type, args) {
   if (args.sqs && !args.sqs.length) return;   // 沒有選取：不下令
+  SND.ui('cmd');   // 下令的確認音（audio.js）
   if (queueMode()) { const { sqs, ...item } = args; return issue('queue', { sqs, item: { type, ...item } }); }
   return issue(type, args);
 }
@@ -5249,13 +5751,14 @@ const UI_OPTS = [
   ['compass', '艦橋方位儀', '指揮官視角上方的方位刻度與各艦隊方位'],
 ];
 const SETTINGS = (() => {
-  const d = { keyVer: 4, keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, pilotRadar: 'right', terrain: 'splat', debris: 'high', ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
+  const d = { keyVer: 4, keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, pilotRadar: 'right', terrain: 'splat', debris: 'high', audio: { on: true, m: 0.8, s: 1, u: 0.7 }, ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
   try { const s = JSON.parse(STORE.getItem('fleet.settings') || 'null'); if (s) { const k0 = { ...(s.keys || {}) };
       // 第 2 版按鍵（指令卡）：舊存檔的鏡頭旋轉 Q／E／R／T、艦橋 B 會和指令卡衝突，沒改過的換成新的預設
       if (!(s.keyVer >= 2)) for (const [id, old] of [['cam_yaw_l', 'KeyQ'], ['cam_yaw_r', 'KeyE'], ['cam_pitch_up', 'KeyR'], ['cam_pitch_dn', 'KeyT'], ['bridge', 'KeyB']]) if (k0[id] === old) delete k0[id];
       if (!(s.keyVer >= 3) && k0.bridge === 'F2') delete k0.bridge;   // 第 3 版：F2 改成全選，艦橋移到 F3
       if (!(s.keyVer >= 4)) for (const id of Object.keys(k0)) if (id.startsWith('cap_')) delete k0[id];   // 第 4 版：艦長改成 A/D 轉向、Q/E 平移、F 技能、G 護航機
-      Object.assign(d.keys, k0); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin', 'pilotRadar', 'terrain', 'debris']) if (s[k] != null) d[k] = s[k]; } } catch (e) { /* 用預設值 */ }
+      Object.assign(d.keys, k0); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin', 'pilotRadar', 'terrain', 'debris']) if (s[k] != null) d[k] = s[k];
+      if (s.audio) Object.assign(d.audio, s.audio); } } catch (e) { /* 用預設值 */ }
   return d;
 })();
 function saveSettings() { try { STORE.setItem('fleet.settings', JSON.stringify(SETTINGS)); } catch (e) { /* 只在本次有效 */ } }
@@ -5528,6 +6031,7 @@ function frame() {
   updateMarkers();
   updateStalks();
   gameFrame(dt);
+  sndFrame(dt);      // 聲音：播到時間的事件、循環音（audio.js）
   const t = U.uTime.value;
   const fogNow = playerFogged();   // 被干擾：敵方標籤只顯示「？？？」
 
@@ -6118,7 +6622,11 @@ const GROUND_SCENES = {
 const GROUND_KEYS = Object.keys(GROUND_SCENES);
 // 隨機戰役、無限戰場的「戰場」選項
 const GROUND_ENV = [{ name: '太空', g: null }, ...GROUND_KEYS.map((k) => ({ name: GROUND_SCENES[k].name, g: k })), { name: '近地隨機', g: 'rand' }];
-function groundPick(g, R) { return g === 'rand' ? GROUND_KEYS[Math.floor(R() * GROUND_KEYS.length)] : g; }
+function groundPick(g, R) { return g === 'rand' ? GROUND_KEYS[Math.floor(R() * GROUND_KEYS.length)] : bldMapOf(g) ? bldMapOf(g).scene : g; }
+// 戰場選項 → battleSetup.ground 的其他欄位：自訂地圖（building.js）＝地圖自己的種子＋整份建築配置（回放、多人都不必再查伺服器）
+function groundExtra(g) { const M = bldMapOf(g); return M ? { seed: M.seed >>> 0, cmap: bldSnapshot(M) } : {}; }
+// 同一個地形的鍵：場景＋種子（＋自訂地圖內容的雜湊）
+function groundKey(g) { return `${g.scene}:${g.seed >>> 0}${g.cmap ? ':' + bldHash(g.cmap) : ''}`; }
 const gKm = (u) => Math.round(u * GROUND_KM * 10) / 10;
 
 // 簡報用：近地規則說明
@@ -6144,15 +6652,15 @@ let SOLID = false;  // 有沒有實體障礙（小行星或近地）：射線、
 const GRD_CACHE = { key: '', tex: null }, GRD_DATA = new Map();
 function groundSpec() { const g = battleSetup && battleSetup.ground; return g && GROUND_SCENES[g.scene] ? g : null; }
 function groundData(g) {   // 生成過的地形（保留最近幾個）
-  const key = `${g.scene}:${g.seed >>> 0}`;
+  const key = groundKey(g);
   let D = GRD_DATA.get(key);
-  if (!D) { D = groundGen(g.scene, g.seed >>> 0); GRD_DATA.set(key, D); if (GRD_DATA.size > 4) GRD_DATA.delete(GRD_DATA.keys().next().value); }
+  if (!D) { D = groundGen(g.scene, g.seed >>> 0, g.cmap); GRD_DATA.set(key, D); if (GRD_DATA.size > 4) GRD_DATA.delete(GRD_DATA.keys().next().value); }
   return D;
 }
 function setGround() {
   const g = groundSpec();
   if (!g) { GRD = null; U.uGrd.value.w = 0; U.uPilN.value = 0; groundSync(); return; }
-  const key = `${g.scene}:${g.seed >>> 0}`, D = groundData(g);
+  const key = groundKey(g), D = groundData(g);
   if (GRD_CACHE.key !== key) {
     GRD_CACHE.key = key;
     if (GRD_CACHE.tex) GRD_CACHE.tex.dispose();
@@ -6350,10 +6858,11 @@ const gCol = (r, g, b, R, j = 0.12) => { const k = 1 - j + R() * j * 2; return [
 // 一般建築（畫面用、可被炸毀）：每一棟 10 個數字 x, z, w, d, h, y0, r, g, b, 窗戶種子
 function gAdd(B, x, z, w, d, h, y0, col, win = 0) { B.a.push(x, z, w, d, h, y0, col[0], col[1], col[2], win); B.n++; }
 
-function groundGen(scene, seed) {
+function groundGen(scene, seed, cmap = null) {
   const R = mulberry32((seed ^ 0x6a09e667) >>> 0 || 1), H = new Float32Array(GROUND_N * GROUND_N).fill(GROUND_Y);
-  const D = { scene, seed, boxes: [], cyl: [], domes: [], pil: [], rocks: [], ms: [], spotsN: [], spotsP: [], hf: null, far: 0, extra: {}, bld: { a: [], n: 0 }, title: GROUND_SCENES[scene].name, obst: '' };
+  const D = { scene, seed, boxes: [], cyl: [], domes: [], pil: [], rocks: [], ms: [], spotsN: [], spotsP: [], hf: null, far: 0, extra: {}, bld: { a: [], n: 0 }, glb: [], title: GROUND_SCENES[scene].name, obst: '' };
   GROUND_GEN[scene](D, R, H);
+  if (cmap) bldApplyMap(D, cmap);   // 自訂地圖：放 GLB 建築（可選擇拿掉原本的巨型結構），building.js
   D.H0 = H.slice();   // 壓入碰撞箱之前的高度（巨型結構被摧毀時還原用）
   for (const b of D.boxes) if (b.coll) gRaster(H, b);
   groundTargetGen(D, H);   // 駕駛模式的地面目標（ground_pilot.js）
@@ -7012,6 +7521,7 @@ function gbNew() { return { p: [], n: [], c: [], w: [] }; }
 function gbTri(G, a, b, c, n, col, win) { for (const v of [a, b, c]) { G.p.push(v[0], v[1], v[2]); G.n.push(n[0], n[1], n[2]); G.c.push(col[0], col[1], col[2]); G.w.push(win); } }
 function gbQuad(G, a, b, c, d, n, col, win) { gbTri(G, a, b, c, n, col, win); gbTri(G, a, c, d, n, col, win); }
 function gbBox(G, b) {
+  if (b.hide) return;   // 只算碰撞（GLB 建築的碰撞箱）
   const x0 = b.x - b.w / 2, x1 = b.x + b.w / 2, z0 = b.z - b.d / 2, z1 = b.z + b.d / 2, y0 = b.y0, y1 = b.y0 + b.h, c = b.col, t = b.top || b.col, w = b.win || 0;
   gbQuad(G, [x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0], [0, 1, 0], t, 0);
   gbQuad(G, [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], [0, 0, 1], c, w);
@@ -7216,6 +7726,7 @@ function groundSync() {
     GV.group.add(gbMesh(G, mat));
     GV.ms = [];   // 巨型結構：以底部中心為支點的群組（倒塌時往下沉、傾斜）
     for (const [id, g] of MG) { const M = D.ms[id], grp = new THREE.Group(), m = gbMesh(g, mat); grp.position.set(M.x, GROUND_Y, M.z); m.position.set(-M.x, -GROUND_Y, -M.z); grp.add(m); GV.group.add(grp); GV.ms[id] = grp; }
+    if (D.glb.length) bldGroundModels(P, D);   // 自訂地圖的 GLB 建築（非同步載入，building.js）
     const bm = groundBldMesh(P, D); if (bm) GV.group.add(bm);
     GV.group.add(groundScarMesh(P));
     GV.group.add(groundSmokeMesh(P));   // 戰火的煙
@@ -7271,7 +7782,7 @@ function groundFrame() {
 // 簡報的小地圖底圖：地形、建築密度、海、巨型結構（PNG data URL，同一個地形只畫一次）
 const GROUND_IMG = {};
 function groundMinimapImg(g) {
-  const key = `${g.scene}:${g.seed >>> 0}`; if (GROUND_IMG[key]) return GROUND_IMG[key];
+  const key = groundKey(g); if (GROUND_IMG[key]) return GROUND_IMG[key];
   const D = groundData(g), W = 120, Hh = 120, cv = document.createElement('canvas'); cv.width = W; cv.height = Hh;
   const cx = cv.getContext('2d'), im = cx.createImageData(W, Hh), H = D.H, dens = new Float32Array(W * Hh);
   const px = (x) => (x - MAP_BOUNDS.x0) / (MAP_BOUNDS.x1 - MAP_BOUNDS.x0) * W, pz = (z) => (z - MAP_BOUNDS.z0) / (MAP_BOUNDS.z1 - MAP_BOUNDS.z0) * Hh;
@@ -8227,7 +8738,7 @@ const GAME = {
   phase: 'menu', playerSide: 0, sc: null, intel: null, loadout: null, attempt: 0,
   init: [0, 0], result: null, skillArm: null, deploySel: 0, drag: null, replaying: false, reportShown: false,
 };
-const PHASE_ON = ['deploy', 'battle', 'report', 'simedit'];
+const PHASE_ON = ['deploy', 'battle', 'report', 'simedit', 'bldedit'];
 const gEl = (id) => document.getElementById(id);
 const fmtN = (n) => Math.round(n).toLocaleString();
 const ships5 = (icons) => fmtN(icons * opts.rep);
@@ -8446,6 +8957,7 @@ function useSkill(f, id, target, pt) {
   const who = GAME.watch ? `${FACTION_NAME[SIDE_FAC[f.side]]}・${f.name}　` : f.side === GAME.playerSide ? '' : '敵方';   // 觀摩：兩邊都是 AI，用陣營名稱
   toast(`${who}${f.commander ? f.commander.name : f.name}：${def.name}${target ? ` → ${target.fleet ? target.fleet.name + ' ' : ''}${target.name}` : ''}`, f.side === GAME.playerSide ? '' : 'enemy');
   if (id === 'focus') for (const g of groups) if (g.side === f.side && !g.inactive) g.target = target;
+  if (f.side === GAME.playerSide && !GAME.replaying) sndCue('skill');
   return true;
 }
 // 呼叫增援：把準備好的增援艦隊（還在場外）移到離 pt 最近的地圖邊緣外側，delay 秒後進場、開往 pt
@@ -8909,8 +9421,9 @@ function setPhase(ph) {
   if (PL.on && ph !== 'battle') pilotEnd();   // 離開作戰＝結束駕駛
   if (CAP.on && ph !== 'battle') capEnd();   // 離開作戰＝結束艦長模式
   if (BR.on && ph !== 'battle' && ph !== 'replay') exitBridge();   // 離開作戰＝離開艦橋
+  if (GAME.phase === 'bldedit' && ph !== 'bldedit') bldLeave();   // 離開建築編輯器
   GAME.phase = ph;
-  if (GAME.forced3D && ph !== 'battle' && ph !== 'deploy' && ph !== 'simedit') { GAME.forced3D = false; if (mode3D) setRenderMode('2d', false); }   // 離開作戰：回到原本的 2D
+  if (GAME.forced3D && ph !== 'battle' && ph !== 'deploy' && ph !== 'simedit' && ph !== 'bldedit') { GAME.forced3D = false; if (mode3D) setRenderMode('2d', false); }   // 離開作戰：回到原本的 2D
   { const op = opNow(), on = ph === 'battle' || ph === 'deploy';
     document.body.classList.toggle('op-flat', on && op === 0); document.body.classList.toggle('op-adv', op >= 1); document.body.classList.toggle('op-sim', op === 2); }
   document.body.classList.toggle('game-on', PHASE_ON.includes(ph) || ph === 'replay');
@@ -8920,8 +9433,10 @@ function setPhase(ph) {
   document.body.classList.remove('hg-on');   // 王牌飛行員的機庫（hangar.js）：進機庫畫面時再加回來
   document.body.classList.toggle('game-sand', ph === 'sandbox');
   document.body.classList.toggle('game-simedit', ph === 'simedit');
+  document.body.classList.toggle('game-bldedit', ph === 'bldedit');
   document.body.classList.toggle('game-watch', !!GAME.watch && (ph === 'battle' || ph === 'replay'));
   if (ph !== 'simedit') { const sb = gEl('simbar'); if (sb) sb.innerHTML = ''; SIM.drag = null; }
+  if (ph !== 'bldedit') { const bb = gEl('bldbar'); if (bb) bb.innerHTML = ''; }
   gEl('battlehud').hidden = !(ph === 'battle' || ph === 'replay');
   gEl('skillbar').hidden = ph !== 'battle';
   gEl('deploybar').hidden = ph !== 'deploy';
@@ -8955,6 +9470,7 @@ const MENU_ICONS = {
   watch: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   tal: '<path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6l-5.4 2.9 1.2-6-4.5-4.2 6.1-.7z"/>',
   tav: '<path d="M5 9h10v10a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z"/><path d="M15 11h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-2M5 9c0-2 1.3-3.2 3-3.2C8.6 4.6 9.7 4 11 4s2.6.8 3 2c1 .2 1 1.5 1 3"/>',
+  bld: '<path d="M3 21h18M5 21V9l4-3v15M9 21V4l6-2v19M15 21V10l4 2v9"/><path d="M11.5 7h1M11.5 10.5h1M11.5 14h1"/>',
   hang: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3 17.8V21h3.2l6.3-6.3a4 4 0 0 0 5.2-5.4l-2.6 2.6-2.5-.6-.6-2.5z"/>',
 };
 function menuIcon(k) { return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${MENU_ICONS[k] || ''}</svg>`; }
@@ -8985,6 +9501,7 @@ function showMenu() {
         ${T('m-set', 'set', '設定', '按鍵綁定、遊戲速度、介面資訊')}
         ${T('m-save', 'save', '存檔管理', '3 個雲端存檔欄位：儲存、讀取進度，也可以匯出成檔案或從檔案匯入')}
         ${T('m-test', 'test', '遊戲測試', '大軍畫面、效能與戰鬥數值（射程、側背受擊倍率等）的測試場')}
+        ${T('m-bld', 'bld', '建築編輯器', '匯入建築 GLB、調整大小與碰撞，在近地戰場擺放建築、存成自訂地圖')}
       </div>
     </div>
     <div class="mm-note" id="mm-note"></div>
@@ -8999,6 +9516,7 @@ function showMenu() {
   if (window.API) { gEl('m-out').onclick = () => API.logout(); gEl('m-acct').onclick = () => showAccount(); }
   gEl('m-set').onclick = () => openSettings();
   gEl('m-save').onclick = () => (window.API ? showSaves() : (gEl('mm-note').textContent = '存檔管理要連上伺服器才能用。'));
+  gEl('m-bld').onclick = () => showBldEditor();
   gEl('m-test').onclick = () => { overlay(null); setPhase('sandbox'); newBattle(12345); setCmdSide(0); };   // 原本的測試場（數值、畫面）
 }
 // 單人戰鬥：先選模式（指揮官、王牌飛行員…），再進該模式的大廳。GAME.spMode＝目前所在的模式（戰鬥、子畫面返回時回到同一個大廳）
@@ -9342,6 +9860,7 @@ function dpCanon(p) { return GAME.sc && GAME.sc.mp && GAME.playerSide ? { x: -p.
 // 遊戲層攔截滑鼠／觸控：部署時放置艦隊、技能選目標
 function gamePointer(type, e) {
   if (GAME.phase === 'simedit') return simPointer(type, e);   // 模擬室編輯：選取、移動、放置
+  if (GAME.phase === 'bldedit') return bldPointer(type, e);   // 建築編輯器：選取、移動、放置建築
   // 技能選目標：左鍵（或觸控）點敵方分艦隊；右鍵取消
   if (GAME.skillArm && type === 'down' && e.pointerType !== 'touch' && e.button === 2) { skillEsc(); return true; }
   if (GAME.skillArm && GAME.skillArm.point && type === 'down' && (e.pointerType === 'touch' || e.button === 0)) {
@@ -9413,7 +9932,7 @@ function startBattle() {
   paused = false; setSpeed(SETTINGS.speedIdx);
   force3D(); if (GAME.op === 2) enterBridge();   // 擬真：開戰直接上艦橋
   if (opts.fow && SETTINGS.autoScan === false) issue('autoscan', { on: false });   // 戰爭迷霧：玩家關掉了自動掃描（記在命令裡）
-  cutPlay(cutSpecStart(GAME.sc));
+  cutPlay(cutSpecStart(GAME.sc)); sndCue('start');
   toast(`${GAME.sc.name}　開戰！${GAME.op ? `（${OP_LEVELS[GAME.op].name}難度）` : ''}（${keyText('pause')} 暫停、${keyText('speed_up')}／${keyText('speed_down')} 調速度、${keyText('attack')}＋左鍵點敵軍＝指定攻擊）`);
 }
 const _fmtT = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -9499,6 +10018,7 @@ function gameFrame(dt) {
     // 結算切入（回放、觀戰不播）；玩家在第 1 邊（多人）時換成自己這一方的角度
     const R = GAME.result, kind = GAME.playerSide === 1 ? { win: 'lose', lose: 'win' }[R.kind] || R.kind : R.kind;
     const ms = GAME.replaying || (NET.on && NET.spec) || (GAME.sc && GAME.sc.sim) ? 0 : cutPlay(cutSpecResult(kind, R.why));
+    if (!GAME.replaying) sndCue(kind === 'win' || kind === 'lose' ? kind : 'draw');
     setTimeout(() => (GAME.replaying ? endReplay() : showReport()), Math.max(1100, ms - 300));
   }
   if (_hudAcc < 0.15) return;
@@ -9984,7 +10504,7 @@ function randStage(o) {
   const lk = RAND_LOOK[o.look].fac, L = mulberry32(campHash(o.seed, 7));
   if (lk === 'rand') sc.enemyFac = 2 + Math.floor(L() * 5); else if (lk != null) sc.enemyFac = lk;
   const ge = GROUND_ENV[o.env].g;   // 近地作戰：不放太空地形，改成地表場景（敵軍是防守方）
-  if (ge) { const G = mulberry32(campHash(o.seed, o.env, 21)); sc.terrain = []; sc.ground = { scene: groundPick(ge, G), seed: campHash(o.seed, o.env, 23), def: 1 }; }
+  if (ge) { const G = mulberry32(campHash(o.seed, o.env, 21)); sc.terrain = []; sc.ground = { scene: groundPick(ge, G), seed: campHash(o.seed, o.env, 23), def: 1, ...groundExtra(ge) }; }
   return sc;
 }
 // 編成沿用上一場（指揮官、陣型、機庫）；預算不同時兵力等比例縮放
@@ -11687,7 +12207,7 @@ function simFieldHtml(m) {
     <div class="sim-row"><span>我方陣營</span><div class="wed-seg" id="sim-fac"><button data-v="0" class="${m.fac === 0 ? 'on emp' : ''}">帝國軍</button><button data-v="1" class="${m.fac === 1 ? 'on all' : ''}">聯盟軍</button></div></div>
     <div class="sim-row"><span>操作難度</span>${opSeg('sim-op')}</div>
     <div class="g-dim sim-note">${OP_LEVELS[opLevel()].desc}（與單人戰鬥共用同一個設定）</div>
-    <div class="sim-row"><span>戰場</span><div class="wed-seg" id="sim-env"><button data-v="" class="${!m.ground ? 'on' : ''}">太空</button>${GROUND_KEYS.map((k) => `<button data-v="${k}" class="${m.ground && m.ground.scene === k ? 'on' : ''}">${GROUND_SCENES[k].name}</button>`).join('')}</div></div>
+    <div class="sim-row"><span>戰場</span><div class="wed-seg" id="sim-env"><button data-v="" class="${!m.ground ? 'on' : ''}">太空</button>${GROUND_KEYS.map((k) => `<button data-v="${k}" class="${m.ground && !m.ground.cmap && m.ground.scene === k ? 'on' : ''}">${GROUND_SCENES[k].name}</button>`).join('')}${bldMapList().map((M) => `<button data-v="map:${M.id}" class="${m.ground && m.ground.cmap && m.ground.cmap.id === M.id ? 'on' : ''}">自訂：${escH(M.name)}</button>`).join('')}</div></div>
     ${m.ground ? `<div class="g-dim sim-note">${GROUND_SCENES[m.ground.scene].desc}（近地戰場不使用太空地形）</div>
     <div class="sim-row"><span>地面砲台</span><div class="wed-seg" id="sim-gdef"><button data-v="-1" class="${m.ground.def === -1 ? 'on' : ''}">沒有</button><button data-v="0" class="${m.ground.def === 0 ? 'on' : ''}">${simSideName(m, 0)}</button><button data-v="1" class="${m.ground.def === 1 ? 'on' : ''}">${simSideName(m, 1)}</button></div></div>
     <div class="sim-row"><span>地形種子</span><input class="g-in" type="number" id="sim-gseed" value="${m.ground.seed}" style="width:110px"><button class="g-btn sm" id="sim-gre">換一個</button></div>` : ''}
@@ -11764,7 +12284,7 @@ function simBind(el) {
   // 戰場設定
   q('#sim-fac [data-v]').forEach((b) => (b.onclick = () => { m.fac = +b.dataset.v; simChanged(); }));
   q('#sim-ctl [data-v]').forEach((b) => (b.onclick = () => { m.ctl = +b.dataset.v; simChanged(false); }));
-  q('#sim-env [data-v]').forEach((b) => (b.onclick = () => { const k = b.dataset.v; m.ground = k ? { scene: k, seed: (m.ground && m.ground.seed) || ((Math.random() * 1e6) | 0) + 1, def: m.ground ? m.ground.def : 1 } : null; simChanged(); }));   // 近地作戰
+  q('#sim-env [data-v]').forEach((b) => (b.onclick = () => { const k = b.dataset.v, cm = bldMapOf(k); m.ground = cm ? { scene: cm.scene, seed: cm.seed >>> 0, def: cm.def, cmap: bldSnapshot(cm) } : k ? { scene: k, seed: (m.ground && m.ground.seed) || ((Math.random() * 1e6) | 0) + 1, def: m.ground ? m.ground.def : 1 } : null; simChanged(); }));   // 近地作戰
   q('#sim-gdef [data-v]').forEach((b) => (b.onclick = () => { m.ground.def = +b.dataset.v; simChanged(); }));
   on('sim-gseed', 'onchange', (e) => { m.ground.seed = Math.max(1, simNum(e.target.value, 1) | 0); simChanged(); });
   on('sim-gre', 'onclick', () => { m.ground.seed = ((Math.random() * 1e6) | 0) + 1; simChanged(); });
@@ -12071,6 +12591,507 @@ function showSimReport() {
   gEl('sr-again').onclick = () => { overlay(null); simEndMid(); SIM.m = base(); simStart(); };
   gEl('sr-edit').onclick = () => showSim(base());
 }
+
+// ═══════════════════════ 建築編輯器：GLB 建築對位＋自訂近地地圖 ═══════════════════════
+// 資料在伺服器 models/建築/buildings.json（GET／PUT api/buildings）；GLB 也放在 models/建築/（PUT api/buildings/glb?name=…）
+//   types[id] ＝ 建築種類（模型對位）：{ name, file GLB 檔名, h 高度（單位，1 單位＝200 公尺）, rot 朝向修正（度）, oy 垂直位移（單位）, lum 亮度,
+//                 hp 耐久, coll 碰撞 'pil' 柱體｜'box' 方塊｜'none' 裝飾, r 柱體半徑, top 碰撞高度（離地，單位）, fw／fd 模型底面的寬／深（依 h 自動量） }
+//   maps[id]  ＝ 自訂地圖：{ id, name, scene 基底場景（GROUND_SCENES）, seed 地形種子, def 砲台屬於哪一方（-1 沒有）, keep 保留原本的巨型結構,
+//                 items: [{ t 種類 id, x, z, rot 角度（度）, s 縮放 }] }
+// 作戰：battleSetup.ground.cmap＝地圖的完整快照（種類的數值一起帶上，回放與多人不必再查伺服器）；groundGen 呼叫 bldApplyMap 放建築，
+//   有碰撞的建築＝巨型結構（擋移動、擋射線、可以被打壞倒塌），沒有碰撞的＝裝飾
+// 編輯器（主選單「建築編輯器」）：用遊戲本身的 3D 近地場景；右邊面板分「地圖擺放」與「建築種類」兩頁
+const BLD = { data: { types: {}, maps: {} }, files: [], canEdit: false, loaded: false, err: '', cache: {} };
+const BLD_DEG = Math.PI / 180;
+const bldId = (p) => p + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36);
+const bldKm = (u) => Math.round(u * GROUND_KM * 100) / 100;   // 單位 → 公里（顯示用）
+
+async function bldLoad() {
+  if (!window.API) { BLD.err = '沒有連上伺服器'; return; }
+  try {
+    const j = await API.get('api/buildings');
+    BLD.data = { types: j.types || {}, maps: j.maps || {} }; BLD.files = j.files || []; BLD.canEdit = !!j.canEdit; BLD.loaded = true; BLD.err = '';
+    bldEnvSync();
+  } catch (e) { BLD.err = e.message; }
+}
+async function bldSave() {
+  await API.put('api/buildings', { types: BLD.data.types, maps: BLD.data.maps });
+  BE.dirty = false; bldEnvSync();
+}
+// 隨機戰役、王牌飛行員、模擬室的「戰場」選項：內建場景之後接著列出自訂地圖
+function bldEnvSync() {
+  for (let i = GROUND_ENV.length - 1; i >= 0; i--) if (String(GROUND_ENV[i].g).startsWith('map:')) GROUND_ENV.splice(i, 1);
+  for (const M of bldMapList()) GROUND_ENV.push({ name: `自訂：${M.name}`, g: 'map:' + M.id });
+}
+function bldMapList() { return Object.values(BLD.data.maps).sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh-Hant')); }
+function bldMapOf(g) { return typeof g === 'string' && g.startsWith('map:') ? BLD.data.maps[g.slice(4)] || null : null; }
+function bldFileV(file) { const f = BLD.files.find((o) => o.file === file); return f ? f.mtime : 0; }
+// 地圖 → 作戰用的快照（每一棟帶著自己種類的數值）
+function bldSnapshot(M) {
+  return { id: M.id, name: M.name, keep: !!M.keep, items: (M.items || []).map((it) => {
+    const T = BLD.data.types[it.t]; if (!T || !T.file) return null;
+    return { name: T.name, file: T.file, v: bldFileV(T.file), h: T.h, rot: (T.rot || 0) + (it.rot || 0), oy: T.oy || 0, lum: T.lum || 1, hp: T.hp || 1000, coll: T.coll || 'pil',
+      r: T.r, top: T.top, fw: T.fw, fd: T.fd, x: it.x, z: it.z, s: it.s || 1 };
+  }).filter(Boolean) };
+}
+function bldHash(o) { const s = JSON.stringify(o); let h = 5381; for (let i = 0; i < s.length; i++) h = (Math.imul(h, 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(36); }
+
+// ───── 套用到地形資料（groundGen 裡呼叫，必須是決定性的：只用快照裡的數字）─────
+// 底面外框：模型底面（fw × fd）轉 rot 之後的軸向外框
+function bldFoot(it) {
+  const s = it.s || 1, a = (it.rot || 0) * BLD_DEG, ca = Math.abs(Math.cos(a)), sa = Math.abs(Math.sin(a));
+  const fw = (it.fw || 2 * (it.r || 5)) * s, fd = (it.fd || 2 * (it.r || 5)) * s;
+  return { w: fw * ca + fd * sa, d: fw * sa + fd * ca, r: (it.r || Math.max(fw, fd) / 2 / s) * s, top: (it.top || it.h) * s, h: it.h * s };
+}
+function bldApplyMap(D, C) {
+  if (!C.keep) {   // 拿掉原本的巨型結構（零件、碰撞、電梯纜繩），也拿掉站在它們上面的砲台
+    const free = (o) => o.ms == null;
+    D.boxes = D.boxes.filter(free); D.cyl = D.cyl.filter(free); D.domes = D.domes.filter(free); D.pil = D.pil.filter(free); D.rocks = D.rocks.filter(free);
+    D.ms = []; D.extra.tether = null; D.obst = '';
+    if (!D.hf) { const low = (L) => L.filter((p) => p.y < GROUND_Y + 20).map((p) => ({ ...p, y: GROUND_Y })); D.spotsN = low(D.spotsN); D.spotsP = low(D.spotsP); }
+  }
+  const cnt = {};
+  for (const it of C.items) {
+    const F = bldFoot(it), y0 = GROUND_Y + (it.oy || 0) * (it.s || 1);
+    let ms = null;
+    if (it.coll !== 'none') {
+      ms = gMs(D, { name: it.name, hp: Math.max(1, it.hp || 1000) }, it.x, it.z, F.r, GROUND_Y + F.top);
+      if (it.coll === 'box') D.boxes.push({ x: it.x, z: it.z, w: F.w, d: F.d, h: F.top, y0: GROUND_Y, col: [0, 0, 0], coll: true, hide: true, ms });
+      else D.pil.push({ x: it.x, z: it.z, r: F.r, top: GROUND_Y + F.top, ms });
+      cnt[it.name] = (cnt[it.name] || 0) + 1;
+    }
+    D.glb.push({ file: it.file, v: it.v, x: it.x, z: it.z, y0, rot: (it.rot || 0) * BLD_DEG, h: F.h, lum: it.lum || 1, ms });
+    (D.clear || (D.clear = [])).push({ x: it.x, z: it.z, r: Math.max(F.w, F.d) / 2 });   // 底下的一般建築清掉
+    const far = Math.max(F.w, F.d) / 2 + 4, away = (p) => Math.hypot(p.x - it.x, p.z - it.z) > far;
+    D.spotsN = D.spotsN.filter(away); D.spotsP = D.spotsP.filter(away);
+  }
+  const names = Object.entries(cnt);
+  if (names.length) D.obst = (D.obst ? D.obst + ' ' : '') + `${names.map(([n, k]) => `${n}${k > 1 ? ` ×${k}` : ''}`).join('、')}（自訂建築，可以擊毀）。`;
+  if (C.name) D.title = `${C.name}（${GROUND_SCENES[D.scene].name}）`;
+}
+
+// ───── GLB 載入與畫面 ─────
+// 同一個檔案只下載、解析一次；回傳 { scene, box（模型座標的外框）}
+function bldModel(file, v) {
+  const k = `${file}?${v || 0}`;
+  if (BLD.cache[k]) return BLD.cache[k];
+  return (BLD.cache[k] = (async () => {
+    const r = await fetch(`models/${encodeURIComponent('建築')}/${encodeURIComponent(file)}?v=${v || 0}`, { cache: 'no-cache' });
+    if (!r.ok) throw new Error(`${file}：HTTP ${r.status}`);
+    if (!MODEL_LOAD.loader) MODEL_LOAD.loader = new GLTFLoader();
+    const gltf = await MODEL_LOAD.loader.parseAsync(await r.arrayBuffer(), '');
+    const sc = gltf.scene; sc.updateMatrixWorld(true);
+    sc.traverse((o) => {
+      if (!o.isMesh) return;
+      if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals();
+      for (const m of Array.isArray(o.material) ? o.material : [o.material]) for (const t of ['map', 'emissiveMap']) if (m && m[t]) { m[t].colorSpace = THREE.SRGBColorSpace; m[t].anisotropy = 4; }
+    });
+    return { scene: sc, box: new THREE.Box3().setFromObject(sc) };
+  })().catch((e) => { delete BLD.cache[k]; throw e; }));
+}
+// 模型縮放到高度 h、底面中心在原點（旋轉、位置由外層決定）
+function bldFit(src, h, matFn) {
+  const b = src.box, sy = Math.max(1e-6, b.max.y - b.min.y), o = src.scene.clone(true), w = new THREE.Group();
+  o.traverse((c) => { if (c.isMesh) c.material = Array.isArray(c.material) ? c.material.map(matFn) : matFn(c.material); });
+  o.position.set(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2);
+  w.add(o); w.scale.setScalar(h / sy);
+  return w;
+}
+// GLB 的材質 → 近地場景的光照與霧（同一個場景的配色）；cache：原材質 → 新材質
+function bldMat(P, m, lum, cache) {
+  const k = `${m.uuid}:${lum}`; let o = cache.get(k); if (o) return o;
+  const c = m.color || new THREE.Color(1, 1, 1), e = m.emissive || new THREE.Color(0, 0, 0), ei = m.emissiveIntensity != null ? m.emissiveIntensity : 1;
+  o = new THREE.ShaderMaterial({
+    uniforms: gUni(P, { uMap: { value: m.map || null }, uHas: { value: m.map ? 1 : 0 }, uCol: { value: new THREE.Vector3(c.r, c.g, c.b) }, uEm: { value: m.emissiveMap || null }, uHasEm: { value: m.emissiveMap ? 1 : 0 },
+      uEmC: { value: new THREE.Vector3(e.r * ei, e.g * ei, e.b * ei) }, uLum: { value: lum } }),
+    side: THREE.DoubleSide,
+    vertexShader: `varying vec3 vW; varying vec3 vN; varying vec2 vUv;
+      void main(){ vec4 w = modelMatrix * vec4(position, 1.); vW = w.xyz; vN = normalize(mat3(modelMatrix) * normal); vUv = uv; gl_Position = projectionMatrix * viewMatrix * w; }`,
+    fragmentShader: GROUND_FOG_GLSL + /* glsl */`
+      uniform sampler2D uMap, uEm; uniform float uHas, uHasEm, uLum; uniform vec3 uCol, uEmC; varying vec3 vW; varying vec3 vN; varying vec2 vUv;
+      void main(){
+        vec3 N = normalize(vN); if (!gl_FrontFacing) N = -N;
+        vec3 base = uCol * (uHas > .5 ? texture2D(uMap, vUv).rgb : vec3(1.));
+        vec3 col = base * (uAmb * (1.1 + .4 * N.y) + uLSun * max(dot(N, uSun), 0.) * 1.2) * uLum;
+        if (uHasEm > .5) col += texture2D(uEm, vUv).rgb * uEmC; else col += uEmC * base;
+        gl_FragColor = vec4(fogMix(col, vW), 1.);
+      }`,
+  });
+  cache.set(k, o); return o;
+}
+// 作戰場景（groundSync）：每一棟掛在自己的巨型結構群組上（倒塌時一起沉下去）；裝飾掛在獨立的群組
+function bldGroundModels(P, D) {
+  const key = GV.key, mats = new Map();
+  for (const g of D.glb) {
+    let grp = g.ms != null ? GV.ms[g.ms] : null;
+    if (!grp) { const M = g.ms != null ? D.ms[g.ms] : g; grp = new THREE.Group(); grp.position.set(M.x, GROUND_Y, M.z); GV.group.add(grp); if (g.ms != null) GV.ms[g.ms] = grp; }
+    const hold = new THREE.Group(); hold.position.set(g.x - grp.position.x, g.y0 - GROUND_Y, g.z - grp.position.z); hold.rotation.y = g.rot; grp.add(hold);
+    bldModel(g.file, g.v).then((src) => {
+      if (GV.key !== key || !GV.group) return;
+      hold.add(bldFit(src, g.h, (m) => { const o = bldMat(P, m, g.lum, mats); if (!GV.mats.includes(o)) GV.mats.push(o); return o; }));
+    }).catch((e) => console.warn('建築模型載入失敗', e.message));
+  }
+}
+
+// ═════ 編輯器 ═════
+// tab：'map' 地圖擺放｜'type' 建築種類；mapId／typeId：目前的地圖、種類；sel：選取中的建築（items 的序號）；brush：點地圖就放這個種類
+const BE = { tab: 'map', mapId: null, typeId: null, sel: -1, brush: null, drag: null, group: null, objs: [], mats: new Map(), baseKey: '', showColl: true, dirty: false, hidden: [], busy: '', ring: null, plane: null };
+const BE_SCENE_DEF = { city: 1, harbor: 1, base: 1, elevator: 1, mountain: 1 };
+function bldCur() { return BLD.data.maps[BE.mapId] || null; }
+function bldNewMap(scene = 'city') {
+  const id = bldId('m'), n = Object.keys(BLD.data.maps).length + 1;
+  BLD.data.maps[id] = { id, name: `自訂地圖 ${n}`, scene, seed: ((Math.random() * 1e6) | 0) + 1, def: BE_SCENE_DEF[scene], keep: false, items: [] };
+  BE.mapId = id; BE.sel = -1; BE.dirty = true;
+  return BLD.data.maps[id];
+}
+function bldNewType(file) {
+  const id = bldId('t');
+  BLD.data.types[id] = { name: file ? file.replace(/\.glb$/i, '').replace(/_?設計圖$/, '') : '新建築', file: file || '', h: 40, rot: 0, oy: 0, lum: 1, hp: 1400, coll: 'pil', r: 6, top: 40, fw: 12, fd: 12 };
+  BE.typeId = id; BE.dirty = true;
+  if (file) bldMeasure(BLD.data.types[id], true);
+  return BLD.data.types[id];
+}
+// 依模型的外框量底面（fw／fd）；full＝連柱體半徑、碰撞高度一起重設
+async function bldMeasure(T, full) {
+  if (!T.file) return;
+  try {
+    const { box } = await bldModel(T.file, bldFileV(T.file)), sy = Math.max(1e-6, box.max.y - box.min.y), k = T.h / sy;
+    T.fw = Math.round((box.max.x - box.min.x) * k * 100) / 100; T.fd = Math.round((box.max.z - box.min.z) * k * 100) / 100;
+    if (full) { T.r = Math.round(Math.max(T.fw, T.fd) / 2 * 0.8 * 10) / 10; T.top = T.h; }
+    bldSyncObjs(); bldRender();
+  } catch (e) { toast('讀不到模型：' + e.message); }
+}
+
+async function showBldEditor() {
+  overlay(null); setPhase('bldedit'); GAME.replaying = false; GAME.result = null; GAME.sc = null; GAME.playerSide = 0;
+  if (!mode3D) { setRenderMode('3d', false); GAME.forced3D = true; }
+  BE.busy = '讀取建築資料…'; bldRender();
+  if (!BLD.loaded) await bldLoad();
+  BE.busy = '';
+  if (GAME.phase !== 'bldedit') return;
+  if (!BLD.loaded) { bldRender(); return; }
+  if (!bldCur()) BE.mapId = (bldMapList()[0] || {}).id || null;
+  if (!bldCur()) { bldNewMap(); BE.dirty = false; }
+  bldBase(true);
+  camAnim = null; view.target.set(0, GROUND_Y, 0); view.height = 320; view.yaw = 0; view.pitch = 0.55; updateCamera();
+  bldRender();
+}
+function bldLeave() {   // setPhase 離開編輯器時：還原被藏起來的一般建築、鏡頭回到艦隊平面
+  bldUnhide();
+  if (BE.group) BE.group.visible = false;
+  BE.drag = null; BE.brush = null;
+  view.target.y = 0;
+}
+// 基底場景：用正式的近地場景（沒有艦隊）；同一個場景＋種子＋保留設定只建一次
+function bldBase(force) {
+  const M = bldCur(); if (!M) return;
+  const g = { scene: M.scene, seed: M.seed >>> 0, def: M.def, cmap: { keep: !!M.keep, items: [] } }, k = groundKey(g) + ':' + M.def;
+  if (force || BE.baseKey !== k || !GRD) {
+    bldUnhide(); BE.baseKey = k;
+    BE.busy = '產生地形…'; bldRender();
+    newBattle(1, { bg: false, scenario: 'bldedit', level: 1, factions: [0, 1], timeLimit: SIM_INF, noVictory: true, terrain: [], fleets: [], ground: g });
+    paused = true; updateTimeUI(); BE.busy = '';
+  }
+  bldSyncObjs();
+}
+// 編輯器裡的建築：直接擺物件（移動時不必重新產生地形），碰撞範圍畫線框
+function bldSyncObjs() {
+  if (!BE.group) { BE.group = new THREE.Group(); scene.add(BE.group); }
+  BE.group.visible = GAME.phase === 'bldedit';
+  for (const o of BE.group.children.slice()) { BE.group.remove(o); o.traverse((c) => { if (c.isLineSegments || c.userData.own) { c.geometry.dispose(); c.material.dispose(); } }); }
+  for (const m of BE.mats.values()) m.dispose(); BE.mats.clear();
+  const M = bldCur(); BE.objs = [];
+  if (!M || !GRD) return;
+  const P = GRD.S.pal;
+  M.items.forEach((it, i) => BE.objs.push(bldObj(it, i, P)));
+  if (BE.tab === 'type' && BE.typeId && BLD.data.types[BE.typeId]) BE.objs.push(bldObj({ t: BE.typeId, x: BE.pv ? BE.pv.x : 0, z: BE.pv ? BE.pv.z : 0, rot: 0, s: 1 }, -2, P));   // 種類的預覽
+  // 選取框、艦隊平面（10 公里高的參考圓盤）
+  BE.ring = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(Array.from({ length: 64 }, (_, k) => new THREE.Vector3(Math.cos(k / 64 * TAU), 0, Math.sin(k / 64 * TAU)))), new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthTest: false }));
+  BE.ring.userData.own = true; BE.ring.renderOrder = 10; BE.group.add(BE.ring);
+  BE.plane = new THREE.Mesh(new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x7fb4ff, transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide }));
+  BE.plane.userData.own = true; BE.plane.renderOrder = 9; BE.group.add(BE.plane);
+  bldMarkSel(); bldHideUnder();
+}
+function bldObj(it, i, P) {
+  const T = BLD.data.types[it.t], root = new THREE.Group(); root.userData.i = i;
+  BE.group.add(root);
+  if (!T) return root;
+  const s = it.s || 1, F = bldFoot({ ...T, rot: (T.rot || 0) + (it.rot || 0), s });
+  root.position.set(it.x, GROUND_Y + (T.oy || 0) * s, it.z); root.rotation.y = ((T.rot || 0) + (it.rot || 0)) * BLD_DEG;
+  // 載入中：先畫底面大小的線框
+  const tmp = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry((T.fw || 10) * s, F.h, (T.fd || 10) * s).translate(0, F.h / 2, 0)), new THREE.LineBasicMaterial({ color: 0x9aa4b8, transparent: true, opacity: 0.6 }));
+  root.add(tmp);
+  if (T.file) bldModel(T.file, bldFileV(T.file)).then((src) => { if (root.parent !== BE.group) return; root.remove(tmp); tmp.geometry.dispose(); root.add(bldFit(src, F.h, (m) => bldMat(P, m, T.lum || 1, BE.mats))); })
+    .catch(() => tmp.material.color.set(0xff6a5a));
+  // 碰撞範圍（世界座標：柱體＝直立圓柱、方塊＝軸向外框）
+  if (T.coll !== 'none') {
+    const geo = T.coll === 'box' ? new THREE.BoxGeometry(F.w, F.top, F.d) : new THREE.CylinderGeometry(F.r, F.r, F.top, 32, 1, true);
+    const c = new THREE.LineSegments(new THREE.EdgesGeometry(geo.translate(0, F.top / 2, 0), 1), new THREE.LineBasicMaterial({ color: 0xffc34d, transparent: true, opacity: 0.55, depthTest: false }));
+    geo.dispose(); c.position.set(it.x, GROUND_Y, it.z); c.visible = BE.showColl; c.renderOrder = 8; BE.group.add(c); root.userData.coll = c;
+  }
+  return root;
+}
+function bldItemAt(i) { const M = bldCur(); return i === -2 ? (BE.pv || null) : M && M.items[i]; }
+function bldMarkSel() {
+  if (!BE.ring) return;
+  const it = BE.sel >= 0 ? bldItemAt(BE.sel) : BE.tab === 'type' ? BE.pv : null, T = it && BLD.data.types[it.t || BE.typeId];
+  BE.ring.visible = BE.plane.visible = !!(it && T);
+  if (!it || !T) return;
+  const F = bldFoot({ ...T, rot: (T.rot || 0) + (it.rot || 0), s: it.s || 1 }), r = Math.max(F.w, F.d) / 2 + 3;
+  BE.ring.position.set(it.x, GROUND_Y + 0.4, it.z); BE.ring.scale.set(r, 1, r);
+  BE.plane.position.set(it.x, 0, it.z); BE.plane.scale.setScalar(Math.max(30, r * 2.5));
+}
+// 移動中：只搬物件，不重建
+function bldMoveObj(i) {
+  const it = bldItemAt(i), o = BE.objs.find((r) => r.userData.i === i), T = it && BLD.data.types[it.t || BE.typeId]; if (!o || !T) return;
+  const s = it.s || 1;
+  o.position.set(it.x, GROUND_Y + (T.oy || 0) * s, it.z); o.rotation.y = ((T.rot || 0) + (it.rot || 0)) * BLD_DEG;
+  if (o.userData.coll) o.userData.coll.position.set(it.x, GROUND_Y, it.z);
+  bldMarkSel();
+}
+// 建築底下的一般大樓先藏起來（作戰時 groundGen 會真的清掉）
+function bldUnhide() {
+  const B = GV.bld;
+  if (B && BE.hidden.length) { for (const [i, h] of BE.hidden) B.iB[i * 4] = h; B.mesh.geometry.attributes.iB.needsUpdate = true; }
+  BE.hidden = [];
+}
+function bldHideUnder() {
+  bldUnhide();
+  const B = GV.bld, M = bldCur(); if (!B || !M) return;
+  for (const it of M.items) {
+    const T = BLD.data.types[it.t]; if (!T) continue;
+    const F = bldFoot({ ...T, rot: (T.rot || 0) + (it.rot || 0), s: it.s || 1 });
+    groundBldEach(it.x, it.z, Math.max(F.w, F.d) / 2, -1e9, 1e9, (i) => { BE.hidden.push([i, B.iB[i * 4]]); B.iB[i * 4] = 0; });
+  }
+  B.mesh.geometry.attributes.iB.needsUpdate = true;
+}
+function bldChanged(objs = true) { BE.dirty = true; if (objs) bldSyncObjs(); else { bldMarkSel(); bldHideUnder(); } bldRender(); }
+function bldSelect(i) { BE.sel = i; bldMarkSel(); bldRender(); }
+function bldPillars() { const M = bldCur(); return M ? M.items.filter((it) => BLD.data.types[it.t] && (BLD.data.types[it.t].coll || 'pil') === 'pil').length + (M.keep && GRD ? GRD.pil.length : 0) : 0; }
+
+// ───── 面板 ─────
+const bldN = (v, d = 0) => (Number.isFinite(+v) ? +v : d);
+function bldRender() {
+  const el = gEl('bldbar'); if (!el) return;
+  const head = `<div class="sim-head"><b>建築編輯器</b><span class="g-sp"></span>${BE.dirty ? '<span class="bld-dirty">未儲存</span>' : ''}
+    <button class="g-btn sm" id="be-exit">離開</button><button class="g-btn sm pri" id="be-save" ${BLD.canEdit ? '' : 'disabled'}>儲存</button></div>
+    ${BLD.loaded && !BLD.canEdit ? '<div class="sim-mid">這台電腦不能存建築（伺服器 config.json 的 modelEdit）。可以看、可以試擺，但不能儲存或匯入 GLB。</div>' : ''}`;
+  if (BE.busy || !BLD.loaded) { el.innerHTML = head + `<div class="sim-sec g-dim">${BE.busy || '讀不到建築資料：' + escH(BLD.err)}</div>`; bldBind(el); return; }
+  el.innerHTML = head + `<div class="wed-seg sim-tabs" id="be-tabs"><button data-tab="map" class="${BE.tab === 'map' ? 'on' : ''}">地圖擺放</button><button data-tab="type" class="${BE.tab === 'type' ? 'on' : ''}">建築種類（模型對位）</button></div>
+    ${BE.tab === 'type' ? bldTypeHtml() : bldMapHtml()}`;
+  bldBind(el);
+}
+function bldMapHtml() {
+  const M = bldCur(), types = Object.entries(BLD.data.types), pil = bldPillars();
+  if (!M) return '<div class="sim-sec g-dim">沒有地圖。</div>';
+  const it = BE.sel >= 0 ? M.items[BE.sel] : null, T = it && BLD.data.types[it.t];
+  return `<div class="sim-sec">
+      <div class="sim-row"><span>地圖</span><select class="g-in g-sel" id="be-map" style="flex:1">${bldMapList().map((m) => `<option value="${m.id}" ${m.id === M.id ? 'selected' : ''}>${escH(m.name)}</option>`).join('')}</select>
+        <button class="g-btn sm" id="be-mnew">新增</button><button class="g-btn sm" id="be-mdup">複製</button><button class="g-btn sm" id="be-mdel">刪除</button></div>
+      <div class="sim-row"><span>名稱</span><input class="g-in" id="be-mname" maxlength="30" value="${escH(M.name)}"></div>
+      <div class="sim-row"><span>基底場景</span><div class="wed-seg" id="be-scene">${GROUND_KEYS.map((k) => `<button data-v="${k}" class="${M.scene === k ? 'on' : ''}">${GROUND_SCENES[k].name}</button>`).join('')}</div></div>
+      <div class="sim-row"><span>地形種子</span><input class="g-in" type="number" id="be-seed" value="${M.seed}" style="width:110px"><button class="g-btn sm" id="be-reseed">換一個</button></div>
+      <div class="sim-row"><span>地面砲台</span><div class="wed-seg" id="be-def"><button data-v="-1" class="${M.def === -1 ? 'on' : ''}">沒有</button><button data-v="0" class="${M.def === 0 ? 'on' : ''}">我方</button><button data-v="1" class="${M.def === 1 ? 'on' : ''}">敵方</button></div></div>
+      <div class="sim-row"><span>原有結構</span><label><input type="checkbox" id="be-keep" ${M.keep ? 'checked' : ''}> 保留場景原本的巨型結構（生態巨塔、船塢…）</label></div>
+      <div class="g-dim sim-note">一般大樓、街道、山照種子自動產生；自訂建築底下的大樓會清掉。隨機戰役、模擬室、王牌飛行員的「戰場」選項會列出「自訂：${escH(M.name)}」（砲台照各模式的規則）。</div>
+      <div class="sim-btns" style="margin-top:6px"><button class="g-btn sm" id="be-try">在模擬室試打</button></div></div>
+    <div class="sim-sec"><div class="sim-h"><span>放置建築</span><span class="g-sp"></span><span class="${pil > PIL_MAX ? 'g-ec' : 'g-dim'}">柱體障礙 ${pil}／${PIL_MAX}</span></div>
+      ${types.length ? `<div class="sim-btns">${types.map(([id, t]) => `<button class="g-btn sm ${BE.brush === id ? 'pri' : ''}" data-brush="${id}" title="點一下，再到地圖上點位置放置（右鍵取消）">${escH(t.name)}</button>`).join('')}</div>
+        <div class="g-dim" style="font-size:calc(11.5px * var(--ui));margin-top:4px">${BE.brush ? `放置中：<b>${escH(BLD.data.types[BE.brush].name)}</b>，在地圖上左鍵點位置（可連續放），右鍵或 Esc 結束。` : '點一個種類，再到地圖上點位置。'}</div>`
+        : '<div class="g-dim">還沒有建築種類：先到「建築種類」頁匯入 GLB、調整大小。</div>'}
+      ${pil > PIL_MAX ? `<div class="g-ec" style="font-size:calc(11.5px * var(--ui))">柱體障礙超過 ${PIL_MAX} 個：多出來的在 3D 畫面上船會穿過去（碰撞計算還是有效）。可以把小建築的碰撞改成「方塊」。</div>` : ''}</div>
+    <div class="sim-sec"><div class="sim-h"><span>這張地圖的建築</span><span class="g-dim">${M.items.length} 棟</span><span class="g-sp"></span><label class="g-dim"><input type="checkbox" id="be-coll" ${BE.showColl ? 'checked' : ''}> 顯示碰撞範圍</label></div>
+      <div class="bld-list">${M.items.map((o, i) => { const t = BLD.data.types[o.t]; return `<button class="sim-it ${BE.sel === i ? 'on' : ''}" data-it="${i}"><b>${t ? escH(t.name) : '（種類已刪除）'}</b><small>(${Math.round(o.x)}, ${Math.round(o.z)})・${Math.round(o.rot || 0)}°${(o.s || 1) !== 1 ? `・×${o.s}` : ''}</small></button>`; }).join('') || '<span class="g-dim">（還沒有建築）</span>'}</div></div>
+    ${it ? `<div class="sim-sec"><div class="sim-h"><b>${T ? escH(T.name) : '（種類已刪除）'}</b><span class="g-sp"></span><button class="g-btn sm" id="be-dup">複製</button><button class="g-btn sm" id="be-del">刪除</button></div>
+      <div class="sim-row"><span>種類</span><select class="g-in g-sel" id="be-itype" style="flex:1">${types.map(([id, t]) => `<option value="${id}" ${id === it.t ? 'selected' : ''}>${escH(t.name)}</option>`).join('')}</select></div>
+      <div class="sim-comp"><label>X<input class="g-in" type="number" step="5" data-ik="x" value="${Math.round(it.x)}"></label><label>Z<input class="g-in" type="number" step="5" data-ik="z" value="${Math.round(it.z)}"></label>
+        <label>角度（度）<input class="g-in" type="number" step="15" data-ik="rot" value="${Math.round(it.rot || 0)}"></label><label>縮放<input class="g-in" type="number" step="0.1" min="0.1" max="10" data-ik="s" value="${it.s || 1}"></label></div>
+      ${T ? `<div class="g-dim" style="font-size:calc(11.5px * var(--ui))">高 ${bldKm(T.h * (it.s || 1))} 公里・耐久 ${T.hp}・${{ pil: '柱體碰撞', box: '方塊碰撞', none: '裝飾（沒有碰撞、不會被打壞）' }[T.coll || 'pil']}</div>` : ''}</div>` : ''}
+    <div class="sim-help g-dim">地圖：左鍵點建築＝選取、拖曳＝移動；右鍵點＝把選取的建築搬到那裡（按住拖曳＝朝向）；R／Shift+R＝轉 15°；Delete＝刪除；中鍵拖曳＝移動鏡頭、滾輪＝縮放、右鍵拖曳空地＝轉鏡頭</div>`;
+}
+function bldTypeHtml() {
+  const types = Object.entries(BLD.data.types), T = BLD.data.types[BE.typeId];
+  const files = BLD.files.slice().sort((a, b) => a.file.localeCompare(b.file, 'zh-Hant'));
+  const used = T ? Object.values(BLD.data.maps).reduce((n, m) => n + m.items.filter((o) => o.t === BE.typeId).length, 0) : 0;
+  const through = T ? GROUND_Y + T.h > 0 : false;
+  return `<div class="sim-sec"><div class="sim-h"><span>建築種類</span><span class="g-sp"></span><button class="g-btn sm" id="be-tnew">＋ 新增種類</button></div>
+      ${types.map(([id, t]) => `<button class="sim-it ${id === BE.typeId ? 'on' : ''}" data-ty="${id}"><b>${escH(t.name)}</b><small>${escH(t.file || '（沒有模型）')}・高 ${bldKm(t.h)} 公里・耐久 ${t.hp}</small></button>`).join('') || '<span class="g-dim">（還沒有建築種類）</span>'}</div>
+    <div class="sim-sec"><div class="sim-h"><span>GLB 檔案</span><span class="g-dim">models/建築/</span><span class="g-sp"></span>
+        <label class="g-btn sm ${BLD.canEdit ? '' : 'disabled'}" title="可以一次選好幾個">匯入 GLB…<input type="file" id="be-up" accept=".glb" multiple hidden ${BLD.canEdit ? '' : 'disabled'}></label></div>
+      ${files.length ? files.map((f) => `<div class="sim-file"><b>${escH(f.file)}</b><small class="g-dim">${(f.bytes / 1048576).toFixed(1)} MB・${new Date(f.mtime).toLocaleString('zh-TW', { hour12: false })}</small><span class="g-sp"></span><button class="g-btn sm" data-fnew="${escH(f.file)}">用這個新增種類</button></div>`).join('') : '<div class="g-dim">資料夾裡還沒有 GLB。按「匯入 GLB…」上傳（例如 TRIPO 匯出的建築）。</div>'}</div>
+    ${T ? `<div class="sim-sec"><div class="sim-h"><b>${escH(T.name)}</b><span class="g-dim">${used ? `用在 ${used} 棟` : '還沒用到'}</span><span class="g-sp"></span><button class="g-btn sm" id="be-tdel">刪除種類</button></div>
+      <div class="sim-row"><span>名稱</span><input class="g-in" data-tk="name" maxlength="20" value="${escH(T.name)}"></div>
+      <div class="sim-row"><span>模型</span><select class="g-in g-sel" data-tk="file" style="flex:1"><option value="">（沒有）</option>${files.map((f) => `<option value="${escH(f.file)}" ${f.file === T.file ? 'selected' : ''}>${escH(f.file)}</option>`).join('')}</select></div>
+      <div class="sim-sub">大小與朝向</div>
+      <div class="sim-comp"><label>高度（公里）<input class="g-in" type="number" step="0.5" min="0.1" data-tk="h" value="${bldKm(T.h)}"></label>
+        <label>朝向修正（度）<input class="g-in" type="number" step="90" data-tk="rot" value="${Math.round(T.rot || 0)}"></label>
+        <label>垂直位移（公里）<input class="g-in" type="number" step="0.1" data-tk="oy" value="${bldKm(T.oy || 0)}"></label>
+        <label>亮度<input class="g-in" type="number" step="0.1" min="0.1" max="5" data-tk="lum" value="${T.lum || 1}"></label></div>
+      <div class="g-dim" style="font-size:calc(11.5px * var(--ui))">底面約 ${bldKm(T.fw || 0)} × ${bldKm(T.fd || 0)} 公里。參考：戰列艦約 1 公里長；艦隊平面離地 ${bldKm(-GROUND_Y)} 公里（藍色圓盤）${through ? '——<b>這棟會穿過艦隊平面</b>' : '，這棟比艦隊平面低（只擋低空）'}。</div>
+      <div class="sim-sub">碰撞與耐久</div>
+      <div class="sim-row"><span>碰撞</span><div class="wed-seg" id="be-tcoll">${[['pil', '柱體'], ['box', '方塊'], ['none', '沒有（裝飾）']].map(([k, n]) => `<button data-v="${k}" class="${(T.coll || 'pil') === k ? 'on' : ''}">${n}</button>`).join('')}</div></div>
+      <div class="g-dim sim-note">柱體＝直立圓柱（細高的塔）；方塊＝底面外框壓進地形高度（矮胖的堡壘、船塢）；裝飾＝只是畫面。</div>
+      ${(T.coll || 'pil') !== 'none' ? `<div class="sim-comp">${(T.coll || 'pil') === 'pil' ? `<label>柱體半徑（公里）<input class="g-in" type="number" step="0.1" min="0.1" data-tk="r" value="${bldKm(T.r || 5)}"></label>` : ''}
+        <label>碰撞高度（公里）<input class="g-in" type="number" step="0.5" min="0.1" data-tk="top" value="${bldKm(T.top || T.h)}"></label>
+        <label>耐久<input class="g-in" type="number" step="100" min="1" data-tk="hp" value="${T.hp}"></label></div>
+        <div class="sim-btns"><button class="g-btn sm" id="be-fit">依模型自動量碰撞</button></div>
+        <div class="g-dim" style="font-size:calc(11.5px * var(--ui));margin-top:4px">參考：生態巨塔耐久 1600、星艦船塢 1000、軌道電梯 2500。黃色線框＝碰撞範圍。</div>` : ''}</div>` : ''}
+    <div class="sim-help g-dim">在「建築種類」頁，地圖上會在你目前看的位置放一棟預覽（左鍵拖曳可以搬）。改數值會即時反映到地圖上所有同種類的建築。</div>`;
+}
+function bldBind(el) {
+  const q = (s) => el.querySelectorAll(s), on = (id, ev, fn) => { const e = el.querySelector('#' + id); if (e) e[ev] = fn; };
+  on('be-exit', 'onclick', () => { if (BE.dirty && !confirm('有修改還沒儲存，離開編輯器？（重新整理網頁前，修改還會留著）')) return; showMenu(); });
+  on('be-save', 'onclick', async () => { try { await bldSave(); toast('已儲存建築與地圖'); } catch (e) { toast('儲存失敗：' + e.message, 'bad'); } bldRender(); });
+  if (!BLD.loaded) return;
+  q('#be-tabs [data-tab]').forEach((b) => (b.onclick = () => { BE.tab = b.dataset.tab; BE.brush = null; BE.sel = -1; if (BE.tab === 'type') bldPreviewHere(); bldSyncObjs(); bldRender(); }));
+  if (BE.tab === 'type') return bldBindType(el, q, on);
+  const M = bldCur(); if (!M) return;
+  on('be-map', 'onchange', (e) => { BE.mapId = e.target.value; BE.sel = -1; BE.brush = null; bldBase(); bldRender(); });
+  on('be-mnew', 'onclick', () => { bldNewMap(M.scene); bldBase(); bldRender(); });
+  on('be-mdup', 'onclick', () => { const id = bldId('m'); BLD.data.maps[id] = { ...JSON.parse(JSON.stringify(M)), id, name: M.name + '（複製）' }; BE.mapId = id; BE.dirty = true; bldRender(); });
+  on('be-mdel', 'onclick', () => { if (!confirm(`刪除地圖「${M.name}」？（按儲存後才會從伺服器刪掉）`)) return; delete BLD.data.maps[M.id]; BE.dirty = true; BE.sel = -1; BE.mapId = (bldMapList()[0] || {}).id || null; if (!bldCur()) bldNewMap(); bldBase(); bldRender(); });
+  on('be-mname', 'onchange', (e) => { M.name = e.target.value.trim() || M.name; BE.dirty = true; bldRender(); });
+  q('#be-scene [data-v]').forEach((b) => (b.onclick = () => { M.scene = b.dataset.v; BE.dirty = true; bldBase(); bldRender(); }));
+  on('be-seed', 'onchange', (e) => { M.seed = Math.max(1, bldN(e.target.value, 1) | 0); BE.dirty = true; bldBase(); bldRender(); });
+  on('be-reseed', 'onclick', () => { M.seed = ((Math.random() * 1e6) | 0) + 1; BE.dirty = true; bldBase(); bldRender(); });
+  q('#be-def [data-v]').forEach((b) => (b.onclick = () => { M.def = +b.dataset.v; BE.dirty = true; bldBase(); bldRender(); }));
+  on('be-keep', 'onchange', (e) => { M.keep = e.target.checked; BE.dirty = true; bldBase(); bldRender(); });
+  on('be-try', 'onclick', () => {
+    const m = simLoadLast(); m.ground = { scene: M.scene, seed: M.seed >>> 0, def: M.def, cmap: bldSnapshot(M) }; m.terrain = [];
+    if (BE.dirty) toast('地圖還沒儲存：模擬室用的是目前編輯中的版本', 'hint');
+    showSim(m);
+  });
+  q('[data-brush]').forEach((b) => (b.onclick = () => { BE.brush = BE.brush === b.dataset.brush ? null : b.dataset.brush; bldRender(); }));
+  on('be-coll', 'onchange', (e) => { BE.showColl = e.target.checked; for (const o of BE.objs) if (o.userData.coll) o.userData.coll.visible = BE.showColl; });
+  q('[data-it]').forEach((b) => (b.onclick = () => { const i = +b.dataset.it, it = M.items[i]; bldSelect(i); if (it) { view.target.x = it.x; view.target.z = it.z; updateCamera(); } }));
+  const it = BE.sel >= 0 ? M.items[BE.sel] : null; if (!it) return;
+  on('be-del', 'onclick', () => bldDelSel());
+  on('be-dup', 'onclick', () => { M.items.push({ ...it, x: it.x + 40 }); BE.sel = M.items.length - 1; bldChanged(); });
+  on('be-itype', 'onchange', (e) => { it.t = e.target.value; bldChanged(); });
+  q('[data-ik]').forEach((e) => (e.onchange = () => {
+    const k = e.dataset.ik;
+    if (k === 's') it.s = Math.max(0.1, Math.min(10, bldN(e.value, 1))); else if (k === 'rot') it.rot = ((bldN(e.value, 0) % 360) + 360) % 360; else it[k] = bldN(e.value, it[k]);
+    bldChanged(k === 's');
+    if (k !== 's') bldMoveObj(BE.sel);
+  }));
+}
+function bldBindType(el, q, on) {
+  q('[data-ty]').forEach((b) => (b.onclick = () => { BE.typeId = b.dataset.ty; bldPreviewHere(); bldSyncObjs(); bldRender(); }));
+  on('be-tnew', 'onclick', () => { bldNewType(''); bldPreviewHere(); bldSyncObjs(); bldRender(); });
+  q('[data-fnew]').forEach((b) => (b.onclick = () => { bldNewType(b.dataset.fnew); bldPreviewHere(); bldSyncObjs(); bldRender(); }));
+  on('be-up', 'onchange', async (e) => {
+    const fs = [...e.target.files]; if (!fs.length) return;
+    for (const f of fs) {
+      BE.busy = `上傳 ${f.name}（${(f.size / 1048576).toFixed(1)} MB）…`; bldRender();
+      try {
+        const r = await fetch('api/buildings/glb?name=' + encodeURIComponent(f.name), { method: 'PUT', headers: { ...API.headers(), 'Content-Type': 'model/gltf-binary' }, body: f });
+        const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+        BLD.files = BLD.files.filter((o) => o.file !== j.file).concat([{ file: j.file, bytes: j.bytes, mtime: j.mtime }]);
+        if (!Object.values(BLD.data.types).some((t) => t.file === j.file)) bldNewType(j.file);   // 新的檔案：順便建一個種類
+        toast(`已匯入 ${j.file}`);
+      } catch (err) { toast(`${f.name} 匯入失敗：${err.message}`, 'bad'); }
+    }
+    BE.busy = ''; bldPreviewHere(); bldSyncObjs(); bldRender();
+  });
+  const T = BLD.data.types[BE.typeId]; if (!T) return;
+  on('be-tdel', 'onclick', () => {
+    const used = Object.values(BLD.data.maps).reduce((n, m) => n + m.items.filter((o) => o.t === BE.typeId).length, 0);
+    if (!confirm(`刪除建築種類「${T.name}」？${used ? `地圖上 ${used} 棟這種建築也會一起拿掉。` : ''}（GLB 檔案不會刪）`)) return;
+    for (const m of Object.values(BLD.data.maps)) m.items = m.items.filter((o) => o.t !== BE.typeId);
+    delete BLD.data.types[BE.typeId]; BE.typeId = Object.keys(BLD.data.types)[0] || null; BE.dirty = true; bldSyncObjs(); bldRender();
+  });
+  q('#be-tcoll [data-v]').forEach((b) => (b.onclick = () => { T.coll = b.dataset.v; bldChanged(); }));
+  on('be-fit', 'onclick', () => { bldMeasure(T, true); BE.dirty = true; });
+  q('[data-tk]').forEach((e) => (e.onchange = () => {
+    const k = e.dataset.tk, U = 1 / GROUND_KM;
+    if (k === 'name') T.name = e.value.trim() || T.name;
+    else if (k === 'file') { T.file = e.value; bldMeasure(T, true); }
+    else if (k === 'h') { const h = Math.max(0.1, bldN(e.value, bldKm(T.h))) * U, f = h / T.h; T.r = (T.r || 5) * f; T.top = (T.top || T.h) * f; T.fw = (T.fw || 0) * f; T.fd = (T.fd || 0) * f; T.h = h; }
+    else if (k === 'rot') T.rot = ((bldN(e.value, 0) % 360) + 360) % 360;
+    else if (k === 'oy') T.oy = bldN(e.value, 0) * U;
+    else if (k === 'lum') T.lum = Math.max(0.1, Math.min(5, bldN(e.value, 1)));
+    else if (k === 'r') T.r = Math.max(0.1, bldN(e.value, 1)) * U;
+    else if (k === 'top') T.top = Math.max(0.1, bldN(e.value, 1)) * U;
+    else if (k === 'hp') T.hp = Math.max(1, Math.round(bldN(e.value, 1000)));
+    bldChanged(k !== 'name' && k !== 'hp');
+  }));
+}
+// 種類的預覽擺在目前鏡頭看的地方
+function bldPreviewHere() {
+  BE.pv = { t: BE.typeId, x: Math.round(view.target.x), z: Math.round(view.target.z), rot: 0, s: 1 };
+  const T = BLD.data.types[BE.typeId]; if (T) { camAnim = null; view.height = Math.max(60, Math.min(900, Math.max(T.h, T.fw || 0, T.fd || 0) * 2.6)); updateCamera(); }
+}
+function bldDelSel() { const M = bldCur(); if (!M || BE.sel < 0) return; M.items.splice(BE.sel, 1); BE.sel = -1; bldChanged(); }
+
+// ───── 地圖上的滑鼠 ─────
+function bldGround(e) { return groundAt(e.clientX, e.clientY, GROUND_Y); }
+function bldPick(e) {
+  _ndc.set((e.clientX / VW) * 2 - 1, -(e.clientY / VH) * 2 + 1); raycaster.setFromCamera(_ndc, camera);
+  const hit = raycaster.intersectObjects(BE.objs, true)[0];
+  if (hit) { let o = hit.object; while (o && o.userData.i == null) o = o.parent; if (o) return o.userData.i; }
+  const p = bldGround(e); if (!p) return null;   // 還沒載入完：用底面
+  let best = null, bd = 1e9;
+  for (const o of BE.objs) { const it = bldItemAt(o.userData.i), T = it && BLD.data.types[it.t || BE.typeId]; if (!T) continue; const d = Math.hypot(p.x - it.x, p.z - it.z), r = bldFoot({ ...T, s: it.s || 1 }).r + 2; if (d < r && d < bd) { bd = d; best = o.userData.i; } }
+  return best;
+}
+function bldPointer(type, e) {
+  if (e.pointerType === 'touch' || (e.button === 1 && type === 'down')) return false;
+  const M = bldCur(); if (!M || BE.busy) return type === 'down' && e.button === 0;
+  const d = BE.drag;
+  if (type === 'down') {
+    if (e.button === 0) {
+      const i = bldPick(e), p = bldGround(e);
+      if (i != null && !BE.brush) {
+        if (i !== BE.sel) bldSelect(i);
+        const it = bldItemAt(i); BE.drag = { mode: 'move', i, ox: p ? it.x - p.x : 0, oz: p ? it.z - p.z : 0, x0: e.clientX, y0: e.clientY };
+        return true;
+      }
+      if (BE.brush && p && BE.tab === 'map') {   // 放一棟新的（放完可以接著拖）
+        M.items.push({ t: BE.brush, x: Math.round(p.x), z: Math.round(p.z), rot: 0, s: 1 }); BE.sel = M.items.length - 1; bldChanged();
+        BE.drag = { mode: 'move', i: BE.sel, ox: 0, oz: 0, x0: e.clientX, y0: e.clientY, moved: true };
+        return true;
+      }
+      if (BE.sel >= 0) bldSelect(-1);
+      return true;
+    }
+    if (e.button === 2) {
+      if (BE.brush) { BE.brush = null; bldRender(); return true; }
+      const i = BE.sel >= 0 ? BE.sel : BE.tab === 'type' ? -2 : null, p = bldGround(e);
+      if (i == null || !p) return false;   // 沒選東西：照一般的右鍵（轉鏡頭）
+      BE.drag = { mode: 'place', i, A: p, x0: e.clientX, y0: e.clientY };
+      const it = bldItemAt(i); it.x = Math.round(p.x); it.z = Math.round(p.z); bldMoveObj(i);
+      return true;
+    }
+    return false;
+  }
+  if (!d) return false;
+  const p = bldGround(e), it = bldItemAt(d.i);
+  if (type === 'move') {
+    if (!p || !it) return true;
+    if (d.mode === 'move' && (d.moved || Math.hypot(e.clientX - d.x0, e.clientY - d.y0) > 4)) { d.moved = true; it.x = Math.round(p.x + d.ox); it.z = Math.round(p.z + d.oz); bldMoveObj(d.i); }
+    else if (d.mode === 'place' && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) > 10) { it.rot = Math.round(((Math.atan2(p.x - d.A.x, p.z - d.A.z) / BLD_DEG) % 360 + 360) % 360); bldMoveObj(d.i); }
+    return true;
+  }
+  if (type === 'up') {
+    BE.drag = null;
+    if (d.i === -2) { bldSyncObjs(); return true; }   // 預覽：不算修改
+    if (d.moved || d.mode === 'place') bldChanged(false);
+    return true;
+  }
+  return false;
+}
+addEventListener('keydown', (e) => {
+  if (typeof GAME === 'undefined' || GAME.phase !== 'bldedit' || (e.target.closest && e.target.closest('input, select, textarea'))) return;
+  const M = bldCur(), it = M && BE.sel >= 0 ? M.items[BE.sel] : null;
+  let used = true;
+  if (e.code === 'Escape') { if (BE.brush) BE.brush = null; else BE.sel = -1; bldMarkSel(); bldRender(); }
+  else if (e.code === 'Delete' && it) bldDelSel();
+  else if (e.code === 'KeyR' && it) { it.rot = (((it.rot || 0) + (e.shiftKey ? -15 : 15)) % 360 + 360) % 360; bldMoveObj(BE.sel); bldChanged(false); }
+  else used = false;
+  if (used) { e.preventDefault(); e.stopImmediatePropagation(); }
+}, true);
+if (window.API) bldLoad();   // 開場就讀：各模式的「戰場」選項要列出自訂地圖
+window.__bld = { BLD, BE, bldSnapshot, bldSyncObjs, bldBase, bldModel, grd: () => GRD, gv: () => GV, msKill: (id) => groundMsKill(GRD.ms[id], 0) };   // 除錯
 
 // ═══════════════════════ 訓練作戰：教學課程與戰術手冊 ═══════════════════════
 // 教學課程：一課＝一個固定的小戰場＋一串步驟。步驟有「目標」（check）時，偵測到玩家真的做了（看命令紀錄、選取、鏡頭、戰況）才前進；
@@ -15480,7 +16501,7 @@ function pilotLayout(p) {
       comp: aiSupplyComp(S.budget), hangar: HANGAR_DEFAULT.slice(), formation: 'ring', orderly: false, layers: 1,
       x: 0, z: side ? -360 - SUPPLY_RULE.follow : 360 + SUPPLY_RULE.follow, y: 0, h: side ? 0 : Math.PI, ai: null, reserve: false, at: 60 });
   }
-  if (scene) { m.terrain = []; m.ground = { scene, seed: campHash(p.seed, 79), def: 1, pilot: true }; }
+  if (scene) { m.terrain = []; m.ground = { scene, seed: campHash(p.seed, 79), def: 1, pilot: true, ...groundExtra(ge) }; }
   m.name = `${PILOT_MIS[mis.type].name}・${S.name}・${WATCH_LV[li].name}${scene ? `・${GROUND_SCENES[scene].name}` : ''}`;
   return m;
 }
@@ -15894,7 +16915,7 @@ function pilotWeapon(k, dt, t, px, py, pz) {
       const hq = squadrons[ships.sq[PL.home >= 0 ? PL.home : 0]], n0 = pending.length;
       if (launchMissileAt(o[0], o[1], o[2], PL.side, hq, tc.i, W.dmg * S.dm, t, 1, W.accM * (locked ? 1 : 0.55))) for (let q = n0; q < pending.length; q++) pending[q].pl = S.id;
     }
-    S.cd = W.cd; S.ammo--; PL.stats.msl++;
+    S.cd = W.cd; S.ammo--; PL.stats.msl++; sndPilotShot(W.vs === 'f' ? 'msl' : 'torp');
     S.lockT = 0;
     return;
   }
@@ -16007,7 +17028,7 @@ function pilotShot(ox, oy, oz, D, W, t, mul) {
   const h = pilotRay(ox, oy, oz, D, W.range, W, true), s = h.s, tf = s / W.speed;
   const ex = ox + D[0] * s, ey = oy + D[1] * s, ez = oz + D[2] * s;
   spawnBeam(ox, oy, oz, ex, ey, ez, t, tf, PL.side, W.inten, Math.min(1, W.bolt / Math.max(1, s)), shipFac(PL.home >= 0 ? PL.home : 0));
-  PL.stats.shots++;
+  PL.stats.shots++; sndPilotShot(W.id);
   if (h.k === 'f') pending.push({ kind: 'ak', a: 1, t: t + tf, i: h.i, dmg: W.dmgF * mul, side: PL.side, pl: W.id });
   else if (h.k === 'm') pending.push({ kind: 'ak', a: 0, t: t + tf, i: h.i, g: h.g, dmg: 1, side: PL.side });
   else if (h.k === 's') { const g = h.i, asp = hitAspect(g, ox, oz, ex, ez, oy, ey); pending.push({ src: 2, t: t + tf, target: g, side: PL.side, asp, dmg: W.dmgS * mul, hm: hitMul(asp, pilotSq(), squadrons[ships.sq[g]]), fx: plRnd() < 0.5, dirIdx: dirIndexOf(ex - ox, ez - oz), x: ex, y: ey, z: ez, pl: W.id }); }
@@ -16078,6 +17099,7 @@ function pilotHurt(dmg, e, self) {
   if (PL.sh > 0) { const a = Math.min(PL.sh, dmg); PL.sh -= a; dmg -= a; }
   pilotHitFx(e, dmg > 0);
   PL.hp -= dmg;
+  sndPilotHurt(dmg > 0, PL.hp <= 0);
   if (PL.hp > 0) return;
   PL.hp = 0; PL.dead = true; PL.deadT = t; PL.stats.deaths++;
   const j = PL.j; FT.state[j] = 3; FT.t0[j] = t; spawnFx(fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2], PL.side, PILOT_FTR_LEN * 6, 24);   // 爆炸照機體大小（鏡頭很近，太大會蓋滿畫面）
@@ -19741,7 +20763,7 @@ function closeSettings() {
   saveSettings(); applyUISettings();
 }
 function renderSettings() {
-  const tabs = [['keys', '按鍵綁定'], ['game', '遊戲'], ['ui', '介面資訊']];
+  const tabs = [['keys', '按鍵綁定'], ['game', '遊戲'], ['sound', '聲音'], ['ui', '介面資訊']];
   let body = '';
   if (SET.tab === 'keys') {
     const groups = [...new Set(KEY_ACTIONS.map((a) => a[2]))];
@@ -19772,6 +20794,16 @@ function renderSettings() {
       <div class="set-row"><span>貼圖繪製<br><small class="g-dim">直接在船體、武器、艦載機的 3D 模型上畫貼圖，存回伺服器</small></span><button class="g-btn sm" id="set-paint">貼圖繪製…</button></div>
       <div class="set-row"><span>模型工坊<br><small class="g-dim">修正 GLB：船頭朝向、原點、合併成一個網格、減面、刪除多餘的面</small></span><button class="g-btn sm" id="set-mtool">模型工坊…</button></div>
       <div class="set-row"><span>畫面</span><span class="g-row"><button class="g-btn sm ${mode3D ? '' : 'pri'}" data-rm="2d">2D 像素</button><button class="g-btn sm ${mode3D ? 'pri' : ''}" data-rm="3d">3D 模型</button></span></div>`;
+  } else if (SET.tab === 'sound') {
+    const A = sndOpts(), sl = (id, v, name, desc) => `<div class="set-row"><span>${name}<br><small class="g-dim">${desc}</small></span>
+        <span class="g-row"><input type="range" min="0" max="100" step="5" id="${id}" value="${Math.round(v * 100)}"><span class="g-dim" id="${id}-v" style="min-width:3em;text-align:right">${Math.round(v * 100)}%</span></span></div>`;
+    body = `<label class="set-row set-chk"><span>聲音<br><small class="g-dim">關掉＝完全靜音（戰場、介面都沒有聲音）</small></span><input type="checkbox" id="set-snd-on" ${A.on ? 'checked' : ''}></label>
+      ${sl('set-snd-m', A.m, '主音量', '全部聲音的音量')}
+      ${sl('set-snd-s', A.s, '戰場音效', '開火、命中、爆炸、推進器；看得越近越大聲，左右依畫面位置')}
+      ${sl('set-snd-u', A.u, '介面音效', '按鈕、下令、開戰與結算的提示音')}
+      <div class="set-row"><span>試聽<br><small class="g-dim">${SND.ctx ? (SND.pack ? '素材已載入' : '素材載入中…（先用合成音）') : '點一下任何地方後才會啟用聲音'}</small></span><button class="g-btn sm" id="set-snd-test">播放</button></div>
+      <div class="set-h">音效授權</div>
+      <p class="g-dim set-note">${SND_CREDITS.join('<br>')}</p>`;
   } else {
     body = `<div class="set-row"><span>介面大小<br><small class="g-dim">文字、按鈕與面板間距一起放大縮小</small></span>
         <select class="g-sel" id="set-uiscale">${UI_SCALES.map(([v, n]) => `<option value="${v}" ${(SETTINGS.uiScale || 1.2) === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
@@ -19789,6 +20821,9 @@ function renderSettings() {
   q('#set-close').onclick = closeSettings;
   qa('[data-tab]').forEach((b) => (b.onclick = () => { SET.tab = b.dataset.tab; SET.capture = null; SET.msg = ''; renderSettings(); }));
   qa('.set-key').forEach((b) => (b.onclick = () => { SET.capture = b.dataset.k; SET.msg = ''; renderSettings(); }));
+  if (q('#set-snd-on')) q('#set-snd-on').onchange = (e) => { SETTINGS.audio.on = e.target.checked; saveSettings(); SND.setVol(); };
+  for (const k of ['m', 's', 'u']) if (q('#set-snd-' + k)) q('#set-snd-' + k).oninput = (e) => { SETTINGS.audio[k] = +e.target.value / 100; q('#set-snd-' + k + '-v').textContent = e.target.value + '%'; saveSettings(); SND.setVol(); };
+  if (q('#set-snd-test')) q('#set-snd-test').onclick = () => { SND.init(); setTimeout(() => sndCue('test'), 60); };
   if (q('#set-pradar')) q('#set-pradar').onchange = (e) => { SETTINGS.pilotRadar = e.target.value; saveSettings(); };
   if (q('#set-qmod')) q('#set-qmod').onchange = (e) => { SETTINGS.queueMod = e.target.value; saveSettings(); };
   if (q('#set-kreset')) q('#set-kreset').onclick = () => { for (const a of KEY_ACTIONS) SETTINGS.keys[a[0]] = a[3]; SETTINGS.queueMod = 'Shift'; SET.msg = '已恢復預設按鍵。'; saveSettings(); renderSettings(); };

@@ -701,7 +701,7 @@ function pilotWeapon(k, dt, t, px, py, pz) {
       const hq = squadrons[ships.sq[PL.home >= 0 ? PL.home : 0]], n0 = pending.length;
       if (launchMissileAt(o[0], o[1], o[2], PL.side, hq, tc.i, W.dmg * S.dm, t, 1, W.accM * (locked ? 1 : 0.55))) for (let q = n0; q < pending.length; q++) pending[q].pl = S.id;
     }
-    S.cd = W.cd; S.ammo--; PL.stats.msl++;
+    S.cd = W.cd; S.ammo--; PL.stats.msl++; sndPilotShot(W.vs === 'f' ? 'msl' : 'torp');
     S.lockT = 0;
     return;
   }
@@ -814,7 +814,7 @@ function pilotShot(ox, oy, oz, D, W, t, mul) {
   const h = pilotRay(ox, oy, oz, D, W.range, W, true), s = h.s, tf = s / W.speed;
   const ex = ox + D[0] * s, ey = oy + D[1] * s, ez = oz + D[2] * s;
   spawnBeam(ox, oy, oz, ex, ey, ez, t, tf, PL.side, W.inten, Math.min(1, W.bolt / Math.max(1, s)), shipFac(PL.home >= 0 ? PL.home : 0));
-  PL.stats.shots++;
+  PL.stats.shots++; sndPilotShot(W.id);
   if (h.k === 'f') pending.push({ kind: 'ak', a: 1, t: t + tf, i: h.i, dmg: W.dmgF * mul, side: PL.side, pl: W.id });
   else if (h.k === 'm') pending.push({ kind: 'ak', a: 0, t: t + tf, i: h.i, g: h.g, dmg: 1, side: PL.side });
   else if (h.k === 's') { const g = h.i, asp = hitAspect(g, ox, oz, ex, ez, oy, ey); pending.push({ src: 2, t: t + tf, target: g, side: PL.side, asp, dmg: W.dmgS * mul, hm: hitMul(asp, pilotSq(), squadrons[ships.sq[g]]), fx: plRnd() < 0.5, dirIdx: dirIndexOf(ex - ox, ez - oz), x: ex, y: ey, z: ez, pl: W.id }); }
@@ -885,6 +885,7 @@ function pilotHurt(dmg, e, self) {
   if (PL.sh > 0) { const a = Math.min(PL.sh, dmg); PL.sh -= a; dmg -= a; }
   pilotHitFx(e, dmg > 0);
   PL.hp -= dmg;
+  sndPilotHurt(dmg > 0, PL.hp <= 0);
   if (PL.hp > 0) return;
   PL.hp = 0; PL.dead = true; PL.deadT = t; PL.stats.deaths++;
   const j = PL.j; FT.state[j] = 3; FT.t0[j] = t; spawnFx(fP[j * 3], fP[j * 3 + 1], fP[j * 3 + 2], PL.side, PILOT_FTR_LEN * 6, 24);   // 爆炸照機體大小（鏡頭很近，太大會蓋滿畫面）
