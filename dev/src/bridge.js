@@ -405,9 +405,9 @@ function bridgeHudSlow(cw, span, pxA) {
   }
   BR.marks.innerHTML = mh;
   // 戰況視窗
-  const a0 = sideAlive(GAME.playerSide), a1 = sideAlive(1 - GAME.playerSide), p0 = a0 / Math.max(1, GAME.init[GAME.playerSide]), p1 = a1 / Math.max(1, GAME.init[1 - GAME.playerSide]);
+  const a0 = sideAlive(GAME.playerSide), a1 = foeAlive(GAME.playerSide), p0 = a0 / Math.max(1, GAME.init[GAME.playerSide]), p1 = a1 / Math.max(1, foeInit(GAME.playerSide));   // 多方勢力：敵方＝所有敵對方加總
   const fog = playerFogged(), fv = fowView();   // 雷達受干擾：敵方兵力、狀態、距離不明；戰爭迷霧：敵方兵力是估計值、看不到的艦隊位置不明
-  const p1e = fv ? fowEstAlive(1 - GAME.playerSide) / Math.max(1, GAME.init[1 - GAME.playerSide]) : p1;
+  const p1e = fv ? sumA(foeSides(GAME.playerSide).map((s) => fowEstAlive(s))) / Math.max(1, foeInit(GAME.playerSide)) : p1;
   const al = fleetAlive(fl), n = sumA(al.map((q) => q.alive)), g = al[0] && al[0].group, st = fleetStatus(fl);
   const fs = fl.sqs.find((q) => q.flagship >= 0), isOrig = fs && BR.ship === fs.flagship;
   const fhp = BR.ship >= 0 ? ships.hp[BR.ship] / (SHIP_TYPES[ships.type[BR.ship]].hp * (isOrig ? 3 : 1)) : 0;

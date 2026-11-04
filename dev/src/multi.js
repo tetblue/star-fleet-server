@@ -310,7 +310,7 @@ function netBegin(st, cmds, turn) {
   overlay(null); fieldGroup.clear();
   GAME.op = st.opts.op; Object.assign(opts, st.rules);   // 規則：用第一方送來的（雙方一樣）
   newBattle(st.seed, mpComposeSetup(st));
-  GAME.init = [sideAlive(0), sideAlive(1)];
+  GAME.init = sideInits();
   GAME.result = null; GAME.reportShown = false; GAME.replaying = false; GAME.replayEnd = null; GAME.skillArm = null; GAME.xp = null; GAME.mpR = null; GAME.merit = 0; GAME.log = []; GAME.simCtl = null;
   for (const c of cmds) cmdQueue.push({ ...c });
   NET.bound = (turn + 1) * NET.K;

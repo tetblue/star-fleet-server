@@ -536,6 +536,11 @@
   #battlehud .timer .lbl { text-align: center; font-weight: 400; } #battlehud .timer .lbl.paused { color: #ffd27a; }
   #battlehud #bh-tm.over { color: #ff9a8a; }   /* 主線：超過目標時間（沒有速戰獎勵了） */
   #battlehud .lbl { font-size: calc(10.5px * var(--ui)); color: var(--dim); white-space: nowrap; }
+  #battlehud .bh-rel { display: flex; flex-direction: column; gap: 1px; font-size: calc(10px * var(--ui)); color: var(--dim); white-space: nowrap; }
+  #battlehud .bh-rel[hidden] { display: none; }
+  #battlehud .bh-rel .rl i { display: inline-block; width: 7px; height: 7px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  #battlehud .bh-rel .rl b { font-weight: 600; } #battlehud .bh-rel .r0 b { color: #ff8a7a; } #battlehud .bh-rel .r1 b { color: #ffd27a; } #battlehud .bh-rel .r2 b { color: #8fe0a0; }
+  .sq-label.neu { border-style: dashed; } .sq-label.neu b::after { content: '・中立'; color: #ffd27a; font-weight: 400; }
   #battlehud .bh-sep { width: 1px; align-self: stretch; background: var(--line); }
   #battlehud .g-btn.sm { padding: calc(3px * var(--sp)) calc(7px * var(--sp)); min-width: calc(28px * var(--ui)); }
   #battlehud .g-btn.ic { display: inline-grid; place-items: center; }

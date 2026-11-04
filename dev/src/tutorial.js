@@ -368,7 +368,7 @@ function tutStart(L) {
   applyOp(sc.op); const setup = tutSetup(L); setup.op = GAME.op;
   newBattle(sc.seed, setup);
   setRule('fire', true); setRule('advance', false);
-  GAME.init = [sideAlive(0), sideAlive(1)];
+  GAME.init = sideInits();
   GAME.result = null; GAME.reportShown = false; GAME.replaying = false; GAME.replayEnd = null; GAME.skillArm = null; GAME.xp = null; GAME.log = []; GAME.simCtl = null;
   gEl('battlehud').innerHTML = '';
   drawField(false);

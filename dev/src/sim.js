@@ -10,7 +10,13 @@ const SIM_LAST = 'fleet.simlast', SIM_KEY = 'fleet.simlayouts';
 const SIM_INF = 359999;   // 模擬室沒有時限
 const SIM_CN = '一二三四五六七八九十';
 const SIM_TERR_MAX_SOLID = 8;   // 實體障礙最多 8 個（著色器與碰撞的上限）
-const simSideName = (m, side) => FACTION_NAME[side ? 1 - m.fac : m.fac];
+// 多方勢力：邊 0、1＝原本的我方、敵方（帝國／聯盟，m.fac 決定哪邊是誰）；邊 2 以後＝m.sides[邊−2]＝{ fac, name }
+//   m.rel＝[[a, b, 關係], ...]（0 敵對、1 中立、2 同盟；沒寫的＝敵對）
+const simSideN = (m) => 2 + ((m.sides && m.sides.length) || 0);
+const simSideFac = (m, side) => (side >= 2 ? (m.sides[side - 2] || { fac: 1 }).fac : side ? 1 - m.fac : m.fac);
+const simSideName = (m, side) => (side >= 2 ? ((m.sides && m.sides[side - 2] && m.sides[side - 2].name) || FACTION_NAME[simSideFac(m, side)] + `（第 ${side + 1} 方）`) : FACTION_NAME[side ? 1 - m.fac : m.fac]);
+const simRel = (m, a, b) => { if (a === b) return 2; const e = (m.rel || []).find(([x, y]) => (x === a && y === b) || (x === b && y === a)); return e ? e[2] : 0; };
+const SIM_SPOT = [null, null, [700, 0, -Math.PI / 2], [-700, 0, Math.PI / 2], [560, -560, -Math.PI * 3 / 4], [-560, 560, Math.PI / 4], [560, 560, -Math.PI / 4], [-560, -560, Math.PI * 3 / 4]];   // 第三方以後的預設位置（地圖四周）
 // 戰術面板、艦橋共用：一般作戰＝剩餘時間；模擬室（無時限）＝整場的經過時間
 function timeLeftText(t) { const tl = battleSetup.timeLimit; return battleSetup.untimed ? _fmtT(t) : tl >= SIM_INF ? `經過 ${_fmtT(t + SIM.t0)}` : _fmtT(Math.max(0, tl - t)); }
 
@@ -19,10 +25,11 @@ function simCmdrFrom(c, mode = 'lv') {
   return { base: c.id, name: c.name, title: c.title || '', trait: c.trait, level: mode === 'tal' ? cmdrLevel(c.id) : 3, mode, tal: mode === 'tal' ? { ...cmdrTal(c.id) } : {}, skills: c.skills.slice() };
 }
 function simNewFleet(m, side) {
-  const fac = side ? 1 - m.fac : m.fac, pool = COMMANDERS.filter((c) => (c.faction || 0) === fac), n = m.fleets.filter((f) => f.side === side).length;
-  const c = pool[n % Math.max(1, pool.length)] || COMMANDERS[0];
-  return { side, name: `${side ? '敵方' : '我方'}第${SIM_CN[n] || n + 1}艦隊`, cmdr: simCmdrFrom(c), comp: defaultComp(2000), hangar: HANGAR_DEFAULT.slice(),
-    formation: 'line', orderly: false, layers: 1, x: -300 + (n % 4) * 200, z: side ? -330 : 330, y: 0, h: side ? 0 : Math.PI,
+  const fac = simSideFac(m, side), pool = COMMANDERS.filter((c) => (c.faction || 0) === fac), n = m.fleets.filter((f) => f.side === side).length;
+  const c = pool[n % Math.max(1, pool.length)] || COMMANDERS[0], P = SIM_SPOT[side];
+  const pos = P ? { x: P[0] + Math.cos(P[2]) * (n % 3 - 1) * 200, z: P[1] - Math.sin(P[2]) * (n % 3 - 1) * 200, h: P[2] } : { x: -300 + (n % 4) * 200, z: side ? -330 : 330, h: side ? 0 : Math.PI };
+  return { side, name: side >= 2 ? `${simSideName(m, side).replace(/（.*）/, '')}第${SIM_CN[n] || n + 1}艦隊` : `${side ? '敵方' : '我方'}第${SIM_CN[n] || n + 1}艦隊`, cmdr: simCmdrFrom(c), comp: defaultComp(2000), hangar: HANGAR_DEFAULT.slice(),
+    formation: 'line', orderly: false, layers: 1, x: Math.round(pos.x), z: Math.round(pos.z), y: 0, h: pos.h,
     ai: side ? { tactic: 'push', level: 2 } : null, reserve: false, at: 60 };
 }
 function simDefault() {
@@ -52,7 +59,7 @@ function simFromScenario(sc) {
 // 布局 → 戰鬥設定（與正式作戰相同的格式）；edit＝編輯中（增援也先顯示出來，方便擺放）
 function simSetup(m, edit) {
   const S = {
-    bg: false, scenario: 'sim', level: 1, factions: m.fac ? [1, 0] : [0, 1], timeLimit: m.timeLimit || SIM_INF, noVictory: !m.victory,
+    bg: false, scenario: 'sim', level: 1, factions: [...(m.fac ? [1, 0] : [0, 1]), ...(m.sides || []).map((s) => s.fac)], ...(m.sides && m.sides.length ? { rel: (m.rel || []).map((r) => r.slice()), sideNames: Array.from({ length: simSideN(m) }, (_, s) => simSideName(m, s)) } : {}), timeLimit: m.timeLimit || SIM_INF, noVictory: !m.victory,
     terrain: m.ground ? [] : m.terrain.map((t) => ({ ...t })), ...(m.ground && GROUND_SCENES[m.ground.scene] ? { ground: { ...m.ground } } : {}),   // 近地作戰：不用太空地形
     fleets: m.fleets.map((f) => {
       const c = f.cmdr, tal = c.mode === 'tal' ? { ...c.tal } : null;
@@ -126,8 +133,8 @@ function simRender() {
       <div class="sim-btns" style="margin-top:6px">${SIM.dirty && SIM.live ? '<button class="g-btn sm" id="sim-discard" title="回到暫停時的戰局">放棄修改</button>' : ''}<button class="g-btn sm" id="sim-reset" title="布局與狀態恢復成開戰時的樣子">↺ 重置戰場</button></div></div>` : ''}
     <div class="wed-seg sim-tabs" id="sim-tabs"><button data-tab="unit" class="${SIM.tab === 'unit' ? 'on' : ''}">單位與地形</button><button data-tab="field" class="${SIM.tab === 'field' ? 'on' : ''}">戰場設定</button><button data-tab="file" class="${SIM.tab === 'file' ? 'on' : ''}">布局存檔</button></div>
     ${SIM.tab === 'field' ? simFieldHtml(m) : SIM.tab === 'file' ? simFileHtml(m) : `
-    <div class="sim-sec"><div class="sim-h"><span class="g-pc">${simSideName(m, 0)}（我方）</span><span class="g-dim">${tot(0)} 艘</span><span class="g-sp"></span><button class="g-btn sm" data-add="0">＋ 艦隊</button></div>${sideList(0)}</div>
-    <div class="sim-sec"><div class="sim-h"><span class="g-ec">${simSideName(m, 1)}（敵方）</span><span class="g-dim">${tot(1)} 艘</span><span class="g-sp"></span><button class="g-btn sm" data-add="1">＋ 艦隊</button></div>${sideList(1)}</div>
+    ${Array.from({ length: simSideN(m) }, (_, s) => `<div class="sim-sec"><div class="sim-h"><span class="${s === 0 ? 'g-pc' : s === 1 ? 'g-ec' : ''}" style="${s >= 2 ? `color:${FACTION[simSideFac(m, s)].ui}` : ''}">${escH(simSideName(m, s))}${s === 0 ? '（我方）' : s === 1 ? '（敵方）' : ''}</span><span class="g-dim">${tot(s)} 艘${simSideN(m) > 2 && s ? `・對我方${['敵對', '中立', '同盟'][simRel(m, 0, s)]}` : ''}</span><span class="g-sp"></span>${s >= 2 ? `<button class="g-btn sm" data-delside="${s}" title="刪除這一方（連同它的艦隊）">✕</button>` : ''}<button class="g-btn sm" data-add="${s}">＋ 艦隊</button></div>${sideList(s)}</div>`).join('')}
+    ${simSideN(m) < SIDE_N ? `<div class="sim-sec"><button class="g-btn sm" id="sim-addside" title="多方勢力：最多 ${SIDE_N} 方；每兩方的關係（敵對／中立／同盟）在「戰場設定」改">＋ 新增勢力（第 ${simSideN(m) + 1} 方）</button></div>` : ''}
     <div class="sim-sec"><div class="sim-h"><span>地形</span><span class="g-dim">實體障礙 ${solid}／${SIM_TERR_MAX_SOLID}</span><span class="g-sp"></span>${Object.keys(TERRAIN_TYPES).map((k) => `<button class="g-btn sm" data-addt="${k}" title="${TERRAIN_TYPES[k].desc}">＋ ${TERRAIN_TYPES[k].name}</button>`).join('')}</div>
       ${m.terrain.map((t, i) => `<button class="sim-it ${SIM.sel && SIM.sel.kind === 'terr' && SIM.sel.i === i ? 'on' : ''}" data-st="${i}"><b>${TERRAIN_TYPES[t.type].name}</b><small>(${Math.round(t.x)}, ${Math.round(t.z)})・高度 ${Math.round(t.y || 0)}・半徑 ${Math.round(t.r)}</small></button>`).join('') || '<span class="g-dim">（沒有地形）</span>'}</div>
     ${it ? (SIM.sel.kind === 'fleet' ? simFleetHtml(it) : simTerrHtml(it)) : '<div class="sim-sec g-dim">點清單或地圖上的艦隊／地形來編輯。</div>'}`}
@@ -145,11 +152,21 @@ function simFieldHtml(m) {
     <div class="sim-row"><span>地形種子</span><input class="g-in" type="number" id="sim-gseed" value="${m.ground.seed}" style="width:110px"><button class="g-btn sm" id="sim-gre">換一個</button></div>` : ''}
     <div class="sim-row"><span>戰爭迷霧</span><div class="wed-seg" id="sim-fow"><button data-v="1" class="${m.fow !== false ? 'on' : ''}">開</button><button data-v="0" class="${m.fow === false ? 'on' : ''}">關</button></div></div>
     <div class="g-dim sim-note">開＝只看得到偵測範圍內（或掃描到）的敵軍，自動攻擊也只打看得到的；關＝雙方都看得到全部</div>
-    <div class="sim-row"><span>${SIM.mid ? '繼續時指揮' : '開戰時指揮'}</span><div class="wed-seg" id="sim-ctl"><button data-v="0" class="${m.ctl === 0 ? 'on' : ''}">我方</button><button data-v="1" class="${m.ctl === 1 ? 'on' : ''}">敵方</button></div></div>
+    <div class="sim-row"><span>${SIM.mid ? '繼續時指揮' : '開戰時指揮'}</span><div class="wed-seg" id="sim-ctl">${Array.from({ length: simSideN(m) }, (_, s) => `<button data-v="${s}" class="${m.ctl === s ? 'on' : ''}">${s === 0 ? '我方' : s === 1 ? '敵方' : escH(simSideName(m, s))}</button>`).join('')}</div></div>
+    ${simSideN(m) > 2 ? simRelHtml(m) : ''}
     <div class="sim-row"><span>勝負判定</span><label><input type="checkbox" id="sim-vic" ${m.victory ? 'checked' : ''}> 一方全滅或潰走（剩 ${Math.round(ROUT_AT * 100)}% 以下）就結束</label></div>
     <div class="sim-row"><span>時限</span><span class="g-dim">模擬室沒有時間限制</span></div>
     <div class="sim-row"><span>隨機種子</span><input class="g-in" type="number" id="sim-seed" value="${m.seed}" style="width:110px"><button class="g-btn sm" id="sim-reseed">換一個</button></div>
     <div class="g-dim" style="font-size:calc(11.5px * var(--ui));margin-top:6px">同一個布局＋同一個種子＋同樣的指令＝同樣的結果；換種子會改變陣型細節與命中的隨機性。<br>規則與正式作戰相同（持續交火、不自動前進、主砲只打前方）。</div></div>`;
+}
+// 多方勢力：第三方以後的陣營、名稱；每兩方的關係
+function simRelHtml(m) {
+  const N = simSideN(m), opt = (v, n, cur) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${n}</option>`;
+  let h = '<div class="sim-sub">多方勢力</div>';
+  for (let s = 2; s < N; s++) h += `<div class="sim-row"><span>第 ${s + 1} 方</span><input class="g-in" data-sname="${s}" value="${escH(m.sides[s - 2].name || '')}" placeholder="${FACTION_NAME[m.sides[s - 2].fac]}" maxlength="12" style="width:110px"><select class="g-sel" data-sfac="${s}">${FACTION_NAME.map((n, f) => opt(f, n, m.sides[s - 2].fac)).join('')}</select></div>`;
+  h += '<div class="sim-sub">勢力關係</div>';
+  for (let a = 0; a < N; a++) for (let b = a + 1; b < N; b++) h += `<div class="sim-row"><span style="min-width:0;flex:1">${escH(simSideName(m, a))} ↔ ${escH(simSideName(m, b))}</span><select class="g-sel" data-rel="${a},${b}">${['敵對', '中立', '同盟'].map((n, r) => opt(r, n, simRel(m, a, b))).join('')}</select></div>`;
+  return h + '<div class="g-dim sim-note">敵對＝自動互相開火；中立＝不會自動開火，但流彈、範圍攻擊會打到，被下令攻擊或誤傷太多就轉為敵對；同盟＝不互打（流彈也不會）。打到只剩互不敵對的勢力時結束。</div>';
 }
 function simFileHtml(m) {
   const L = simLayouts();
@@ -164,7 +181,7 @@ function simFleetHtml(f) {
   const cost = compCost(f.comp);
   return `<div class="sim-sec sim-ed"><div class="sim-h"><b>編輯艦隊</b><span class="g-sp"></span><button class="g-btn sm" id="sim-dup">複製</button><button class="g-btn sm" id="sim-del">刪除</button></div>
     <div class="sim-row"><span>名稱</span><input class="g-in" data-fk="name" value="${escH(f.name)}" maxlength="20"></div>
-    <div class="sim-row"><span>陣營</span><div class="wed-seg" id="sim-fside"><button data-v="0" class="${f.side === 0 ? 'on' : ''}">我方</button><button data-v="1" class="${f.side === 1 ? 'on' : ''}">敵方</button></div></div>
+    <div class="sim-row"><span>陣營</span><div class="wed-seg" id="sim-fside">${Array.from({ length: simSideN(SIM.m) }, (_, s) => `<button data-v="${s}" class="${f.side === s ? 'on' : ''}">${s === 0 ? '我方' : s === 1 ? '敵方' : escH(simSideName(SIM.m, s))}</button>`).join('')}</div></div>
     <div class="sim-row"><span>補給艦隊</span><label><input type="checkbox" data-fk="supply" ${f.supply ? 'checked' : ''}> 沒有指揮官，範圍內的友艦自動補飛彈</label></div>
     ${f.supply ? `<div class="sim-row"><span>跟隨</span><select class="g-sel" data-fk="follow">${opt(-1, '不跟隨', f.follow != null ? f.follow : -1)}${SIM.m.fleets.map((o, i) => (o !== f && o.side === f.side && !o.supply ? opt(i, o.name, f.follow) : '')).join('')}</select></div>` : `
     <div class="sim-row"><span>控制</span><select class="g-sel" data-fk="ai">${opt('', '無 AI（玩家指揮／不動）', f.ai ? f.ai.tactic : '')}${Object.keys(TACTICS).map((k) => opt(k, 'AI：' + TACTICS[k].name, f.ai ? f.ai.tactic : '')).join('')}</select>
@@ -207,6 +224,27 @@ function simBind(el) {
   q('[data-sf]').forEach((b) => (b.onclick = () => simSelect({ kind: 'fleet', i: +b.dataset.sf })));
   q('[data-st]').forEach((b) => (b.onclick = () => simSelect({ kind: 'terr', i: +b.dataset.st })));
   q('[data-add]').forEach((b) => (b.onclick = () => { m.fleets.push(simNewFleet(m, +b.dataset.add)); SIM.sel = { kind: 'fleet', i: m.fleets.length - 1 }; simChanged(); }));
+  on('sim-addside', 'onclick', () => {   // 新增勢力：先挑還沒用過的陣營
+    m.sides = m.sides || []; if (simSideN(m) >= SIDE_N) return;
+    const used = Array.from({ length: simSideN(m) }, (_, s) => simSideFac(m, s)), fac = [4, 5, 6, 3, 2, 7, 0, 1].find((f) => !used.includes(f)) ?? 4;
+    m.sides.push({ fac, name: '' }); const s = simSideN(m) - 1;
+    m.fleets.push(simNewFleet(m, s)); SIM.sel = { kind: 'fleet', i: m.fleets.length - 1 }; simChanged();
+  });
+  q('[data-delside]').forEach((b) => (b.onclick = () => {
+    const s = +b.dataset.delside; if (m.fleets.some((f) => f.side === s) && !confirm(`刪除「${simSideName(m, s)}」和它的艦隊？`)) return;
+    m.fleets = m.fleets.filter((f) => f.side !== s); for (const f of m.fleets) if (f.side > s) f.side--;
+    m.rel = (m.rel || []).filter(([x, y]) => x !== s && y !== s).map(([x, y, r]) => [x > s ? x - 1 : x, y > s ? y - 1 : y, r]);
+    m.sides.splice(s - 2, 1); if (m.ctl === s) m.ctl = 0; else if (m.ctl > s) m.ctl--;
+    SIM.sel = null; simChanged();
+  }));
+  q('[data-sname]').forEach((e) => (e.onchange = () => { m.sides[+e.dataset.sname - 2].name = e.value.trim(); simChanged(false); }));
+  q('[data-sfac]').forEach((e) => (e.onchange = () => { m.sides[+e.dataset.sfac - 2].fac = +e.value; simChanged(); }));
+  q('[data-rel]').forEach((e) => (e.onchange = () => {
+    const [a, b] = e.dataset.rel.split(',').map(Number), r = +e.value;
+    m.rel = (m.rel || []).filter(([x, y]) => !((x === a && y === b) || (x === b && y === a)));
+    if (r) m.rel.push([a, b, r]);   // 敵對＝預設，不用記
+    simChanged();
+  }));
   q('[data-addt]').forEach((b) => (b.onclick = () => {
     const type = b.dataset.addt;
     if (TERRAIN_TYPES[type].solid && m.terrain.filter((t) => TERRAIN_TYPES[t.type].solid).length >= SIM_TERR_MAX_SOLID) { toast(`實體障礙最多 ${SIM_TERR_MAX_SOLID} 個`); return; }
@@ -349,7 +387,8 @@ function simGo() { if (SIM.mid && SIM.live && !SIM.dirty) simResumeLive(); else 
 // 開戰（SIM.mid＝戰鬥中編輯完，從暫停時的戰況接著打）
 function simStart() {
   const m = SIM.m, cont = SIM.mid;
-  if (![0, 1].every((s) => m.fleets.some((f) => f.side === s && !f.reserve && simComp(f) > 0))) { toast('雙方都至少要有一支（非增援的）艦隊'); return; }
+  const has = Array.from({ length: simSideN(m) }, (_, s) => s).filter((s) => m.fleets.some((f) => f.side === s && !f.reserve && simComp(f) > 0));
+  if (simSideN(m) <= 2 ? has.length < 2 : !has.some((a) => has.some((b) => simRel(m, a, b) === 0))) { toast(simSideN(m) <= 2 ? '雙方都至少要有一支（非增援的）艦隊' : '至少要有兩方互相敵對、而且都有（非增援的）艦隊'); return; }
   if (cont) SIM.t0 += SIM.snapT; else { SIM.base = JSON.parse(JSON.stringify(m)); SIM.t0 = 0; if (!m.watch && !m.pilot && !m.captain) simSave(); }   // 觀摩不覆蓋模擬室「上次的布局」
   SIM.mid = SIM.live = SIM.dirty = false;
   GAME.attempt = (GAME.attempt || 0) + 1;
@@ -362,7 +401,7 @@ function simStart() {
   if (GAME.watch) GAME.op = Math.min(GAME.op, 1);   // 觀摩：規則照操作難度（含擬真的誤射），但畫面不鎖在艦橋
   newBattle(m.seed >>> 0, setup);
   setRule('fire', true); setRule('advance', false);
-  GAME.init = [sideAlive(0), sideAlive(1)];
+  GAME.init = sideInits();
   if (cont) {
     // 接續：潰走的比例仍以整場的兵力為準（加進來的新艦隊另外算進去）；各艦隊的百分比也照原本的兵力
     GAME.init = GAME.init.map((n, s) => SIM.snapInit[s] + Math.max(0, n - SIM.snapAlive[s]));
@@ -412,7 +451,8 @@ function simSnapshot() {
       formation: g ? g.formation : 'line', orderly: !!(g && g.orderly), layers: (g && g.layers) || 1, x: Math.round(C.x), z: Math.round(C.z), y: Math.round(C.y), h: g ? groupHeading(g, t) : 0,
       ai: null, reserve: false, at: 60, init0: f.initial, keep: simKeepOf(f, g, t) });
   }
-  m.jam = [0, 1].map((s) => (jammed(s) ? [Math.round((jam[s].until - t) * 10) / 10, jam[s].delay] : null));   // 干擾剩下的時間
+  m.jam = Array.from({ length: SIDES }, (_, s) => (jammed(s) ? [Math.round((jam[s].until - t) * 10) / 10, jam[s].delay] : null));   // 干擾剩下的時間
+  if (m.sides && m.sides.length) { m.rel = []; for (let a = 0; a < SIDES; a++) for (let b = a + 1; b < SIDES; b++) if (REL[a][b]) m.rel.push([a, b, REL[a][b]]); }   // 戰鬥中改變的關係（宣戰、翻臉）
   return m;
 }
 // 接續時要保留的狀態（重建後套回去）：平均耐久與護盾比例、飛彈與補給存量比例、技能剩餘次數與冷卻、命令隊列（指定目標的項目除外）
@@ -439,7 +479,7 @@ function simEditMid() {
   if (TAC.open) closeTac();
   GAME.skillArm = null; hideHint(); closeRadial();
   paused = true; updateTimeUI();
-  SIM.snapT = U.uTime.value; SIM.snapInit = GAME.init.slice(); SIM.snapAlive = [sideAlive(0), sideAlive(1)];
+  SIM.snapT = U.uTime.value; SIM.snapInit = GAME.init.slice(); SIM.snapAlive = sideInits();
   SIM.keep = SIM.m;   // 放棄修改時還原
   SIM.m = simSnapshot(); SIM.mid = true; SIM.live = true; SIM.dirty = false; SIM.sel = null; SIM.tab = 'unit';
   setPhase('simedit');
@@ -463,11 +503,16 @@ function simReset() {
   simBuild(); toast('已重置：回到開戰時的布局');
 }
 function simEndMid() { SIM.mid = SIM.live = SIM.dirty = false; SIM.keep = null; SIM.t0 = 0; }
+// 下一個還有艦隊的一方（兩方＝對面）
+function simNextSide() {
+  for (let k = 1; k < SIDES; k++) { const s = (GAME.playerSide + k) % SIDES; if (fleets.some((f) => f.side === s && !f.reserve && fleetAlive(f).length)) return s; }
+  return 1 - GAME.playerSide;
+}
 // 戰鬥中切換指揮的陣營
 function simSwitch() {
   if (!GAME.sc || !GAME.sc.sim || GAME.phase !== 'battle' || GAME.replaying) return;
   if (BR.on) exitBridge();
-  const side = 1 - GAME.playerSide;
+  const side = simNextSide();
   GAME.skillArm = null; hideHint(); closeRadial();
   if (typeof closeNodePop === 'function') closeNodePop();
   issue('simctl', { ctl: side });
@@ -483,7 +528,8 @@ function showSimReport() {
   const R = GAME.result, m = SIM.m, st = battleStats();
   setPhase('report');
   const n0 = simSideName(m, 0), n1 = simSideName(m, 1);
-  const label = { win: `${n0} 勝利`, lose: `${n1} 勝利`, draw: '平手', end: '模擬結束' }[R.kind] || '模擬結束';
+  const label = SIDES > 2 && R.kind !== 'end' ? R.why : { win: `${n0} 勝利`, lose: `${n1} 勝利`, draw: '平手', end: '模擬結束' }[R.kind] || '模擬結束';
+  const multi = SIDES > 2 ? `<div class="g-card" style="margin-bottom:12px"><h3>各方勢力</h3><table class="stat-tbl"><tr><th>勢力</th><th>對${escH(n0)}</th><th>出擊</th><th>損失</th><th>剩下</th></tr>${Array.from({ length: SIDES }, (_, s) => `<tr><td style="color:${FACTION[SIDE_FAC[s]].ui}">${escH(simSideName(m, s))}</td><td>${s ? ['敵對', '中立', '同盟'][REL[0][s]] : '—'}</td><td>${ships5(sumA(st.init[s]))}</td><td>${ships5(sumA(st.init[s]) - sumA(st.left[s]))}</td><td>${Math.round(sideAlive(s) / Math.max(1, GAME.init[s]) * 100)}%</td></tr>`).join('')}</table></div>` : '';
   const row = (t) => `<tr><td>${SHIP_TYPES[t].name}</td><td>${ships5(st.init[0][t])}</td><td>${ships5(st.init[0][t] - st.left[0][t])}</td><td>${ships5(st.init[1][t])}</td><td>${ships5(st.init[1][t] - st.left[1][t])}</td></tr>`;
   const asp = (sd) => dmgStats[sd].map((v) => ships5(v)).join(' ／ ');
   const used = (side) => fleets.filter((f) => f.side === side).flatMap((f) => Object.entries(f.skills).filter(([, s]) => s.used).map(([id, s]) => `${f.name}：${SKILLS[id].name} ×${s.used}`));
@@ -492,7 +538,8 @@ function showSimReport() {
     <div class="g-head"><h2>${m.watch ? '觀摩結果' : '模擬結果'}</h2><span class="crumb">${escH(m.name)}　·　${OP_LEVELS[(battleSetup && battleSetup.op) || 0].name}難度　·　戰鬥時間 ${_fmtT(R.t + SIM.t0)}</span></div>
     ${SIM.t0 > 0 ? `<div class="g-dim" style="margin:-4px 0 10px">戰鬥中調整過配置：下面的損失統計與回放從最後一次調整（${_fmtT(SIM.t0)}）開始。</div>` : ''}
     <div class="g-card" style="margin-bottom:12px;text-align:center"><p class="result ${R.kind === 'end' ? 'draw' : R.kind}">${label}</p><div class="g-dim">${escH(m.watch ? R.why.replaceAll('我軍', n0).replaceAll('敵軍', n1).replace('我方', n0).replace('敵方', n1) : R.why)}</div>
-      <div style="margin-top:6px">${n0} 剩 ${Math.round(R.ratio[0] * 100)}%　·　${n1} 剩 ${Math.round(R.ratio[1] * 100)}%</div></div>
+      ${SIDES > 2 ? '' : `<div style="margin-top:6px">${n0} 剩 ${Math.round(R.ratio[0] * 100)}%　·　${n1} 剩 ${Math.round(R.ratio[1] * 100)}%</div>`}</div>
+    ${multi}
     <div class="intel-grid">
       <div class="g-card"><h3>兵力損失（艘）</h3><table class="stat-tbl"><tr><th>艦種</th><th>${n0}出擊</th><th>${n0}損失</th><th>${n1}出擊</th><th>${n1}損失</th></tr>
         ${SHIP_TYPES.map((_, t) => t).filter((t) => t < N_COMBAT || st.init[0][t] + st.init[1][t] > 0).map(row).join('')}
@@ -503,7 +550,8 @@ function showSimReport() {
         ${battleRules && battleRules.ray ? `<dt>光束擋下／流彈／空中擋下</dt><dd>${n0} ${rayStats[0].map(fmtN).join('／')} 發<br>${n1} ${rayStats[1].map(fmtN).join('／')} 發</dd>` : ''}
         ${battleRules && battleRules.ff ? `<dt>友軍誤射</dt><dd>${n0} ${fmtN(ffStats[0][0])} 發（${fmtN(Math.round(ffStats[0][1]))} 傷害）<br>${n1} ${fmtN(ffStats[1][0])} 發（${fmtN(Math.round(ffStats[1][1]))} 傷害）</dd>${battleRules.ff === 2 ? `<dt>射界受阻停火</dt><dd>${n0} ${fmtN(ffHold[0])} 次<br>${n1} ${fmtN(ffHold[1])} 次</dd>` : ''}` : ''}</dl></div>
       <div class="g-card"><h3>各艦隊</h3><div class="g-pc" style="margin-bottom:4px">${n0}</div>${fl(0)}<div class="g-ec" style="margin:8px 0 4px">${n1}</div>${fl(1)}
-        <dl class="kv" style="margin-top:10px"><dt>使用技能</dt><dd>${[...used(0), ...used(1)].join('<br>') || '無'}</dd></dl>
+        ${Array.from({ length: Math.max(0, SIDES - 2) }, (_, k) => `<div style="margin:8px 0 4px;color:${FACTION[SIDE_FAC[k + 2]].ui}">${escH(simSideName(m, k + 2))}</div>${fl(k + 2)}`).join('')}
+        <dl class="kv" style="margin-top:10px"><dt>使用技能</dt><dd>${Array.from({ length: SIDES }, (_, s) => used(s)).flat().join('<br>') || '無'}</dd></dl>
         <div class="g-dim" style="font-size:calc(12px * var(--ui));margin-top:8px">${m.watch ? 'AI 對戰觀摩' : '模擬室'}不計戰績、不給經驗，也不會上傳戰鬥紀錄。</div></div>
     </div>
     ${m.watch ? watchReportHtml(m, R) : ''}

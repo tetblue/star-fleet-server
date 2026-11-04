@@ -4,7 +4,7 @@
 
 const GAME = {
   phase: 'menu', playerSide: 0, sc: null, intel: null, loadout: null, attempt: 0,
-  init: [0, 0], result: null, skillArm: null, deploySel: 0, drag: null, replaying: false, reportShown: false,
+  init: new Array(8).fill(0), result: null, skillArm: null, deploySel: 0, drag: null, replaying: false, reportShown: false,
 };
 const PHASE_ON = ['deploy', 'battle', 'report', 'simedit', 'bldedit'];
 const gEl = (id) => document.getElementById(id);
@@ -194,6 +194,12 @@ function makeSetup(sc, lo, attempt) {
     fleetsS.push({ side: 0, fac: a.fac, name: a.name, ax: a.arrive ? sx * 800 : a.x, az: a.arrive ? -60 : a.z, ay: 0, h: a.arrive ? (sx < 0 ? Math.PI / 2 : -Math.PI / 2) : a.h, formation: a.formation, comp: a.comp.slice(),
       commander: { ...a.commander }, ai: { tactic: a.tactic, level: sc.level }, ally: true, defectAt: a.defectAt, ...(a.arrive ? { reserve: true, activateAt: a.arrive[0] } : {}) });
   }
+  // 多方勢力（第三方以後，邊 2、3…）：AI 自己打；rel＝對玩家、對敵軍的關係，其餘第三方之間互相敵對
+  const rel = [], facs = [];
+  (sc.sides || []).forEach((S, k) => {
+    const s = 2 + k; facs[k] = S.fac; rel.push([0, s, S.rel[0]], [1, s, S.rel[1]]);
+    for (const F of S.fleets) fleetsS.push({ side: s, fac: S.fac, name: F.name, ax: F.x, az: F.z, ay: 0, h: F.h, formation: F.formation, comp: F.comp.slice(), commander: { ...F.commander }, ai: { tactic: F.tactic, level: sc.level } });
+  });
   // 救援（〈星海之外〉第 7 關）：撤離船團先放在場外，時間到了才從地表起飛（rescueTick）
   if (sc.rescue) sc.rescue.at.forEach((_, k) => fleetsS.push({ ...supplySetup(0, { comp: sc.rescue.comp, formation: 'ring', x: 0, z: MAP_BOUNDS.z0 - 900, h: Math.PI }, -1, `${sc.rescue.name} ${k + 1}`), ally: true, reserve: true, activateAt: null }));
   const e0 = fleetsS.length;
@@ -208,7 +214,7 @@ function makeSetup(sc, lo, attempt) {
     fleetsS.push({ side: 1, ...(ev.fac != null ? { fac: ev.fac } : {}), name: ev.name, ax: sx * 800, az: -140 + R() * 200, ay: Math.round((R() - 0.5) * 240), h: sx < 0 ? Math.PI / 2 : -Math.PI / 2, formation: ev.formation, comp: ev.comp.slice(),
       commander: ev.commander ? { ...ev.commander } : reinforceCmdr(sc), reserve: true, activateAt: at, ai: { tactic: 'push', level: sc.level } });
   }
-  return { bg: false, terrain: sc.terrain, ...(sc.ground ? { ground: { ...sc.ground } } : {}), fleets: fleetsS, scenario: sc.id, timeLimit: sc.timeLimit, level: sc.level, factions: sc.enemyFac != null ? [lo.faction || 0, sc.enemyFac] : (lo.faction || 0) === 1 ? [1, 0] : [0, 1], ...(sc.goal ? { goal: sc.goal } : {}), ...(sc.lines ? { lines: sc.lines } : {}), ...(sc.dlines ? { dlines: sc.dlines } : {}), ...(sc.defect ? { defect: sc.defect } : {}), ...(sc.aiOmni ? { omni: [false, true] } : {}), ...(sc.untimed ? { untimed: true } : {}), ...(sc.doom ? { doom: sc.doom } : {}), ...(sc.rescue ? { rescue: sc.rescue } : {}) };   // doom：劇情強制擊沉（m8 杜蘭的旗艦）；rescue：救援任務；untimed：沒有時限（timeLimit 只當目標時間）；aiOmni：這一關的 AI 不受戰爭迷霧限制
+  return { bg: false, terrain: sc.terrain, ...(sc.ground ? { ground: { ...sc.ground } } : {}), fleets: fleetsS, scenario: sc.id, timeLimit: sc.timeLimit, level: sc.level, factions: [...(sc.enemyFac != null ? [lo.faction || 0, sc.enemyFac] : (lo.faction || 0) === 1 ? [1, 0] : [0, 1]), ...facs], ...(rel.length ? { rel, sideNames: [null, null, ...(sc.sides || []).map((S) => S.name)] } : {}), ...(sc.relRule ? { relRule: sc.relRule } : {}), ...(sc.goal ? { goal: sc.goal } : {}), ...(sc.lines ? { lines: sc.lines } : {}), ...(sc.dlines ? { dlines: sc.dlines } : {}), ...(sc.defect ? { defect: sc.defect } : {}), ...(sc.aiOmni ? { omni: [false, true] } : {}), ...(sc.untimed ? { untimed: true } : {}), ...(sc.doom ? { doom: sc.doom } : {}), ...(sc.rescue ? { rescue: sc.rescue } : {}) };   // doom：劇情強制擊沉（m8 杜蘭的旗艦）；rescue：救援任務；untimed：沒有時限（timeLimit 只當目標時間）；aiOmni：這一關的 AI 不受戰爭迷霧限制
 }
 
 // ───── 技能（命令 'skill'） ─────
@@ -221,12 +227,12 @@ function gameExec(c) {
 function useSkill(f, id, target, pt) {
   const s = f.skills[id], t = U.uTime.value, def = SKILLS[id];
   if (!s || s.left <= 0 || t < s.ready || f.sqs.every((q) => q.alive <= 0)) return false;
-  if (def.targetMode === 'enemy' && (!target || target.side === f.side || target.alive <= 0)) return false;
+  if (def.targetMode === 'enemy' && (!target || !hostile(f.side, target.side) || target.alive <= 0)) return false;
   if (def.targetMode === 'point' && !pt) return false;
   if (id === 'reinforce' && !callReinforce(f, pt)) return false;
   if (id === 'merc' && !callMercs(f, pt)) return false;
   s.left--; s.until = t + def.dur; s.ready = t + def.cd * (1 - 0.15 * talentRank(f.commander, 'tempo')); s.target = target; s.used = (s.used || 0) + 1;   // 指揮效率：冷卻縮短
-  if (id === 'jam') setJam(1 - f.side, def.dur, 6);   // 干擾：敵方變陣延遲 6 秒
+  if (id === 'jam') for (const s of foeSides(f.side)) setJam(s, def.dur, 6);   // 干擾：敵對各方變陣延遲 6 秒
   const who = GAME.watch ? `${FACTION_NAME[SIDE_FAC[f.side]]}・${f.name}　` : f.side === GAME.playerSide ? '' : '敵方';   // 觀摩：兩邊都是 AI，用陣營名稱
   toast(`${who}${f.commander ? f.commander.name : f.name}：${def.name}${target ? ` → ${target.fleet ? target.fleet.name + ' ' : ''}${target.name}` : ''}`, f.side === GAME.playerSide ? '' : 'enemy');
   if (id === 'focus') for (const g of groups) if (g.side === f.side && !g.inactive) g.target = target;
@@ -266,7 +272,7 @@ function callMercs(f, pt) {
 }
 // 友軍倒戈：整支艦隊換到對面（船、分艦隊、艦隊群組、艦載機），之後算敵軍兵力
 function defectFleet(f) {
-  f.ally = false; f.side = 1 - f.side; f.aiS = {};
+  f.ally = false; f.side = f.defectTo != null ? f.defectTo : 1 - f.side; f.aiS = {};   // defectTo：多方勢力時倒向哪一方
   const sqSet = new Set(f.sqs);
   for (const q of f.sqs) { q.side = f.side; q.target = null; if (q.group) { q.group.side = f.side; q.group.target = null; q.group.goal = null; } selected.delete(q); }
   for (let i = 0; i < shipCount; i++) if (sqSet.has(squadrons[ships.sq[i]])) ships.side[i] = f.side;
@@ -373,7 +379,7 @@ function aiTarget(f, S, C, far, lv) {
   let best = null, bs = -1e9;
   for (const q of squadrons) {
     const v = seenSq(f.side, q);   // 被干擾：位置與兵力是干擾開始時的
-    if (q.side === f.side || !v || v.bg || v.alive <= 0 || q.alive <= 0 || Math.hypot(v.x - C.x, v.z - C.z) > far || (fowOn() && v.stale)) continue;   // 戰爭迷霧：只選看得到的
+    if (!hostile(f.side, q.side) || !v || v.bg || v.alive <= 0 || q.alive <= 0 || Math.hypot(v.x - C.x, v.z - C.z) > far || (fowOn() && v.stale)) continue;   // 戰爭迷霧：只選看得到的
     let s = q.typeAlive[0] * 4 + (1 - v.alive / Math.max(1, q.list.length - (q.nDorm || 0))) * 30 - v.alive * 0.05;   // 預留的空位（寄生、孵化）不算損失
     for (const [A, r] of allies) if (Math.hypot(v.x - A.x, v.z - A.z) < r) s += 12;
     if (s > bs) { bs = s; best = q; }
@@ -387,7 +393,7 @@ function aiThink(f) { FOW.obs = f; try { aiThink0(f); } finally { FOW.obs = null
 //   派去哪：掃描訊號的方向 → 最近的最後已知位置 → 敵軍開戰時的位置
 function aiScan(f, lv, t) {
   if (!fowOn() || lv < 2 || f.supply || fowReconLeft(f) > 0 || !fowHasCarrier(f)) return;
-  const en = fleets.filter((o) => o.side !== f.side && !o.reserve && o.sqs.some((q) => fowLive(q)));
+  const en = fleets.filter((o) => hostile(f.side, o.side) && !o.reserve && o.sqs.some((q) => fowLive(q)));
   const seen = (o) => o.sqs.some((q) => fowLive(q) && fowKnows(f, q));
   const none = !en.some(seen);
   if (!((none && (lv >= 3 || t > 30)) || (lv >= 4 && t > 15 && en.some((o) => !seen(o))))) return;
@@ -397,7 +403,7 @@ function aiScan(f, lv, t) {
   if (p) { const d = FOW_RULE.scanR * 0.65; P = { x: C.x + Math.sin(p.a) * d, y: C.y, z: C.z + Math.cos(p.a) * d }; }   // 掃描來自 scanR 以內：取 0.65 倍，偵察半徑 350 涵蓋大半範圍
   else {
     let best = null; for (const [e, o] of f.fowLast) if (e.alive > 0 && !fowKnows(f, e) && (!best || o.t > best.t)) best = o;
-    const st = FOW.start[1 - f.side];
+    const st = FOW.start[firstFoe(f.side)];
     P = best ? { x: best.x, y: best.y, z: best.z } : st ? { x: st.x, y: st.y || 0, z: st.z } : null;
   }
   if (P) { clampMap(P); launchRecon(f, P); }
@@ -408,7 +414,7 @@ function aiSearch(f, S, C) {
   let P;
   if (p) { P = { x: C.x + Math.sin(p.a) * 450, z: C.z + Math.cos(p.a) * 450 }; S.note = '搜索：往掃描訊號的方向'; }
   else {
-    const st = FOW.start[1 - f.side] || { x: 0, z: 0 }, A = S.searchMid ? { x: 0, z: 0 } : st;
+    const st = FOW.start[firstFoe(f.side)] || { x: 0, z: 0 }, A = S.searchMid ? { x: 0, z: 0 } : st;
     if (Math.hypot(A.x - C.x, A.z - C.z) < 220) S.searchMid = !S.searchMid;
     P = { x: A.x, z: A.z }; S.note = S.searchMid ? '搜索：往地圖中央' : '搜索：往敵軍開戰時的位置';
   }
@@ -420,7 +426,7 @@ function aiThink0(f) {
   aiScan(f, lv, t);
   // 最近的玩家艦隊
   let E = null, Ef = null, bd = 1e18;
-  for (const o of fleets) if (o.side !== f.side && !o.reserve) { const c = seenCenter(f.side, o); if (c && (c.x - C.x) ** 2 + (c.z - C.z) ** 2 < bd) { bd = (c.x - C.x) ** 2 + (c.z - C.z) ** 2; E = c; Ef = o; } }   // 被干擾：用干擾開始時的敵情；戰爭迷霧：看得到的或最後已知
+  for (const o of fleets) if (hostile(f.side, o.side) && !o.reserve) { const c = seenCenter(f.side, o); if (c && (c.x - C.x) ** 2 + (c.z - C.z) ** 2 < bd) { bd = (c.x - C.x) ** 2 + (c.z - C.z) ** 2; E = c; Ef = o; } }   // 被干擾：用干擾開始時的敵情；戰爭迷霧：看得到的或最後已知
   if (!E) { if (fowOn()) aiSearch(f, S, C); return; }
   S.ey = E.y;
   const d = Math.sqrt(bd), ux = (E.x - C.x) / (d || 1), uz = (E.z - C.z) / (d || 1), H = Math.atan2(ux, uz);
@@ -455,7 +461,7 @@ function aiThink0(f) {
     if (d < far * 0.95) aiSkill(f, 'rapid');
     const w = f.skills.wall;
     if ((lossRate > 0.1 || flanked) && d < far && !(w && t < w.until)) aiSkill(f, 'evade');
-    if (lv >= 3 && d < far * 1.3 && jam[1 - f.side].until <= t) aiSkill(f, 'jam');
+    if (lv >= 3 && d < far * 1.3 && jam[Ef.side].until <= t) aiSkill(f, 'jam');
   }
   // ── 難度 4 以上：被包抄時改圓陣、脫離後換回；射程內優先打航母與快被打垮的分艦隊 ──
   if (lv >= 4) {
@@ -469,7 +475,7 @@ function aiThink0(f) {
   }
   // ── 難度 5：看時間與戰損調整打法（領先就拉開距離拖到時間到，落後就推進衝鋒）──
   if (lv >= 5 && battleSetup.timeLimit < SIM_INF && !battleSetup.untimed && t > battleSetup.timeLimit * 0.65 && t > (S.tmT || 0)) {
-    const me = sideAlive(f.side) / Math.max(1, GAME.init[f.side]), op = sideAlive(1 - f.side) / Math.max(1, GAME.init[1 - f.side]);
+    const me = sideAlive(f.side) / Math.max(1, GAME.init[f.side]), op = foeAlive(f.side) / Math.max(1, foeInit(f.side));
     if (me - op > 0.12 && f.ai.tactic !== 'kite') { S.tmT = t + 20; S.base = S.base || f.ai.tactic; f.ai.tactic = 'kite'; S.goal = null; S.phase = null; if (GAME.watch) toast(`${f.name}：戰損領先，拉開距離拖時間`); }
     else if (op - me > 0.02 && f.ai.tactic === 'kite') { S.tmT = t + 20; f.ai.tactic = S.base && S.base !== 'kite' ? S.base : 'push'; S.goal = null; aiSkill(f, 'charge'); if (GAME.watch) toast(`${f.name}：時間不多又落後，全力進攻`); }
   }
@@ -557,19 +563,47 @@ function aiResupply(f, S, H) {
 }
 
 // ───── 勝負 ─────
+// 多方勢力：s 的所有敵對方加總（兩方時＝對面那一方）
+function foeAlive(s) { let n = 0; for (const k of foeSides(s)) n += sideAlive(k); return n; }
+function foeInit(s) { let n = 0; for (const k of foeSides(s)) n += GAME.init[k] || 0; return n; }
+function sideInits() { return Array.from({ length: SIDE_N }, (_, s) => sideAlive(s)); }   // 開戰時各方的兵力（GAME.init）
+// 那一方的名稱（提示用）：關卡可以用 battleSetup.sideNames 指定，否則用陣營名
+function sideName(s) { const N = battleSetup && battleSetup.sideNames; return (N && N[s]) || (FACTION[SIDE_FAC[s]] || FACTION[0]).name; }
+// 勢力關係改變、誤傷中立的提示（main.js 的 relSet／relHit 呼叫；模擬裡的狀態已經改好了，這裡只管提示）
+function relNote(a, b, why) {
+  if (typeof GAME === 'undefined' || GAME.phase !== 'battle' && GAME.phase !== 'replay') return;
+  const me = GAME.playerSide, o = a === me ? b : b === me ? a : -1, fail = battleSetup.relRule && battleSetup.relRule.act === 'fail';
+  if (why === 'warn') { if (a === me) toast(`注意：流彈正在打到中立的${sideName(b)}，再打下去${fail ? '任務就會失敗' : '對方會翻臉'}！`, 'bad'); return; }
+  if (why === 'fail') { if (a === me) toast(`誤傷${sideName(b)}太多了！`, 'bad'); return; }
+  if (o >= 0) toast(why === 'attack' && a === me ? `向${sideName(o)}開戰：雙方轉為敵對` : why === 'stray' && a === me ? `誤傷太多：${sideName(o)}轉為敵對！` : `${sideName(o)}與我軍轉為${REL[a][b] === 0 ? '敵對' : REL[a][b] === 2 ? '同盟' : '中立'}`, REL[a][b] === 0 ? 'bad' : '');
+  else toast(`${sideName(a)}與${sideName(b)}轉為${REL[a][b] === 0 ? '敵對' : REL[a][b] === 2 ? '同盟' : '中立'}`);
+}
 function sideAlive(side) { let n = 0; for (const f of fleets) if (f.side === side && !f.reserve && !f.ally) for (const q of f.sqs) n += q.alive; return n; }   // 友軍（還沒倒戈的傭兵）不算進勝負
 // 蟲族・群體意志：還活著的艦隊全是蟲族的一方不會潰走（要全滅才算輸）
 function noRout(side) { let any = false; for (const f of fleets) if (f.side === side && !f.reserve && !f.ally && f.sqs.some((q) => q.alive > 0)) { if (fleetMods(f).fac !== 6) return false; any = true; } return any; }
 // 劇情戰役的護送目標：剩不到 VIP_KEEP 就算護送失敗
 const VIP_KEEP = 0.4;
 function vipLost() { const f = fleets.find((o) => o.vip); if (!f) return false; let n = 0; for (const q of f.sqs) n += q.alive; return n < f.initial * VIP_KEEP; }
+// 模擬室（三方以上）：還沒潰走的各方之間沒有敵對了就結束；邊 0 在裡面＝勝利
+function simMultiVictory() {
+  const live = [];
+  for (let s = 0; s < SIDES; s++) {
+    const n = sideAlive(s), wait = fleets.some((f) => f.side === s && f.reserve && f.activateAt != null);
+    if (wait || (n > 0 && (n / Math.max(1, GAME.init[s]) >= ROUT_AT || noRout(s)))) live.push(s);
+  }
+  if (live.some((a) => live.some((b) => hostile(a, b)))) return;
+  GAME.result = battleResult(live.includes(0) ? 'win' : live.length ? 'lose' : 'draw', live.length ? `${live.map(sideName).join('、')} 勝利` : '各方都潰走了');
+}
 function checkVictory() {
+  if (SIDES > 2 && battleSetup.scenario === 'sim') { simMultiVictory(); return; }
   const t = U.uTime.value, tl = battleSetup.timeLimit, G = battleSetup.goal;
-  const a0 = sideAlive(0), a1 = sideAlive(1), p = a0 / Math.max(1, GAME.init[0]), e = a1 / Math.max(1, GAME.init[1]);
+  const a0 = sideAlive(0), a1 = foeAlive(0), p = a0 / Math.max(1, GAME.init[0]), e = a1 / Math.max(1, foeInit(0));
+  const RR = battleSetup.relRule, relBad = RR && RR.act === 'fail' ? (battleSetup.rel || []).find(([x, y, v]) => v === 1 && (x === 0 || y === 0) && (relOver(0, x || y) || hostile(0, x || y))) : null;   // 關卡：誤傷或攻擊中立的一方＝失敗
   let r = null;
   const pend = fleets.some((f) => f.ally && f.defectAt != null && !f.reserve) || (battleSetup.doom && t < battleSetup.doom.at + 4);   // 劇情演出（倒戈、強制擊沉）還沒發生：先不判勝利   // 還有友軍沒倒戈（劇情的倒戈）：先不判勝利，等倒戈發生
-  if (a1 === 0 && !pend) r = ['win', '殲滅敵軍'];
-  else if (e < ROUT_AT && !noRout(1) && !pend) r = ['win', '敵軍潰走'];
+  if (relBad) { const b = relBad[0] || relBad[1]; r = ['lose', hostile(0, b) ? `與${sideName(b)}開戰` : `誤傷${sideName(b)}太多`]; }
+  else if (a1 === 0 && !pend) r = ['win', '殲滅敵軍'];
+  else if (e < ROUT_AT && !foeSides(0).some((s) => sideAlive(s) > 0 && noRout(s)) && !pend) r = ['win', '敵軍潰走'];
   else if (a0 === 0) r = ['lose', '我軍全滅'];
   else if (p < ROUT_AT && !noRout(0)) r = ['lose', '我軍潰走'];
   else if (G && G.type === 'escort' && vipLost()) r = ['lose', `${G.name}損失過重`];
@@ -624,8 +658,8 @@ function doomTick(t) {
   for (const i of q.list) if (ships.alive[i]) { shipWorldCPU(i, _doomV); killShip(i, t, _doomV.x, _doomV.y, _doomV.z, 1.4); }
 }
 function battleResult(kind, why, extra) {
-  const a0 = sideAlive(0), a1 = sideAlive(1);
-  return { kind, why, t: U.uTime.value, alive: [a0, a1], ratio: [a0 / Math.max(1, GAME.init[0]), a1 / Math.max(1, GAME.init[1])], tick: simTick, hash: fullHash(), ...extra };   // hash：結束那一刻的戰局指紋（回放比對用）
+  const a0 = sideAlive(0), a1 = foeAlive(0);
+  return { kind, why, t: U.uTime.value, alive: [a0, a1], ratio: [a0 / Math.max(1, GAME.init[0]), a1 / Math.max(1, foeInit(0))], tick: simTick, hash: fullHash(), ...extra };   // hash：結束那一刻的戰局指紋（回放比對用）
 }
 // 撤退／手動結束：記下結束的 tick，回放才會停在同一刻（不靠勝負判定）
 const RETREAT_MIN_T = 60;   // 開戰不到這麼久就撤退：不給經驗與功勳
@@ -1188,7 +1222,7 @@ function gamePointer(type, e) {
   }
   if (GAME.skillArm && type === 'down' && (e.pointerType === 'touch' || e.button === 0)) {
     const q = squadronAt(e.clientX, e.clientY);
-    if (q && q.side !== cmdSide && !q.bg) {
+    if (q && !friendly(cmdSide, q.side) && !q.bg && (GAME.skillArm.attack || hostile(cmdSide, q.side))) {   // 攻擊指令可以點中立的（＝宣戰）；技能只能對敵對的
       if (GAME.skillArm.attack) cmdAttack(q); else skillCmd(GAME.skillArm.f, GAME.skillArm.id, q);
       GAME.skillArm = null; hideHint();
     }
@@ -1242,7 +1276,7 @@ function startBattle() {
   applyOp(); setup.op = GAME.op;
   newBattle(GAME.sc.seed + GAME.attempt, setup);
   setRule('fire', true); setRule('advance', false);
-  GAME.init = [sideAlive(0), sideAlive(1)];
+  GAME.init = sideInits();
   GAME.result = null; GAME.reportShown = false; GAME.replaying = false; GAME.replayEnd = null; GAME.skillArm = null; GAME.xp = null; GAME.log = []; GAME.simCtl = null; GAME.lineK = 0; GAME.dlineK = 0;
   gEl('battlehud').innerHTML = '';
   drawField(false);
@@ -1295,12 +1329,27 @@ function bhRepFrame() {
     <tr title="飛行中的飛彈（全場）"><th>${BH_IC.missile}</th><td colspan="2" class="c">${tx('h-mis')}</td></tr></table>`;
   if (el.innerHTML !== html) el.innerHTML = html;
 }
+// 三方以上：列出玩家以外的每一方（關係、兵力）；兩方時不顯示
+const REL_TXT = ['敵對', '中立', '同盟'];
+function bhRelDraw() {
+  const el = gEl('bh-rel'); if (!el) return;
+  el.hidden = SIDES <= 2; if (SIDES <= 2) return;
+  const me = GAME.playerSide, fv = fowView();
+  let h = '';
+  for (let s = 0; s < SIDES; s++) {
+    if (s === me || !GAME.init[s]) continue;
+    const r = REL[me][s], n = fv ? fowEstAlive(s, me) : sideAlive(s), pc = Math.round(n / Math.max(1, GAME.init[s]) * 100);
+    h += `<span class="rl r${r}" title="${sideName(s)}：${REL_TXT[r]}${r === 1 ? '（不會自動開火；用攻擊指令點它＝宣戰，流彈也會打到它）' : ''}"><i style="background:${(FACTION[SIDE_FAC[s]] || FACTION[0]).ui}"></i>${escH(sideName(s))} <b>${REL_TXT[r]}</b> ${fv ? '≈' : ''}${pc}%</span>`;
+  }
+  if (el.innerHTML !== h) el.innerHTML = h;
+}
 // 戰鬥 HUD 與技能列：結構只建一次，之後只更新文字（避免重畫吃掉點擊）
 // 右上角：雙方兵力＋時間，指令都是圖示按鈕（滑鼠移上去看說明）
 function buildBattleHud() {
   gEl('battlehud').innerHTML = `<div class="side"><div class="lbl" id="bh-t0"></div><div class="bar s0"><i id="bh-b0"></i></div></div>
     <div class="timer"><span id="bh-tm"></span><div class="lbl" id="bh-tl"></div></div>
     <div class="side"><div class="lbl" style="text-align:right" id="bh-t1"></div><div class="bar s1"><i id="bh-b1"></i></div></div>
+    <div class="bh-rel" id="bh-rel" hidden></div>
     <span class="bh-sep"></span>
     <button class="g-btn sm ic" id="bh-pause"></button><button class="g-btn sm" id="bh-speed"></button><button class="g-btn sm ic" id="bh-tac">${BH_IC.tac}</button><button class="g-btn sm" id="bh-3d" title="切換 2D／3D 畫面（${keyText('render')}）"></button><button class="g-btn sm ic" id="bh-br">${BH_IC.bridge}</button>${uiOn('stats') ? `<button class="g-btn sm ic" id="bh-rep-b" title="戰況簡報：命中率、被擊沉方向、艦載機與飛彈">${BH_IC.report}</button>` : ''}<button class="g-btn sm ic" id="bh-help" title="操作說明（${keyText('help')}）">?</button><button class="g-btn sm ic" id="bh-set" title="設定（${keyText('settings')}）">⚙</button>${GAME.sc && GAME.sc.sim && !GAME.replaying && !GAME.watch ? '<button class="g-btn sm" id="bh-ctl" title="模擬室：接管另一方（該方 AI 暫停）"></button><button class="g-btn sm" id="bh-edit" title="模擬室：暫停並調整配置與設定">✎ 編輯</button>' : ''}<button class="g-btn sm" id="bh-quit"></button>`;
   if (gEl('bh-rep-b')) gEl('bh-rep-b').onclick = bhRepToggle;
@@ -1342,18 +1391,21 @@ function gameFrame(dt) {
   if (_hudAcc < 0.15) return;
   _hudAcc = 0;
   const t = U.uTime.value, tl = battleSetup.timeLimit;
-  const a0 = sideAlive(0), a1 = sideAlive(1), p = a0 / Math.max(1, GAME.init[0]), e = a1 / Math.max(1, GAME.init[1]);
+  const ps = SIDES > 2 ? GAME.playerSide : 0;   // 三方以上：左邊＝玩家這一方、右邊＝所有敵對方加總（兩方：左右固定是邊 0、邊 1）
+  const a0 = sideAlive(ps), a1 = foeAlive(ps), p = a0 / Math.max(1, GAME.init[ps]), e = a1 / Math.max(1, foeInit(ps));
   if (!gEl('bh-tm')) buildBattleHud();
-  const sim = GAME.sc && GAME.sc.sim, nm = (s) => (NET.on ? mpSideName(s) : sim ? simSideName(SIM.m, s) + (s === GAME.playerSide && !GAME.watch ? (GAME.pilot || GAME.captain ? '（我軍）' : '（指揮中）') : '') : s === GAME.playerSide ? '我軍' : '敵軍');
+  bhRelDraw();
+  const sim = GAME.sc && GAME.sc.sim, nm1 = (s) => (NET.on ? mpSideName(s) : sim ? simSideName(SIM.m, s) + (s === GAME.playerSide && !GAME.watch ? (GAME.pilot || GAME.captain ? '（我軍）' : '（指揮中）') : '') : s === GAME.playerSide ? '我軍' : '敵軍');
+  const nm = SIDES > 2 ? (s) => (s ? '敵對各方' : nm1(ps)) : nm1;
   if (GAME.watch) watchFrame();
   // 兵力只顯示百分比，艘數放在滑鼠提示裡
   const setT = (s, txt, tip) => { const el = gEl('bh-t' + s); el.textContent = txt; el.parentElement.title = tip; };
   setT(0, `${nm(0)} ${Math.round(p * 100)}%`, `${nm(0)}：剩 ${ships5(a0)} 艘`); gEl('bh-b0').style.width = p * 100 + '%';
-  const fogE = playerFogged() ? 1 - GAME.playerSide : -1;   // 雷達受干擾：敵方兵力不明（長條停在原處）
+  const fogE = playerFogged() ? (SIDES > 2 ? 1 : 1 - GAME.playerSide) : -1;   // 雷達受干擾：敵方兵力不明（長條停在原處）
   if (fogE === 0) setT(0, `${nm(0)} ？？？`, '雷達受干擾：兵力不明');
   if (fogE === 1) setT(1, `${nm(1)} ？？？`, '雷達受干擾：兵力不明'); else { setT(1, `${nm(1)} ${Math.round(e * 100)}%`, `${nm(1)}：剩 ${ships5(a1)} 艘`); gEl('bh-b1').style.width = e * 100 + '%'; }
   if (fowView()) {   // 戰爭迷霧：對方兵力只能估計（看得到的照實、最後已知照當時、沒看過的照開戰時）
-    const os = 1 - GAME.playerSide, est = fowEstAlive(os), r = est / Math.max(1, GAME.init[os]);
+    const os = SIDES > 2 ? 1 : 1 - GAME.playerSide, est = SIDES > 2 ? sumA(foeSides(GAME.playerSide).map((s) => fowEstAlive(s))) : fowEstAlive(os), r = est / Math.max(1, SIDES > 2 ? foeInit(GAME.playerSide) : GAME.init[os]);
     setT(os, `${nm(os)} ≈${Math.round(r * 100)}%`, `${nm(os)}：估計約 ${ships5(est)} 艘${jammed(GAME.playerSide) ? '（通訊受干擾）' : ''}`); gEl('bh-b' + os).style.width = r * 100 + '%';
   }
   const unt = battleSetup.untimed;   // 沒有時限的主線關卡：顯示經過時間與目標時間
@@ -1368,7 +1420,7 @@ function gameFrame(dt) {
   gEl('bh-speed').textContent = NET.on ? `×${NET.speed}${NET.lag ? ' …' : ''}` : cmdSlowOn ? `×${effSpeed()}` : '×' + SPEEDS[speedIdx]; gEl('bh-speed').classList.toggle('slow', cmdSlowOn);
   gEl('bh-speed').title = NET.on ? (NET.lag ? '等待連線…' : '遊戲速度（房主決定）') : cmdSlowOn ? '下令中：自動放慢' : `遊戲速度（${keyText('speed_up')}／${keyText('speed_down')}）`;
   if (!gEl('bh-quit').dataset.sure) gEl('bh-quit').textContent = GAME.replaying ? '結束回放' : NET.on ? (NET.spec ? '離開觀戰' : '投降') : GAME.watch ? '結束觀摩' : GAME.pilot ? '結束出擊' : GAME.captain ? '結束任務' : sim ? '結束模擬' : GAME.sc && GAME.sc.tut ? '結束教學' : '撤退';
-  if (gEl('bh-ctl')) gEl('bh-ctl').textContent = `切換 → ${simSideName(SIM.m, 1 - GAME.playerSide)}`;
+  if (gEl('bh-ctl')) gEl('bh-ctl').textContent = `切換 → ${simSideName(SIM.m, simNextSide())}`;
   gEl('bh-3d').textContent = mode3D ? '2D' : '3D';
   gEl('bh-br').title = `${BR.on ? '離開艦橋' : '艦橋視角'}（${keyText('bridge')}）`; gEl('bh-br').classList.toggle('on', BR.on);
   gEl('bh-tac').title = `${BR.on ? (bridgeConsoleK() > 0.5 ? '抬頭' : '戰術台') : '戰術面板'}（${keyText('tactical')}）`;
@@ -1386,7 +1438,7 @@ function gameFrame(dt) {
 
 // ───── 戰後報告 ─────
 function battleStats() {
-  const init = [0, 1].map(() => new Array(NT).fill(0)), left = [0, 1].map(() => new Array(NT).fill(0));
+  const init = Array.from({ length: SIDE_N }, () => new Array(NT).fill(0)), left = Array.from({ length: SIDE_N }, () => new Array(NT).fill(0));
   for (const f of fleets) {
     if (f.reserve) continue;   // 沒出場的增援不算
     for (const q of f.sqs) for (const i of q.list) { init[f.side][ships.type[i]]++; if (ships.alive[i]) left[f.side][ships.type[i]]++; }
@@ -1476,7 +1528,7 @@ function startReplay(rec) {
   else if (rec && ref && ref.ver !== (window.__BUILD || '')) toast(`這筆紀錄來自版本 ${ref.ver}（目前 ${window.__BUILD || '-'}）：結束時會比對結果是否一致`, 'hint');
   if (rec && rec.replay) replayBattle(rec.replay.log, rec.replay.rules, rec.replay.seed, rec.replay.setup);
   else replayBattle(cmdLog.slice(), battleRules, battleSeed, battleSetup);
-  GAME.init = [sideAlive(0), sideAlive(1)];
+  GAME.init = sideInits();
   drawField(false);
   setPhase('replay');
   paused = false; updateTimeUI();

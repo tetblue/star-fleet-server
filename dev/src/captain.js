@@ -792,7 +792,7 @@ function capSkill(s, t) {
   if (s.skillCd > 0) { if (ctl) capFeed(`${K.name}冷卻中（${Math.ceil(s.skillCd)} 秒）`, 'hint'); return; }
   s.skillCd = K.cd;
   if (K.key === 'burst') { s.burstT = t + K.dur; s.boostE = 1; if (ctl) capFeed(`${K.name}！${K.dur} 秒內速度、轉向提升`, 'ok'); }
-  if (K.key === 'shield') { s.shieldT = t + K.dur; ships.sh[s.i] = ships.shMax[s.i]; ships.shT[s.i] = -99; spawnFx(s.x, s.y, s.z, 2 + fxFac(CAP.side) * 8, s.L * 0.8, 22); if (ctl) capFeed(`${K.name}！護盾充滿，${K.dur} 秒內傷害減半`, 'ok'); }
+  if (K.key === 'shield') { s.shieldT = t + K.dur; ships.sh[s.i] = ships.shMax[s.i]; ships.shT[s.i] = -99; spawnFx(s.x, s.y, s.z, fxShield(CAP.side), s.L * 0.8, 22); if (ctl) capFeed(`${K.name}！護盾充滿，${K.dur} 秒內傷害減半`, 'ok'); }
 }
 // 支援艦的維修光束：按住 Q，修準心方向附近的友艦（沒有就修自己，比較慢）
 function capRepair(s, dt, t, on) {
@@ -822,7 +822,7 @@ function capHeal(s, o, amt, t) {
   const i = o.i, a = Math.min(amt, maxHp(i) - ships.hp[i]); if (a > 0) ships.hp[i] += a;
   const b = Math.min(amt * 0.6, ships.shMax[i] - ships.sh[i]); if (b > 0) ships.sh[i] += b;
   if (o !== s && simTick % 4 === 0) spawnBeam(s.x, s.y + s.L * 0.1, s.z, o.x, o.y, o.z, t, 0.08, CAP.side, 0.7, 1, SIDE_FAC[CAP.side]);
-  if (simTick % 12 === 0) spawnFx(o.x, o.y, o.z, 2 + fxFac(CAP.side) * 8, o.L * 0.4, 30);
+  if (simTick % 12 === 0) spawnFx(o.x, o.y, o.z, fxShield(CAP.side), o.L * 0.4, 30);
 }
 // 支援艦的護航機（攔截機：在支援艦附近巡邏，攔飛彈、打戰機）；火控「禁止開火」＝全部收回
 function capEscorts(t) {

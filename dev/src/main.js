@@ -23,9 +23,64 @@ function capShip(i) { return CAP.on && CAP.byI && i < CAP.byI.length ? CAP.byI[i
 // 7 帝國攝政派＝帝國內戰的另一邊：船型、特效、種族特性都借帝國（FAC_BASE），只有顏色（光束、標籤、船體換色）是自己的
 // 單一艦隊也可以有自己的外觀（fleet.fac，例如友軍傭兵、傭兵支援）；畫船、光束、飛彈、艦載機都用 sqFac／shipFac
 let SIDE_FAC = [0, 1];
+// ───── 多方勢力：一場最多 SIDE_N 方（邊 0..SIDES−1）─────
+// REL[a][b]＝a 與 b 的關係（對稱）：0 敵對、1 中立、2 同盟；自己＝2。沒設定＝傳統兩方（全部互相敵對）
+//   自動開火、AI 只找「敵對」；對中立下攻擊指令＝雙方轉為敵對（relSet，在命令裡執行，回放一致）
+//   流彈（射線）、範圍攻擊打得到敵對與中立；誤傷中立累積超過門檻也會翻臉（battleSetup.relRule.act＝'fail' 改成判失敗）
+const SIDE_N = 8;
+const sideArr = (v) => Array.from({ length: SIDE_N }, () => (typeof v === 'function' ? v() : v));
+let SIDES = 2, REL = relTable(null), relVer = 0;
+const relDmg = sideArr(() => new Array(SIDE_N).fill(0)), relHP0 = new Array(SIDE_N).fill(0);   // relDmg[a][b]＝a 誤傷中立的 b 累積的傷害；relHP0＝b 的總耐久（第一次被誤傷時算）
+const REL_RULE = { thr: 0.05, warn: 0.5 };   // 誤傷超過對方總耐久的 thr＝翻臉；到 warn 倍先警告
+function relTable(spec) {
+  const R = Array.from({ length: SIDE_N }, (_, a) => Array.from({ length: SIDE_N }, (_, b) => (a === b ? 2 : 0)));
+  if (spec) for (const [a, b, r] of spec) if (a !== b) R[a][b] = R[b][a] = r;
+  return R;
+}
+const hostile = (a, b) => a !== b && REL[a][b] === 0;
+const strayOK = (a, b) => a !== b && REL[a][b] !== 2;   // 流彈、範圍傷害打得到（敵對＋中立）
+const friendly = (a, b) => a === b || REL[a][b] === 2;
+function foeSides(s) { const o = []; for (let k = 0; k < SIDES; k++) if (hostile(s, k)) o.push(k); return o; }
+function firstFoe(s) { for (let k = 0; k < SIDES; k++) if (hostile(s, k)) return k; return s ? 0 : 1; }
+function sideMask(s, stray) { let m = 0; for (let k = 0; k < SIDES; k++) if (stray ? strayOK(s, k) : hostile(s, k)) m |= 1 << k; return m; }
+function relSet(a, b, r, why) {
+  if (a === b || REL[a][b] === r) return;
+  REL[a][b] = REL[b][a] = r; relVer++;
+  if (r !== 0) for (const g of groups) if (g.target && !hostile(g.side, g.target.side)) g.target = null;
+  relLabels();
+  if (typeof relNote === 'function') relNote(a, b, why || (r === 0 ? 'war' : 'peace'));
+}
+// 標籤：對玩家中立的分艦隊加虛線框（「・中立」）
+function relLabels() { const me = typeof GAME !== 'undefined' ? GAME.playerSide || 0 : 0; for (const q of squadrons) if (q.label) q.label.classList.toggle('neu', !q.bg && q.side !== me && REL[me][q.side] === 1); }
+function sideHP(s) { let n = 0; for (let i = 0; i < shipCount; i++) if (ships.side[i] === s) n += SHIP_TYPES[ships.type[i]].hp; return n; }
+// a 的攻擊打中了中立的 b：累積；超過門檻＝翻臉（或交給關卡判失敗）
+function relHit(a, b, eff) {
+  if (a >= SIDES || b >= SIDES || REL[a][b] !== 1) return;
+  if (!relHP0[b]) relHP0[b] = Math.max(1, sideHP(b));
+  const RR = (battleSetup && battleSetup.relRule) || {}, thr = (RR.thr != null ? RR.thr : REL_RULE.thr) * relHP0[b], d0 = relDmg[a][b];
+  relDmg[a][b] = d0 + eff;
+  if (d0 < thr * REL_RULE.warn && relDmg[a][b] >= thr * REL_RULE.warn && typeof relNote === 'function') relNote(a, b, 'warn');
+  if (d0 < thr && relDmg[a][b] >= thr) { if (RR.act === 'fail') { if (typeof relNote === 'function') relNote(a, b, 'fail'); } else relSet(a, b, 0, 'stray'); }
+}
+function relOver(a, b) { const RR = (battleSetup && battleSetup.relRule) || {}; return relHP0[b] > 0 && relDmg[a][b] >= (RR.thr != null ? RR.thr : REL_RULE.thr) * relHP0[b]; }
+// 把好幾方的格子索引合成一張（射線、空中目標用）；只有一方＝直接用那一方的。tag＝格子陣列帶 g（第幾輪），舊的跳過
+const EMPTY_MAP = new Map();
+function mapsOf(src, mask, holder, gen, tag) {
+  if (!mask) return EMPTY_MAP;
+  if (!(mask & (mask - 1))) return src[31 - Math.clz32(mask)];
+  const C = holder.mc || (holder.mc = new Map());
+  const e = C.get(mask); if (e && e.gen === gen) return e.m;
+  const m = new Map();
+  for (let s = 0; s < SIDE_N; s++) if ((mask >> s) & 1) for (const [k, a] of src[s]) {
+    if (tag && a.g !== gen) continue;
+    const b = m.get(k); if (b) { for (const x of a) b.push(x); } else { const c = a.slice(); if (tag) c.g = gen; m.set(k, c); }
+  }
+  C.set(mask, { gen, m });
+  return m;
+}
 // 作戰介面跟著玩家的陣營換主題（顏色、紋飾）
 function applyPlayerTheme() {   // 傭兵等不是玩家陣營：對手是這些陣營時，敵方顏色（--ec）改成那個陣營的顏色
-  const sd = typeof cmdSide === 'number' ? cmdSide : 0, f = SIDE_FAC[sd] || 0, ef = SIDE_FAC[1 - sd];
+  const sd = typeof cmdSide === 'number' ? cmdSide : 0, f = SIDE_FAC[sd] || 0, ef = SIDE_FAC[firstFoe(sd)];
   document.body.classList.toggle('pf-0', f !== 1); document.body.classList.toggle('pf-1', f === 1);
   if (ef >= 2 && FACTION[ef]) document.body.style.setProperty('--ec', FACTION[ef].ui); else document.body.style.removeProperty('--ec');
   if (f >= 2 && FACTION[f]) document.body.style.setProperty('--pc', FACTION[f].ui); else document.body.style.removeProperty('--pc');   // 番外篇：玩家是傭兵
@@ -35,7 +90,9 @@ const FAC_BASE = [0, 1, 2, 3, 4, 5, 6, 0];   // 船型、貼圖、種族特性�
 const baseKey = (k) => (k && k[0] === 'v' ? 'e' + k.slice(1) : k);   // 模型、掛點鍵 → 真正有檔案的鍵
 const sqFac = (sq) => (sq.fleet && sq.fleet.fac != null ? sq.fleet.fac : SIDE_FAC[sq.side]);
 const shipFac = (i) => sqFac(squadrons[ships.sq[i]]);
-const fxFac = (side) => (SIDE_FAC[side] === 1 ? 1 : 0);   // 爆炸、護盾特效只有帝國、聯盟兩套：傭兵用帝國的
+const fxFac = (side) => (SIDE_FAC[side] === 1 ? 1 : 0);
+const SHF = 100;   // spawnFx 的列：0..SIDE_N−1＝那一方的爆炸；SHF＋邊×8＋方向＝那一方的護盾受擊
+const fxShield = (side, dir = 0) => SHF + side * 8 + dir;   // 爆炸、護盾特效只有帝國、聯盟兩套：傭兵用帝國的
 function applySideNames() {
   document.querySelectorAll('[data-fn]').forEach((el) => { const f = SIDE_FAC[+el.dataset.fn]; el.textContent = el.dataset.short ? FACTION[f].short || FACTION[f].name[0] : FACTION[f].name; });
   document.querySelectorAll('[data-fs]').forEach((el) => { const f = SIDE_FAC[+el.dataset.fs]; FAC_KEY.forEach((k, i) => el.classList.toggle(k, f === i)); });
@@ -436,7 +493,7 @@ scene.add(fxMesh);
 let fxHead = 0, fxDirtyFrom = -1, fxDirtyCount = 0;
 
 function spawnFx(x, y, z, row, scale, fps = 20) {
-  if (row < 2) row = fxFac(row); else if (row < 18) row = 2 + fxFac((row - 2) >> 3) * 8 + ((row - 2) & 7);   // 邊 → 陣營（爆炸、護盾的顏色）
+  if (row >= SHF) { const k = row - SHF; row = 2 + fxFac(k >> 3) * 8 + (k & 7); } else row = fxFac(row);   // 邊 → 陣營（爆炸、護盾的顏色）
   const i = fxHead; fxHead = (fxHead + 1) % FX_MAX;
   fxP[i * 3] = x; fxP[i * 3 + 1] = y; fxP[i * 3 + 2] = z;
   fxF[i * 4] = U.uTime.value; fxF[i * 4 + 1] = row; fxF[i * 4 + 2] = scale; fxF[i * 4 + 3] = fps;
@@ -793,7 +850,7 @@ let groups = [];          // 部隊：一或多支分艦隊組成，有錨點、
 let squadrons = [];
 let ships = null;
 let shipCount = 0;
-let aliveBySide = [0, 0];
+let aliveBySide = new Array(SIDE_N).fill(0);
 const outlineGroup = new THREE.Group();
 scene.add(outlineGroup);
 const labelLayer = document.getElementById('labels');
@@ -848,7 +905,11 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
   outlineGroup.clear();
   labelLayer.innerHTML = '';
   squadrons = []; groups = []; fleets = [];
-  SIDE_FAC = (setup.factions || [0, 1]).slice(); applySideNames(); applyPlayerTheme();
+  SIDE_FAC = (setup.factions || [0, 1]).slice();
+  SIDES = Math.min(SIDE_N, Math.max(2, SIDE_FAC.length, ...setup.fleets.map((f) => (f.side || 0) + 1)));
+  for (let s = SIDE_FAC.length; s < SIDES; s++) { const f = setup.fleets.find((o) => o.side === s && o.fac != null); SIDE_FAC[s] = f ? f.fac : 1; }   // 沒寫陣營的那一方：用它第一支艦隊的外觀
+  REL = relTable(setup.rel); relVer++; for (const a of relDmg) a.fill(0); relHP0.fill(0);   // 勢力關係：setup.rel＝[[a, b, 關係], ...]
+  applySideNames(); applyPlayerTheme();
   const R = rand(12345);
 
   // 先決定每支分艦隊的艦數與落點
@@ -1043,6 +1104,7 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
     labelLayer.appendChild(el);
     sq.label = el; sq.labelNum = el.querySelector('span'); sq.labelState = el.querySelector('i');
   });
+  relLabels();
   recountAlive();
   pushSquadronUniforms();
   refreshFormationUI && refreshFormationUI();
@@ -1055,7 +1117,7 @@ function measureSquadron(sq) {
 }
 
 function recountAlive() {
-  aliveBySide = [0, 0];
+  aliveBySide = new Array(SIDE_N).fill(0);
   for (const sq of squadrons) if (!sq.bg) aliveBySide[sq.side] += sq.alive;
 }
 
@@ -1134,7 +1196,7 @@ function lerpNum(a, b, e) { return a + (b - a) * e; }
 
 // ───── 通訊干擾接口：受干擾的一方下令變陣後，要延遲才開始 ─────
 // 之後的技能或特殊場地只要呼叫 setJam(side, 秒數, 延遲秒數)
-const jam = [{ until: 0, delay: 0 }, { until: 0, delay: 0 }];
+const jam = sideArr(() => ({ until: 0, delay: 0 }));
 const orderQueue = [];
 function setJam(side, duration, delay) {
   if (!jammed(side)) jamSeen[side] = snapEnemy(side);   // 雷達失效：這一方看到的敵情停在干擾開始那一刻
@@ -1142,7 +1204,7 @@ function setJam(side, duration, delay) {
 }
 function jammed(side) { return jam[side].until > U.uTime.value; }
 // 被干擾時看到的敵軍分艦隊（位置、艘數、陣型都是干擾開始時的）；沒被干擾＝即時的
-const jamSeen = [null, null];
+const jamSeen = sideArr(null);
 function snapEnemy(side) {
   const m = new Map();
   for (const q of squadrons) if (q.side !== side) m.set(q, { x: q.x, y: q.y || 0, z: q.z, h: q.h, W: q.W, D: q.D, alive: q.alive, name: q.name, side: q.side, bg: q.bg, formation: q.group ? q.group.formation : null, to: q.group ? q.group.to : q.h, group: q.group, fleet: q.fleet, t: U.uTime.value, stale: true });
@@ -1163,12 +1225,13 @@ function playerFogged() { return typeof GAME !== 'undefined' && (GAME.phase === 
 //   自己的分艦隊偵測半徑內、視線沒被巨大小行星擋住；攻擊型艦載機周圍；掃描結果、開火暴露（f.fowRev 到期前）
 //   沒被干擾＝全軍共享（每支艦隊都知道全軍知道的）；被干擾＝各艦隊只知道自己偵測到的，掃描也沒有結果
 // 最後已知：f.fowLast（分艦隊 → 最後看到的快照）；看過去那個位置已經沒有人＝刪掉。全部在模擬裡算（回放一致）
-const FOW = { tick: -1, scanReady: [0, 0], pings: [[], []], scans: [], start: [null, null], obs: null, auto: [true, true], rlog: new Map() };   // rlog：偵察機（FT 索引）→ 被干擾時記下、還沒回報的情報
+const FOW = { tick: -1, scanReady: sideArr(0), pings: sideArr(() => []), scans: [], start: sideArr(null), obs: null, auto: sideArr(true), rlog: new Map() };   // rlog：偵察機（FT 索引）→ 被干擾時記下、還沒回報的情報
 function fowOn() { return !!opts.fow && !!battleSetup && !battleSetup.bg; }
 function fowOmni(side) { return !!(battleSetup && battleSetup.omni && battleSetup.omni[side]); }   // 關卡設定：這一方全知
 function sqIdx(q) { return squadrons[q.qi] === q ? q.qi : (q.qi = squadrons.indexOf(q)); }
 function fowReset() {
-  FOW.tick = -1; FOW.scanReady = [U.uTime.value + FOW_RULE.scanFirst, U.uTime.value + FOW_RULE.scanFirst];   // 開戰 scanFirst 秒後才能第一次掃描 FOW.pings = [[], []]; FOW.scans = []; FOW.start = [null, null]; FOW.obs = null; FOW.auto = [true, true]; FOW.rlog = new Map();
+  FOW.tick = -1; FOW.scanReady = sideArr(U.uTime.value + FOW_RULE.scanFirst);   // 開戰 scanFirst 秒後才能第一次掃描
+  FOW.pings = sideArr(() => []); FOW.scans = []; FOW.start = sideArr(null); FOW.obs = null; FOW.auto = sideArr(true); FOW.rlog = new Map();
   squadrons.forEach((q, i) => (q.qi = i));
   for (const f of fleets) { f.fowK = new Uint8Array(MAX_SQ); f.fowRev = new Float32Array(MAX_SQ); f.fowLast = new Map(); }
 }
@@ -1189,7 +1252,7 @@ function fowUpdate() {
   if (FOW.tick < 0) pushSquadronUniforms();   // 第一次：先算出分艦隊位置
   const t = U.uTime.value, nS = squadrons.length;
   FOW.tick = simTick;
-  if (!FOW.start[0]) for (let s = 0; s < 2; s++) { const al = squadrons.filter((q) => q.side === s && fowLive(q)); FOW.start[s] = al.length ? centerOf(al) : { x: 0, y: 0, z: 0 }; }   // 開戰時的位置（部署時看得到）
+  if (!FOW.start[0]) for (let s = 0; s < SIDES; s++) { const al = squadrons.filter((q) => q.side === s && fowLive(q)); FOW.start[s] = al.length ? centerOf(al) : { x: 0, y: 0, z: 0 }; }   // 開戰時的位置（部署時看得到）
   for (const f of fleets) f.fowK.fill(0);
   // 自己的分艦隊偵測到的（3D 距離，量到對方外框）
   for (const q of squadrons) {
@@ -1207,7 +1270,7 @@ function fowUpdate() {
   //   偵察機飛進掃描區域（離目標點 < 半徑 FT.heal）＝區域掃描：以目標點為中心的球體內都看得到，離開後再保留 scanShow 秒
   //   所以就算之後被打下來，進到區域那一刻起掃到的都已經回報；飛行路徑上（去程、回程）自己周圍 recon.eye 看到的也一起回報
   //   被干擾：回報不了 → 記在偵察機上（FOW.rlog），干擾結束或飛回母艦時才回報（fowReconReport）；被打下來＝情報跟著沒了
-  for (let s = 0; s < 2; s++) for (const j of aliveF[s]) {
+  for (let s = 0; s < SIDES; s++) for (const j of aliveF[s]) {
     if (FT.kind[j] === 1 || FT.state[j] !== 2) continue;
     const c = FT.carrier[j]; if (c < 0 || c >= shipCount) continue;
     const f = squadrons[ships.sq[c]].fleet; if (!f) continue;
@@ -1230,7 +1293,7 @@ function fowUpdate() {
   // 掃描結果、開火暴露
   for (const f of fleets) for (let i = 0; i < nS; i++) if (f.fowRev[i] > t && fowLive(squadrons[i])) f.fowK[i] = 1;
   // 共享：沒被干擾＝全軍共用；關卡設定全知的一方＝全部知道
-  for (let s = 0; s < 2; s++) {
+  for (let s = 0; s < SIDES; s++) {
     const fs = fleets.filter((f) => f.side === s);
     if (fowOmni(s)) { for (const f of fs) for (let i = 0; i < nS; i++) f.fowK[i] = squadrons[i].side !== s && fowLive(squadrons[i]) ? 1 : 0; continue; }
     if (jammed(s)) continue;
@@ -1248,7 +1311,7 @@ function fowUpdate() {
       for (const q of eyes) if (Math.hypot(o.x - q.x, o.y - (q.y || 0), o.z - q.z) < fowSensor(q) * 0.8 && !(SOLID && rockBlock(q.x, q.y || 0, q.z, o.x, o.y, o.z) >= 0)) { f.fowLast.delete(e); break; }
     }
   }
-  for (let s = 0; s < 2; s++) FOW.pings[s] = FOW.pings[s].filter((p) => t - p.t < FOW_RULE.ping);
+  for (let s = 0; s < SIDES; s++) FOW.pings[s] = FOW.pings[s].filter((p) => t - p.t < FOW_RULE.ping);
   FOW.scans = FOW.scans.filter((p) => t - p.t < 4);
 }
 // f 這支艦隊知不知道敵方分艦隊 q 的位置（沒有迷霧＝一律知道）；沒有艦隊（艦載機的母艦沉了等）＝這一方有人知道就算
@@ -1284,8 +1347,8 @@ function pSeen(q, maxAge = FOW_RULE.last) {
 }
 function fowHidden(q) { return fowView() && !q.bg && q.side !== GAME.playerSide && !fowKnows(fowObs(GAME.playerSide), q); }   // 3D／戰術圖：不畫這支敵軍
 // 估計的敵方兵力（看得到的照實、最後已知照快照、沒看過的照開戰時）
-function fowEstAlive(side) {
-  const f = fowObs(1 - side); let n = 0;
+function fowEstAlive(side, viewer = side === GAME.playerSide ? firstFoe(side) : GAME.playerSide) {
+  const f = fowObs(viewer); let n = 0;
   for (const g of fleets) if (g.side === side && !g.reserve) for (const q of g.sqs) { if (q.bg) continue; const v = f ? fowSeen(f, q) : q; n += v ? v.alive : q.list.length - (q.nDorm || 0); }   // 看不到：照編制算（預留的空位不算）
   return n;
 }
@@ -1314,10 +1377,10 @@ function fowScanLeft(side) { return Math.max(0, FOW.scanReady[side] - U.uTime.va
 // 自動掃描：每一方還有敵方艦隊看不到、冷卻好了，就從第一支還在的艦隊自動發出脈衝掃描（FOW.auto＝開關，用命令 'autoscan' 改）
 function fowAutoScan() {
   if (!fowOn()) return;
-  for (let s = 0; s < 2; s++) {
+  for (let s = 0; s < SIDES; s++) {
     if (!FOW.auto[s] || fowScanLeft(s) > 0) continue;
     const ob = fleets.filter((o) => o.side === s && !o.reserve && !o.supply && o.sqs.some(fowLive)); if (!ob.length) continue;
-    const en = fleets.filter((o) => o.side !== s && !o.reserve && o.sqs.some(fowLive));
+    const en = fleets.filter((o) => hostile(s, o.side) && !o.reserve && o.sqs.some(fowLive));
     if (!en.length || en.every((o) => o.sqs.some((q) => fowLive(q) && ob.some((f) => fowKnows(f, q))))) continue;   // 全都看得到
     fowScan(ob[0], true);
   }
@@ -1359,7 +1422,7 @@ function fowExpose(fromSq, target) {
 function sqArea(sq) { const a = sq.group && sq.group.area; return a && a.until > U.uTime.value ? a : null; }
 function areaShip(side, A) {
   const r = FOW_RULE.area.r, c = [];
-  for (const e of squadrons) if (e.side !== side && fowLive(e) && Math.hypot(e.x - A.x, (e.y || 0) - A.y, e.z - A.z) < r + Math.max(e.W, e.D) / 2) c.push(e);
+  for (const e of squadrons) if (strayOK(side, e.side) && fowLive(e) && Math.hypot(e.x - A.x, (e.y || 0) - A.y, e.z - A.z) < r + Math.max(e.W, e.D) / 2) c.push(e);   // 範圍攻擊：中立的也會被打到
   if (!c.length) return -1;
   for (let k = 0; k < 8; k++) {
     const e = c[(rnd() * c.length) | 0], i = e.list[(rnd() * e.list.length) | 0];
@@ -1903,7 +1966,7 @@ function updateGroups(dt) {
     } else if (opts.advance) {
       const step = groupSpeed(g, t) * dt;
       let best = 1e9;
-      for (const o of groups) if (o.side !== g.side) best = Math.min(best, Math.hypot(o.ax - g.ax, o.az - g.az));
+      for (const o of groups) if (hostile(g.side, o.side)) best = Math.min(best, Math.hypot(o.ax - g.ax, o.az - g.az));
       if (best > 280) { const H = groupHeading(g, t); g.ax += Math.sin(H) * step * 0.7; g.az += Math.cos(H) * step * 0.7; }
     }
     if (g.target && g.target.alive <= 0) g.target = null;
@@ -2063,7 +2126,7 @@ function rockBlock(ax, ay, az, bx, by, bz) {
 const pending = []; // 命中事件
 function pickTarget(sideAttacker, fromSq) {
   // 打對面同位置附近的分艦隊（對位），有一定機率打鄰近的；戰爭迷霧：只打知道位置的
-  const enemies = squadrons.filter((s) => s.side !== sideAttacker && !s.bg && s.alive > 0 && fowKnowsSq(fromSq, s));
+  const enemies = squadrons.filter((s) => hostile(sideAttacker, s.side) && !s.bg && s.alive > 0 && fowKnowsSq(fromSq, s));
   if (!enemies.length) return -1;
   let best = null, bd = 1e9;
   for (const e of enemies) {
@@ -2090,7 +2153,7 @@ function focusTarget(sq) {
 // ───── 受擊方位：攻擊來自目標船頭前方 ±60°＝正面，船尾 ±60°＝背後，其餘＝側面 ─────
 // 以目標艦「當下船頭朝向」判斷，所以迴轉、轉向途中被打，容易吃到側面與背後傷害
 const ASPECT_NAME = ['正面', '側面', '背後'];
-const dmgStats = [[0, 0, 0], [0, 0, 0]];   // 各陣營被擊沉的方位統計
+const dmgStats = sideArr(() => [0, 0, 0]);   // 各陣營被擊沉的方位統計
 function shipHeadingNow(i) {
   if (ships.snOn[i]) return ships.snH[i];
   return visHeading(squadrons[ships.sq[i]], U.uTime.value, ships.lag[i]);
@@ -2154,9 +2217,9 @@ function inTerrain(type, x, z, y = 0) { for (const t of terrainList()) if (t.typ
 
 // ───── 光束：距離減傷、射角、命中率 ─────
 // 最大射程時的傷害倍率：BEAM_FALLOFF_MIN（data.js）
-const beamPow = [0, 0], beamShots = [0, 0], beamLastT = [-99, -99];   // 最近一段時間的平均威力（給 HUD）
-const gunStats = [0, 1].map(() => ({ main: [0, 0], sec: [0, 0], aa: [0, 0] }));   // 各類砲 [開火, 命中]
-const hitAvg = [0, 0];   // 最近的平均命中率（HUD）
+const beamPow = sideArr(0), beamShots = sideArr(0), beamLastT = sideArr(-99);   // 最近一段時間的平均威力（給 HUD）
+const gunStats = sideArr(() => ({ main: [0, 0], sec: [0, 0], aa: [0, 0] }));   // 各類砲 [開火, 命中]
+const hitAvg = sideArr(0);   // 最近的平均命中率（HUD）
 function beamFalloff(d, bm) {
   const k = opts.rangeMul || 1;
   const n = (bm ? bm.near : opts.beamNear) * k, f = Math.max(n + 1, (bm ? bm.far : opts.beamFar) * k);
@@ -2195,7 +2258,7 @@ function hitChance(gk, gun, dist, target, attackerSq, ax, ay, az, bx, by, bz) {
 }
 const GUN_FX = { main: { inten: 1.0, len: 0.45, fxP: 0.4, spd: 560 }, sec: { inten: 0.75, len: 0.3, fxP: 0.25, spd: 620 }, aa: { inten: 0.45, len: 0.16, fxP: 0.08, spd: 760 } };
 // ───── 空中目標（飛彈、艦載機）：每個 tick 建一次格子索引，防空砲／副砲找最近的 ─────
-const AIR = { tick: -1, cell: 200, map: [new Map(), new Map()] };   // map[s]＝陣營 s 的飛彈與艦載機
+const AIR = { tick: -1, cell: 200, map: sideArr(() => new Map()) };   // map[s]＝陣營 s 的飛彈與艦載機
 function airKey(x, z) { return Math.floor(x / AIR.cell) * 100003 + Math.floor(z / AIR.cell); }
 function airIndex() {
   if (AIR.tick === simTick) return;
@@ -2218,10 +2281,11 @@ function airIndex() {
 }
 // 還能不能再對它開火：每顆飛彈最多被打 missileShots 次；每架艦載機每 fighterGap 秒最多被一門砲瞄準
 function airFree(o, t) { return o.a === 0 ? misShot[o.i] < AIR_RULE.missileShots : FT.engT[o.i] <= t; }
-// 射程內、射角內最近的敵方空中目標
-function nearestAir(enemySide, i, gun, R, x, y, z) {
-  airIndex();
-  const m = AIR.map[enemySide]; if (!m.size) return null;
+// 好幾方的空中目標合成一張：敵對（防空、攔截）或敵對＋中立（擋光束）
+function airOf(s, stray) { airIndex(); return mapsOf(AIR.map, sideMask(s, stray), AIR, AIR.tick, false); }
+// 射程內、射角內最近的敵方空中目標（side＝開火的那一方）
+function nearestAir(side, i, gun, R, x, y, z) {
+  const m = airOf(side); if (!m.size) return null;
   const C = AIR.cell, r = Math.ceil(R / C), cx = Math.floor(x / C), cz = Math.floor(z / C), t = U.uTime.value;
   let best = null, bd = R;
   for (let ax = cx - r; ax <= cx + r; ax++) for (let az = cz - r; az <= cz + r; az++) {
@@ -2232,9 +2296,8 @@ function nearestAir(enemySide, i, gun, R, x, y, z) {
   return best;
 }
 // 防空砲的優先順序：射程內先找飛彈，沒有才找艦載機
-function nearestAirPri(enemySide, i, gun, R) {
-  airIndex();
-  const m = AIR.map[enemySide]; if (!m.size) return null;
+function nearestAirPri(side, i, gun, R) {
+  const m = airOf(side); if (!m.size) return null;
   const C = AIR.cell, r = Math.ceil(R / C), cx = Math.floor(_a.x / C), cz = Math.floor(_a.z / C), t = U.uTime.value;
   let bm = null, dm = R, bf = null, df = R;
   for (let ax = cx - r; ax <= cx + r; ax++) for (let az = cz - r; az <= cz + r; az++) {
@@ -2254,8 +2317,8 @@ function aaMul(sq) {
   const FM = FORMATIONS[(sq.group && sq.group.formation) || 'line'];
   return (AIR_RULE.formBase + FM.aa) * (sqMorphing(sq) ? 0.6 : 1) * (1 + fleetMods(sq.fleet).aa);
 }
-const airStats = [0, 1].map(() => ({ shots: 0, hits: 0 }));
-const ftrStats = [[0, 0], [0, 0]];   // 艦載機開火／命中
+const airStats = sideArr(() => ({ shots: 0, hits: 0 }));
+const ftrStats = sideArr(() => [0, 0]);   // 艦載機開火／命中
 function fireAir(attacker, gk, gun, sq, o, delay) {
   const k = opts.rangeMul || 1, n = gun.near * k, f = Math.max(n + 1, gun.far * k), dist = o.d;
   const rf = dist <= n ? 1 : 1 - (1 - HIT_RULE.farMul) * Math.min(1, (dist - n) / (f - n));
@@ -2330,7 +2393,7 @@ function ffHit(sq, x0, y0, z0, x1, y1, z1) {
 const RAY_RULE = { r: 0.55, cell: 16, every: 3, air: [1.2, 1.6] };
 const _r = new THREE.Vector3();
 let rayT = 0, rayB = 0;   // rayCast 打到的距離；rayB＝擦邊程度（船中心到射線的距離 ÷ 受擊半徑，0＝正中、1＝擦過邊緣）
-const RAYG = { gen: 0, tick: -1, pos: new Float32Array(0), map: [new Map(), new Map()] };   // pos：各艦 x, y, z, 受擊半徑；map[s]＝陣營 s 的格子（陣列帶 g＝哪一輪）
+const RAYG = { gen: 0, tick: -1, pos: new Float32Array(0), map: sideArr(() => new Map()) };   // pos：各艦 x, y, z, 受擊半徑；map[s]＝陣營 s 的格子（陣列帶 g＝哪一輪）
 function rayGrid() {
   if (RAYG.tick >= 0 && simTick >= RAYG.tick && simTick - RAYG.tick < RAY_RULE.every) return;
   RAYG.tick = simTick; const gen = ++RAYG.gen;
@@ -2355,10 +2418,10 @@ function rayGrid() {
     }
   }
 }
-// 射線（起點 x0、單位方向 u）在 tmax 內第一艘碰到的 side 方艦艇；skip 不算。回傳艦艇編號（沒有＝-1），距離放在 rayT
+// 射線（起點 x0、單位方向 u）在 tmax 內第一艘碰到、side 這一方打得到（敵對＋中立）的艦艇；skip 不算。回傳艦艇編號（沒有＝-1），距離放在 rayT
 function rayCast(side, x0, y0, z0, ux, uy, uz, tmax, skip) {
   rayGrid();
-  const m = RAYG.map[side], P = RAYG.pos, C = RAY_RULE.cell;
+  const m = mapsOf(RAYG.map, sideMask(side, true), RAYG, RAYG.gen, true), P = RAYG.pos, C = RAY_RULE.cell;
   let best = tmax, bi = -1, bb = 0;
   // 依序走過射線經過的格子（水平投影）；t 是沿 3D 射線的距離
   let cx = Math.floor(x0 / C), cz = Math.floor(z0 / C);
@@ -2385,8 +2448,7 @@ function rayCast(side, x0, y0, z0, ux, uy, uz, tmax, skip) {
 //   受擊半徑 air＝[飛彈, 艦載機]（世界單位）。回傳被打中的空中目標（沒有＝null），距離放在 rayT
 const _rayAir = [];
 function rayAir(side, x0, y0, z0, ux, uy, uz, tmax) {
-  airIndex();
-  const m = AIR.map[side]; if (!m.size) return null;
+  const m = airOf(side, true); if (!m.size) return null;
   const C = AIR.cell, A = _rayAir; A.length = 0;
   let cx = Math.floor(x0 / C), cz = Math.floor(z0 / C);
   const sx = ux > 0 ? 1 : -1, sz = uz > 0 ? 1 : -1;
@@ -2426,7 +2488,7 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
   shipWorldCPU(attacker, _a);
   const k = opts.rangeMul || 1, far = gun.far * k;
   if (gk !== 'main' && !volleyShot) {
-    const o = gk === 'aa' ? nearestAirPri(1 - sq.side, attacker, gun, far) : nearestAir(1 - sq.side, attacker, gun, gun.near * k, _a.x, _a.y, _a.z);
+    const o = gk === 'aa' ? nearestAirPri(sq.side, attacker, gun, far) : nearestAir(sq.side, attacker, gun, gun.near * k, _a.x, _a.y, _a.z);
     if (o) return fireAir(attacker, gk, gun, sq, o, delay);
   }
   // 區域攻擊（主／副砲）：那一點在射程、射角內就打那裡；範圍內有敵艦＝打它（看不到＝盲射），沒有＝光束打進空處
@@ -2459,7 +2521,7 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
     if (d <= far && inArc(attacker, gun, dx, dy, dz, d)) { target = c; dist = d; break; }
   }
   if (target < 0) {
-    if (gk === 'sec' && !volleyShot) { const o = nearestAir(1 - sq.side, attacker, gun, far, _a.x, _a.y, _a.z); if (o) { shipWorldCPU(attacker, _a); return fireAir(attacker, gk, gun, sq, o, delay); } }
+    if (gk === 'sec' && !volleyShot) { const o = nearestAir(sq.side, attacker, gun, far, _a.x, _a.y, _a.z); if (o) { shipWorldCPU(attacker, _a); return fireAir(attacker, gk, gun, sq, o, delay); } }
     if (GRD && GRD.live && gk !== 'aa') { shipWorldCPU(attacker, _a); const tu = turretFor(sq.side, attacker, gun, far); if (tu) return fireTurret(attacker, gk, gun, sq, tu, delay, dmgMul); }   // 近地：沒有船可打就打砲台
     return false;
   }
@@ -2483,13 +2545,13 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
     }
     const L = Math.max(1, _a.distanceTo(_b)), ux = (_b.x - _a.x) / L, uy = (_b.y - _a.y) / L, uz = (_b.z - _a.z) / L;
     // 準：只看目標前面有沒有別的敵艦擋住；偏：射程內沿路都算（目標本身已經閃過）
-    let i = rayCast(1 - sq.side, _a.x, _a.y, _a.z, ux, uy, uz, ok ? L : far, target), th = rayT;
+    let i = rayCast(sq.side, _a.x, _a.y, _a.z, ux, uy, uz, ok ? L : far, target), th = rayT;
     graze = rayB;
     if (i < 0 && ok) { i = target; th = L; graze = Math.sqrt(rnd()); }   // 打中瞄準的目標：落點在船身截面上均勻分布
     const end = i >= 0 ? th : L;
     blk = SOLID ? rockBlock(_a.x, _a.y, _a.z, _a.x + ux * end, _a.y + uy * end, _a.z + uz * end) : -1;
     // 途中先碰到敵方飛彈／艦載機：由它吃下這一發
-    const o = rayAir(1 - sq.side, _a.x, _a.y, _a.z, ux, uy, uz, end * (blk >= 0 ? blk : 1));
+    const o = rayAir(sq.side, _a.x, _a.y, _a.z, ux, uy, uz, end * (blk >= 0 ? blk : 1));
     if (o) {
       const tA = Math.max(1, rayT), fA = beamFalloff(tA, gun), fxs = GUN_FX[gk];
       _b.set(_a.x + ux * tA, _a.y + uy * tA, _a.z + uz * tA);
@@ -2639,7 +2701,7 @@ function swarmInfectKill(i, t, x, y, z) {
     if (typeof toast === 'function' && typeof GAME !== 'undefined' && GAME.phase === 'battle') toast(side === GAME.playerSide ? '母巢被擊沉，附近的蟲群陷入混亂！' : '擊沉母巢：附近的蟲群陷入混亂', side === GAME.playerSide ? 'bad' : '');
   }
   for (const f of fleets) {
-    if (f.side === side || f.reserve || !f.sqs.length) continue;
+    if (!hostile(f.side, side) || f.reserve || !f.sqs.length) continue;
     const M = fleetMods(f);
     if (M.fac === 5 && (ty === 3 || ty === 4) && f.paraLive < INFECT_RULE.live) {   // 寄生倒戈：附近沉沒的敵方驅逐、護衛
       const R = INFECT_RULE;
@@ -2680,7 +2742,7 @@ function swarmInfectTick(dt, t) {
     if (ships.dotT[i] > t) d += ships.dotR[i] * dt;
     if (ships.para[i]) d += SHIP_TYPES[ships.type[i]].hp * INFECT_RULE.decay * dt;
     if (d > 0) {
-      ships.hp[i] -= d; if (ships.dotT[i] > t) { if (ships.shMax[i] <= 0) ships.shT[i] = Math.max(ships.shT[i], t); /* 腐蝕中的蟲族不會再生（有護盾的船不影響回充） */ facStats[1 - ships.side[i]].dot += d; dmgDealt[1 - ships.side[i]] += d; }
+      ships.hp[i] -= d; if (ships.dotT[i] > t) { if (ships.shMax[i] <= 0) ships.shT[i] = Math.max(ships.shT[i], t); /* 腐蝕中的蟲族不會再生（有護盾的船不影響回充） */ facStats[firstFoe(ships.side[i])].dot += d; dmgDealt[firstFoe(ships.side[i])] += d; }
       if (ships.hp[i] <= 0) { shipWorldCPU(i, _c); killShip(i, t, _c.x, _c.y, _c.z); continue; }
     }
     const q = squadrons[ships.sq[i]], M = q.mods;
@@ -2694,14 +2756,14 @@ function swarmInfectTick(dt, t) {
 // ───────────────────────── 種族特性（規則數值見 data.js 的 VOLLEY_RULE、LINK_RULE、SALVAGE_RULE） ─────────────────────────
 // 統計（除錯、平衡用）：armor＝裝甲擋掉的船體傷害、dot＝持續傷害、para＝寄生倒戈艘數、zones＝腐蝕區域、hive＝母巢陣亡、hatch／hatchShip＝屍體孵化的艦載機／戰艦、regen＝蟲族再生量
 const FAC_STAT_KEYS = ['volley', 'retarget', 'salvHeal', 'built', 'armor', 'dot', 'para', 'zones', 'hive', 'hatch', 'hatchShip', 'regen'];
-const facStats = [0, 1].map(() => Object.fromEntries(FAC_STAT_KEYS.map((k) => [k, 0])));
+const facStats = sideArr(() => Object.fromEntries(FAC_STAT_KEYS.map((k) => [k, 0])));
 function facStatReset() { for (const s of facStats) for (const k of FAC_STAT_KEYS) s[k] = 0; }
 // 聯盟飛彈：目標在命中前沉了 → 在原本的落點附近找最近的敵艦，重新擲命中；轉向成功＝改打它
 function misRetarget(e) {
   const R = LINK_RULE.r * (1 + LINK_RULE.rTal * (e.rt - 1));
   let best = -1, bd = R * R;
   for (const q of squadrons) {
-    if (q.side === e.side || q.bg || q.alive <= 0 || (q.x - e.x) ** 2 + (q.z - e.z) ** 2 > (R + 200) ** 2) continue;
+    if (!hostile(e.side, q.side) || q.bg || q.alive <= 0 || (q.x - e.x) ** 2 + (q.z - e.z) ** 2 > (R + 200) ** 2) continue;
     for (const j of q.list) {
       if (!ships.alive[j]) continue;
       shipWorldCPU(j, _c); const d = (_c.x - e.x) ** 2 + (_c.y - e.y) ** 2 + (_c.z - e.z) ** 2;
@@ -3102,7 +3164,7 @@ ftrSpriteMesh.frustumCulled = ftrTrailMesh.frustumCulled = false;
 ftrSpriteMesh.renderOrder = 1; ftrTrailMesh.renderOrder = 2;
 scene.add(ftrSpriteMesh, ftrTrailMesh);
 let ftrHead = 0;
-const aliveF = [[], []];
+const aliveF = sideArr(() => []);
 
 // 從艦 i 放出 n 架（kind 0＝攻擊型、1＝維修機，tgt＝維修對象）；回傳實際放出的架數（機位滿了就少放）
 // 艦隊的機庫比例（合計＝n）
@@ -3144,13 +3206,13 @@ function launchFighters(side, perCarrier = 8, set = null) {
 }
 function ftrDmgMul(home) { const q = home >= 0 && home < shipCount ? squadrons[ships.sq[home]] : null, m = q && (q.mods || fleetMods(q.fleet)); return m ? m.dmg * m.ftrDmg : 1; }
 // ───── 自動武器：飛彈、艦載機、維修機（各艦各自冷卻；敵人進入射程才用） ─────
-const wStats = [{ mFired: 0, mInt: 0, mMiss: 0, healed: 0, fLaunch: 0, rLaunch: 0, fLand: 0, fLost: 0, fBuilt: 0, rot: 0, fRep: 0, fHeal: 0 }, { mFired: 0, mInt: 0, mMiss: 0, healed: 0, fLaunch: 0, rLaunch: 0, fLand: 0, fLost: 0, fBuilt: 0, rot: 0, fRep: 0, fHeal: 0 }];
+const wStats = sideArr(() => ({ mFired: 0, mInt: 0, mMiss: 0, healed: 0, fLaunch: 0, rLaunch: 0, fLand: 0, fLost: 0, fBuilt: 0, rot: 0, fRep: 0, fHeal: 0 }));
 function maxHp(i) { return SHIP_TYPES[ships.type[i]].hp * (squadrons[ships.sq[i]].flagship === i ? 3 : 1) * ships.hpCap[i]; }   // hpCap：傭兵重新造出來的船只有一半
 function updateEnemyDist() {   // 每支分艦隊離最近敵方分艦隊（邊緣）的距離，每 0.5 秒更新
   for (const q of squadrons) {
     if (q.bg || q.alive <= 0) { q.enemyD = 1e9; continue; }
     let best = 1e9;
-    for (const o of squadrons) { if (o.side === q.side || o.bg || o.alive <= 0 || o.hidden || !fowKnowsSq(q, o)) continue; const d = Math.hypot(o.x - q.x, (o.y || 0) - (q.y || 0), o.z - q.z) - Math.max(o.W, o.D) / 2 - Math.max(q.W, q.D) / 2; if (d < best) best = d; }
+    for (const o of squadrons) { if (!hostile(q.side, o.side) || o.bg || o.alive <= 0 || o.hidden || !fowKnowsSq(q, o)) continue; const d = Math.hypot(o.x - q.x, (o.y || 0) - (q.y || 0), o.z - q.z) - Math.max(o.W, o.D) / 2 - Math.max(q.W, q.D) / 2; if (d < best) best = d; }
     q.enemyD = Math.max(0, best);
   }
   // 突破：紡錘陣／圓錐陣的前端衝進敵方分艦隊 → 對方陣形混亂
@@ -3160,7 +3222,7 @@ function updateEnemyDist() {   // 每支分艦隊離最近敵方分艦隊（邊�
     if (!F || !F.breach || q.bg || q.alive <= 0 || q.enemyD > 5 || sqMorphing(q, t)) continue;
     const fx = q.x + Math.sin(q.h) * q.D / 2, fz = q.z + Math.cos(q.h) * q.D / 2;
     for (const o of squadrons) {
-      if (o.side === q.side || o.bg || o.alive <= 0 || o.hidden) continue;
+      if (!hostile(q.side, o.side) || o.bg || o.alive <= 0 || o.hidden) continue;
       const dx = fx - o.x, dz = fz - o.z, u = dx * Math.cos(o.h) - dz * Math.sin(o.h), v = dx * Math.sin(o.h) + dz * Math.cos(o.h);
       if (Math.abs(u) > o.W / 2 || Math.abs(v) > o.D / 2 || Math.abs((q.y || 0) + Math.sin(q.p || 0) * q.D / 2 - (o.y || 0)) > 40) continue;   // 3D：高度也要對上
       const dm = disorderMul(o); if (dm <= 0) continue;   // 種族：機械改造混亂時間縮短（蟲族之後會是 0＝不會混亂）
@@ -3347,7 +3409,7 @@ function activateFighter(j) {
 // 攔截機找目標：交戰半徑內（以艦隊中心算）離中心最近的敵方飛彈，沒有就找艦載機
 function interceptAcquire(j, s, cx, cy, cz) {
   airIndex();
-  const m = AIR.map[1 - s], R = INTERCEPT_RULE.engage, C = AIR.cell, r = Math.ceil(R / C), gx = Math.floor(cx / C), gz = Math.floor(cz / C);
+  const m = airOf(s), R = INTERCEPT_RULE.engage, C = AIR.cell, r = Math.ceil(R / C), gx = Math.floor(cx / C), gz = Math.floor(cz / C);
   let bm = null, dm = R, bf = null, df = R;
   if (m.size) for (let ax = gx - r; ax <= gx + r; ax++) for (let az = gz - r; az <= gz + r; az++) {
     const arr = m.get(ax * 100003 + az); if (!arr) continue;
@@ -3361,7 +3423,7 @@ function interceptAcquire(j, s, cx, cy, cz) {
 function areaFtrTarget(j, s, hq) {
   let best = null, bd = 350;
   for (const e of squadrons) {
-    if (e.side === s || !fowLive(e) || !fowKnowsSq(hq || { side: s }, e)) continue;
+    if (!strayOK(s, e.side) || !fowLive(e) || !fowKnowsSq(hq || { side: s }, e)) continue;
     const d = Math.hypot(e.x - FT.ax[j], (e.y || 0) - FT.ay[j], e.z - FT.az[j]); if (d < bd) { bd = d; best = e; }
   }
   if (!best) return -1;
@@ -3371,7 +3433,7 @@ function areaFtrTarget(j, s, hq) {
 let aaAcc = 0;
 function updateFighters(dt) {
   const t = U.uTime.value;
-  aliveF[0].length = 0; aliveF[1].length = 0;
+  for (const a of aliveF) a.length = 0;
   for (const q of squadrons) q.drones = 0;
   ships.fout.fill(0); ships.foutR.fill(0);
   for (let i = 0; i < FTR_MAX; i++) {
@@ -3458,7 +3520,7 @@ function updateFighters(dt) {
         if (g2 >= 0 && ships.alive[g2]) { shipWorldCPU(g2, _a); tx = _a.x; ty = _a.y; tz = _a.z; hasT = true; }
         else if (FT.area[i]) { FT.ch[i] = 0; tx = FT.ax[i]; ty = FT.ay[i]; tz = FT.az[i]; }   // 區域攻擊：飛到那一點，在上空盤旋偵察
         else if (fowOn() || CAP.on) { FT.ch[i] = 0; const G = hq && hq.group; tx = G ? G.ax : px; ty = G ? G.ay || 0 : py; tz = G ? G.az : pz; }   // 戰爭迷霧：沒有看得到的目標就回艦隊上空
-        else { FT.ch[i] = 0; const ef = groups.find((o) => o.side === 1 - s); tx = ef ? ef.ax : px; ty = 0; tz = ef ? ef.az : pz; }
+        else { FT.ch[i] = 0; const ef = groups.find((o) => hostile(s, o.side)); tx = ef ? ef.ax : px; ty = 0; tz = ef ? ef.az : pz; }
         if (role === 2) mode = 2; else if (role === 3) mode = 3;
       }
       dx = tx - px; dy = ty - py; dz = tz - pz; d = Math.hypot(dx, dy, dz) || 1;
@@ -3642,35 +3704,35 @@ function processHits() {
       if (e.kill) dmgStats[tSide][e.asp]++;
     }
     if (e.ff) { ffStats[e.side][0]++; ffStats[e.side][1] += eff; }   // 友軍誤射：不算進對敵傷害
-    else { dmgDealt[e.side] += eff; wDmg[e.side][e.src || 0] += eff; cStatHit(e, ti, shD, hullD); }
+    else { dmgDealt[e.side] += eff; wDmg[e.side][e.src || 0] += eff; cStatHit(e, ti, shD, hullD); if (eff > 0 && REL[e.side] && REL[e.side][tSide] === 1) relHit(e.side, tSide, eff); }   // 打到中立的一方：累積誤傷
     if (e.kind === 'mh' || e.kind === 'lb') {
       if (e.kill) { killShip(e.target, t, e.x, e.y, e.z, e.kind === 'mh' ? 1.25 : 1); continue; }
-      if (e.kind === 'lb') { if (e.fx) spawnFx(e.x, e.y, e.z, e.hull ? e.side : 2 + tSide * 8 + e.dirIdx, TYPE_W[ships.type[e.target]] * (e.hull ? 0.4 : 0.9), 24); continue; }
+      if (e.kind === 'lb') { if (e.fx) spawnFx(e.x, e.y, e.z, e.hull ? e.side : fxShield(tSide, e.dirIdx), TYPE_W[ships.type[e.target]] * (e.hull ? 0.4 : 0.9), 24); continue; }
       if (e.kill) killShip(e.target, t, e.x, e.y, e.z, 1.25);
-      else { spawnFx(e.x, e.y, e.z, 2 + tSide * 8 + e.dirIdx, TYPE_W[ships.type[e.target]] * 1.2, 22); spawnFx(e.x, e.y, e.z, e.side, 3, 24); }
+      else { spawnFx(e.x, e.y, e.z, fxShield(tSide, e.dirIdx), TYPE_W[ships.type[e.target]] * 1.2, 22); spawnFx(e.x, e.y, e.z, e.side, 3, 24); }
       continue;
     }
     if (e.kill) killShip(e.target, t, e.x, e.y, e.z);
     else if (e.fx) {
-      if (!e.hull) spawnFx(e.x, e.y, e.z, 2 + tSide * 8 + e.dirIdx, TYPE_W[ships.type[e.target]] * 0.9, 24);   // 護盾擋下
+      if (!e.hull) spawnFx(e.x, e.y, e.z, fxShield(tSide, e.dirIdx), TYPE_W[ships.type[e.target]] * 0.9, 24);   // 護盾擋下
       else spawnFx(e.x, e.y, e.z, e.side, TYPE_W[ships.type[e.target]] * 0.45, 26);   // 打到船體：小爆炸
     }
   }
   if (stateDirty) { shipGeo.getAttribute('aState').needsUpdate = true; recountAlive(); stateDirty = false; }
 }
 
-const dmgDealt = [0, 0];
-const ffStats = [[0, 0], [0, 0]];   // 友軍誤射（擬真難度）：各方誤擊的次數、傷害
-const deflStats = [[0, 0, 0], [0, 0, 0]];  // 護盾偏折：各方受擊時 [無傷次數, 減半次數, 擋掉的傷害]
-const rayStats = [[0, 0, 0], [0, 0, 0]];  // 射線判定：各方光束 [被目標前面的敵艦擋下, 打偏後打中別艘敵艦, 被敵方飛彈／艦載機擋下] 的次數
-const ffHold = [0, 0];   // 擬真難度：同部隊擋住射界而停火的次數
-const wDmg = [[0, 0, 0], [0, 0, 0]];   // 傷害來源：光束、飛彈、艦載機
+const dmgDealt = sideArr(0);
+const ffStats = sideArr(() => [0, 0]);   // 友軍誤射（擬真難度）：各方誤擊的次數、傷害
+const deflStats = sideArr(() => [0, 0, 0]);  // 護盾偏折：各方受擊時 [無傷次數, 減半次數, 擋掉的傷害]
+const rayStats = sideArr(() => [0, 0, 0]);  // 射線判定：各方光束 [被目標前面的敵艦擋下, 打偏後打中別艘敵艦, 被敵方飛彈／艦載機擋下] 的次數
+const ffHold = sideArr(0);   // 擬真難度：同部隊擋住射界而停火的次數
+const wDmg = sideArr(() => [0, 0, 0]);   // 傷害來源：光束、飛彈、艦載機
 // 平衡用的細項統計（不顯示，供除錯／模擬分析）：各方打出的傷害依武器分 [護盾, 船體]、受到的傷害依艦種分、擊沉數、護盾回充量
 const C_SRC = ['main', 'sec', 'aa', 'msl', 'ftr', 'lance'];
-const cStats = [0, 1].map(() => ({ src: C_SRC.map(() => [0, 0]), taken: [0, 1, 2, 3, 4, 5].map(() => [0, 0]), lost: [0, 0, 0, 0, 0, 0], regen: 0 }));   // 艦種 6 種（data.js 比 main.js 晚載入）
+const cStats = sideArr(() => ({ src: C_SRC.map(() => [0, 0]), taken: [0, 1, 2, 3, 4, 5].map(() => [0, 0]), lost: [0, 0, 0, 0, 0, 0], regen: 0 }));   // 艦種 6 種（data.js 比 main.js 晚載入）
 function cStatHit(e, ti, shD, hullD) {
   const k = e.kind === 'mh' ? 3 : e.kind === 'lb' ? 5 : e.src === 2 ? 4 : e.gk === 'sec' ? 1 : e.gk === 'aa' ? 2 : 0;
-  const a = cStats[e.side].src[k], d = cStats[1 - e.side], ty = ships.type[ti];
+  const a = cStats[e.side].src[k], d = cStats[ships.side[ti]], ty = ships.type[ti];
   a[0] += shD; a[1] += hullD; d.taken[ty][0] += shD; d.taken[ty][1] += hullD;
   if (e.kill) d.lost[ty]++;
 }
@@ -3737,7 +3799,7 @@ function resetCombat() {
   pending.length = 0; RAYG.tick = -1;
   for (const k in FT) FT[k].fill(k === 'tgt' ? -1 : 0);
   fP.fill(0); fV.fill(0); fI.fill(0); ftrAttrs.aFI.needsUpdate = true;
-  aliveF[0].length = 0; aliveF[1].length = 0; misHead = 0; ftrHead = 0;
+  for (const a of aliveF) a.length = 0; misHead = 0; ftrHead = 0;
   for (const w of wStats) { w.mFired = w.mInt = w.mMiss = w.healed = w.fLaunch = w.rLaunch = w.fLand = w.fLost = w.fBuilt = w.rot = w.fRep = w.fHeal = 0; } for (const a of wDmg) a.fill(0);
   for (const q of squadrons) { q.enemyD = null; q.drones = 0; q.disorderUntil = 0; q.volleyT = -1e9; q.lkQ = null; q.lkT = -99; q.salvT = -99; q.netN = 0; q.zoneMul = 0; q.hive = false; }
   for (const f of fleets) { f.parts = 0; f.built = 0; f.paraLive = 0; }
@@ -3856,6 +3918,8 @@ function execCommand(c) {
       // 只指定射擊目標：不重新編組、不轉向、不變陣，也不取消隊列（陣型／移動是另一套命令）
       // 選的是整支部隊＝部隊目標；只選了其中幾支分艦隊＝只有它們改打這個目標
       const tq = squadrons[c.target];
+      if (tq && list.length && friendly(c.side, tq.side)) break;   // 不能攻擊自己人、同盟
+      if (tq && list.length && REL[c.side][tq.side] === 1) relSet(c.side, tq.side, 0, 'attack');   // 攻擊中立的一方＝宣戰
       if (tq) for (const gg of new Set(list.map((q) => q.group).filter(Boolean))) {
         const mine = list.filter((q) => q.group === gg), whole = gg.sqs.filter((q) => q.alive > 0 && !q.bg).every((q) => set.has(q));
         if (whole) { gg.target = tq; for (const q of gg.sqs) q.atk = null; } else for (const q of mine) q.atk = tq;
@@ -3965,7 +4029,7 @@ function newBattle(seed = battleSeed, setup = null) {
   beamHead = 0; beamDirtyFrom = 0; beamDirtyCount = BEAM_MAX;
   for (let i = 0; i < FX_MAX; i++) fxF[i * 4] = -999;
   fxHead = 0; fxDirtyFrom = 0; fxDirtyCount = FX_MAX;
-  orderQueue.length = 0; jam[0] = { until: 0, delay: 0 }; jam[1] = { until: 0, delay: 0 }; jamSeen[0] = jamSeen[1] = null;
+  orderQueue.length = 0; for (let s = 0; s < SIDE_N; s++) { jam[s] = { until: 0, delay: 0 }; jamSeen[s] = null; }
   for (const a of dmgStats) a.fill(0);
   dmgDealt.fill(0); cStatReset(); ffStats.forEach((a) => a.fill(0)); rayStats.forEach((a) => a.fill(0)); deflStats.forEach((a) => a.fill(0)); ffHold.fill(0);
   beamPow.fill(0); beamShots.fill(0); beamLastT.fill(-99); hitAvg.fill(0); for (const g of gunStats) for (const k in g) g[k].fill(0); for (const a of airStats) a.shots = a.hits = 0; for (const f of ftrStats) f.fill(0); fireAcc = [0, 0]; aaAcc = 0;
@@ -4435,6 +4499,7 @@ function update3D(cam = camera, vh = VH) {   // cam／vh：子畫面（其他旗
     const cpp = Math.cos(pp);
     const hk = hullKey(i), ms = R3.meshByKey[hk], fx = Math.sin(h) * cpp, fy = Math.sin(pp), fz = Math.cos(h) * cpp;
     if (!ms) continue;
+    if (kb) { const d = kb * HK.amp * L; _a.x -= fx * d; _a.y -= fy * d; _a.z -= fz * d; }
     writeMatrix(ms[lod], _a.x, _a.y, _a.z, fx, fy, fz, L);
     if (lod <= 2 && SETTINGS.weapons3D !== false) writeMounts(typeKey(i), lod, forced >= 0 ? Math.min(3, forced + 1) : pickPx > 1500 ? 0 : lod + 1, _a.x, _a.y, _a.z, fx, fy, fz, L, i);   // 武器細節：很近才用原檔，其餘比船低一級
   }
@@ -4495,7 +4560,6 @@ function fowFxFrame() {
   const use =(arr, k, col) => { let l = arr[k]; if (!l) { l = lineObj(col, 0.8); arr.push(l); fowFx.g.add(l); } l.visible = true; return l; };
   let nr = 0, np = 0;
   if (on) {
-    if (kb) { const d = kb * HK.amp * L; _a.x -= fx * d; _a.y -= fy * d; _a.z -= fz * d; }
     for (const s of FOW.scans) {
       if (s.side !== me) continue;
       const u = Math.min(1, (t - s.t) / 1.5); if (u >= 1) continue;
@@ -4775,14 +4839,14 @@ function armRecon(f) {
 }
 function cmdRecon(f, p) { issue('recon', { fleet: f.id, x: Math.round(p.x), y: Math.round(p.y != null ? p.y : selAlt()), z: Math.round(p.z) }); }
 function cmdAutoScan(on) { issue('autoscan', { on }); SETTINGS.autoScan = on; saveSettings(); }
-function cmdJam() { issue('jam', { target: 1 - cmdSide, dur: SKILLS.jam.dur, delay: 6 }); }   // 測試場：與技能「干擾」相同
+function cmdJam() { issue('jam', { target: firstFoe(cmdSide), dur: SKILLS.jam.dur, delay: 6 }); }   // 測試場：與技能「干擾」相同
 function setRule(key, value) { issue('rule', { key, value }); }
 // 畫陣線：第一步 A→B 決定位置與寬度；第二步指定面向線的哪一側（預設：最近的敵軍那一側）
 function lineNormal(A, B) { const dx = B.x - A.x, dz = B.z - A.z, L = Math.hypot(dx, dz) || 1; return [dz / L, -dx / L]; }
 function defaultLineSide(A, B) {
   const [nx, nz] = lineNormal(A, B), mx = (A.x + B.x) / 2, mz = (A.z + B.z) / 2;
   let best = null, bd = 1e18;
-  for (const q of sideSquadrons(1 - cmdSide)) { const d = (q.x - mx) ** 2 + (q.z - mz) ** 2; if (d < bd) { bd = d; best = q; } }
+  for (const q of squadrons) { if (q.bg || q.alive <= 0 || !hostile(cmdSide, q.side)) continue; const d = (q.x - mx) ** 2 + (q.z - mz) ** 2; if (d < bd) { bd = d; best = q; } }
   if (best) return (best.x - mx) * nx + (best.z - mz) * nz >= 0 ? 1 : -1;
   const c = camGround(); return nx * c.fx + nz * c.fz >= 0 ? 1 : -1;
 }
@@ -5150,7 +5214,7 @@ function boxSelect(x0, y0, x1, y1, add) {
   const [a, b, c, d] = [Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)];
   const inBox = (sd) => sideSquadrons(sd).filter((q) => { const [sx, sy] = screenOf(q.x, q.y || 0, q.z); return sx >= a && sx <= c && sy >= b && sy <= d; });
   let l = inBox(cmdSide);
-  if (!l.length) l = inBox(1 - cmdSide);
+  for (let s = 0; !l.length && s < SIDES; s++) if (s !== cmdSide) l = inBox(s);
   if (l.length) setSelection(l, add && l[0].side === cmdSide);
   else if (!add) clearSelection();
 }
@@ -5216,7 +5280,7 @@ function touchUp(e) {
   ts = null;
   if (!aim) hideHint();
   const far = Math.hypot(e.clientX - m.x0, e.clientY - m.y0) > 24;
-  const moveOrAttack = (p) => { const q = squadronAt(e.clientX, e.clientY); if (q && q.side !== cmdSide) cmdAttack(q); else cmdMoveTo(p); };
+  const moveOrAttack = (p) => { const q = squadronAt(e.clientX, e.clientY); if (q && hostile(cmdSide, q.side)) cmdAttack(q); else cmdMoveTo(p); };   // 右鍵只打敵對的；中立要用攻擊指令
   if (m.mode === 'tpress' && aim) {
     // 畫陣線第二步：點的位置決定面向哪一側
     confirmAim(groundAt(e.clientX, e.clientY), false);

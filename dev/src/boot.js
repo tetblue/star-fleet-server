@@ -61,7 +61,7 @@ async function autoStory(id, o = {}) {
     GAME.reportShown = true;   // 不跳結算畫面（不然上一場的結算計時器會在下一場代打中途切走畫面）
     GAME.watch = true; GAME.replaying = false; GAME.result = null; GAME.lineK = 0; GAME.dlineK = 0; GAME.log = []; GAME.simCtl = null; GAME.phase = 'battle';
     newBattle(sc.seed + 1, setup); setRule('fire', true); setRule('advance', false);
-    GAME.init = [sideAlive(0), sideAlive(1)];
+    GAME.init = sideInits();
     const cap = o.peek ? o.peek * SIM_HZ : (sc.untimed ? sc.timeLimit * 3 : sc.timeLimit + 30) * SIM_HZ, t0 = performance.now();
     while (!GAME.result && simTick < cap) { for (let k = 0; k < 600 && !GAME.result; k++) stepSim(); await new Promise((r) => { const ch = new MessageChannel(); ch.port1.onmessage = r; ch.port2.postMessage(0); }); }   // 不用 setTimeout：背景分頁會被降速
     const R = GAME.result || { kind: 'none', why: '沒有分出勝負', t: U.uTime.value, ratio: [sideAlive(0) / GAME.init[0], sideAlive(1) / GAME.init[1]] };
@@ -73,5 +73,5 @@ async function autoStory(id, o = {}) {
     if (!o.peek) { GAME.watch = false; GAME.phase = 'menu'; }
   }
 }
-Object.assign(window.__demo, { autoStory, queueMode });
+Object.assign(window.__demo, { autoStory, queueMode, REL: () => REL, relDmg, relHP0, SIDES: () => SIDES, dmgDealt, gunStats, foeSides, hostile, pickTarget: (s, q) => pickTarget(s, q) });   // 多方勢力（除錯）
 Object.assign(window.__demo, { GRD: () => GRD, setGround, groundBlock, groundGen, newBattle, sandboxSetup, terrainUse, terrainSurfaceAt, TERRAIN, battleSetup: () => battleSetup, groundFrame, GV });   // 近地作戰（除錯）

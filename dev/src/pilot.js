@@ -479,12 +479,12 @@ function pilotJumpCharge(j, dt, t) {
   const nx = C.x + dx * R, nz = C.z + dz * R;
   const F = v3.norm([C.x - nx, (C.y || 0) - ty, C.z - nz]);
   spawnBeam(x0, y0, z0, x0 + F[0] * 30, y0 + F[1] * 30, z0 + F[2] * 30, t, 0.25, PL.side, 2.2, 1.0, shipFac(PL.home >= 0 ? PL.home : 0));   // 出發：往前一道光
-  spawnFx(x0, y0, z0, 2 + fxFac(PL.side) * 8, 1.2, 30);
+  spawnFx(x0, y0, z0, fxShield(PL.side), 1.2, 30);
   fP[j3] = nx; fP[j3 + 1] = ty; fP[j3 + 2] = nz;
   PL.F = F; PL.U = Math.abs(F[1]) < 0.96 ? v3.norm([-F[0] * F[1], 1 - F[1] * F[1], -F[2] * F[1]]) : PL.U; PL.yaw = Math.atan2(F[0], F[2]); PL.pitch = Math.asin(Math.max(-1, Math.min(1, F[1])));
   fV[j3] = F[0] * PL.speed; fV[j3 + 1] = F[1] * PL.speed; fV[j3 + 2] = F[2] * PL.speed;
   spawnBeam(nx - F[0] * 30, ty - F[1] * 30, nz - F[2] * 30, nx, ty, nz, t, 0.25, PL.side, 2.2, 1.0, shipFac(PL.home >= 0 ? PL.home : 0));   // 抵達：從後方拉進來
-  spawnFx(nx, ty, nz, 2 + fxFac(PL.side) * 8, PILOT_FTR_LEN * 5, 30);   // 抵達的閃光在機體上：照機體大小
+  spawnFx(nx, ty, nz, fxShield(PL.side), PILOT_FTR_LEN * 5, 30);   // 抵達的閃光在機體上：照機體大小
   PL.msl.length = 0; PL.travel = false; PL.inv = Math.max(PL.inv, t + 0.8); PL.jumpCd = t + PILOT_JUMP.cd; PL.jumpFx = performance.now(); PL.jump = null;
   pilotFeed(`躍傳完成：${J.it.enemy ? '敵' : '我'}・${J.it.f.name}`, J.it.enemy ? 'kill' : 'ok');
 }
@@ -745,7 +745,7 @@ function pilotEcmOn(S, W, t) {
     FT.tgt[f] = -1; FT.rt[f] = 0; n++;
   }
   if (n && PL.stats) PL.stats.wxp.ecm = (PL.stats.wxp.ecm || 0) + n * PILOT_PROF_XP.ecm;
-  spawnFx(px, py, pz, 2 + fxFac(PL.side) * 8, PILOT_FTR_LEN * 10, 22);
+  spawnFx(px, py, pz, fxShield(PL.side), PILOT_FTR_LEN * 10, 22);
   pilotFeed(`電磁干擾啟動！${n ? `甩掉 ${n} 架咬尾的敵機` : '周圍的敵人無法鎖定你'}`, 'ok');
 }
 function pilotEcmLeft() { return PL.on && PL.ecm && !PL.dead ? Math.max(0, PL.ecm.until - U.uTime.value) : 0; }

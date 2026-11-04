@@ -342,12 +342,13 @@ function mmDraw() {
   }
   // 艦艇（抽樣畫點）：戰爭迷霧／被干擾時，敵軍只畫看得到的
   const fog = pFiltered(), me = GAME.playerSide, step = Math.max(2, Math.ceil(shipCount / 3000));
-  for (let sd = 0; sd < 2; sd++) {
+  for (let sd = 0; sd < SIDES; sd++) {
     if (fog && sd !== me && !fowView()) continue;
+    const rl = sd === me ? 2 : REL[me][sd];
     for (let i = 0; i < shipCount; i += step) {
       if (!ships.alive[i] || ships.side[i] !== sd) continue;
       const q = squadrons[ships.sq[i]]; if (!q || q.bg || q.hidden || fowHidden(q)) continue;
-      c.fillStyle = sd === me ? '#5fe38a' : '#ff5a4a';
+      c.fillStyle = sd === me ? '#5fe38a' : rl === 1 ? '#ffd27a' : rl === 2 ? '#7fd0ff' : '#ff5a4a';   // 多方勢力：中立黃、同盟藍
       shipWorldCPU(i, _a); c.fillRect(G.toX(_a.x) - 0.75, G.toY(_a.z) - 0.75, 1.5, 1.5);
     }
   }

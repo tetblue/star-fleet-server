@@ -218,7 +218,7 @@ function drawTac() {
   const fog = pFiltered(), me = GAME.playerSide, hid = (side) => fog && side !== me;   // 被干擾／戰爭迷霧：敵軍只畫看得到的，其他畫最後已知位置
   // 戰爭迷霧：我方的偵測範圍（淡色圈）、掃描波紋、被掃描的方向
   if (fowView()) drawFowTac(c, k, me);
-  for (let sd = 0; sd < 2; sd++) {
+  for (let sd = 0; sd < SIDES; sd++) {
     if (hid(sd) && !fowView()) continue;
     c.fillStyle = col[SIDE_FAC[sd]];
     for (let i = 0; i < shipCount; i += 3) {
@@ -412,11 +412,11 @@ function tacFrame(dt) {
 }
 
 // ── 面板上的滑鼠／觸控 ──
-function tacHit(w, side) {
+function tacHit(w, side, ok) {
   let best = null, bd = 1e9;
   const pad = 10 / TAC.k;
   for (const q of squadrons) {
-    if (q.bg || q.alive <= 0 || (side != null && q.side !== side) || fowHidden(q)) continue;   // 戰爭迷霧：看不到的點不到
+    if (q.bg || q.alive <= 0 || (side != null && side >= 0 && q.side !== side) || (ok && !ok(q)) || fowHidden(q)) continue;   // 戰爭迷霧：看不到的點不到
     const dx = w.x - q.x, dz = w.z - q.z;
     const u = dx * Math.cos(q.h) - dz * Math.sin(q.h), v = dx * Math.sin(q.h) + dz * Math.cos(q.h);
     if (Math.abs(u) <= q.W / 2 + pad && Math.abs(v) <= q.D / 2 + pad) { const d = Math.hypot(dx, dz); if (d < bd) { bd = d; best = q; } }
@@ -432,7 +432,7 @@ function tacDown(e) {
     GAME.skillArm = null; hideHint(); drawTac(); return;
   }
   if (GAME.skillArm) {
-    const q = tacHit(w, 1 - cmdSide);
+    const q = tacHit(w, -1, (o) => !friendly(cmdSide, o.side) && (GAME.skillArm.attack || hostile(cmdSide, o.side)));
     if (q) { if (GAME.skillArm.attack) cmdAttack(q); else skillCmd(GAME.skillArm.f, GAME.skillArm.id, q); GAME.skillArm = null; hideHint(); }
     return;
   }
@@ -591,7 +591,7 @@ function drawSideView() {
   // 艦艇：每 3 艘一點；同時算出每支分艦隊在側視圖上的範圍
   const col = FACTION.map((f) => f.ui);
   SV.ext = squadrons.map(() => [1e9, -1e9, 1e9, -1e9]);
-  for (let sd = 0; sd < 2; sd++) {
+  for (let sd = 0; sd < SIDES; sd++) {
     c.fillStyle = col[SIDE_FAC[sd]];
     for (let i = 0; i < shipCount; i += 3) {
       if (!ships.alive[i] || ships.side[i] !== sd) continue;

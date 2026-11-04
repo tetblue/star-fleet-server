@@ -7,6 +7,8 @@
 // goal：省略＝殲滅或潰走；survive＝撐到時限；escort＝護送目標（vip）撐到時限；cut＝擊沉敵方所有補給艦（要有 supply）
 // ev：增援 [名稱, 指揮官 [名, 特性, 等級, 技能] 或 null, 兵力, 艦隊類型, 陣型, 進場邊 left/right, 進場時間 [a, b], 機率（省略＝1）, 外觀的陣營（省略＝enemyFac）]
 // intel：[準確度, 看不到的項目]；decoy：假情報（簡報只顯示第一支艦隊，兵力 × decoy，也看不到增援）；enemyFac：敵軍外觀的陣營（2＝灰鴉傭兵團、7＝帝國攝政派：帝國的船換成銀白色，帝國內戰用；不要設成跟玩家同陣營：標籤顏色和船型會分不出來）
+// sides：第三方以後的勢力（多方勢力，邊 2、3…）[{ name, fac, rel: [對玩家, 對敵軍], fleets: [同 allies 的格式（不用倒戈、外觀欄）] }]
+//   rel：0 敵對、1 中立、2 同盟。relRule：{ act: 'fail'（誤傷或攻擊中立的一方＝失敗）／'hostile'（翻臉，預設）, thr: 誤傷門檻（對方總耐久的比例）}
 // allies：AI 友軍 [艦隊名, 指揮官, 特性, 等級, 技能, 艦隊類型, 兵力, 陣型, 打法, x, 倒戈秒數（省略／null＝不倒戈）, 外觀的陣營（省略＝2 傭兵）, 中途進場 [秒, 'left'／'right']（省略＝開戰就在場）]
 // lines：戰鬥中的通訊 [秒, 誰, 台詞]；after：打贏後的結語；supply：敵方補給艦隊（預算的倍數，跟著第一支艦隊）
 // defect：倒戈的觸發 { left: 敵軍剩下的比例, lead: 觸發後幾秒才倒戈 }：敵軍剩到 left 以下、或到了友軍的倒戈秒數減 lead，就排定 lead 秒後倒戈（取先到的）
@@ -364,15 +366,18 @@ const STORY_WAR = {
     ev: [['感染艦群', null, 0.25, 'raider', 'wedge', 'left', [120, 170]]],
     lines: [[3, '「老錨」歐文', '（通訊）這艘船三十年沒飛過了。你們說要護送，就護送到底。'], [8, '米拉・哈特', '老錨，你只管飛。剩下的交給我們。'], [180, '「老錨」歐文', '（通訊）引擎……撐住了！'], [290, '米拉・哈特', '封鎖線過了！']],
     after: '倖存者船團突破了封鎖。殖民船團的老船長「老錨」歐文，把他的船隊交給了灰鴉調度。' },
-  // 第 7 關：靜默節點（中立的機械智慧族，AI 友軍）要淨化行星；撤離船從地表起飛，掩護到後方。擊沉越多感染艦，淨化延得越久
+  // 第 7 關：靜默節點（中立的第三方勢力，邊 2）要淨化行星；撤離船從地表起飛，掩護到後方。擊沉越多感染艦，淨化延得越久
+  //   靜默節點與感染艦隊敵對、對灰鴉中立：攻擊它或流彈誤傷太多＝任務失敗
   'x7': { budget: 6000, time: 300, fleets: 3, lv: 5, enemyFac: 5, goal: 'rescue', intel: [0.7, ['events']],
     terrain: [stT('rock', -420, -40, 70, 30), stT('rock', 420, -60, 65, -40)],
     rescue: { name: '撤離船', at: [15, 40, 65, 90, 115, 140, 170, 200], from: [[-300, -380], [0, -440], [300, -380]], need: 4, comp: [0, 0, 0, 0, 20, 30], ext: 30, per: 0.2, max: 3 },
     foes: [['感染艦群', '？？？', 'dmg', 9, ['charge'], 'balanced', 0.4, 'line', 'push', -260],
       ['感染艦群', '？？？', 'speed', 8, ['charge'], 'raider', 0.35, 'wedge', 'flank', 260]],
     ev: [['感染艦群', null, 0.25, 'raider', 'wedge', 'left', [100, 150]], ['感染艦群', null, 0.25, 'balanced', 'line', 'right', [160, 210]]],
-    allies: [['靜默節點艦隊', '靜默節點', 'shield', 9, ['wall'], 'heavy', 0.35, 'line', 'kite', 0, null, 4]],
-    lines: [[3, '靜默節點', '（通訊）行星淨化程序已排定。剩餘時間：300 秒。'], [8, '米拉・哈特', '淨化？地表上還有人！'], [13, '靜默節點', '（通訊）已計算。救援的成本高於淨化。'], [19, '賽弗', '（通訊）賽隆，我會跟它談。你們要證明，救人也可以有效率。'], [25, '賽隆', '聽到了。清出航道，讓撤離船上來！']],
+    sides: [{ name: '靜默節點', fac: 4, rel: [1, 0], fleets: [['靜默節點艦隊', '靜默節點', 'shield', 9, ['wall'], 'heavy', 0.35, 'line', 'kite', 640, -260]] }],
+    relRule: { act: 'fail', thr: 0.08 },
+    lines: [[3, '靜默節點', '（通訊）行星淨化程序已排定。剩餘時間：300 秒。'], [8, '米拉・哈特', '淨化？地表上還有人！'], [13, '靜默節點', '（通訊）已計算。救援的成本高於淨化。'], [19, '賽弗', '（通訊）賽隆，我會跟它談。你們要證明，救人也可以有效率。'], [25, '賽隆', '聽到了。清出航道，讓撤離船上來！'],
+      [32, '賽弗', '（通訊）注意射線。靜默節點不是我們的盟友——流彈打到它，它會記下來。'], [38, '「老錨」歐文', '（通訊）所以我們得一邊救人、一邊別打到那些機器？'], [42, '賽隆', '對。開火前看清楚後面是誰。']],
     after: '淨化照計畫進行了。被救出來的人看著行星在身後燒起來。靜默節點沒有道歉，只留下一句：「效率修正，已記錄。」賽弗說，這是它們表達敬意的方式。' },
   'x8': { budget: 6000, time: 420, fleets: 3, lv: 5, enemyFac: 6, intel: [0.5, ['comp', 'events']],
     terrain: [stT('asteroid', -300, -100, 200), stT('asteroid', 300, -80, 190), stT('rock', 0, 100, 70, 20)],
@@ -476,6 +481,9 @@ function storyScenario(id) {
   if (W.enemyFac != null) sc.enemyFac = facX(W.enemyFac);
   if (W.allies) sc.allies = W.allies.map(([name, cn, trait, level, skills, arch, pow, formation, tactic, x, defect, fac, arrive]) => ({ name, commander: { name: cn, trait, level: Math.max(1, level + D.lv), skills: skills.slice() },
     comp: comp(arch, pow), formation, tactic, x, z: 300 + ZONE_SHIFT - 40, h: Math.PI, fac: fac != null ? facX(fac) : 2, defectAt: defect != null ? defect : null, ...(arrive ? { arrive: arrive.slice() } : {}) }));
+  if (W.sides) sc.sides = W.sides.map((S) => ({ name: S.name, fac: facX(S.fac), rel: S.rel.slice(), fleets: S.fleets.map(([name, cn, trait, level, skills, arch, pow, formation, tactic, x, z]) => ({ name, commander: { name: cn, trait, level: Math.max(1, level + D.lv), skills: skills.slice() },
+    comp: comp(arch, pow), formation, tactic, x, z: z != null ? z : 300 + ZONE_SHIFT - 40, h: Math.PI })) }));
+  if (W.relRule) sc.relRule = { ...W.relRule };
   if (W.ground) { sc.terrain = []; sc.ground = { scene: W.ground, seed: 7000 + k * 13, def: 1 }; }
   if (W.doom) sc.doom = { name: W.allies[W.doom.ally][0], at: W.doom.at };
   if (W.goal === 'target') sc.goal = { type: 'target', name: W.foes[W.target][0] };
@@ -515,7 +523,9 @@ function storyGoalRows(sc) {
     : G.type === 'rescue' ? [`淨化開始前至少救出 ${G.need} 批${G.name}（共 ${G.waves} 批，把它們掩護到後方的撤離點），或殲滅敵軍`, `淨化開始時救出的不到 ${G.need} 批，或${rout}`, `${min} 分鐘後開始淨化：每擊沉約 ${Math.round(sc.rescue.per * 100)}% 的敵軍延後 ${sc.rescue.ext} 秒（最多 ${sc.rescue.max} 次）`]
     : G.type === 'escort' ? [`保護${G.name}撐過 ${min} 分鐘，或${er}`, `${G.name}損失超過 ${Math.round((1 - VIP_KEEP) * 100)}%，或${rout}`, `${min} 分鐘（${G.name}撐到時間就是勝利）`]
     : [`擊沉敵方所有補給艦，或${er}`, rout, par];
-  return `<dt>勝利條件</dt><dd>${T[0]}</dd><dt>敗北條件</dt><dd>${T[1]}</dd><dt>${sc.untimed ? '目標時間' : '時間限制'}</dt><dd>${T[2]}</dd>`;
+  if (sc.sides) for (const S of sc.sides) if (S.rel[0] === 1) T[1] += sc.relRule && sc.relRule.act === 'fail' ? `，或攻擊、誤傷中立的${S.name}太多` : '';
+  const neu = sc.sides ? sc.sides.map((S) => `<dt>${S.name}</dt><dd>${['敵對', '中立', '同盟'][S.rel[0]]}${S.rel[0] === 1 ? '：不會自動開火，但流彈、範圍攻擊會打到它' : ''}${S.rel[1] === 0 ? '；與敵軍敵對' : ''}</dd>`).join('') : '';
+  return `${neu}<dt>勝利條件</dt><dd>${T[0]}</dd><dt>敗北條件</dt><dd>${T[1]}</dd><dt>${sc.untimed ? '目標時間' : '時間限制'}</dt><dd>${T[2]}</dd>`;
 }
 // 作戰簡報
 function storyBriefing(id) {
