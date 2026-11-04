@@ -109,15 +109,16 @@ function bldMat(P, m, lum, cache) {
   const c = m.color || new THREE.Color(1, 1, 1), e = m.emissive || new THREE.Color(0, 0, 0), ei = m.emissiveIntensity != null ? m.emissiveIntensity : 1;
   o = new THREE.ShaderMaterial({
     uniforms: gUni(P, { uMap: { value: m.map || null }, uHas: { value: m.map ? 1 : 0 }, uCol: { value: new THREE.Vector3(c.r, c.g, c.b) }, uEm: { value: m.emissiveMap || null }, uHasEm: { value: m.emissiveMap ? 1 : 0 },
-      uEmC: { value: new THREE.Vector3(e.r * ei, e.g * ei, e.b * ei) }, uLum: { value: lum } }),
+      uEmC: { value: new THREE.Vector3(e.r * ei, e.g * ei, e.b * ei) }, uLum: { value: lum }, uChar: { value: 0 } }),
     side: THREE.DoubleSide,
     vertexShader: `varying vec3 vW; varying vec3 vN; varying vec2 vUv;
       void main(){ vec4 w = modelMatrix * vec4(position, 1.); vW = w.xyz; vN = normalize(mat3(modelMatrix) * normal); vUv = uv; gl_Position = projectionMatrix * viewMatrix * w; }`,
     fragmentShader: GROUND_FOG_GLSL + /* glsl */`
-      uniform sampler2D uMap, uEm; uniform float uHas, uHasEm, uLum; uniform vec3 uCol, uEmC; varying vec3 vW; varying vec3 vN; varying vec2 vUv;
+      uniform sampler2D uMap, uEm; uniform float uHas, uHasEm, uLum, uChar; uniform vec3 uCol, uEmC; varying vec3 vW; varying vec3 vN; varying vec2 vUv;
       void main(){
         vec3 N = normalize(vN); if (!gl_FrontFacing) N = -N;
         vec3 base = uCol * (uHas > .5 ? texture2D(uMap, vUv).rgb : vec3(1.));
+        if (uChar > 0.) base = mix(base, vec3(dot(base, vec3(.3, .59, .11))) * vec3(.85, .72, .6) * (.55 + .45 * gn(vW.xz * .7 + vW.y)), uChar);   // 燒焦：褪色成焦黑
         vec3 col = base * (uAmb * (1.1 + .4 * N.y) + uLSun * max(dot(N, uSun), 0.) * 1.2) * uLum;
         if (uHasEm > .5) col += texture2D(uEm, vUv).rgb * uEmC; else col += uEmC * base;
         gl_FragColor = vec4(fogMix(col, vW), 1.);
@@ -497,4 +498,4 @@ addEventListener('keydown', (e) => {
   if (used) { e.preventDefault(); e.stopImmediatePropagation(); }
 }, true);
 if (window.API) bldLoad();   // 開場就讀：各模式的「戰場」選項要列出自訂地圖
-window.__bld = { BLD, BE, bldSnapshot, bldSyncObjs, bldBase, bldModel, grd: () => GRD, gv: () => GV, msKill: (id) => groundMsKill(GRD.ms[id], 0) };   // 除錯
+window.__bld = { BLD, BE, bldSnapshot, bldSyncObjs, bldBase, bldModel, grd: () => GRD, gv: () => GV, msKill: (id, sx, sz) => groundMsKill(GRD.ms[id], 0, sx, sz) };   // 除錯

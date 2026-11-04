@@ -764,10 +764,10 @@ function groundMsHit(e) {
   M.hpNow -= e.dmg;
   if (Math.random() < 0.5) spawnFx(e.x, e.y, e.z, e.side, 2 + Math.random() * 1.5, 22);
   const kill = M.hpNow <= 0;
-  if (kill) groundMsKill(M, e.side);
+  if (kill) groundMsKill(M, e.side, e.x, e.z);   // 命中點在打過來的那一面：往反方向倒
   if (typeof CAP !== 'undefined' && CAP.on) capCreditMs(M, e.dmg, kill);
 }
-function groundMsKill(M, side) {
+function groundMsKill(M, side, sx = null, sz = null) {
   const t = U.uTime.value;
   M.dead = true; M.hpNow = 0; M.deadT = t;
   // 碰撞、遮蔽：柱子、球形障礙拿掉，碰撞箱壓入的高度還原
@@ -786,6 +786,148 @@ function groundMsKill(M, side) {
   groundPlume(M.x, M.z, t, 200, Math.max(10, M.r * 1.4), 2);
   groundScar(M.x, GROUND_Y, M.z, M.r * 1.8);
   if (GV.beacons) { const a = GV.beacons.pts.geometry.attributes.position; GV.beacons.list.forEach((b, k) => { if (b.ms === M.id) a.setY(k, -1e4); }); a.needsUpdate = true; }
+  groundMsCollapse(M, side, sx, sz);
+}
+// ═════ 巨型結構倒塌（只是畫面，用 Math.random；新的一場由 groundRestore 還原）═════
+//   細高的（高 > 底面直徑 1.6 倍）：整棟以倒向那一側的底邊為軸倒下（離開打擊點的方向，越倒越快），掃過的一般建築被壓垮，
+//     落地時沿著長度炸開、揚起一長排塵土、噴出碎塊；倒下的塔身燒焦後留在地上冒煙，原地留下一圈燒焦的殘基
+//   矮胖的：原地塌成一堆（壓扁、歪斜），周圍的建築被震垮，燒焦後留著冒煙
+//   太高的（軌道電梯的纜繩）：照舊往下沉、消失
+const MS_FALL = { delay: 0.7, th: 1.45, sink: 0.08, stump: 0.13, burnt: 0.32 };
+GV.msFx = [];
+// 燒焦：網格換成變暗的材質副本（uniform 共用原本的物件，只換亮度）；回傳還原用的清單
+function msBurnt(o, k, keep) {
+  const done = new Map();
+  const swap = (m) => {
+    let n = done.get(m); if (n) return n;
+    n = m.clone(); n.uniforms = { ...m.uniforms };
+    if (m.uniforms.uDim) n.uniforms.uDim = { value: m.uniforms.uDim.value * k };
+    if (m.uniforms.uLum) n.uniforms.uLum = { value: m.uniforms.uLum.value * k };
+    if (m.uniforms.uEmC) n.uniforms.uEmC = { value: new THREE.Vector3(0, 0, 0) };
+    if (m.uniforms.uChar) n.uniforms.uChar = { value: 1 };   // 燈光、發光的部分也熄掉
+    done.set(m, n); GV.mats.push(n); return n;
+  };
+  const ok = (m) => m && m.uniforms;
+  o.traverse((c) => {
+    if (!c.isMesh || !c.material) return;
+    if (Array.isArray(c.material)) { if (!c.material.some(ok)) return; keep.push([c, c.material]); c.material = c.material.map((m) => (ok(m) ? swap(m) : m)); }
+    else if (ok(c.material)) { keep.push([c, c.material]); c.material = swap(c.material); }
+  });
+}
+// 碎塊：從 (x, y, z) 往外噴（dx, dz＝主要方向，0＝四散）
+function msDebris(x, y, z, n, size, dx, dz, t) {
+  if (typeof debOn !== 'function' || !debOn()) return;
+  n = Math.max(1, Math.round(n * debMul()));
+  for (let k = 0; k < n; k++) {
+    const a = Math.random() * TAU, s = 2 + Math.random() * 6, v = 0.5 + Math.random() * 0.4;
+    debPiece(x + (Math.random() - 0.5) * size * 3, y, z + (Math.random() - 0.5) * size * 3, Math.cos(a) * s + dx * 4, 3 + Math.random() * 7, Math.sin(a) * s + dz * 4, t,
+      size * (0.4 + Math.random() * 0.9), [0.3 * v, 0.29 * v, 0.28 * v], 400, true, Math.random() < 0.3 ? 1 : 0, Math.random() < 0.5);
+  }
+}
+function groundMsCollapse(M, side, sx, sz) {
+  const g = GV.ms && GV.ms[M.id]; if (!g) return;
+  const t = U.uTime.value, h = M.top - GROUND_Y, r = Math.max(1, M.r);
+  if (h > 300) { GV.msFx[M.id] = { kind: 'sink', t0: t, g }; return; }   // 軌道電梯：照舊
+  const F = { t0: t, g, h, r, keep: [], side, landed: false, nextFx: t };
+  GV.msFx[M.id] = F;
+  if (h > r * 3.2) {
+    // 倒向：離開打擊點（加一點亂數）；沒有打擊點就隨機
+    let a = sx != null && Math.hypot(M.x - sx, M.z - sz) > 1 ? Math.atan2(M.z - sz, M.x - sx) : Math.random() * TAU;
+    a += (Math.random() - 0.5) * 0.7;
+    const dx = Math.cos(a), dz = Math.sin(a), T = 2 + Math.sqrt(h) * 0.55;
+    Object.assign(F, { kind: 'fall', dx, dz, a, T });
+    // 殘基：同一棟壓扁成一圈燒焦的底座（共用幾何）
+    const st = g.clone(true); st.scale.set(1.08, MS_FALL.stump, 1.08); st.rotation.set((Math.random() - 0.5) * 0.06, g.rotation.y, (Math.random() - 0.5) * 0.06);
+    msBurnt(st, MS_FALL.burnt * 0.8, F.keep); GV.group.add(st); F.stump = st;
+    // 倒下的塔身：掛在倒向那一側底邊的支點上
+    const P = new THREE.Group(); P.position.set(M.x + dx * r, GROUND_Y, M.z + dz * r);
+    GV.group.add(P); P.add(g); g.position.set(-dx * r, 0, -dz * r); F.pivot = P;
+    F.axis = new THREE.Vector3(dz, 0, -dx);
+    msBurnt(g, MS_FALL.burnt, F.keep);
+    // 掃過的一般建築：塔身碰到它頂端的那一刻壓垮（順著倒的方向倒）
+    const B = GV.bld, Q = GV.bldQ || (GV.bldQ = []);
+    if (B && GV.key === GRD.key) {
+      // 塔身寬度用模型看起來的寬度（碰撞半徑通常比較小）；兩側再往外一圈被落地的衝擊波推倒（往外倒）
+      const L = h * Math.sin(MS_FALL.th) + r, px = P.position.x, pz = P.position.z, seen = new Set(), body = r * 1.45 + 1.5, shock = r * 2.6 + 4, tLand = t + MS_FALL.delay + T;
+      for (let s = -r; s <= L + r * 0.5; s += 5) for (let o = -shock - 3; o <= shock + 3; o += 5) {
+        const L2 = B.idx.get(Math.floor((px + dx * s - dz * o) / 10) * 4099 + Math.floor((pz + dz * s + dx * o) / 10)); if (!L2) continue;
+        for (const j of L2) {
+          if (seen.has(j) || B.ic.array[j * 4 + 1] >= 0 || B.iB[j * 4] <= 0) continue; seen.add(j);
+          const ex = B.iA[j * 4] - px, ez = B.iA[j * 4 + 1] - pz, al = ex * dx + ez * dz, cr = ex * dz - ez * dx, pe = Math.abs(cr);
+          if (al > L + r * 0.5 || al < -r) continue;
+          if (pe <= body * (0.85 + 0.3 * Math.random())) {   // 塔身壓到：碰到頂端的那一刻
+            const th = Math.min(MS_FALL.th, Math.atan2(Math.max(0.5, al), B.ic.array[j * 4 + 2] + B.iB[j * 4] - GROUND_Y + 0.5));
+            Q.push({ i: j, t: t + MS_FALL.delay + T * Math.sqrt(th / MS_FALL.th), a: a + (Math.random() - 0.5) * 0.8, depth: BLD_CHAIN_MAX, x: px - dx * 3, z: pz - dz * 3 });
+          } else if (pe <= shock && Math.random() < 1.15 - (pe - body) / (shock - body)) {   // 衝擊波：離塔身越遠越少、越晚
+            const out = Math.atan2(cr > 0 ? -dx : dx, cr > 0 ? dz : -dz);   // 垂直塔身、往外
+            Q.push({ i: j, t: tLand + (pe - body) / 25 + Math.random() * 0.3, a: out + (Math.random() - 0.5) * 0.6, depth: BLD_CHAIN_MAX, x: B.iA[j * 4] - Math.cos(out) * 5, z: B.iA[j * 4 + 1] - Math.sin(out) * 5 });
+          }
+        }
+      }
+    }
+  } else {
+    const T = 2.5 + Math.sqrt(h) * 0.35, tilt = [(Math.random() - 0.5) * 0.12, (Math.random() - 0.5) * 0.12];
+    Object.assign(F, { kind: 'crumble', T, tilt, s0: g.scale.y });
+    msBurnt(g, MS_FALL.burnt, F.keep);
+    // 周圍的建築被震垮（往外倒）
+    const R = r * 1.5 + 4;
+    groundBldEach(M.x, M.z, R, -1e9, 1e9, (j) => { const B = GV.bld; (GV.bldQ || (GV.bldQ = [])).push({ i: j, t: t + 0.3 + Math.random() * T * 0.8, a: Math.atan2(B.iA[j * 4 + 1] - M.z, B.iA[j * 4] - M.x), depth: BLD_CHAIN_MAX, x: M.x, z: M.z }); });
+    msDebris(M.x, GROUND_Y + h * 0.6, M.z, 24, Math.max(0.7, r * 0.1), 0, 0, t);
+  }
+}
+// 每幀：倒下、塌陷的進度，落地的爆炸、塵土與碎塊，殘骸冒煙
+const _msQ = new THREE.Quaternion();
+function msCollapseFrame(M, F, t) {
+  const u = (t - F.t0 - MS_FALL.delay) / F.T, jx = () => (Math.random() - 0.5) * F.r * 1.6;
+  if (F.kind === 'fall') {
+    const k = Math.max(0, Math.min(1, u)), th = MS_FALL.th * k * k;
+    F.pivot.quaternion.setFromAxisAngle(F.axis, th);
+    F.pivot.position.y = GROUND_Y - F.h * MS_FALL.sink * k;
+    if (u < 1) {   // 倒下途中：折斷處與塔身零星爆炸、掉碎塊
+      if (t >= F.nextFx) {
+        F.nextFx = t + 0.12 + Math.random() * 0.2;
+        const s = Math.random() * F.h, px = F.pivot.position.x + F.dx * s * Math.sin(th), pz = F.pivot.position.z + F.dz * s * Math.sin(th), py = GROUND_Y + s * Math.cos(th);
+        spawnFx(px + jx() * 0.4, py, pz + jx() * 0.4, F.side, 3 + Math.random() * 4, 18);
+        if (Math.random() < 0.6) msDebris(px, py, pz, 3, Math.max(0.6, F.r * 0.09), F.dx, F.dz, t);
+      }
+      return;
+    }
+    if (!F.landed) {   // 落地：沿著塔身一連串爆炸、一長排塵土、碎塊往兩側噴，躺著的塔身冒煙
+      F.landed = true;
+      const L = F.h * Math.sin(MS_FALL.th), n = Math.max(6, Math.round(L / 5));
+      for (let m = 0; m < n; m++) {
+        const s = L * (m + 0.5) / n, x = F.pivot.position.x + F.dx * s, z = F.pivot.position.z + F.dz * s, y = terrainHAt(x, z) + 0.5, side = (Math.random() - 0.5) * F.r * 2;
+        const ox = x - F.dz * side, oz = z + F.dx * side;
+        if (m % 2 === 0) spawnFx(ox, y + Math.random() * F.r, oz, F.side, 4 + Math.random() * 6, 20);
+        for (let p = 0; p < 2; p++) smokePuff(ox, y, oz, t, 14 + Math.random() * 10, F.r * 0.4, F.r * (1.6 + Math.random()), 0.8, WIND[0] * 0.4 - F.dz * (p ? 1 : -1) * 1.5, WIND[1] * 0.4 + F.dx * (p ? 1 : -1) * 1.5, 1.2);
+        msDebris(ox, y + 1, oz, 5, Math.max(0.7, F.r * 0.12), -F.dz * (Math.random() < 0.5 ? 1 : -1), F.dx * (Math.random() < 0.5 ? 1 : -1), t);
+        groundScar(ox, GROUND_Y, oz, F.r * 0.7);
+      }
+      for (const s of [0.25, 0.6, 0.9]) groundPlume(F.pivot.position.x + F.dx * L * s, F.pivot.position.z + F.dz * L * s, t, 240, Math.max(10, F.r * 1.2), 1.2);
+    }
+    return;
+  }
+  // 塌陷：壓扁、歪斜，往下陷一點
+  const k = Math.max(0, Math.min(1, u)), e = 1 - (1 - k) * (1 - k);
+  F.g.scale.y = F.s0 * (1 - 0.68 * e); F.g.rotation.x = F.tilt[0] * e; F.g.rotation.z = F.tilt[1] * e; F.g.position.y = GROUND_Y - F.h * 0.06 * e;
+  if (u < 1 && t >= F.nextFx) {
+    F.nextFx = t + 0.15 + Math.random() * 0.2;
+    spawnFx(M.x + jx(), GROUND_Y + Math.random() * F.h * (1 - 0.6 * e), M.z + jx(), F.side, 3 + Math.random() * 4, 18);
+    smokePuff(M.x + jx(), GROUND_Y + 0.5, M.z + jx(), t, 12 + Math.random() * 8, F.r * 0.3, F.r * 1.4, 0.7, WIND[0] * 0.5, WIND[1] * 0.5, 1.2);
+  }
+  if (u >= 1 && !F.landed) { F.landed = true; groundPlume(M.x, M.z, t, 240, Math.max(10, F.r * 1.3), 1.4); msDebris(M.x, GROUND_Y + 2, M.z, 16, Math.max(0.7, F.r * 0.1), 0, 0, t); }
+}
+// 新的一場：倒下、塌陷的巨型結構恢復原狀
+function msCollapseRestore() {
+  for (const [id, F] of (GV.msFx || []).entries()) {
+    if (!F) continue;
+    for (const [c, m] of F.keep || []) c.material = m;
+    if (F.pivot) { F.pivot.remove(F.g); GV.group.add(F.g); GV.group.remove(F.pivot); }
+    if (F.stump) GV.group.remove(F.stump);
+    F.g.scale.set(1, 1, 1);
+    GV.msFx[id] = null;
+  }
+  GV.msFx = [];
 }
 // 照碰撞箱的範圍走過每一格（同 gRaster）
 function gRasterCells(b, f) {
@@ -799,10 +941,14 @@ function gRasterCells(b, f) {
 function groundMsFrame(t) {
   if (!GRD || !GRD.ms || !GV.ms) return;
   for (const M of GRD.ms) {
-    const g = GV.ms[M.id]; if (!g || !M.dead) continue;
-    const k = Math.min(1, (t - M.deadT) / 10), e = k * k * (3 - 2 * k);
-    g.visible = k < 1; g.position.y = GROUND_Y - e * Math.min(M.top - GROUND_Y, 90) * 0.95; g.rotation.z = e * 0.12 * (M.id % 2 ? 1 : -1); g.rotation.x = e * 0.08;
-    if (k < 1 && Math.random() < 0.15) spawnFx(M.x + (Math.random() - 0.5) * M.r * 2, GROUND_Y + Math.random() * 6, M.z + (Math.random() - 0.5) * M.r * 2, 1, 4, 18);
+    const g = GV.ms[M.id], F = GV.msFx[M.id]; if (!g || !M.dead || !F) continue;
+    if (F.kind === 'sink') {   // 軌道電梯：往下沉、消失
+      const k = Math.min(1, (t - M.deadT) / 10), e = k * k * (3 - 2 * k);
+      g.visible = k < 1; g.position.y = GROUND_Y - e * Math.min(M.top - GROUND_Y, 90) * 0.95; g.rotation.z = e * 0.12 * (M.id % 2 ? 1 : -1); g.rotation.x = e * 0.08;
+      if (k < 1 && Math.random() < 0.15) spawnFx(M.x + (Math.random() - 0.5) * M.r * 2, GROUND_Y + Math.random() * 6, M.z + (Math.random() - 0.5) * M.r * 2, 1, 4, 18);
+      continue;
+    }
+    msCollapseFrame(M, F, t);
   }
   for (const c of GV.climb) if (c.ms != null && GRD.ms[c.ms] && GRD.ms[c.ms].dead) c.m.visible = false;
 }
@@ -810,6 +956,7 @@ function groundMsFrame(t) {
 function groundRestore() {
   const B = GV.bld; if (B) { for (let i = 1; i < B.ic.array.length; i += 4) { B.ic.array[i] = -1; B.ic.array[i + 2] = 0; } B.ic.clearUpdateRanges(); B.ic.needsUpdate = true; B.dirty.length = 0; }
   const S = GV.scars; if (S) { S.s.array.fill(0); S.s.clearUpdateRanges(); S.s.needsUpdate = true; S.head = 0; }
+  msCollapseRestore();
   for (const [id, g] of (GV.ms || []).entries()) if (g && GRD && GRD.ms[id]) { g.visible = true; g.position.set(GRD.ms[id].x, GROUND_Y, GRD.ms[id].z); g.rotation.set(0, 0, 0); }
   for (const c of GV.climb) c.m.visible = true;
   if (GV.beacons) { const a = GV.beacons.pts.geometry.attributes.position; GV.beacons.list.forEach((b, k) => a.setY(k, b.y)); a.needsUpdate = true; }
@@ -1121,7 +1268,7 @@ function groundSync() {
   GV.group.visible = true;
   if (GV.key !== GRD.key) {
     for (const o of GV.group.children.slice()) { GV.group.remove(o); o.traverse((c) => { if (c.geometry) c.geometry.dispose(); }); }
-    for (const m of GV.mats) m.dispose(); GV.mats = []; GV.tur = []; GV.climb = []; GV.defKey = ''; GV.tMat = GV.wMat = null; GV.bld = GV.scars = GV.smoke = null;
+    for (const m of GV.mats) m.dispose(); GV.mats = []; GV.tur = []; GV.climb = []; GV.defKey = ''; GV.tMat = GV.wMat = null; GV.bld = GV.scars = GV.smoke = null; GV.msFx = [];
     if (GV.sky) { scene.remove(GV.sky); GV.sky.material.dispose(); GV.sky.geometry.dispose(); }
     GV.key = GRD.key;
     const P = GRD.S.pal, D = GRD, mat = groundMat(P), G = gbNew(), beacons = [], MG = new Map();
