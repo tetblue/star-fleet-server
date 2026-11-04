@@ -1,0 +1,14 @@
+Star Fleet battle music
+=======================
+Music: Kevin MacLeod (incompetech.com)
+License: Creative Commons Attribution 4.0 (https://creativecommons.org/licenses/by/4.0/)
+Source: https://incompetech.com/music/royalty-free/
+Changes: a section of each track was cut into a seamless loop (3 s equal-power crossfade), normalized and
+re-encoded to 80 kbps MP3 by RUBICON PROTOCOL's scripts/bgm-prep.py (https://github.com/tetblue/rubicon-protocol, MIT).
+
+explore1.mp3 = "Lightless Dawn"        (no contact)
+alert1.mp3   = "Crypto"                (fleets closing in)
+combat1.mp3  = "Cyborg Ninja"          (engagement)
+combat2.mp3  = "Volatile Reaction"     (engagement)
+
+The build packs this folder into web/assets/bgm.js (base64), which the game downloads at startup.

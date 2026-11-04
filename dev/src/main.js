@@ -4113,7 +4113,18 @@ function getModel(key) {
 // 沒分件的模型（還有遠景簡化網格）整座當轉塔。每個實例一組 aRig＝(方位角, 仰角, 開火後經過秒數, 艙蓋開度)。只影響畫面，不影響模擬。
 const RIG_GK = { main: 0, sec: 1, aa: 2, msl: 3 }, RIG_GKC = { m: 0, s: 1, a: 2, x: 3 };
 const RIG_M = 32;   // 每艘船最多幾個掛點有動畫
-const RIG_RULE = { hold: 8, yawRate: 2.2, pitchRate: 1.3, yawT: 2.8, yawF: 0.35, pitchT: [-0.08, 0.75], pitchF: [-0.04, 0.22], kick: 0.06, kickB: { t: 0.025, f: 0.03, l: 0.015, n: 0 } };
+const RIG_RULE = { hold: 8, yawRate: 2.2, pitchRate: 1.3, yawT: 2.8, yawF: 0.35, pitchT: [-0.08, 0.75], pitchF: [-0.04, 0.22], kick: 0.06, kickB: { t: 0.025, f: 0.03, l: 0.015, n: 0 },
+  // 後座的彈簧（移植自 rubicon-protocol 的 mech-spring／mech-fire 的做法：開火＝給一個衝量，阻尼不足的彈簧拉回、稍微回彈）
+  //   spr[砲種]＝[ω 角頻率, ζ 阻尼比]：主砲重、慢；防空輕、快。kickG＝後座量倍率
+  //   hull：大船（航母、戰列、巡洋）主砲開火時船身往後退一點、船頭微微上抬（更慢的彈簧）；amp＝後退（船長的比例）、pitch＝上抬（弧度）
+  spr: [[24, 0.4], [36, 0.45], [52, 0.5], [30, 0.45]], kickG: [1.35, 1, 0.6, 1],
+  hull: { amp: 0.012, pitch: 0.012, w: 9, z: 0.35, types: 3 } };
+// 阻尼不足的彈簧受衝量後的位移（解析解），正規化成最大值＝1；age＜0＝還沒開火
+function rigSpring(age, w, z) {
+  if (age < 0 || age > 8) return 0;
+  const wd = w * Math.sqrt(1 - z * z), tp = Math.atan2(wd, z * w) / wd;
+  return Math.exp(-z * w * age) * Math.sin(wd * age) / (Math.exp(-z * w * tp) * Math.sin(wd * tp));
+}
 const RIG = { ver: -1, n: 0, t: null, p: null, tg: null, yaw: null, pit: null, upd: null };
 function rigAlloc() {
   if (RIG.ver === fleetVersion && RIG.n >= shipCount) return;
@@ -4138,11 +4149,16 @@ function rigFire(i, gk, t0, x, y, z, tg = -1) {
 }
 const RIG_HEAD = /* glsl */`
   attribute vec4 aRig; attribute float aPart; attribute vec3 aPiv;
-  uniform vec2 uYawC; uniform float uKick; uniform float uKickB;
+  uniform vec2 uYawC; uniform float uKick; uniform float uKickB; uniform vec2 uSpr;
   vec3 rigRY(vec3 p, float a){ float c = cos(a), s = sin(a); return vec3(p.x * c + p.z * s, p.y, -p.x * s + p.z * c); }
   vec3 rigRX(vec3 p, float a){ float c = cos(a), s = sin(a); return vec3(p.x, p.y * c + p.z * s, -p.y * s + p.z * c); }
   vec3 rigRZ(vec3 p, float a){ float c = cos(a), s = sin(a); return vec3(p.x * c - p.y * s, p.x * s + p.y * c, p.z); }
-  float rigKick(float age){ return age < 0. ? 0. : age < 0.04 ? age / 0.04 : exp(-(age - 0.04) * 6.); }
+  // 後座：阻尼不足的彈簧（RIG_RULE.spr，同 rigSpring）——猛地往後、拉回時稍微衝過頭再停
+  float rigKick(float age){
+    if (age < 0.) return 0.;
+    float w = uSpr.x, z = uSpr.y, wd = w * sqrt(1. - z * z), tp = atan(wd, z * w) / wd;
+    return exp(-z * w * age) * sin(wd * age) / (exp(-z * w * tp) * sin(wd * tp));
+  }
   vec3 rigApply(vec3 p, float pt){
     if (aPart > 9.5) { vec3 c = aPiv * pt; return rigRZ(p - c, aRig.w * 1.9) + c; }   // 艙蓋：繞鉸鏈掀開
     if (aPart > 1.5) {   // 砲管：後座（沿砲管往後）→ 仰角（繞砲耳）；三根輪流
@@ -4173,7 +4189,8 @@ function rigMat(key) {
   let yc = [0, 0];
   if (pa) for (let i = 0; i < pa.count; i++) if (Math.abs(pa.getX(i) - 1) < 0.1) { const v = g0.attributes.aPiv; yc = [v.getX(i), v.getZ(i)]; break; }
   const mat = M.mat.clone(); mat.userData.themeF = M.mat.userData.themeF;
-  mat.userData.rigU = { uYawC: { value: new THREE.Vector2(yc[0], yc[1]) }, uKick: { value: RIG_RULE.kick }, uKickB: { value: pa ? 0 : RIG_RULE.kickB[sp.mode] || 0 } };
+  const sg = RIG_RULE.spr[sp.g] || RIG_RULE.spr[1], kg = RIG_RULE.kickG[sp.g] || 1;
+  mat.userData.rigU = { uYawC: { value: new THREE.Vector2(yc[0], yc[1]) }, uKick: { value: RIG_RULE.kick * kg }, uKickB: { value: pa ? 0 : (RIG_RULE.kickB[sp.mode] || 0) * kg }, uSpr: { value: new THREE.Vector2(sg[0], sg[1]) } };
   mat.onBeforeCompile = rigOBC; mat.customProgramCacheKey = () => 'fleet-theme-rig';
   if (src) src.rig = !!pa;
   return (M.rigMat = mat);
@@ -4409,7 +4426,13 @@ function update3D(cam = camera, vh = VH) {   // cam／vh：子畫面（其他旗
       if (lod <= 2 && SETTINGS.weapons3D !== false) writeMounts(typeKey(i), lod, forced >= 0 ? Math.min(3, forced + 1) : pickPx > 1500 ? 0 : lod + 1, _a.x, _a.y, _a.z, s.F[0], s.F[1], s.F[2], L, i);
       continue;
     }
-    const pp = ships.snOn[i] ? 0 : (sq.p || 0), cpp = Math.cos(pp);   // 船身跟著陣型俯仰
+    let pp = ships.snOn[i] ? 0 : (sq.p || 0);   // 船身跟著陣型俯仰
+    // 主砲的後座：大船開火時往後退一點、船頭微微上抬（只是畫面；RIG_RULE.hull）
+    const HK = RIG_RULE.hull;
+    let kb = 0;
+    if (lod <= 2 && ships.type[i] < HK.types && RIG.ver === fleetVersion && i < RIG.n) { const tl = RIG.t[i * 4]; if (tl > -1e8) kb = rigSpring(t - tl, HK.w, HK.z); }
+    if (kb) pp += kb * HK.pitch;
+    const cpp = Math.cos(pp);
     const hk = hullKey(i), ms = R3.meshByKey[hk], fx = Math.sin(h) * cpp, fy = Math.sin(pp), fz = Math.cos(h) * cpp;
     if (!ms) continue;
     writeMatrix(ms[lod], _a.x, _a.y, _a.z, fx, fy, fz, L);
@@ -4472,6 +4495,7 @@ function fowFxFrame() {
   const use =(arr, k, col) => { let l = arr[k]; if (!l) { l = lineObj(col, 0.8); arr.push(l); fowFx.g.add(l); } l.visible = true; return l; };
   let nr = 0, np = 0;
   if (on) {
+    if (kb) { const d = kb * HK.amp * L; _a.x -= fx * d; _a.y -= fy * d; _a.z -= fz * d; }
     for (const s of FOW.scans) {
       if (s.side !== me) continue;
       const u = Math.min(1, (t - s.t) / 1.5); if (u >= 1) continue;
@@ -5259,13 +5283,13 @@ const UI_OPTS = [
   ['compass', '艦橋方位儀', '指揮官視角上方的方位刻度與各艦隊方位'],
 ];
 const SETTINGS = (() => {
-  const d = { keyVer: 4, keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, pilotRadar: 'right', terrain: 'splat', debris: 'high', particles: 'high', shake: true, audio: { on: true, m: 0.8, s: 1, u: 0.7 }, ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
+  const d = { keyVer: 4, keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, pilotRadar: 'right', terrain: 'splat', debris: 'high', particles: 'high', shake: true, introCam: true, audio: { on: true, m: 0.8, s: 1, u: 0.7, b: 0.6, sOn: true, uOn: true, bOn: true }, ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
   try { const s = JSON.parse(STORE.getItem('fleet.settings') || 'null'); if (s) { const k0 = { ...(s.keys || {}) };
       // 第 2 版按鍵（指令卡）：舊存檔的鏡頭旋轉 Q／E／R／T、艦橋 B 會和指令卡衝突，沒改過的換成新的預設
       if (!(s.keyVer >= 2)) for (const [id, old] of [['cam_yaw_l', 'KeyQ'], ['cam_yaw_r', 'KeyE'], ['cam_pitch_up', 'KeyR'], ['cam_pitch_dn', 'KeyT'], ['bridge', 'KeyB']]) if (k0[id] === old) delete k0[id];
       if (!(s.keyVer >= 3) && k0.bridge === 'F2') delete k0.bridge;   // 第 3 版：F2 改成全選，艦橋移到 F3
       if (!(s.keyVer >= 4)) for (const id of Object.keys(k0)) if (id.startsWith('cap_')) delete k0[id];   // 第 4 版：艦長改成 A/D 轉向、Q/E 平移、F 技能、G 護航機
-      Object.assign(d.keys, k0); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin', 'pilotRadar', 'terrain', 'debris', 'particles', 'shake']) if (s[k] != null) d[k] = s[k];
+      Object.assign(d.keys, k0); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin', 'pilotRadar', 'terrain', 'debris', 'particles', 'shake', 'introCam']) if (s[k] != null) d[k] = s[k];
       if (s.audio) Object.assign(d.audio, s.audio); } } catch (e) { /* 用預設值 */ }
   return d;
 })();
@@ -5599,6 +5623,7 @@ function frame() {
     sq.label.style.transform = `translate(${(proj.x * 0.5 + 0.5) * VW}px, ${(-proj.y * 0.5 + 0.5) * VH}px) translate(-50%, 0)`;
   }
   U.uSpriteFade.value = 1.0;
+  cineFrame(dt);     // 運鏡：開戰時掃過戰場（cinecam.js）
 
   // 背景視差
   bgMat.uniforms.uOff.value.set(view.target.x * ppu, -view.target.z * Math.sin(ELEV) * ppu);

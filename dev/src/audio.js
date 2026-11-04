@@ -120,6 +120,7 @@ const SND_CREDITS = [   // 設定裡的「音效授權」（CC-BY 需要署名�
   'dklon「Big Explosion」— CC-BY 3.0',
   'JC Sounds「Sci-Fi Pack Vol 1」— CC-BY 4.0',
   'CC0：Black Lodge Games、rubberduck、Kenney、Still North Media、qubodup 等（OpenGameArt）',
+  '配樂：Kevin MacLeod（incompetech.com）「Lightless Dawn」「Crypto」「Cyborg Ninja」「Volatile Reaction」— CC-BY 4.0',
   '音效引擎與素材整理：RUBICON PROTOCOL（MIT）',
 ];
 
@@ -140,6 +141,7 @@ const SND = {
       this.sfx = c.createGain(); this.sfx.connect(this.world);
       this.amb = c.createGain(); this.amb.gain.value = 0; this.amb.connect(this.world);
       this.uiBus = c.createGain(); this.uiBus.connect(this.master);
+      this.bgmBus = c.createGain(); this.bgmBus.gain.value = 0; this.bgmBus.connect(this.master);   // 配樂（不受爆炸的壓低）
       this.buildTail();
       this.setVol();
       const rnd = sndRnd;
@@ -157,24 +159,21 @@ const SND = {
     if (!this.ctx) return;
     const A = sndOpts(), t = this.ctx.currentTime;
     this.master.gain.setTargetAtTime(A.on ? 0.8 * A.m : 0, t, 0.03);
-    this.world.gain.setTargetAtTime(A.s, t, 0.03);
-    this.uiBus.gain.setTargetAtTime(A.u, t, 0.03);
+    this.world.gain.setTargetAtTime(A.sOn ? A.s : 0, t, 0.03);
+    this.uiBus.gain.setTargetAtTime(A.uOn ? A.u : 0, t, 0.03);
+    this.bgmBus.gain.setTargetAtTime(A.bOn ? A.b * 0.5 : 0, t, 0.1);
   },
   b64(s) { const bin = atob(s), arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i); return arr.buffer; },
+  // 音效包：遊戲啟動時已經開始下載（sndPreload）；這裡等它到了再解碼（要有 AudioContext，所以在第一次點擊之後）
   loadPack() {
     if (this.packLoading) return;
     this.packLoading = true;
-    const go = () => {
+    sndPreload('sfx').then(() => {
       const P = window.__SFX; if (!P) return;
       const keys = Object.keys(P); let n = 0;
       const done = () => { if (++n === keys.length) { this.pack = true; try { delete window.__SFX; } catch (e) { window.__SFX = null; } } };
       for (const k of keys) this.ctx.decodeAudioData(this.b64(P[k]), (b) => { this.buf[k] = b; done(); }, done);
-    };
-    if (window.__SFX) return go();
-    const s = document.createElement('script');
-    s.src = (window.__ASSETS && window.__ASSETS.sfx) || 'assets/sfx.js';
-    s.onload = go; s.onerror = () => {};
-    document.head.appendChild(s);
+    });
   },
   // 太空裡沒有回音：只留一點很淡的反射，讓大的聲音有尾巴（兩條有回授的延遲線，左右分開）
   buildTail() {
@@ -356,7 +355,8 @@ const SND = {
 
 // 數量 → 音量倍率（一群越多發越大聲，但不會線性疊上去）
 function sndCount(n) { return Math.min(2, 1 + 0.4 * Math.log2(Math.max(1, n))); }
-function sndOpts() { const A = SETTINGS.audio || {}; return { on: A.on !== false, m: A.m ?? 0.8, s: A.s ?? 1, u: A.u ?? 0.7 }; }
+// on 主開關；sOn/uOn/bOn 各類開關（關＝靜音，配樂關＝停播）
+function sndOpts() { const A = SETTINGS.audio || {}; return { on: A.on !== false, m: A.m ?? 0.8, s: A.s ?? 1, u: A.u ?? 0.7, b: A.b ?? 0.6, sOn: A.sOn !== false, uOn: A.uOn !== false, bOn: A.bOn !== false }; }
 // 聽者：一般＝鏡頭看的那一點（拉得越遠、聽的範圍越大但整體小聲一點）；駕駛、艦長、艦橋＝鏡頭本身
 // 回傳 { g 音量, pan 左右（-1～1）, f 低通 Hz, u 遠近（0 近～1 遠） }；太遠＝null
 const _sndP = new THREE.Vector3();
@@ -405,6 +405,7 @@ function sndEv(k, x, y, z, t, a = 0, b = 0, own = false) {
 }
 // 3D 砲塔的開火紀錄（main.js 的 rigFire）＝每一門砲開火：位置用分艦隊的中心（不必再算船的位置）
 function sndFire(i, gk, t0) {
+  BGM.shots++;   // 配樂的戰況（不管距離、聲音開不開都算）
   if (!SND.live) return;
   const q = squadrons[ships.sq[i]]; if (!q || q.bg) return;
   sndEv('f', q.x, q.y || 0, q.z, t0, gk, ships.type[i], CAP.on && !!CAP.byI && CAP.byI[i] >= 0);
@@ -436,6 +437,7 @@ let _sndAmbT = 0;
 function sndFrame(dt) {
   const C = SND.ctx;
   SND.live = !!C && C.state === 'running' && sndOpts().on && SND_PHASES.includes(GAME.phase) && !document.hidden;
+  bgmFrame(dt, SND.live && sndOpts().bOn && sndOpts().b > 0);   // 動態配樂
   if (!SND.live) { if (SND.ev.size) SND.ev.clear(); if (C && Object.keys(SND.loops).length) SND.stopLoops(); return; }
   _sndR = sndRef(); _sndC = Math.max(40, _sndR.ref * 0.6);   // 合併的區塊大小：跟著聽的範圍
   const now = U.uTime.value, due = [];
@@ -484,7 +486,99 @@ function sndPlayGroup(g) {
   }
 }
 
-window.__snd = { SND, SND_GUN, sndCue, sndEv, sndPlayGroup, sndPilotShot, sndPilotHurt };   // 除錯、測試用
+// ───── 啟動時下載：音效包、配樂（使用者要求：需要的檔案在遊戲啟動時就下載，不等第一次出聲） ─────
+// 回傳 Promise（下載完成、或失敗也 resolve）；解碼要等 AudioContext（第一次點擊）
+const _sndPre = {};
+function sndPreload(kind) {
+  if (_sndPre[kind]) return _sndPre[kind];
+  const glob = kind === 'sfx' ? '__SFX' : '__BGM';
+  return (_sndPre[kind] = new Promise((res) => {
+    if (window[glob] || typeof document === 'undefined') return res(!!window[glob]);
+    const s = document.createElement('script');
+    s.src = (window.__ASSETS && window.__ASSETS[kind]) || `assets/${kind}.js`;
+    s.onload = () => res(true); s.onerror = () => res(false);
+    document.head.appendChild(s);
+  }));
+}
+if (typeof document !== 'undefined') { sndPreload('sfx'); sndPreload('bgm'); }
+
+// ───── 動態配樂（移植自 rubicon-protocol 的 game/bgm.js 的分級做法） ─────
+// 三級：explore 沒有接觸（雙方最近的分艦隊相距很遠）、alert 逼近（進入射程附近，還沒開火）、combat 交戰（最近幾秒有開火）。
+// 往上切換快（0.8 秒）、往下慢（交戰停火 8 秒後才降級），曲子之間交叉淡化；交戰曲每場隨機選一首。
+// 用 <audio>（Blob 網址）邊播邊解碼：整首解成 AudioBuffer 會吃掉上百 MB 的記憶體。暫停時配樂降低音量。
+const BGM_TIERS = { explore: ['explore1'], alert: ['alert1'], combat: ['combat1', 'combat2'] };
+const BGM_RULE = { alertD: 1500, exploreD: 2100, combatShots: 3, combatHold: 8, upHold: 0.8, fade: 1.6 };
+const BGM = { els: {}, cur: '', want: '', tier: 'explore', tierT: 0, upT: 0, shots: 0, rate: 0, lastCombat: -99, chkT: 0, minD: 1e9, combatKey: '', battleKey: null, ready: false, loading: false };
+function bgmLoad() {
+  if (BGM.loading || !SND.ctx) return;
+  BGM.loading = true;
+  sndPreload('bgm').then(() => {
+    const P = window.__BGM; if (!P) return;
+    for (const k of Object.keys(P)) {
+      const bin = atob(P[k]), arr = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      const el = new Audio(URL.createObjectURL(new Blob([arr], { type: 'audio/mpeg' })));
+      el.loop = true; el.preload = 'auto';
+      const g = SND.ctx.createGain(); g.gain.value = 0;
+      try { SND.ctx.createMediaElementSource(el).connect(g); } catch (e) { continue; }
+      g.connect(SND.bgmBus);
+      BGM.els[k] = { el, g, v: 0, idleT: 0 };
+    }
+    try { delete window.__BGM; } catch (e) { window.__BGM = null; }
+    BGM.ready = true;
+  });
+}
+// 雙方最近的分艦隊距離（每 0.5 秒算一次）
+function bgmMinDist() {
+  let best = 1e9;
+  const A = [], B = [];
+  for (const q of squadrons) { if (q.alive <= 0 || q.bg || q.hidden) continue; (q.side === 0 ? A : B).push(q); }
+  for (const a of A) for (const b of B) { const d = Math.hypot(a.x - b.x, a.z - b.z); if (d < best) best = d; }
+  return best;
+}
+function bgmFrame(dt, on) {
+  const C = SND.ctx;
+  if (!C) return;
+  if (on && !BGM.ready) bgmLoad();
+  let want = '';
+  if (on && BGM.ready) {
+    // 新的一場：重新從探索開始，交戰曲換一首
+    const bk = typeof battleSeed !== 'undefined' ? battleSeed : 0;
+    if (bk !== BGM.battleKey) { BGM.battleKey = bk; BGM.tier = 'explore'; BGM.lastCombat = -99; BGM.shots = 0; BGM.rate = 0; const L = BGM_TIERS.combat; BGM.combatKey = L[Math.floor(sndRnd() * L.length)]; }
+    const now = C.currentTime;
+    BGM.chkT -= dt;
+    if (BGM.chkT <= 0) {
+      BGM.chkT = 0.5;
+      BGM.minD = bgmMinDist();
+      BGM.rate = BGM.rate * 0.6 + BGM.shots * 0.4 * 2; BGM.shots = 0;   // 每秒開火數（平滑）
+    }
+    if (!paused && BGM.rate >= BGM_RULE.combatShots) BGM.lastCombat = now;
+    // 交戰：最近 combatHold 秒內有開火；逼近：相距 alertD 內（已經逼近過的，要拉開到 exploreD 外才回到探索）
+    let target;
+    if (now - BGM.lastCombat < BGM_RULE.combatHold) target = 'combat';
+    else if (BGM.minD < BGM_RULE.alertD) target = 'alert';
+    else if (BGM.tier !== 'explore' && BGM.minD < BGM_RULE.exploreD) target = 'alert';
+    else target = 'explore';
+    const rank = { explore: 0, alert: 1, combat: 2 };
+    if (target !== BGM.tier) {
+      BGM.upT += dt;
+      if (rank[target] < rank[BGM.tier] || BGM.upT >= BGM_RULE.upHold) { BGM.tier = target; BGM.upT = 0; }
+    } else BGM.upT = 0;
+    want = BGM.tier === 'combat' ? BGM.combatKey : BGM_TIERS[BGM.tier][0];
+    if (GAME.result) want = '';   // 結算：淡出
+  }
+  BGM.want = want;
+  const pv = paused ? 0.45 : 1, t = C.currentTime;
+  for (const [k, E] of Object.entries(BGM.els)) {
+    const tv = k === want ? pv : 0;
+    if (tv > 0 && E.el.paused) { E.el.play().catch(() => {}); E.idleT = 0; }
+    if (Math.abs(E.v - tv) > 0.001) { E.v = tv; E.g.gain.setTargetAtTime(tv, t, BGM_RULE.fade / 3); }
+    if (tv === 0 && !E.el.paused) { E.idleT += dt; if (E.idleT > BGM_RULE.fade * 2.5) { E.el.pause(); E.idleT = 0; } }   // 淡出完了才停（省解碼）
+  }
+  BGM.cur = want;
+}
+
+window.__snd = { SND, BGM, SND_GUN, sndCue, sndEv, sndPlayGroup, sndPilotShot, sndPilotHurt };   // 除錯、測試用
 // ───── 啟動：第一次點擊／按鍵建立 AudioContext；按鈕、勾選的介面音 ─────
 function sndGesture() { if (!SND.ctx) SND.init(); else if (SND.ctx.state === 'suspended') SND.ctx.resume(); }
 addEventListener('pointerdown', sndGesture, true);

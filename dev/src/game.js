@@ -1250,7 +1250,7 @@ function startBattle() {
   paused = false; setSpeed(SETTINGS.speedIdx);
   force3D(); if (GAME.op === 2) enterBridge();   // 擬真：開戰直接上艦橋
   if (opts.fow && SETTINGS.autoScan === false) issue('autoscan', { on: false });   // 戰爭迷霧：玩家關掉了自動掃描（記在命令裡）
-  cutPlay(cutSpecStart(GAME.sc)); sndCue('start');
+  cutPlay(cutSpecStart(GAME.sc)); sndCue('start'); cineIntroStart();   // 開戰運鏡（cinecam.js）
   toast(`${GAME.sc.name}　開戰！${GAME.op ? `（${OP_LEVELS[GAME.op].name}難度）` : ''}（${keyText('pause')} 暫停、${keyText('speed_up')}／${keyText('speed_down')} 調速度、${keyText('attack')}＋左鍵點敵軍＝指定攻擊）`);
 }
 const _fmtT = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;

@@ -8,15 +8,16 @@ import * as esbuild from 'esbuild';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const src = path.join(root, 'src'), web = path.join(root, '..', 'web');
-const parts = ['audio.js', 'particles.js', 'main.js', 'data.js', 'ground.js', 'terrain.js', 'debris.js', 'mounts_default.js', 'weapons.js', 'game.js', 'campaign.js', 'story.js', 'story_war.js', 'tavern.js', 'dock.js', 'sim.js', 'building.js', 'tutorial.js', 'watch.js', 'multi.js', 'cutin.js', 'overlay.js', 'tac.js', 'bridge.js', 'pilot.js', 'ground_pilot.js', 'captain.js', 'hangar.js', 'hud.js', 'settings.js', 'paint_link.js', 'boot.js'];
+const parts = ['audio.js', 'particles.js', 'cinecam.js', 'main.js', 'data.js', 'ground.js', 'terrain.js', 'debris.js', 'mounts_default.js', 'weapons.js', 'game.js', 'campaign.js', 'story.js', 'story_war.js', 'tavern.js', 'dock.js', 'sim.js', 'building.js', 'tutorial.js', 'watch.js', 'multi.js', 'cutin.js', 'overlay.js', 'tac.js', 'bridge.js', 'pilot.js', 'ground_pilot.js', 'captain.js', 'hangar.js', 'hud.js', 'settings.js', 'paint_link.js', 'boot.js'];
 fs.writeFileSync(path.join(src, '_entry.js'), parts.map((f) => fs.readFileSync(path.join(src, f), 'utf8')).join('\n'), 'utf8');
 fs.mkdirSync(path.join(web, 'assets'), { recursive: true });
-// 音效（audio.js）：dev/sfx 的 mp3 → web/assets/sfx.js（window.__SFX＝{鍵: base64}），遊戲第一次出聲時用 <script> 載入；授權寫在檔頭
-{
-  const dir = path.join(root, 'sfx'), files = fs.readdirSync(dir).filter((f) => f.endsWith('.mp3')).sort();
+// 音效、配樂（audio.js）：dev/sfx、dev/bgm 的 mp3 → web/assets/sfx.js、bgm.js（window.__SFX／__BGM＝{鍵: base64}），
+// 遊戲啟動時用 <script> 下載；授權寫在檔頭
+for (const [folder, out, glob] of [['sfx', 'sfx.js', '__SFX'], ['bgm', 'bgm.js', '__BGM']]) {
+  const dir = path.join(root, folder), files = fs.readdirSync(dir).filter((f) => f.endsWith('.mp3')).sort();
   const credits = fs.readFileSync(path.join(dir, 'CREDITS.txt'), 'utf8').replaceAll('*/', '* /');
   const body = files.map((f) => `${JSON.stringify(f.slice(0, -4))}:"${fs.readFileSync(path.join(dir, f)).toString('base64')}"`).join(',\n');
-  fs.writeFileSync(path.join(web, 'assets', 'sfx.js'), `/*\n${credits}*/\nwindow.__SFX={\n${body}};\n`, 'utf8');
+  fs.writeFileSync(path.join(web, 'assets', out), `/*\n${credits}*/\nwindow.${glob}={\n${body}};\n`, 'utf8');
 }
 await esbuild.build({ entryPoints: [path.join(src, '_entry.js')], bundle: true, minify: true, format: 'iife', outfile: path.join(web, 'game.js'), logLevel: 'warning' });
 const d = new Date(), p2 = (n) => String(n).padStart(2, '0');

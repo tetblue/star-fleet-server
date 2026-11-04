@@ -120,6 +120,7 @@ const SND_CREDITS = [   // 設定裡的「音效授權」（CC-BY 需要署名�
   'dklon「Big Explosion」— CC-BY 3.0',
   'JC Sounds「Sci-Fi Pack Vol 1」— CC-BY 4.0',
   'CC0：Black Lodge Games、rubberduck、Kenney、Still North Media、qubodup 等（OpenGameArt）',
+  '配樂：Kevin MacLeod（incompetech.com）「Lightless Dawn」「Crypto」「Cyborg Ninja」「Volatile Reaction」— CC-BY 4.0',
   '音效引擎與素材整理：RUBICON PROTOCOL（MIT）',
 ];
 
@@ -140,6 +141,7 @@ const SND = {
       this.sfx = c.createGain(); this.sfx.connect(this.world);
       this.amb = c.createGain(); this.amb.gain.value = 0; this.amb.connect(this.world);
       this.uiBus = c.createGain(); this.uiBus.connect(this.master);
+      this.bgmBus = c.createGain(); this.bgmBus.gain.value = 0; this.bgmBus.connect(this.master);   // 配樂（不受爆炸的壓低）
       this.buildTail();
       this.setVol();
       const rnd = sndRnd;
@@ -157,24 +159,21 @@ const SND = {
     if (!this.ctx) return;
     const A = sndOpts(), t = this.ctx.currentTime;
     this.master.gain.setTargetAtTime(A.on ? 0.8 * A.m : 0, t, 0.03);
-    this.world.gain.setTargetAtTime(A.s, t, 0.03);
-    this.uiBus.gain.setTargetAtTime(A.u, t, 0.03);
+    this.world.gain.setTargetAtTime(A.sOn ? A.s : 0, t, 0.03);
+    this.uiBus.gain.setTargetAtTime(A.uOn ? A.u : 0, t, 0.03);
+    this.bgmBus.gain.setTargetAtTime(A.bOn ? A.b * 0.5 : 0, t, 0.1);
   },
   b64(s) { const bin = atob(s), arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i); return arr.buffer; },
+  // 音效包：遊戲啟動時已經開始下載（sndPreload）；這裡等它到了再解碼（要有 AudioContext，所以在第一次點擊之後）
   loadPack() {
     if (this.packLoading) return;
     this.packLoading = true;
-    const go = () => {
+    sndPreload('sfx').then(() => {
       const P = window.__SFX; if (!P) return;
       const keys = Object.keys(P); let n = 0;
       const done = () => { if (++n === keys.length) { this.pack = true; try { delete window.__SFX; } catch (e) { window.__SFX = null; } } };
       for (const k of keys) this.ctx.decodeAudioData(this.b64(P[k]), (b) => { this.buf[k] = b; done(); }, done);
-    };
-    if (window.__SFX) return go();
-    const s = document.createElement('script');
-    s.src = (window.__ASSETS && window.__ASSETS.sfx) || 'assets/sfx.js';
-    s.onload = go; s.onerror = () => {};
-    document.head.appendChild(s);
+    });
   },
   // 太空裡沒有回音：只留一點很淡的反射，讓大的聲音有尾巴（兩條有回授的延遲線，左右分開）
   buildTail() {
@@ -356,7 +355,8 @@ const SND = {
 
 // 數量 → 音量倍率（一群越多發越大聲，但不會線性疊上去）
 function sndCount(n) { return Math.min(2, 1 + 0.4 * Math.log2(Math.max(1, n))); }
-function sndOpts() { const A = SETTINGS.audio || {}; return { on: A.on !== false, m: A.m ?? 0.8, s: A.s ?? 1, u: A.u ?? 0.7 }; }
+// on 主開關；sOn/uOn/bOn 各類開關（關＝靜音，配樂關＝停播）
+function sndOpts() { const A = SETTINGS.audio || {}; return { on: A.on !== false, m: A.m ?? 0.8, s: A.s ?? 1, u: A.u ?? 0.7, b: A.b ?? 0.6, sOn: A.sOn !== false, uOn: A.uOn !== false, bOn: A.bOn !== false }; }
 // 聽者：一般＝鏡頭看的那一點（拉得越遠、聽的範圍越大但整體小聲一點）；駕駛、艦長、艦橋＝鏡頭本身
 // 回傳 { g 音量, pan 左右（-1～1）, f 低通 Hz, u 遠近（0 近～1 遠） }；太遠＝null
 const _sndP = new THREE.Vector3();
@@ -405,6 +405,7 @@ function sndEv(k, x, y, z, t, a = 0, b = 0, own = false) {
 }
 // 3D 砲塔的開火紀錄（main.js 的 rigFire）＝每一門砲開火：位置用分艦隊的中心（不必再算船的位置）
 function sndFire(i, gk, t0) {
+  BGM.shots++;   // 配樂的戰況（不管距離、聲音開不開都算）
   if (!SND.live) return;
   const q = squadrons[ships.sq[i]]; if (!q || q.bg) return;
   sndEv('f', q.x, q.y || 0, q.z, t0, gk, ships.type[i], CAP.on && !!CAP.byI && CAP.byI[i] >= 0);
@@ -436,6 +437,7 @@ let _sndAmbT = 0;
 function sndFrame(dt) {
   const C = SND.ctx;
   SND.live = !!C && C.state === 'running' && sndOpts().on && SND_PHASES.includes(GAME.phase) && !document.hidden;
+  bgmFrame(dt, SND.live && sndOpts().bOn && sndOpts().b > 0);   // 動態配樂
   if (!SND.live) { if (SND.ev.size) SND.ev.clear(); if (C && Object.keys(SND.loops).length) SND.stopLoops(); return; }
   _sndR = sndRef(); _sndC = Math.max(40, _sndR.ref * 0.6);   // 合併的區塊大小：跟著聽的範圍
   const now = U.uTime.value, due = [];
@@ -484,7 +486,99 @@ function sndPlayGroup(g) {
   }
 }
 
-window.__snd = { SND, SND_GUN, sndCue, sndEv, sndPlayGroup, sndPilotShot, sndPilotHurt };   // 除錯、測試用
+// ───── 啟動時下載：音效包、配樂（使用者要求：需要的檔案在遊戲啟動時就下載，不等第一次出聲） ─────
+// 回傳 Promise（下載完成、或失敗也 resolve）；解碼要等 AudioContext（第一次點擊）
+const _sndPre = {};
+function sndPreload(kind) {
+  if (_sndPre[kind]) return _sndPre[kind];
+  const glob = kind === 'sfx' ? '__SFX' : '__BGM';
+  return (_sndPre[kind] = new Promise((res) => {
+    if (window[glob] || typeof document === 'undefined') return res(!!window[glob]);
+    const s = document.createElement('script');
+    s.src = (window.__ASSETS && window.__ASSETS[kind]) || `assets/${kind}.js`;
+    s.onload = () => res(true); s.onerror = () => res(false);
+    document.head.appendChild(s);
+  }));
+}
+if (typeof document !== 'undefined') { sndPreload('sfx'); sndPreload('bgm'); }
+
+// ───── 動態配樂（移植自 rubicon-protocol 的 game/bgm.js 的分級做法） ─────
+// 三級：explore 沒有接觸（雙方最近的分艦隊相距很遠）、alert 逼近（進入射程附近，還沒開火）、combat 交戰（最近幾秒有開火）。
+// 往上切換快（0.8 秒）、往下慢（交戰停火 8 秒後才降級），曲子之間交叉淡化；交戰曲每場隨機選一首。
+// 用 <audio>（Blob 網址）邊播邊解碼：整首解成 AudioBuffer 會吃掉上百 MB 的記憶體。暫停時配樂降低音量。
+const BGM_TIERS = { explore: ['explore1'], alert: ['alert1'], combat: ['combat1', 'combat2'] };
+const BGM_RULE = { alertD: 1500, exploreD: 2100, combatShots: 3, combatHold: 8, upHold: 0.8, fade: 1.6 };
+const BGM = { els: {}, cur: '', want: '', tier: 'explore', tierT: 0, upT: 0, shots: 0, rate: 0, lastCombat: -99, chkT: 0, minD: 1e9, combatKey: '', battleKey: null, ready: false, loading: false };
+function bgmLoad() {
+  if (BGM.loading || !SND.ctx) return;
+  BGM.loading = true;
+  sndPreload('bgm').then(() => {
+    const P = window.__BGM; if (!P) return;
+    for (const k of Object.keys(P)) {
+      const bin = atob(P[k]), arr = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      const el = new Audio(URL.createObjectURL(new Blob([arr], { type: 'audio/mpeg' })));
+      el.loop = true; el.preload = 'auto';
+      const g = SND.ctx.createGain(); g.gain.value = 0;
+      try { SND.ctx.createMediaElementSource(el).connect(g); } catch (e) { continue; }
+      g.connect(SND.bgmBus);
+      BGM.els[k] = { el, g, v: 0, idleT: 0 };
+    }
+    try { delete window.__BGM; } catch (e) { window.__BGM = null; }
+    BGM.ready = true;
+  });
+}
+// 雙方最近的分艦隊距離（每 0.5 秒算一次）
+function bgmMinDist() {
+  let best = 1e9;
+  const A = [], B = [];
+  for (const q of squadrons) { if (q.alive <= 0 || q.bg || q.hidden) continue; (q.side === 0 ? A : B).push(q); }
+  for (const a of A) for (const b of B) { const d = Math.hypot(a.x - b.x, a.z - b.z); if (d < best) best = d; }
+  return best;
+}
+function bgmFrame(dt, on) {
+  const C = SND.ctx;
+  if (!C) return;
+  if (on && !BGM.ready) bgmLoad();
+  let want = '';
+  if (on && BGM.ready) {
+    // 新的一場：重新從探索開始，交戰曲換一首
+    const bk = typeof battleSeed !== 'undefined' ? battleSeed : 0;
+    if (bk !== BGM.battleKey) { BGM.battleKey = bk; BGM.tier = 'explore'; BGM.lastCombat = -99; BGM.shots = 0; BGM.rate = 0; const L = BGM_TIERS.combat; BGM.combatKey = L[Math.floor(sndRnd() * L.length)]; }
+    const now = C.currentTime;
+    BGM.chkT -= dt;
+    if (BGM.chkT <= 0) {
+      BGM.chkT = 0.5;
+      BGM.minD = bgmMinDist();
+      BGM.rate = BGM.rate * 0.6 + BGM.shots * 0.4 * 2; BGM.shots = 0;   // 每秒開火數（平滑）
+    }
+    if (!paused && BGM.rate >= BGM_RULE.combatShots) BGM.lastCombat = now;
+    // 交戰：最近 combatHold 秒內有開火；逼近：相距 alertD 內（已經逼近過的，要拉開到 exploreD 外才回到探索）
+    let target;
+    if (now - BGM.lastCombat < BGM_RULE.combatHold) target = 'combat';
+    else if (BGM.minD < BGM_RULE.alertD) target = 'alert';
+    else if (BGM.tier !== 'explore' && BGM.minD < BGM_RULE.exploreD) target = 'alert';
+    else target = 'explore';
+    const rank = { explore: 0, alert: 1, combat: 2 };
+    if (target !== BGM.tier) {
+      BGM.upT += dt;
+      if (rank[target] < rank[BGM.tier] || BGM.upT >= BGM_RULE.upHold) { BGM.tier = target; BGM.upT = 0; }
+    } else BGM.upT = 0;
+    want = BGM.tier === 'combat' ? BGM.combatKey : BGM_TIERS[BGM.tier][0];
+    if (GAME.result) want = '';   // 結算：淡出
+  }
+  BGM.want = want;
+  const pv = paused ? 0.45 : 1, t = C.currentTime;
+  for (const [k, E] of Object.entries(BGM.els)) {
+    const tv = k === want ? pv : 0;
+    if (tv > 0 && E.el.paused) { E.el.play().catch(() => {}); E.idleT = 0; }
+    if (Math.abs(E.v - tv) > 0.001) { E.v = tv; E.g.gain.setTargetAtTime(tv, t, BGM_RULE.fade / 3); }
+    if (tv === 0 && !E.el.paused) { E.idleT += dt; if (E.idleT > BGM_RULE.fade * 2.5) { E.el.pause(); E.idleT = 0; } }   // 淡出完了才停（省解碼）
+  }
+  BGM.cur = want;
+}
+
+window.__snd = { SND, BGM, SND_GUN, sndCue, sndEv, sndPlayGroup, sndPilotShot, sndPilotHurt };   // 除錯、測試用
 // ───── 啟動：第一次點擊／按鍵建立 AudioContext；按鈕、勾選的介面音 ─────
 function sndGesture() { if (!SND.ctx) SND.init(); else if (SND.ctx.state === 'suspended') SND.ctx.resume(); }
 addEventListener('pointerdown', sndGesture, true);
@@ -925,6 +1019,100 @@ function pfxFrame() {
   pfxRibbons(t);   // 近地作戰：飛彈的白煙帶
 }
 window.__pfx = { PFX, RIB, pfxExplode, pfxHit, pfxKill, pfxShake };   // 除錯、測試用
+
+// ═══════════════════════ 運鏡：關鍵影格的鏡頭（參考 rubicon-protocol 的 game/cine.js 的 cineCamera，MIT） ═══════════════════════
+// 鍵：{ t 秒, x, z 看的點, h 視野高度, yaw, pitch }；位置用 Catmull-Rom 曲線（平順通過每個鍵）、高度用對數內插、角度取最短轉法。
+// 整段再套一次緩入緩出。只改戰場鏡頭（view），不碰模擬；播放期間暫停戰鬥，任何按鍵或點擊略過。
+// 目前用在：開戰運鏡（cineIntroStart，設定「開戰運鏡」）。之後的劇情過場也可以用 cinePlay(keys, onEnd)。
+const CINE = { on: false, pend: null, keys: null, T: 0, dur: 0, wasPaused: false, onEnd: null };
+
+function cineEase(u) { return u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2; }
+const cineCR = (p0, p1, p2, p3, u) => { const u2 = u * u, u3 = u2 * u; return 0.5 * (2 * p1 + (-p0 + p2) * u + (2 * p0 - 5 * p1 + 4 * p2 - p3) * u2 + (-p0 + 3 * p1 - 3 * p2 + p3) * u3); };
+// 在時間 T 的鏡頭（view 的欄位）
+function cineEval(K, T) {
+  const n = K.length;
+  if (T <= K[0].t) return K[0];
+  if (T >= K[n - 1].t) return K[n - 1];
+  let i = 0; while (i < n - 2 && T > K[i + 1].t) i++;
+  const a = K[Math.max(0, i - 1)], b = K[i], c = K[i + 1], d = K[Math.min(n - 1, i + 2)], u = (T - b.t) / (c.t - b.t);
+  const ang = (p, q) => p + wrapAngle(q - p);   // 角度：取最短的轉法
+  const yb = b.yaw, yc = ang(yb, c.yaw), ya = ang(yb, a.yaw), yd = ang(yc, d.yaw);
+  return {
+    x: cineCR(a.x, b.x, c.x, d.x, u), z: cineCR(a.z, b.z, c.z, d.z, u),
+    h: Math.exp(cineCR(Math.log(a.h), Math.log(b.h), Math.log(c.h), Math.log(d.h), u)),
+    yaw: cineCR(ya, yb, yc, yd, u), pitch: cineCR(a.pitch, b.pitch, c.pitch, d.pitch, u),
+  };
+}
+function cineApply(v) {
+  view.target.x = v.x; view.target.z = v.z; view.height = Math.max(view.minH, Math.min(view.maxH, v.h));
+  view.yaw = v.yaw; view.pitch = Math.max(0.12, Math.min(1.45, v.pitch));
+  updateCamera();
+}
+// 播一段運鏡：keys 的 t 從 0 開始；播完（或略過）回到最後一個鍵，呼叫 onEnd
+function cinePlay(keys, onEnd) {
+  CINE.on = true; CINE.keys = keys; CINE.T = 0; CINE.dur = keys[keys.length - 1].t; CINE.onEnd = onEnd || null;
+  CINE.wasPaused = paused; paused = true; updateTimeUI();
+  camAnim = null;
+}
+function cineStop() {
+  if (!CINE.on) return;
+  const K = CINE.keys;
+  CINE.on = false; cineApply(K[K.length - 1]);
+  paused = CINE.wasPaused; updateTimeUI();
+  const f = CINE.onEnd; CINE.onEnd = null; if (f) f();
+}
+
+// ───── 開戰運鏡：從敵軍掃過整個戰場、經過我軍，回到指揮的視角 ─────
+// 開戰時先排定（cineIntroStart），下一幀才開始：那時候切 3D 的鏡頭動畫、駕駛／艦長／艦橋都已經設定好
+function cineIntroStart() {
+  if (SETTINGS.introCam === false || NET.on || GAME.replaying || GAME.watch) return;
+  if (typeof TUT !== 'undefined' && TUT.L) return;   // 教學關卡不播
+  CINE.pend = { t: 0 };
+}
+function cineIntroBuild() {
+  if (PL.on || CAP.on || BR.on || GAME.phase !== 'battle') return null;
+  const ps = GAME.playerSide, c = [{ x: 0, z: 0, n: 0 }, { x: 0, z: 0, n: 0 }];
+  for (const q of squadrons) { if (q.alive <= 0 || q.bg || q.hidden) continue; const C = c[q.side === ps ? 0 : 1]; C.x += q.x * q.alive; C.z += q.z * q.alive; C.n += q.alive; }
+  if (!c[0].n || !c[1].n) return null;
+  for (const C of c) { C.x /= C.n; C.z /= C.n; }
+  // 終點＝現在的指揮視角（切 3D 的鏡頭動畫還在跑就用它的終點）
+  const E = camAnim ? { ...camAnim.to } : { x: view.target.x, z: view.target.z, h: view.height, yaw: view.yaw, pitch: view.pitch };
+  camAnim = null;
+  const me = c[0], cl = (v, a, b) => Math.max(a, Math.min(b, v));
+  // 戰爭迷霧：不能把鏡頭帶到敵軍那裡（會洩漏位置）——改從地圖中央開始，只掃過我軍
+  let en = c[1];
+  if (typeof fowView === 'function' && fowView()) {
+    const B = MAP_BOUNDS, mx = (B.x0 + B.x1) / 2, mz = (B.z0 + B.z1) / 2;
+    en = { x: mx + (mx - me.x) * 0.3, z: mz + (mz - me.z) * 0.3 };   // 地圖中央再往前一點（我軍看出去的方向）
+  }
+  const D = Math.hypot(en.x - me.x, en.z - me.z), mid = { x: (me.x + en.x) / 2, z: (me.z + en.z) / 2 }, p3 = mode3D;
+  return [
+    { t: 0, x: en.x, z: en.z, h: cl(D * 0.45, 240, 900), yaw: E.yaw + (p3 ? 0.8 : 0), pitch: p3 ? 0.26 : E.pitch },   // 敵軍：低角度
+    { t: 2.1, x: mid.x, z: mid.z, h: cl(D * 0.95, 420, 1700), yaw: E.yaw + (p3 ? 0.35 : 0), pitch: p3 ? 0.62 : E.pitch },   // 拉高：整個戰場
+    { t: 3.9, x: me.x, z: me.z, h: cl(D * 0.42, 220, 800), yaw: E.yaw - (p3 ? 0.25 : 0), pitch: p3 ? 0.3 : E.pitch },   // 我軍
+    { t: 5.2, x: E.x, z: E.z, h: E.h, yaw: E.yaw, pitch: E.pitch },   // 回到指揮視角
+  ];
+}
+// 每一幀（main.js 的 frame，用真實時間）
+function cineFrame(dt) {
+  if (CINE.pend) {
+    if ((CINE.pend.t += dt) < 0.05) return;
+    CINE.pend = null;
+    const K = cineIntroBuild();
+    if (K) cinePlay(K);
+  }
+  if (!CINE.on) return;
+  if (GAME.phase !== 'battle' && GAME.phase !== 'sandbox') { CINE.on = false; return; }   // 離開了戰鬥：不還原
+  CINE.T += Math.min(dt, 0.05);
+  if (CINE.T >= CINE.dur) { cineStop(); return; }
+  cineApply(cineEval(CINE.keys, cineEase(CINE.T / CINE.dur) * CINE.dur));
+}
+// 播放中：任何按鍵、點擊＝略過（這一下不傳給遊戲）
+for (const ev of ['keydown', 'pointerdown', 'wheel']) addEventListener(ev, (e) => {
+  if (!CINE.on) return;
+  e.stopImmediatePropagation(); if (ev !== 'wheel') e.preventDefault();
+  cineStop();
+}, { capture: true, passive: false });
 
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
@@ -5041,7 +5229,18 @@ function getModel(key) {
 // 沒分件的模型（還有遠景簡化網格）整座當轉塔。每個實例一組 aRig＝(方位角, 仰角, 開火後經過秒數, 艙蓋開度)。只影響畫面，不影響模擬。
 const RIG_GK = { main: 0, sec: 1, aa: 2, msl: 3 }, RIG_GKC = { m: 0, s: 1, a: 2, x: 3 };
 const RIG_M = 32;   // 每艘船最多幾個掛點有動畫
-const RIG_RULE = { hold: 8, yawRate: 2.2, pitchRate: 1.3, yawT: 2.8, yawF: 0.35, pitchT: [-0.08, 0.75], pitchF: [-0.04, 0.22], kick: 0.06, kickB: { t: 0.025, f: 0.03, l: 0.015, n: 0 } };
+const RIG_RULE = { hold: 8, yawRate: 2.2, pitchRate: 1.3, yawT: 2.8, yawF: 0.35, pitchT: [-0.08, 0.75], pitchF: [-0.04, 0.22], kick: 0.06, kickB: { t: 0.025, f: 0.03, l: 0.015, n: 0 },
+  // 後座的彈簧（移植自 rubicon-protocol 的 mech-spring／mech-fire 的做法：開火＝給一個衝量，阻尼不足的彈簧拉回、稍微回彈）
+  //   spr[砲種]＝[ω 角頻率, ζ 阻尼比]：主砲重、慢；防空輕、快。kickG＝後座量倍率
+  //   hull：大船（航母、戰列、巡洋）主砲開火時船身往後退一點、船頭微微上抬（更慢的彈簧）；amp＝後退（船長的比例）、pitch＝上抬（弧度）
+  spr: [[24, 0.4], [36, 0.45], [52, 0.5], [30, 0.45]], kickG: [1.35, 1, 0.6, 1],
+  hull: { amp: 0.012, pitch: 0.012, w: 9, z: 0.35, types: 3 } };
+// 阻尼不足的彈簧受衝量後的位移（解析解），正規化成最大值＝1；age＜0＝還沒開火
+function rigSpring(age, w, z) {
+  if (age < 0 || age > 8) return 0;
+  const wd = w * Math.sqrt(1 - z * z), tp = Math.atan2(wd, z * w) / wd;
+  return Math.exp(-z * w * age) * Math.sin(wd * age) / (Math.exp(-z * w * tp) * Math.sin(wd * tp));
+}
 const RIG = { ver: -1, n: 0, t: null, p: null, tg: null, yaw: null, pit: null, upd: null };
 function rigAlloc() {
   if (RIG.ver === fleetVersion && RIG.n >= shipCount) return;
@@ -5066,11 +5265,16 @@ function rigFire(i, gk, t0, x, y, z, tg = -1) {
 }
 const RIG_HEAD = /* glsl */`
   attribute vec4 aRig; attribute float aPart; attribute vec3 aPiv;
-  uniform vec2 uYawC; uniform float uKick; uniform float uKickB;
+  uniform vec2 uYawC; uniform float uKick; uniform float uKickB; uniform vec2 uSpr;
   vec3 rigRY(vec3 p, float a){ float c = cos(a), s = sin(a); return vec3(p.x * c + p.z * s, p.y, -p.x * s + p.z * c); }
   vec3 rigRX(vec3 p, float a){ float c = cos(a), s = sin(a); return vec3(p.x, p.y * c + p.z * s, -p.y * s + p.z * c); }
   vec3 rigRZ(vec3 p, float a){ float c = cos(a), s = sin(a); return vec3(p.x * c - p.y * s, p.x * s + p.y * c, p.z); }
-  float rigKick(float age){ return age < 0. ? 0. : age < 0.04 ? age / 0.04 : exp(-(age - 0.04) * 6.); }
+  // 後座：阻尼不足的彈簧（RIG_RULE.spr，同 rigSpring）——猛地往後、拉回時稍微衝過頭再停
+  float rigKick(float age){
+    if (age < 0.) return 0.;
+    float w = uSpr.x, z = uSpr.y, wd = w * sqrt(1. - z * z), tp = atan(wd, z * w) / wd;
+    return exp(-z * w * age) * sin(wd * age) / (exp(-z * w * tp) * sin(wd * tp));
+  }
   vec3 rigApply(vec3 p, float pt){
     if (aPart > 9.5) { vec3 c = aPiv * pt; return rigRZ(p - c, aRig.w * 1.9) + c; }   // 艙蓋：繞鉸鏈掀開
     if (aPart > 1.5) {   // 砲管：後座（沿砲管往後）→ 仰角（繞砲耳）；三根輪流
@@ -5101,7 +5305,8 @@ function rigMat(key) {
   let yc = [0, 0];
   if (pa) for (let i = 0; i < pa.count; i++) if (Math.abs(pa.getX(i) - 1) < 0.1) { const v = g0.attributes.aPiv; yc = [v.getX(i), v.getZ(i)]; break; }
   const mat = M.mat.clone(); mat.userData.themeF = M.mat.userData.themeF;
-  mat.userData.rigU = { uYawC: { value: new THREE.Vector2(yc[0], yc[1]) }, uKick: { value: RIG_RULE.kick }, uKickB: { value: pa ? 0 : RIG_RULE.kickB[sp.mode] || 0 } };
+  const sg = RIG_RULE.spr[sp.g] || RIG_RULE.spr[1], kg = RIG_RULE.kickG[sp.g] || 1;
+  mat.userData.rigU = { uYawC: { value: new THREE.Vector2(yc[0], yc[1]) }, uKick: { value: RIG_RULE.kick * kg }, uKickB: { value: pa ? 0 : (RIG_RULE.kickB[sp.mode] || 0) * kg }, uSpr: { value: new THREE.Vector2(sg[0], sg[1]) } };
   mat.onBeforeCompile = rigOBC; mat.customProgramCacheKey = () => 'fleet-theme-rig';
   if (src) src.rig = !!pa;
   return (M.rigMat = mat);
@@ -5337,7 +5542,13 @@ function update3D(cam = camera, vh = VH) {   // cam／vh：子畫面（其他旗
       if (lod <= 2 && SETTINGS.weapons3D !== false) writeMounts(typeKey(i), lod, forced >= 0 ? Math.min(3, forced + 1) : pickPx > 1500 ? 0 : lod + 1, _a.x, _a.y, _a.z, s.F[0], s.F[1], s.F[2], L, i);
       continue;
     }
-    const pp = ships.snOn[i] ? 0 : (sq.p || 0), cpp = Math.cos(pp);   // 船身跟著陣型俯仰
+    let pp = ships.snOn[i] ? 0 : (sq.p || 0);   // 船身跟著陣型俯仰
+    // 主砲的後座：大船開火時往後退一點、船頭微微上抬（只是畫面；RIG_RULE.hull）
+    const HK = RIG_RULE.hull;
+    let kb = 0;
+    if (lod <= 2 && ships.type[i] < HK.types && RIG.ver === fleetVersion && i < RIG.n) { const tl = RIG.t[i * 4]; if (tl > -1e8) kb = rigSpring(t - tl, HK.w, HK.z); }
+    if (kb) pp += kb * HK.pitch;
+    const cpp = Math.cos(pp);
     const hk = hullKey(i), ms = R3.meshByKey[hk], fx = Math.sin(h) * cpp, fy = Math.sin(pp), fz = Math.cos(h) * cpp;
     if (!ms) continue;
     writeMatrix(ms[lod], _a.x, _a.y, _a.z, fx, fy, fz, L);
@@ -5400,6 +5611,7 @@ function fowFxFrame() {
   const use =(arr, k, col) => { let l = arr[k]; if (!l) { l = lineObj(col, 0.8); arr.push(l); fowFx.g.add(l); } l.visible = true; return l; };
   let nr = 0, np = 0;
   if (on) {
+    if (kb) { const d = kb * HK.amp * L; _a.x -= fx * d; _a.y -= fy * d; _a.z -= fz * d; }
     for (const s of FOW.scans) {
       if (s.side !== me) continue;
       const u = Math.min(1, (t - s.t) / 1.5); if (u >= 1) continue;
@@ -6187,13 +6399,13 @@ const UI_OPTS = [
   ['compass', '艦橋方位儀', '指揮官視角上方的方位刻度與各艦隊方位'],
 ];
 const SETTINGS = (() => {
-  const d = { keyVer: 4, keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, pilotRadar: 'right', terrain: 'splat', debris: 'high', particles: 'high', shake: true, audio: { on: true, m: 0.8, s: 1, u: 0.7 }, ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
+  const d = { keyVer: 4, keys: Object.fromEntries(KEY_ACTIONS.map((a) => [a[0], a[3]])), queueMod: 'Shift', speedIdx: 1, tacPause: true, bridgePause: false, cmdSlow: 0.2, weapons2D: true, weapons3D: true, brPins: { stat: false, pip: false }, uiScale: 1.2, autoScan: true, cutin: true, pilotRadar: 'right', terrain: 'splat', debris: 'high', particles: 'high', shake: true, introCam: true, audio: { on: true, m: 0.8, s: 1, u: 0.7, b: 0.6, sOn: true, uOn: true, bOn: true }, ui: Object.fromEntries(UI_OPTS.map((u) => [u[0], true])) };
   try { const s = JSON.parse(STORE.getItem('fleet.settings') || 'null'); if (s) { const k0 = { ...(s.keys || {}) };
       // 第 2 版按鍵（指令卡）：舊存檔的鏡頭旋轉 Q／E／R／T、艦橋 B 會和指令卡衝突，沒改過的換成新的預設
       if (!(s.keyVer >= 2)) for (const [id, old] of [['cam_yaw_l', 'KeyQ'], ['cam_yaw_r', 'KeyE'], ['cam_pitch_up', 'KeyR'], ['cam_pitch_dn', 'KeyT'], ['bridge', 'KeyB']]) if (k0[id] === old) delete k0[id];
       if (!(s.keyVer >= 3) && k0.bridge === 'F2') delete k0.bridge;   // 第 3 版：F2 改成全選，艦橋移到 F3
       if (!(s.keyVer >= 4)) for (const id of Object.keys(k0)) if (id.startsWith('cap_')) delete k0[id];   // 第 4 版：艦長改成 A/D 轉向、Q/E 平移、F 技能、G 護航機
-      Object.assign(d.keys, k0); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin', 'pilotRadar', 'terrain', 'debris', 'particles', 'shake']) if (s[k] != null) d[k] = s[k];
+      Object.assign(d.keys, k0); Object.assign(d.ui, s.ui || {}); for (const k of ['queueMod', 'speedIdx', 'tacPause', 'bridgePause', 'brPins', 'cmdSlow', 'weapons2D', 'weapons3D', 'uiScale', 'autoScan', 'cutin', 'pilotRadar', 'terrain', 'debris', 'particles', 'shake', 'introCam']) if (s[k] != null) d[k] = s[k];
       if (s.audio) Object.assign(d.audio, s.audio); } } catch (e) { /* 用預設值 */ }
   return d;
 })();
@@ -6527,6 +6739,7 @@ function frame() {
     sq.label.style.transform = `translate(${(proj.x * 0.5 + 0.5) * VW}px, ${(-proj.y * 0.5 + 0.5) * VH}px) translate(-50%, 0)`;
   }
   U.uSpriteFade.value = 1.0;
+  cineFrame(dt);     // 運鏡：開戰時掃過戰場（cinecam.js）
 
   // 背景視差
   bgMat.uniforms.uOff.value.set(view.target.x * ppu, -view.target.z * Math.sin(ELEV) * ppu);
@@ -6787,12 +7000,16 @@ const STORY_CMDRS = [
   { id: 'duran', name: '「鏽牙」杜蘭', title: '傭兵', trait: 'dmg', skills: ['charge', 'focus'], faction: 2, lv: 3, bio: '灰鴉的突擊隊長。打法粗暴，最討厭跟商人做生意。' },
   { id: 'sasha', name: '「快手」莎夏', title: '傭兵', trait: 'speed', skills: ['charge', 'rapid'], faction: 2, lv: 2, bio: '灰鴉的游擊隊長。飛彈艦隊用得最好的人。' },
   { id: 'kol', name: '「鐵顎」柯爾', title: '傭兵', trait: 'shield', skills: ['wall', 'focus'], faction: 2, lv: 3, bio: '灰鴉的守備隊長。話不多，守住的地方從來沒丟過。' },
+  // 新主線〈星海之外〉：救出的新伊甸倖存者（傭兵陣營）與機械智慧族的聯絡個體（leads：可以替哪些陣營出擊，艦隊是機械智慧族的船與特性）
+  { id: 'mira', name: '米拉・哈特', title: '上尉', trait: 'shield', skills: ['wall', 'focus'], faction: 2, lv: 7, bio: '新伊甸殖民地防衛軍的倖存軍官。守了三十年的殖民地，最後只剩她還站著。' },
+  { id: 'owen', name: '「老錨」歐文', title: '船長', trait: 'shield', skills: ['wall', 'jam'], faction: 2, lv: 7, bio: '殖民船團的老船長。打仗不是他的本行，但他比誰都懂怎麼讓船隊活下去。' },
+  { id: 'seph', name: '賽弗', title: '聯絡個體', trait: 'dmg', skills: ['focus', 'jam'], faction: 4, leads: [2], lv: 8, bio: '機械智慧族派來的聯絡個體。說話平板、凡事講機率，正在學人類的說話方式。' },
 ];
 const STORY_MERCS = STORY_CMDRS.filter((c) => c.faction === 2).map((c) => c.id);
 const FACTION_NAME = ['帝國軍', '聯盟軍', '灰鴉傭兵團', '機械改造人類', '機械智慧族', '蟲族感染人類', '蟲族', '帝國攝政派'];   // 7＝帝國攝政派：帝國內戰的敵軍，船與特性同帝國，只有顏色不同   // 2＝傭兵：只有劇情番外篇〈雙星之外〉是玩家的陣營，傭兵指揮官可以替兩個陣營出擊；3～6 目前只當敵軍外觀
 const FACTION_CLS = ['emp', 'all', 'mer', 'cyb', 'mai', 'inf', 'bug', 'reg'];
 // 指揮官能不能替這個陣營出擊（傭兵兩邊都行）
-const canLead = (c, faction) => (c.faction || 0) === faction || (c.faction === 2 && faction < 2);
+const canLead = (c, faction) => (c.faction || 0) === faction || (c.faction === 2 && faction < 2) || !!(c.leads && c.leads.includes(faction));   // leads：劇情指揮官另外可以替哪些陣營出擊（賽弗替灰鴉）
 // 指揮官只帶自己風格的艦隊：傭兵指揮官替帝國／聯盟出擊時，艦隊是灰鴉的船、用傭兵的種族特性（setup 的 fleet.fac）
 const ownFac = (c, sideFac) => (c && c.faction != null && c.faction !== sideFac ? { fac: c.faction } : {});
 const TRAIT_NAME = { dmg: '攻擊', shield: '防禦', speed: '機動' };
@@ -9359,22 +9576,27 @@ function makeSetup(sc, lo, attempt) {
   }
   // 劇情戰役的護送目標（不能部署，跟著第一艦隊；損失太多就敗北）
   if (sc.vip) fleetsS.push({ ...supplySetup(0, sc.vip, lo.fleets.length ? 0 : -1, sc.vip.name), vip: true });
-  // 劇情戰役的友軍（傭兵外觀）：AI 自己打、玩家不能指揮；defectAt 秒後倒戈成敵軍
-  for (const a of sc.allies || []) fleetsS.push({ side: 0, fac: a.fac, name: a.name, ax: a.x, az: a.z, ay: 0, h: a.h, formation: a.formation, comp: a.comp.slice(),
-    commander: { ...a.commander }, ai: { tactic: a.tactic, level: sc.level }, ally: true, defectAt: a.defectAt });
+  // 劇情戰役的友軍（傭兵外觀）：AI 自己打、玩家不能指揮；defectAt 秒後倒戈成敵軍；arrive＝[秒, 'left'／'right']：戰鬥中途才從側翼進場
+  for (const a of sc.allies || []) {
+    const sx = a.arrive && a.arrive[1] === 'left' ? -1 : 1;
+    fleetsS.push({ side: 0, fac: a.fac, name: a.name, ax: a.arrive ? sx * 800 : a.x, az: a.arrive ? -60 : a.z, ay: 0, h: a.arrive ? (sx < 0 ? Math.PI / 2 : -Math.PI / 2) : a.h, formation: a.formation, comp: a.comp.slice(),
+      commander: { ...a.commander }, ai: { tactic: a.tactic, level: sc.level }, ally: true, defectAt: a.defectAt, ...(a.arrive ? { reserve: true, activateAt: a.arrive[0] } : {}) });
+  }
+  // 救援（〈星海之外〉第 7 關）：撤離船團先放在場外，時間到了才從地表起飛（rescueTick）
+  if (sc.rescue) sc.rescue.at.forEach((_, k) => fleetsS.push({ ...supplySetup(0, { comp: sc.rescue.comp, formation: 'ring', x: 0, z: MAP_BOUNDS.z0 - 900, h: Math.PI }, -1, `${sc.rescue.name} ${k + 1}`), ally: true, reserve: true, activateAt: null }));
   const e0 = fleetsS.length;
-  sc.enemy.forEach((ef) => fleetsS.push({ side: 1, name: ef.name, ax: ef.x, az: ef.z, ay: ef.y || 0, h: ef.h, formation: ef.formation, comp: ef.comp.slice(),
-    commander: { ...ef.commander }, ai: { tactic: ef.tactic, level: sc.level } }));
+  sc.enemy.forEach((ef) => fleetsS.push({ side: 1, ...(ef.fac != null ? { fac: ef.fac } : {}), name: ef.name, ax: ef.x, az: ef.z, ay: ef.y || 0, h: ef.h, formation: ef.formation, comp: ef.comp.slice(),
+    commander: { ...ef.commander }, ai: { tactic: ef.tactic, level: sc.level } }));   // fac：這支艦隊自己的外觀（例如蟲族與感染人類混編）
   if (sc.enemySupply && sc.enemy.length) fleetsS.push(supplySetup(1, sc.enemySupply, e0 + Math.min(sc.enemySupply.follow || 0, sc.enemy.length - 1)));
   // 突發事件：開戰前就抽好（同一個 attempt 回放時一樣）
   const R = mulberry32(sc.seed * 31 + attempt * 977);
   for (const ev of sc.events) {
     if (ev.type !== 'reinforce' || R() >= ev.chance) continue;
     const at = ev.at[0] + R() * (ev.at[1] - ev.at[0]), sx = ev.edge === 'left' ? -1 : 1;
-    fleetsS.push({ side: 1, name: ev.name, ax: sx * 800, az: -140 + R() * 200, ay: Math.round((R() - 0.5) * 240), h: sx < 0 ? Math.PI / 2 : -Math.PI / 2, formation: ev.formation, comp: ev.comp.slice(),
+    fleetsS.push({ side: 1, ...(ev.fac != null ? { fac: ev.fac } : {}), name: ev.name, ax: sx * 800, az: -140 + R() * 200, ay: Math.round((R() - 0.5) * 240), h: sx < 0 ? Math.PI / 2 : -Math.PI / 2, formation: ev.formation, comp: ev.comp.slice(),
       commander: ev.commander ? { ...ev.commander } : reinforceCmdr(sc), reserve: true, activateAt: at, ai: { tactic: 'push', level: sc.level } });
   }
-  return { bg: false, terrain: sc.terrain, ...(sc.ground ? { ground: { ...sc.ground } } : {}), fleets: fleetsS, scenario: sc.id, timeLimit: sc.timeLimit, level: sc.level, factions: sc.enemyFac != null ? [lo.faction || 0, sc.enemyFac] : (lo.faction || 0) === 1 ? [1, 0] : [0, 1], ...(sc.goal ? { goal: sc.goal } : {}), ...(sc.lines ? { lines: sc.lines } : {}), ...(sc.dlines ? { dlines: sc.dlines } : {}), ...(sc.defect ? { defect: sc.defect } : {}), ...(sc.aiOmni ? { omni: [false, true] } : {}), ...(sc.untimed ? { untimed: true } : {}) };   // untimed：沒有時限（timeLimit 只當目標時間）；aiOmni：這一關的 AI 不受戰爭迷霧限制
+  return { bg: false, terrain: sc.terrain, ...(sc.ground ? { ground: { ...sc.ground } } : {}), fleets: fleetsS, scenario: sc.id, timeLimit: sc.timeLimit, level: sc.level, factions: sc.enemyFac != null ? [lo.faction || 0, sc.enemyFac] : (lo.faction || 0) === 1 ? [1, 0] : [0, 1], ...(sc.goal ? { goal: sc.goal } : {}), ...(sc.lines ? { lines: sc.lines } : {}), ...(sc.dlines ? { dlines: sc.dlines } : {}), ...(sc.defect ? { defect: sc.defect } : {}), ...(sc.aiOmni ? { omni: [false, true] } : {}), ...(sc.untimed ? { untimed: true } : {}), ...(sc.doom ? { doom: sc.doom } : {}), ...(sc.rescue ? { rescue: sc.rescue } : {}) };   // doom：劇情強制擊沉（m8 杜蘭的旗艦）；rescue：救援任務；untimed：沒有時限（timeLimit 只當目標時間）；aiOmni：這一關的 AI 不受戰爭迷霧限制
 }
 
 // ───── 技能（命令 'skill'） ─────
@@ -9483,11 +9705,12 @@ function skillKey(id) {
 function activateReserve(f) {
   f.reserve = false;
   for (const q of f.sqs) { q.bg = false; q.hidden = false; if (q.group) q.group.inactive = false; if (q.label) q.label.classList.remove('bg'); }
-  GAME.init[f.side] += f.initial;
+  if (!f.ally) GAME.init[f.side] += f.initial;   // 友軍不算進勝負（sideAlive），兵力基準也不加
   // 呼叫來的增援：進場後開往指定的位置
   if (f.entryGoal) { const g = f.sqs[0].group; execCommand({ tick: simTick, side: f.side, type: 'move', auto: true, sqs: fleetAlive(f).map((q) => squadrons.indexOf(q)), x: f.entryGoal.x, z: f.entryGoal.z, H: g ? g.to : null, pivot: false, width: null, uturn: 'auto' }); }
   if (typeof TAC !== 'undefined' && TAC.open && f.side === GAME.playerSide) buildTacSide();   // 戰術面板加上這支艦隊的卡片
-  if (f.side === GAME.playerSide) toast(f.entryGoal ? `增援：${f.name}進場` : `增援：${f.name}抵達${f.sqs[0].x < 0 ? '左' : '右'}翼`);
+  if (f.entryNote) toast(f.entryNote, 'story');
+  else if (f.side === GAME.playerSide) toast(f.entryGoal ? `增援：${f.name}進場` : `增援：${f.name}抵達${f.sqs[0].x < 0 ? '左' : '右'}翼`);
   else toast(`警告：${f.name}出現在${f.sqs[0].x < 0 ? '左' : '右'}翼！`, 'bad');
   for (let k = 0; k < 12; k++) { const q = f.sqs[k % f.sqs.length]; spawnFx(q.x + (rnd() - 0.5) * 60, 0, q.z + (rnd() - 0.5) * 60, 1, 8, 16); }
 }
@@ -9732,19 +9955,61 @@ function checkVictory() {
   const t = U.uTime.value, tl = battleSetup.timeLimit, G = battleSetup.goal;
   const a0 = sideAlive(0), a1 = sideAlive(1), p = a0 / Math.max(1, GAME.init[0]), e = a1 / Math.max(1, GAME.init[1]);
   let r = null;
-  const pend = fleets.some((f) => f.ally && f.defectAt != null && !f.reserve);   // 還有友軍沒倒戈（劇情的倒戈）：先不判勝利，等倒戈發生
+  const pend = fleets.some((f) => f.ally && f.defectAt != null && !f.reserve) || (battleSetup.doom && t < battleSetup.doom.at + 4);   // 劇情演出（倒戈、強制擊沉）還沒發生：先不判勝利   // 還有友軍沒倒戈（劇情的倒戈）：先不判勝利，等倒戈發生
   if (a1 === 0 && !pend) r = ['win', '殲滅敵軍'];
   else if (e < ROUT_AT && !noRout(1) && !pend) r = ['win', '敵軍潰走'];
   else if (a0 === 0) r = ['lose', '我軍全滅'];
   else if (p < ROUT_AT && !noRout(0)) r = ['lose', '我軍潰走'];
   else if (G && G.type === 'escort' && vipLost()) r = ['lose', `${G.name}損失過重`];
+  else if (G && G.type === 'target' && !fleets.some((f) => f.side === 1 && f.name === G.name && fleetAlive(f).length)) r = ['win', `${G.name}被擊沉`];
+  else if (G && G.type === 'rescue' && t >= rescuePurgeAt()) { const n = rescueCount(); r = n.saved >= G.need ? ['win', `淨化開始・救出了 ${n.saved} 批倖存者`] : ['lose', `淨化開始・只救出 ${n.saved} 批倖存者（至少要 ${G.need} 批）`]; }
   else if (G && G.type === 'cut' && !fleets.some((f) => f.side === 1 && f.supply && !f.reserve && fleetAlive(f).length)) r = ['win', '敵軍補給艦全滅・補給線切斷'];
   else if (t >= tl && G && (G.type === 'survive' || G.type === 'escort')) r = ['win', G.type === 'escort' ? `時間到・${G.name}撐到了最後` : '時間到・撐過了敵軍的攻勢'];
   else if (t >= tl && !battleSetup.untimed) {
     const lp = 1 - p, le = 1 - e;
     r = le - lp > 0.08 ? ['win', '時間到・判定勝利（敵方損失較重）'] : lp - le > 0.08 ? ['lose', '時間到・判定敗北（我方損失較重）'] : ['draw', '時間到・平手'];
   }
-  if (r) GAME.result = battleResult(r[0], r[1]);
+  if (r) { const RS = battleSetup.rescue, n = RS && rescueCount(); GAME.result = battleResult(r[0], r[1], RS ? { rescued: r[0] === 'win' && !r[1].startsWith('淨化') ? RS.at.length - n.lost : n.saved, waves: RS.at.length } : undefined); }   // 救援：在淨化前打贏（殲滅、潰走）＝還沒被擊沉的船團都能撤離
+}
+// ───── 救援任務（〈星海之外〉第 7 關〈不一樣的機械〉）─────
+// battleSetup.rescue＝{ name, at: [各批起飛秒數], from: [起飛點 {x, z}…], toZ: 撤離點（後方）的 z, comp, ext: 每次延後幾秒, per: 每擊沉多少比例的敵軍延後一次, max: 最多延後幾次 }
+// 狀態都從模擬算出來（回放一致）：撤離完成的船團 f.evac、淨化時間＝時限＋延後
+const rescueFleets = () => { const R = battleSetup.rescue; return R ? fleets.filter((f) => f.side === 0 && f.name.startsWith(R.name + ' ')) : []; };
+function rescueCount() { let saved = 0, lost = 0; for (const f of rescueFleets()) { if (f.evac) saved++; else if (!f.reserve && !fleetAlive(f).length) lost++; } return { saved, lost }; }
+function rescueExt() { const R = battleSetup.rescue, k = 1 - sideAlive(1) / Math.max(1, GAME.init[1]); return Math.min(R.max, Math.floor(k / R.per)); }
+function rescuePurgeAt() { return battleSetup.timeLimit + battleSetup.rescue.ext * rescueExt(); }
+let RESCUE_UI = { fl: null, ext: 0, warn: 0 };   // 只管提示（不影響模擬）
+function rescueTick(t) {
+  const R = battleSetup.rescue;
+  for (const f of rescueFleets()) {
+    const k = +f.name.slice(R.name.length + 1) - 1, g = f.sqs[0] && f.sqs[0].group;
+    if (f.reserve && !f.evac && f.activateAt == null && t >= R.at[k] && g) {   // 起飛：移到地表的起飛點，進場後開往撤離點
+      const P = R.from[k % R.from.length];   // 起飛點輪流用（地表上的幾處據點），撤離點在同一個 x 的後方
+      warpGroup(g, P.x, P.z, Math.atan2(0, R.toZ - P.z));
+      f.activateAt = t; f.entryGoal = { x: P.x, z: R.toZ }; f.entryNote = `${f.name}從地表起飛了，掩護它到後方的撤離點！`;
+    } else if (!f.reserve && !f.evac) {
+      const C = centerOf(fleetAlive(f));
+      if (C && C.z > R.toZ - 70) {   // 到了撤離點：離開戰場
+        f.evac = true; f.reserve = true; f.activateAt = null;   // activateAt 清掉：不然會被當成增援又叫回來
+        for (const q of f.sqs) { q.bg = true; q.hidden = true; selected.delete(q); if (q.group) q.group.inactive = true; if (q.label) q.label.classList.add('bg'); }
+        if (g) warpGroup(g, 0, MAP_BOUNDS.z1 + 900, Math.PI);
+        toast(`${f.name}脫離戰場・已救出 ${rescueCount().saved} 批`, 'story');
+      }
+    }
+  }
+  if (RESCUE_UI.fl !== fleets) RESCUE_UI = { fl: fleets, ext: 0, warn: 0 };
+  const e = rescueExt(), left = Math.round(rescuePurgeAt() - t);
+  if (e > RESCUE_UI.ext) { RESCUE_UI.ext = e; toast(`賽弗：靜默節點同意把淨化延後 ${R.ext} 秒。距離淨化還有 ${left} 秒`, 'story'); }
+  const w = left <= 20 ? 20 : left <= 60 ? 60 : 0;
+  if (w && RESCUE_UI.warn !== w) { RESCUE_UI.warn = w; toast(`靜默節點：淨化倒數 ${left} 秒`, 'bad'); }
+}
+// 劇情強制擊沉（m8：杜蘭的旗艦）：battleSetup.doom＝{ name: 友軍艦隊名, at: 秒 }，時間到就擊沉那支艦隊的旗艦分艦隊
+const _doomV = new THREE.Vector3();
+function doomTick(t) {
+  const DM = battleSetup.doom; if (t < DM.at || t > DM.at + 2) return;
+  const f = fleets.find((o) => o.side === 0 && o.name === DM.name); if (!f) return;
+  const q = f.sqs.find((o) => o.flagship >= 0) || f.sqs[0]; if (!q) return;
+  for (const i of q.list) if (ships.alive[i]) { shipWorldCPU(i, _doomV); killShip(i, t, _doomV.x, _doomV.y, _doomV.z, 1.4); }
 }
 function battleResult(kind, why, extra) {
   const a0 = sideAlive(0), a1 = sideAlive(1);
@@ -9763,6 +10028,8 @@ function gameTick() {
   const end = GAME.replaying && GAME.replayEnd;
   if (end && simTick >= end.tick) { GAME.result = battleResult(end.kind, end.why, { retreat: !!end.retreat }); return; }
   const t = U.uTime.value;
+  if (battleSetup.rescue) rescueTick(t);
+  if (battleSetup.doom) doomTick(t);
   for (const f of fleets) if (f.reserve && f.activateAt != null && t >= f.activateAt) activateReserve(f);
   // 倒戈的觸發（劇情）：敵軍剩下的比例夠低、或快到原本的倒戈秒數，就排定 lead 秒後倒戈（defT＝倒戈的時間，台詞跟著它走）
   const DF = battleSetup.defect;
@@ -10371,7 +10638,7 @@ function startBattle() {
   paused = false; setSpeed(SETTINGS.speedIdx);
   force3D(); if (GAME.op === 2) enterBridge();   // 擬真：開戰直接上艦橋
   if (opts.fow && SETTINGS.autoScan === false) issue('autoscan', { on: false });   // 戰爭迷霧：玩家關掉了自動掃描（記在命令裡）
-  cutPlay(cutSpecStart(GAME.sc)); sndCue('start');
+  cutPlay(cutSpecStart(GAME.sc)); sndCue('start'); cineIntroStart();   // 開戰運鏡（cinecam.js）
   toast(`${GAME.sc.name}　開戰！${GAME.op ? `（${OP_LEVELS[GAME.op].name}難度）` : ''}（${keyText('pause')} 暫停、${keyText('speed_up')}／${keyText('speed_down')} 調速度、${keyText('attack')}＋左鍵點敵軍＝指定攻擊）`);
 }
 const _fmtT = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -11008,7 +11275,18 @@ const STORY_LINE = {
   m: { side: 2, name: '番外・雙星之外', ending: '雙星之外', cast: '賽隆、「鏽牙」杜蘭、「快手」莎夏、「鐵顎」柯爾', extra: true,
     blurb: '帝國和聯盟都雇用過他們，也都追殺過他們。收錢辦事的灰鴉傭兵團，看見了這場戰爭帳本的另一面。',
     note: '番外篇的前半段跟主線第一、二章的事件（包括灰鴉的支線）是同一批事件，後半段會揭露主線第三章以後的內幕。沒玩過主線也能直接玩，但建議先玩過主線的第一、二章。' },
+  // 新主線〈星海之外〉：番外篇的延續（打完番外篇第 8 關才開放）；自己的星圖（新伊甸星系，map: 'eden'）與章節（chs），杜蘭不能派（absent）
+  x: { side: 2, name: '星海之外', title: '星海之外', ending: '向外', cast: '賽隆、「快手」莎夏、「鐵顎」柯爾、賽弗、米拉・哈特、「老錨」歐文', sequel: true, req: 'm8', map: 'eden', absent: ['duran'],
+    blurb: '被堵在人類星域之外的灰鴉，在三十年前失蹤的殖民船團的目的地，遇見了人類以外的存在。',
+    note: '番外篇〈雙星之外〉的延續。打完番外篇的第 8 關〈雙星之外〉後開放。',
+    chs: [{ no: '第一幕', name: '潰退' }, { no: '第二幕', name: '接觸' }, { no: '第三幕', name: '新伊甸' }, { no: '第四幕', name: '歸航' }],
+    marks: [{ name: '新伊甸', sub: '恆星・殖民船團的目的地', x: 1090, y: 470, cls: 'neu', kind: 'star', lp: 'down' },
+      { name: '人類星域', sub: '星圖邊緣的另一側', x: 70, y: 470, cls: 'mer', kind: 'capital', lp: 'right' }] },
 };
+// 章節：每一篇可以有自己的章節（STORY_LINE.chs），沒有的用 STORY_CH
+const storyChs = (line) => (STORY_LINE[line] && STORY_LINE[line].chs) || STORY_CH;
+const storyChOf = (s) => storyChs(s.line)[s.ch];
+const storyLineOpen = (p, k) => !STORY_LINE[k].req || !!p.done[STORY_LINE[k].req];
 // 番外篇的 {V}：贏得戰爭的一方（玩家打過的結局；兩個都打過就看最近的那一個，都沒打過就是「新政府」）
 function storyVictor() { const p = storyLoad(), e = p.done['21e'] || 0, a = p.done['21a'] || 0; return !e && !a ? '新政府' : e >= a ? '帝國' : '聯盟'; }
 const storyText = (t) => (t ? t.split('{V}').join(storyVictor()) : t);
@@ -11139,7 +11417,47 @@ const STORY_STAGES = [
     when: '主線結局之後',
     story: '灰鴉的一半成了{V}的傭兵編隊，另一半跟著杜蘭當了宇宙海盜。第一份任務就是追捕杜蘭。賽隆追著他的訊號，一路追出了星圖。',
     inter: '戰爭結束了。{V}的星圖上，人類星域第一次只剩下一種顏色。',
-    ending: '帝國與聯盟的戰爭結束了，人類以為星空終於屬於自己。灰鴉的一半成了{V}的傭兵編隊，另一半成了被通緝的宇宙海盜。而在星圖的邊緣，那些沒有活人的船，還在朝這裡航行。' },
+    ending: '帝國與聯盟的戰爭結束了，人類以為星空終於屬於自己。灰鴉的一半成了{V}的傭兵編隊，「鏽牙」杜蘭死在了星圖的邊緣。而賽隆和剩下的人，被那些沒有活人的船堵在了人類星域之外。（新主線〈星海之外〉開放）' },
+  // ── 新主線〈星海之外〉：灰鴉傭兵團（玩家是傭兵陣營）。ch＝第幾幕（STORY_LINE.x.chs）；talk＝只有劇情、沒有戰鬥（scenes：[說話的人（null＝旁白）, 內容]）──
+  { id: 'x1', ch: 0, merc: true, line: 'x', name: '斷後', place: '星圖邊緣', x: 210, y: 440, cast: ['ceron', 'kol'], goal: '掩護受損艦突圍',
+    story: '退路被堵死了。灰鴉帶著受損的船和鏽牙的殘部，往星圖之外的未知星域突圍。',
+    inter: '人類星域那邊，{V}的情報部把灰鴉列為「失聯」。沒有人打算去找他們。' },
+  { id: 'x2', ch: 0, merc: true, line: 'x', name: '消耗', place: '未知星域・灰燼星雲', x: 400, y: 340, cast: ['ceron', 'sasha'], goal: '撐到時限',
+    story: '甩不掉。廢棄艦隊不會累，也不需要補給。灰鴉的彈藥和船，一天比一天少。' },
+  { id: 'x3', ch: 0, merc: true, line: 'x', name: '千鈞一髮', place: '未知星域・碎環', x: 560, y: 540, cast: ['ceron', 'sasha', 'kol'], goal: '殲滅廢棄艦隊',
+    story: '最後一道防線。灰鴉被逼進一片碎裂的小行星環，沒有地方可以再退了。' },
+  { id: 'x4', ch: 1, merc: true, line: 'x', name: '第一句話', place: '新伊甸外圍', x: 720, y: 400, cast: ['ceron'], goal: '跟不明艦隊一起清掉感染艦',
+    story: '救了灰鴉的不明艦隊自稱「機械智慧族」。它們的聯絡個體賽弗提議：先一起清掉附近的感染艦，再談。' },
+  { id: 'x5', ch: 2, merc: true, line: 'x', name: '殖民地的燈', place: '新伊甸 II・殖民地', x: 900, y: 280, cast: ['ceron', 'kol'], goal: '擊潰地面據點的守軍', joins: ['mira'],
+    story: '新伊甸的第二顆行星上，還有微弱的人類訊號。感染體在地表建起了據點，還有防空砲台。',
+    inter: '賽弗說明了新伊甸的狀況：三十年前抵達的殖民者，大部分已經被感染。但機械智慧族的探測器，還收得到地表的人類訊號。' },
+  { id: 'x6', ch: 2, merc: true, line: 'x', name: '方舟', place: '新伊甸 II・軌道', x: 1040, y: 220, cast: ['ceron', 'mira'], goal: '護送倖存者船團突破封鎖', joins: ['owen'],
+    story: '倖存者藏在殖民船團的舊船裡。船還能飛，但要穿過感染艦的封鎖線。' },
+  { id: 'x7', ch: 2, merc: true, line: 'x', name: '不一樣的機械', place: '新伊甸 III', x: 1230, y: 280, cast: ['ceron', 'mira', 'owen'], goal: '淨化開始前救出更多人',
+    story: '另一派機械智慧族「靜默節點」抵達了新伊甸的第三顆行星。它們決定把整顆行星連同感染體一起淨化，包括地表上還活著的人。',
+    inter: '賽弗說，機械智慧族不是一個整體。「靜默節點」不恨人類，它們只是永遠選擇成本最低的做法。' },
+  { id: 'x8', ch: 2, merc: true, line: 'x', name: '第一次看見蟲', place: '新伊甸外環', x: 1400, y: 420, cast: ['ceron', 'sasha', 'kol'], goal: '殲滅蟲群',
+    story: '新伊甸外環出現了不一樣的訊號。不是被感染的人類船，是蟲族本身。' },
+  { id: 'x9', ch: 2, merc: true, line: 'x', name: '熟悉的戰法', place: '新伊甸 IV', x: 1260, y: 620, cast: ['ceron', 'sasha', 'mira'], goal: '擊退感染艦隊', joins: ['seph'],
+    story: '一支感染艦隊在第四顆行星附近伏擊了機械智慧族的補給線。這一次，牠們的打法不一樣了。' },
+  { id: 'x10', ch: 2, merc: true, line: 'x', name: '母巢', place: '新伊甸・母巢', x: 1420, y: 760, cast: ['ceron', 'kol', 'seph'], goal: '擊沉母巢',
+    story: '新伊甸的蟲族都從同一個巢穴出來。打掉母巢，這個星系就能清乾淨。' },
+  { id: 'x11', ch: 3, merc: true, line: 'x', name: '回家的路', place: '星圖邊緣・回程', x: 760, y: 720, cast: ['ceron', 'owen', 'seph'], goal: '護送倖存者船團回到人類星域',
+    story: '新伊甸清乾淨了。灰鴉帶著倖存者和機械智慧族，踏上回人類星域的航道。蟲族的殘部還在後面追。',
+    inter: '阿瑪蘭和杜蘭撤出了新伊甸。賽弗說，蟲族從來不會真的放棄一塊土地，牠們只是換個地方播種。' },
+  { id: 'x12', ch: 3, merc: true, line: 'x', name: '不速之客', place: '人類星域邊境', x: 330, y: 760, cast: ['ceron', 'mira', 'seph'], goal: '協助邊境部隊平定叛亂',
+    story: '灰鴉帶著倖存者和機械智慧族回到人類星域。邊境要塞正被不肯接受新秩序的殘黨圍攻。' },
+  { id: 'x13', ch: 3, merc: true, line: 'x', talk: true, name: '向外', place: '人類星域', x: 160, y: 620, cast: ['ceron'], goal: '劇情（沒有戰鬥）',
+    story: '{V}願意聽賽隆說話了。灰鴉要讓人類知道外面的世界，還有正在等著他們的東西。',
+    scenes: [[null, '{V}的首都。賽隆站在議事廳中央，身後的螢幕上是新伊甸燃燒的行星，和母巢沉沒前最後的影像。'],
+      ['賽隆', '三十年前失蹤的殖民船團，不是失蹤。它們被吃掉了。外面有蟲族，有機械，還有我們不知道的東西。'],
+      ['賽弗', '補充：蟲族的指揮個體阿瑪蘭仍然存活。它的下一個播種地點，機率最高的是你們。'],
+      [null, '議事廳安靜了很久。然後，有人站了起來。'],
+      ['米拉・哈特', '新伊甸防衛軍，還活著的人都在這裡。我們會去。'],
+      ['「老錨」歐文', '老錨的船隊也去。這把老骨頭，還能再飛一次。'],
+      [null, '消息傳開之後，志願艦從人類星域的每個角落趕來：帝國的老兵、聯盟的退役艦長、走投無路的海盜、想看看星圖之外的年輕人。灰鴉的船塢第一次排不下。'],
+      ['「快手」莎夏', '團長，這次的雇主是誰？'], ['賽隆', '我們自己。'], ['「鐵顎」柯爾', '報酬呢？'], ['賽隆', '活下去。']],
+    ending: '人類第一次把目光投向星圖之外。灰鴉、機械智慧族和各地的志願艦，組成了第一支遠征艦隊。在某個遙遠的星系裡，阿瑪蘭和杜蘭也在等著。' },
   // ── 支線：灰鴉傭兵團（第一章；不打也能繼續主線）。req＝要先打完的關、at＝劇情時間點（在哪一關之後：決定誰已經退場）、merc＝跟傭兵有關的任務 ──
   { id: 's1', sub: true, merc: true, req: ['5'], at: '5', ch: 1, line: 'e', name: '鏽色的海盜', place: '卡德倫外緣', x: 340, y: 170, cast: ['kas'], goal: '擊退海盜艦隊',
     story: '卡德倫的補給線接連被「海盜」劫掠。卡斯追了上去，才發現對方的陣形和裝備都不像海盜。',
@@ -11192,11 +11510,11 @@ function storyMarkBox(m) {   // 地標（首都、要塞）的圖示＋名稱佔
 function storyLayoutAll() {
   if (STORY_POS) return STORY_POS;
   STORY_POS = {};
-  const tw = (t, px) => [...t].length * px, PAD = 10, obs = STORY_MARKS.map(storyMarkBox);
+  const tw = (t, px) => [...t].length * px, PAD = 10;
   for (const line of Object.keys(STORY_LINE)) {
-    const seq = storySeq(line);
+    const seq = storySeq(line), obs = (STORY_LINE[line].marks || STORY_MARKS).map(storyMarkBox);
     const it = storyNodes(line).map((n) => {
-      const s = STORY_BY[n.key], r = n.sub ? 16 : 22, ch = STORY_CH[s.ch], first = !n.sub && seq.find((id) => STORY_BY[id].ch === s.ch) === n.key;
+      const s = STORY_BY[n.key], r = n.sub ? 16 : 22, ch = storyChOf(s), first = !n.sub && seq.find((id) => STORY_BY[id].ch === s.ch) === n.key;
       const w = Math.max(70, tw(s.name, 21) + 8, first ? tw(ch.no + ch.name, 17) + 34 : 0) * 1.3;   // 節點群組放大 1.3 倍畫
       return { id: n.key, x: s.x * STORY_K, y: s.y * STORY_K, x0: s.x * STORY_K, y0: s.y * STORY_K, w, top: (r + 30 + (first ? 24 : 0)) * 1.3, bot: (r + 32) * 1.3 };
     });
@@ -11307,10 +11625,11 @@ function storyMapSVG(p, sel, vb = STORY_VB, curCh = -1) {
   }).join('');
   const regions = [['奧瑞利安帝國', 300, 120, 'emp'], ['自由星系聯盟', 1310, 140, 'all'], ['洛珊自治領', 1260, 860, 'neu'], ['暗黑星雲帶', 800, 640, 'dust']]
     .map(([t, x, y, c]) => `<text class="st-region ${c}" x="${x}" y="${y}">${t}</text>`).join('');
-  const marks = STORY_MARKS.map((m) => {
-    const side = m.flip && m.flip.some((id) => p.done[id]) ? 1 : ended >= 0 && m.side < 2 ? ended : m.side, c = ['emp', 'all', 'neu'][side];
+  const L = STORY_LINE[line];
+  const marks = (L.marks || STORY_MARKS).map((m) => {
+    const side = m.flip && m.flip.some((id) => p.done[id]) ? 1 : ended >= 0 && m.side < 2 ? ended : m.side, c = m.cls || ['emp', 'all', 'neu'][side];
     const mx = m.x * STORY_K, my = m.y * STORY_K;
-    const icon = m.kind === 'fortress' ? `<path class="st-mk ${c}" d="M${mx} ${my - 16}l14 8v16l-14 8l-14-8v-16z"/>`
+    const icon = m.kind === 'star' ? `<circle class="st-sun" cx="${mx}" cy="${my}" r="26"/>` : m.kind === 'fortress' ? `<path class="st-mk ${c}" d="M${mx} ${my - 16}l14 8v16l-14 8l-14-8v-16z"/>`
       : `<circle class="st-mk ${c}" cx="${mx}" cy="${my}" r="12"/><circle class="st-mk-c ${c}" cx="${mx}" cy="${my}" r="5"/>`;
     const [dx, dy, an] = { up: [0, -44, 'middle'], down: [0, 40, 'middle'], right: [22, -2, 'start'], left: [-22, -2, 'end'] }[m.lp];
     return `<g class="st-mark" text-anchor="${an}">${icon}<text class="st-mk-t" x="${mx + dx}" y="${my + dy}">${m.name}</text><text class="st-mk-s" x="${mx + dx}" y="${my + dy + 19}">${m.sub}</text></g>`;
@@ -11328,7 +11647,7 @@ function storyMapSVG(p, sel, vb = STORY_VB, curCh = -1) {
     const s = storyNodeStage(p, n), st = storyNodeState(p, n), [x, y] = storyPos(n.key);
     const c = STORY_SIDE[s.side].cls, label = st === 'locked' ? '' : s.name;
     const no = n.sub ? '支' : storySeq(line).indexOf(n.key) + 1, r = n.sub ? 16 : 22;   // 支線：小一號的節點
-    const seq = storySeq(line), ch = STORY_CH[s.ch], first = !n.sub && seq.find((id) => STORY_BY[id].ch === s.ch) === n.key;   // 這一章的第一關：標出章名
+    const seq = storySeq(line), ch = storyChOf(s), first = !n.sub && seq.find((id) => STORY_BY[id].ch === s.ch) === n.key;   // 這一章的第一關：標出章名
     const next = st === 'avail' && !n.sub, far = curCh >= 0 && s.ch !== curCh ? 'far' : '';
     const tip = `${storyNo(s)}${st === 'locked' ? '・？？？' : `〈${s.name}〉`}　${ch.no} ${ch.name}　${{ done: '已完成（可以重打）', avail: n.sub ? '可以打的支線（不打也能繼續主線）' : '下一場作戰：點選查看', locked: '還沒開放' }[st]}`;
     const tags = [next ? `<text class="st-next" y="${-r - 12}">▼ 下一場</text>` : st === 'avail' ? `<text class="st-next sub" y="${-r - 10}">支線</text>` : '', first ? `<text class="st-cht" y="${-r - (next ? 34 : 12)}">${ch.no}　${ch.name}</text>` : ''].join('');
@@ -11344,19 +11663,34 @@ function storyMapSVG(p, sel, vb = STORY_VB, curCh = -1) {
       <radialGradient id="stg-all"><stop offset="0" stop-color="#7cc4ff" stop-opacity=".16"/><stop offset="1" stop-color="#7cc4ff" stop-opacity="0"/></radialGradient>
       <radialGradient id="stg-neu"><stop offset="0" stop-color="#8fd9b6" stop-opacity=".15"/><stop offset="1" stop-color="#8fd9b6" stop-opacity="0"/></radialGradient>
       <radialGradient id="stg-ame"><stop offset="0" stop-color="#b48cff" stop-opacity=".35"/><stop offset="1" stop-color="#b48cff" stop-opacity="0"/></radialGradient>
+      <radialGradient id="stg-sun"><stop offset="0" stop-color="#ffd88a" stop-opacity=".3"/><stop offset="1" stop-color="#ffd88a" stop-opacity="0"/></radialGradient>
+      <radialGradient id="stg-inf"><stop offset="0" stop-color="#c47cff" stop-opacity=".28"/><stop offset="1" stop-color="#c47cff" stop-opacity="0"/></radialGradient>
+      <radialGradient id="stg-ash"><stop offset="0" stop-color="#e2735a" stop-opacity=".12"/><stop offset="1" stop-color="#e2735a" stop-opacity="0"/></radialGradient>
       <filter id="stf-blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="28"/></filter>
     </defs>
     <g transform="scale(${STORY_K})">
     <g class="st-stars">${stars}</g>
-    ${blobs}
+    ${L.map === 'eden' ? storyEdenBG() : `${blobs}
     <g class="st-dust2" filter="url(#stf-blur)">${dust(mulberry32(11))}</g>
     <g class="st-dust" filter="url(#stf-blur)">${dust(mulberry32(7))}</g>
     <ellipse cx="835" cy="290" rx="120" ry="80" fill="url(#stg-ame)"/>
     <path class="st-lane" d="M590 380C680 395 720 430 800 420S940 400 1010 410"/><text class="st-lane-t" x="920" y="455">阿刻戎走廊</text>
     <path class="st-lane" d="M470 560C520 690 660 790 830 820S1100 720 1180 560"/><text class="st-lane-t" x="1110" y="700">洛珊航道</text>
-    ${regions}</g>
+    ${regions}`}</g>
     ${links}${marks}${nodes}
   </svg>`;
+}
+
+// 〈星海之外〉的星圖背景：新伊甸星系（中央的恆星、軌道、小行星環），東南是蟲族的巢穴，西邊的航道通往人類星域
+function storyEdenBG() {
+  const R = mulberry32(31), cx = 1090, cy = 470;
+  const ast = Array.from({ length: 110 }, () => { const a = R() * Math.PI * 2, r = 330 + R() * 45; return `<circle cx="${(cx + Math.cos(a) * r * 1.15).toFixed(0)}" cy="${(cy + Math.sin(a) * r * 0.62).toFixed(0)}" r="${(0.8 + R() * 2).toFixed(1)}"/>`; }).join('');
+  return `<ellipse cx="${cx}" cy="${cy}" rx="300" ry="220" fill="url(#stg-sun)"/>
+    <g class="st-orbit">${[150, 250, 470].map((r) => `<ellipse cx="${cx}" cy="${cy}" rx="${r * 1.15}" ry="${r * 0.62}"/>`).join('')}</g>
+    <g class="st-ast">${ast}</g>
+    <ellipse cx="1380" cy="720" rx="280" ry="180" fill="url(#stg-inf)"/><ellipse cx="420" cy="430" rx="320" ry="220" fill="url(#stg-ash)"/>
+    <path class="st-lane" d="M70 470C260 430 420 520 600 480S900 420 ${cx} ${cy}"/><text class="st-lane-t" x="600" y="455">殖民船團的航道</text>
+    <text class="st-region mer" x="420" y="140">未知星域</text><text class="st-region neu" x="1150" y="110">新伊甸星系</text><text class="st-region inf" x="1330" y="880">蟲族的巢穴</text>`;
 }
 
 // ───── 畫面 ─────
@@ -11365,24 +11699,24 @@ function storyPanel(p, key, chs = '') {
   const s = STORY_BY[key], chBox = chs ? `<div class="st-chs"><div class="st-chs-h">章節</div>${chs}</div>` : '';
   if (!s || s.line !== storyLineOf(p)) return `<div class="st-panel g-card"><div class="g-dim">點選星圖上的星系查看作戰。</div>${chBox}</div>`;
   const st = storyState(p, s.id);
-  const side = STORY_SIDE[s.side], ch = STORY_CH[s.ch], open = st !== 'locked';
+  const side = STORY_SIDE[s.side], ch = storyChOf(s), open = st !== 'locked';
   const cast = s.cast.map((id) => { const c = storyCmdrDef(id); return c ? `${c.title} ${c.name}` : id; }).join('、');
   return `<div class="st-panel g-card ${side.cls}">
     <div class="st-ch">${ch.no}　${ch.name}・${storyNo(s)}</div>
     <h3 class="st-h">${open ? s.name : '？？？'}</h3>
     <div class="st-meta"><span class="g-${side.cls}">${side.name}</span>・${s.place}</div>
     ${open && s.when ? `<div class="st-when">時間點：${s.when}</div>` : ''}
-    ${open ? `<p>${storyText(s.story)}</p><dl class="kv"><dt>出擊指揮官</dt><dd>${cast}</dd><dt>作戰目標</dt><dd>${s.goal}</dd><dt>建議等級</dt><dd>Lv ${storyRec(s.id)} 以上</dd>${s.reward ? `<dt>獎勵</dt><dd>${s.reward}</dd>` : ''}</dl>`
+    ${open ? `<p>${storyText(s.story)}</p><dl class="kv">${s.talk ? '' : `<dt>出擊指揮官</dt><dd>${cast}</dd>`}<dt>${s.talk ? '內容' : '作戰目標'}</dt><dd>${s.goal}</dd>${s.talk ? '' : `<dt>建議等級</dt><dd>Lv ${storyRec(s.id)} 以上</dd>`}${s.reward ? `<dt>獎勵</dt><dd>${s.reward}</dd>` : ''}</dl>`
       : `<p class="g-dim">${s.sub ? `完成${s.req.map((q) => (STORY_BY[q].sub ? `支線「${STORY_BY[q].name}」` : storyNo(STORY_BY[q]))).join('、')}後開放。支線不打也能繼續主線。` : '完成前一場作戰後開放。'}</p>`}
     ${st === 'done' && s.ending ? `<div class="st-end"><b>結局</b><p>${storyText(s.ending)}</p></div>` : ''}
-    <div class="g-row" style="margin-top:12px"><span class="g-sp"></span>${open ? `<button class="g-btn ${st === 'done' ? '' : 'pri'}" data-go="${s.id}">${st === 'done' ? '重打這一關' : '出擊 →'}</button>` : ''}</div>
+    <div class="g-row" style="margin-top:12px"><span class="g-sp"></span>${open ? `<button class="g-btn ${st === 'done' ? '' : 'pri'}" data-go="${s.id}">${s.talk ? (st === 'done' ? '再看一次' : '觀看 →') : st === 'done' ? '重打這一關' : '出擊 →'}</button>` : ''}</div>
     ${chBox}
   </div>`;
 }
 function showStory() {
   const V = GAME.storyView || (GAME.storyView = { sel: null });
   const p = storyLoad();
-  if (!STORY_LINE[p.line]) { showStoryLine(); return; }   // 第一次進來：先選篇章（陣營）
+  if (!STORY_LINE[p.line] || !storyLineOpen(p, p.line)) { showStoryLine(); return; }   // 第一次進來：先選篇章（陣營）
   if (p.diff == null) { showStoryDiff(); return; }        // 再選難度
   const line = p.line, L = STORY_LINE[line], NODES = storyNodes(line);
   V.selBy = V.selBy || {};
@@ -11394,14 +11728,14 @@ function showStory() {
   const curCh = STORY_BY[V.sel] ? STORY_BY[V.sel].ch : -1;
   const chIds = (k) => NODES.map((n) => n.key).filter((id) => STORY_BY[id].ch === k);
   if (fresh) V.focus = chIds(curCh).concat([V.sel]);
-  const chs = STORY_CH.map((c, k) => {
+  const chs = storyChs(line).map((c, k) => {
     const ids = storySeq(line).filter((id) => STORY_BY[id].ch === k), d = ids.filter((id) => p.done[id]).length;
     const subs = STORY_SUBS.filter((s) => s.ch === k && s.line === line), sd = subs.filter((s) => p.done[s.id]).length;
     if (!ids.length) return '';   // 番外篇：沒有關卡的章節不顯示
     return `<button class="st-chb ${d === ids.length ? 'done' : d ? 'on' : ''} ${k === curCh ? 'cur' : ''}" data-ch="${k}"><span>${c.no}</span><b>${c.name}</b><i>${d}／${ids.length}${subs.length ? `・支線 ${sd}／${subs.length}` : ''}</i></button>`;
   }).join('');
   overlay(`<div class="g-wrap st-wrap">
-    <div class="g-head"><h2>雙星記</h2><span class="crumb"><span class="g-${STORY_SIDE[L.side].cls}">${L.name}</span>・${storyCount(p, line)}／${storySeq(line).length} 場作戰</span><span class="g-sp"></span><button class="g-btn sm" id="st-line" title="換到另一個篇章（兩篇的進度分開保存）">切換篇章</button><button class="g-btn sm" id="st-diff" title="更改難度（進度不會重置）">難度：${storyDiffOf(p).name}</button><button class="g-btn sm" id="st-reset">重新開始${L.name}</button><button class="g-btn" id="st-back">← 單人戰鬥</button></div>
+    <div class="g-head"><h2>${L.title || '雙星記'}</h2><span class="crumb"><span class="g-${STORY_SIDE[L.side].cls}">${L.name}</span>・${storyCount(p, line)}／${storySeq(line).length} 場作戰</span><span class="g-sp"></span><button class="g-btn sm" id="st-line" title="換到另一個篇章（兩篇的進度分開保存）">切換篇章</button><button class="g-btn sm" id="st-diff" title="更改難度（進度不會重置）">難度：${storyDiffOf(p).name}</button><button class="g-btn sm" id="st-reset">重新開始${L.name}</button><button class="g-btn" id="st-back">← 單人戰鬥</button></div>
     <div class="st-main"><div class="st-map">${storyMapSVG(p, V.sel, V.vb || STORY_VB, curCh)}<div class="st-help">點選星系查看作戰・滾輪縮放・拖曳移動・雙擊看整張</div><div class="st-zoom"><button class="g-btn sm" data-z="in" title="放大（滾輪也可以）">＋</button><button class="g-btn sm" data-z="out" title="縮小">－</button><button class="g-btn sm" data-z="reset" title="整張星圖（雙擊星圖也可以）">⟲</button></div></div>${storyPanel(p, V.sel, chs)}</div>
   </div>`);
   gEl('st-back').onclick = showSingle;
@@ -11428,9 +11762,9 @@ function showStoryLine(change) {
   const p = storyLoad();
   setPhase('briefing');
   const card = (k) => {
-    const L = STORY_LINE[k], cls = STORY_SIDE[L.side].cls, n = storyCount(p, k), all = storySeq(k).length, cur = change && p.line === k;
+    const L = STORY_LINE[k], cls = STORY_SIDE[L.side].cls, n = storyCount(p, k), all = storySeq(k).length, cur = change && p.line === k, lock = !storyLineOpen(p, k);
     const nx = STORY_BY[storySeq(k).find((id) => !p.done[id])];
-    return `<button class="sp-mode st-linepick ${cls} ${cur ? 'on' : ''}" data-l="${k}"><span class="sp-en">${L.extra ? '番外篇・' : ''}${STORY_SIDE[L.side].name}${cur ? '・目前' : ''}</span><b class="g-${cls}">${L.name}</b><span class="sp-desc">${L.blurb}</span>
+    return `<button class="sp-mode st-linepick ${cls} ${cur ? 'on' : ''} ${lock ? 'locked' : ''}" data-l="${k}" ${lock ? 'disabled title="打完番外篇〈雙星之外〉的第 8 關後開放"' : ''}><span class="sp-en">${L.extra ? '番外篇・' : L.sequel ? `新主線・${lock ? '尚未開放・' : ''}` : ''}${STORY_SIDE[L.side].name}${cur ? '・目前' : ''}</span><b class="g-${cls}">${L.name}</b><span class="sp-desc">${L.blurb}</span>
       ${L.note ? `<span class="sp-desc st-note">${L.note}</span>` : ''}<span class="sp-st"><span class="g-dim">主要人物</span>　${L.cast}</span><span class="sp-st"><span class="g-dim">進度</span>　${n ? `${n}／${all} 場作戰${p.done[storySeq(k)[all - 1]] ? `・已看過結局〈${L.ending}〉` : nx ? `・下一場：${storyNo(nx)}〈${nx.name}〉` : ''}` : `尚未開始・共 ${all} 場作戰`}</span></button>`;
   };
   overlay(`<div class="g-wrap sp-wrap">
@@ -11439,10 +11773,12 @@ function showStoryLine(change) {
     <div class="st-lines">${card('e')}${card('a')}</div>
     <h3 class="st-xh">番外篇</h3>
     <div class="st-lines one">${card('m')}</div>
+    <h3 class="st-xh">新主線</h3>
+    <div class="st-lines one">${card('x')}</div>
   </div>`);
   gEl('sl-back').onclick = change ? () => showStory() : showSingle;
   document.querySelectorAll('.st-lines [data-l]').forEach((b) => { b.onclick = () => {
-    const q = storyLoad(); q.line = b.dataset.l; storySave(q); if (GAME.storyView) { GAME.storyView.sel = null; GAME.storyView.vb = null; } showStory();
+    const q = storyLoad(); if (!storyLineOpen(q, b.dataset.l)) return; q.line = b.dataset.l; storySave(q); if (GAME.storyView) { GAME.storyView.sel = null; GAME.storyView.vb = null; } showStory();
   }; });
 }
 // 難度選擇：第一次進劇情（或重新開始）時一定會先到這裡；之後可以從星圖再進來改（進度保留）
@@ -11450,8 +11786,8 @@ function showStoryDiff(change) {
   const p = storyLoad(), cur = p.diff != null ? p.diff : -1, line = storyLineOf(p), L = STORY_LINE[line];
   setPhase('briefing');
   // 各章的建議等級（同一章取最低～最高；只算目前篇章）
-  const recs = (D) => STORY_CH.map((c, k) => {
-    const v = STORY_STAGES.filter((s) => s.ch === k && s.line === line).map((s) => storyRec(s.id, D));
+  const recs = (D) => storyChs(line).map((c, k) => {
+    const v = STORY_STAGES.filter((s) => s.ch === k && s.line === line && STORY_WAR[s.id]).map((s) => storyRec(s.id, D));
     if (!v.length) return '';
     const lo = Math.min(...v), hi = Math.max(...v);
     return `<span>${c.no} <b>Lv ${lo === hi ? lo : `${lo}～${hi}`}</b></span>`;
@@ -11470,11 +11806,15 @@ function showStoryDiff(change) {
 }
 
 // ═══════════════════════ 劇情戰役〈雙星記〉：每一關的戰鬥資料、簡報、戰後進度 ═══════════════════════
-// foes：[艦隊名, 指揮官, 特性, 等級, 技能, 艦隊類型（CAMP_ARCHETYPES 的 key）, 兵力（預算的倍數）, 陣型, 打法, x（省略＝平均排開）]
+// foes：[艦隊名, 指揮官, 特性, 等級, 技能, 艦隊類型（CAMP_ARCHETYPES 的 key）, 兵力（預算的倍數）, 陣型, 打法, x（省略＝平均排開）, 外觀的陣營（省略＝enemyFac）]
+// 陣營可以寫 'victor'／'loser'：贏得戰爭的一方（帝國 0、聯盟 1）／輸的一方的殘黨（帝國贏＝聯盟 1，聯盟贏＝帝國攝政派 7），見 storyVictor
+// goal 另外有：target＝擊沉 foes[target] 那支艦隊（例如母巢）；rescue＝救援（見 rescue）。ground：近地作戰的場景（GROUND_SCENES 的 key，敵方有防空砲台）
+// rescue：{ name, at: [各批起飛秒數], from: [[x, z]…], need: 至少救出幾批, comp, ext: 每次延後幾秒, per: 每擊沉多少比例延後一次, max: 最多延後幾次 }；時限＝淨化開始的時間
+// doom：{ ally: allies 的序號, at: 秒 }：那支友軍的旗艦分艦隊在這個時間被擊沉（劇情演出）
 // goal：省略＝殲滅或潰走；survive＝撐到時限；escort＝護送目標（vip）撐到時限；cut＝擊沉敵方所有補給艦（要有 supply）
-// ev：增援 [名稱, 指揮官 [名, 特性, 等級, 技能] 或 null, 兵力, 艦隊類型, 陣型, 進場邊 left/right, 進場時間 [a, b], 機率（省略＝1）]
+// ev：增援 [名稱, 指揮官 [名, 特性, 等級, 技能] 或 null, 兵力, 艦隊類型, 陣型, 進場邊 left/right, 進場時間 [a, b], 機率（省略＝1）, 外觀的陣營（省略＝enemyFac）]
 // intel：[準確度, 看不到的項目]；decoy：假情報（簡報只顯示第一支艦隊，兵力 × decoy，也看不到增援）；enemyFac：敵軍外觀的陣營（2＝灰鴉傭兵團、7＝帝國攝政派：帝國的船換成銀白色，帝國內戰用；不要設成跟玩家同陣營：標籤顏色和船型會分不出來）
-// allies：AI 友軍 [艦隊名, 指揮官, 特性, 等級, 技能, 艦隊類型, 兵力, 陣型, 打法, x, 倒戈秒數（省略／null＝不倒戈）, 外觀的陣營（省略＝2 傭兵）]
+// allies：AI 友軍 [艦隊名, 指揮官, 特性, 等級, 技能, 艦隊類型, 兵力, 陣型, 打法, x, 倒戈秒數（省略／null＝不倒戈）, 外觀的陣營（省略＝2 傭兵）, 中途進場 [秒, 'left'／'right']（省略＝開戰就在場）]
 // lines：戰鬥中的通訊 [秒, 誰, 台詞]；after：打贏後的結語；supply：敵方補給艦隊（預算的倍數，跟著第一支艦隊）
 // defect：倒戈的觸發 { left: 敵軍剩下的比例, lead: 觸發後幾秒才倒戈 }：敵軍剩到 left 以下、或到了友軍的倒戈秒數減 lead，就排定 lead 秒後倒戈（取先到的）
 // dlines：跟著倒戈時間走的通訊 [相對倒戈的秒數（負數＝倒戈前）, 誰, 台詞]
@@ -11771,16 +12111,117 @@ const STORY_WAR = {
       ['港口防衛隊', '黛菈', 'shield', 7, ['wall', 'focus'], 'heavy', 0.35, 'line', 'push']],
     lines: [[3, '賽隆', '全艦，轉向一百八十度。目標，赫爾墨斯旗艦。'], [6, '沃斯總裁', '（通訊）賽隆！你的報酬我加倍——不，三倍！'], [10, '賽隆', '抱歉，總裁。有人出了更好的價錢。'], [13, '莎夏', '（通訊）誰出的？'], [15, '賽隆', '我們自己。'], [300, '通訊官', '{V}的艦隊從正面突入了！赫爾墨斯的防線崩了！']],
     after: '赫爾墨斯的私兵艦隊潰散，沃斯總裁在港口被捕。戰後，{V}向灰鴉開出條件：解散，或者編入正規軍替新秩序工作。賽隆選了後者。那天夜裡，杜蘭帶著一半的人和船離開了。' },
-  // 最後一關：被感染的廢棄艦隊（蟲族感染人類的外觀）；杜蘭的海盜團是 AI 友軍
-  'm8': { budget: 5600, time: 360, fleets: 3, lv: 5, enemyFac: 5, goal: 'survive', intel: [0.3, ['comp', 'tactic', 'events']],
+  // 最後一關：被感染的廢棄艦隊（蟲族感染人類的外觀）；杜蘭的海盜團是 AI 友軍。doom：杜蘭的旗艦在第 110 秒被擊沉（演出，一定會沉；所有人都以為他死了，其實被感染了，見〈星海之外〉第 10 關）
+  'm8': { budget: 5600, time: 360, fleets: 3, lv: 5, enemyFac: 5, goal: 'survive', intel: [0.3, ['comp', 'tactic', 'events']], doom: { ally: 0, at: 110 },
     terrain: [stT('nebula', -360, -120, 230), stT('nebula', 380, -60, 210), stT('rock', -120, -40, 75, 30), stT('rock', 200, 120, 60, -50)],
     foes: [['廢棄艦隊', '？？？', 'dmg', 9, ['charge'], 'balanced', 0.5, 'line', 'push'],
       ['廢棄艦隊', '？？？', 'shield', 9, ['wall'], 'heavy', 0.4, 'crescent', 'push']],
     ev: [['廢棄艦隊', null, 0.3, 'balanced', 'line', 'left', [120, 180]], ['廢棄艦隊', null, 0.3, 'raider', 'wedge', 'right', [190, 240], 0.8]],
     allies: [['鏽牙海盜團', '「鏽牙」杜蘭', 'dmg', 7, ['charge', 'focus'], 'raider', 0.35, 'wedge', 'flank', 380, null, 2]],
     lines: [[3, '賽隆', '杜蘭的訊號就在前面……這裡已經是星圖的邊緣了。'], [30, '莎夏', '（通訊）前方有艦隊！很多……識別碼是三十年前失蹤的殖民船團？'], [36, '杜蘭', '（通訊）賽隆！別過來，這些船不對勁——裡面沒有活人，可是它們在動！'],
-      [42, '賽隆', '全艦跟杜蘭會合。我們的帳，等一下再算。'], [200, '柯爾', '（通訊）被擊沉的船……殘骸在長東西。'], [330, '賽隆', '撤。把看到的一切都記下來。這件事，比{V}的通緝令重要。']],
-    after: '灰鴉帶著杜蘭的殘部退回了人類星域。分手前，杜蘭只說了一句：「下次見面，我們還是敵人。」賽隆的報告被{V}列為最高機密。' },
+      [42, '賽隆', '全艦跟杜蘭會合。我們的帳，等一下再算。'], [80, '柯爾', '（通訊）被擊沉的船……殘骸在長東西。'], [100, '杜蘭', '（通訊）牠們從底下鑽上來了——賽隆，帶我的人走！'],
+      [113, '莎夏', '（通訊）杜蘭的旗艦……爆炸了。'], [118, '賽隆', '……杜蘭。'], [160, '鏽牙海盜團', '（通訊）灰鴉，鏽牙的人聽你指揮。只要能活著出去。'], [325, '柯爾', '（通訊）團長，來的航道也被堵住了。我們回不去了。'], [332, '賽隆', '那就往前走。把看到的一切都記下來。']],
+    after: '「鏽牙」杜蘭的旗艦沒有回來，所有人都以為他死了。失去首領的海盜團向賽隆降伏，併入了灰鴉。回人類星域的航道被廢棄艦隊堵死，灰鴉只能往星圖之外走。旗艦燃燒的殘骸，墜進了附近一顆行星的大氣層。' },
+  // ── 新主線〈星海之外〉：玩家是灰鴉傭兵團；敵軍是感染人類（5）與蟲族（6），機械智慧族（4）是友軍 ──
+  'x1': { budget: 5400, time: 300, fleets: 2, lv: 5, enemyFac: 5, goal: 'escort', vip: { name: '受損艦隊', comp: [0, 0, 0, 0, 50, 30] }, intel: [0.5, ['comp', 'events']],
+    terrain: [stT('nebula', -340, -160, 210), stT('rock', 260, -40, 70, 30), stT('rock', -120, 120, 55, -40)],
+    foes: [['廢棄艦隊', '？？？', 'dmg', 8, ['charge'], 'balanced', 0.5, 'line', 'push'],
+      ['廢棄艦隊', '？？？', 'speed', 8, ['charge'], 'raider', 0.35, 'wedge', 'flank']],
+    ev: [['廢棄艦隊', null, 0.25, 'balanced', 'line', 'left', [110, 160]]],
+    allies: [['鏽牙海盜團殘部', '「斷鏈」葛利', 'dmg', 7, ['charge'], 'raider', 0.3, 'wedge', 'flank', 380]],
+    lines: [[3, '賽隆', '受損的船走中間。柯爾，你殿後。'], [7, '柯爾', '收到。……團長，牠們不會累。'], [120, '「斷鏈」葛利', '（通訊）灰鴉，左邊又來了一群！'], [240, '賽隆', '再撐一下。前面的星雲可以甩掉牠們。']],
+    after: '受損艦大多突圍了，但廢棄艦隊沒有停下來。灰鴉越逃，離人類星域就越遠。' },
+  'x2': { budget: 5400, time: 300, fleets: 2, lv: 5, enemyFac: 5, goal: 'survive', intel: [0.6, ['events']],
+    terrain: [stT('nebula', -300, -80, 230), stT('nebula', 320, -40, 220), stT('asteroid', 0, -240, 160)],
+    foes: [['廢棄艦隊', '？？？', 'dmg', 8, ['charge', 'focus'], 'balanced', 0.5, 'line', 'push'],
+      ['廢棄艦隊', '？？？', 'shield', 8, ['wall'], 'heavy', 0.4, 'crescent', 'push']],
+    ev: [['廢棄艦隊', null, 0.3, 'raider', 'wedge', 'left', [70, 110]], ['廢棄艦隊', null, 0.3, 'balanced', 'line', 'right', [140, 190]]],
+    allies: [['鏽牙海盜團殘部', '「斷鏈」葛利', 'dmg', 7, ['charge'], 'raider', 0.25, 'wedge', 'flank', -380]],
+    lines: [[3, '「快手」莎夏', '（通訊）團長，飛彈只剩三成了。'], [7, '賽隆', '省著用。打船頭，不要打殘骸。'], [100, '「斷鏈」葛利', '（通訊）又來了！牠們怎麼越打越多？'], [180, '「快手」莎夏', '（通訊）被擊沉的船……又站起來了。'], [280, '賽隆', '撐住。再五分鐘……再一分鐘。']],
+    after: '灰鴉撐了下來，代價是三分之一的船。彈藥見底了，廢棄艦隊的數量卻比出發時又多了一倍。' },
+  // 第 3 關：機械智慧族艦隊在第 100 秒從右翼跳躍進場（allies 的中途進場）
+  'x3': { budget: 6000, time: 420, fleets: 3, lv: 5, enemyFac: 5, intel: [0.4, ['comp', 'tactic', 'events']],
+    terrain: [stT('asteroid', -300, -60, 190), stT('asteroid', 320, -20, 180), stT('rock', 0, -260, 90, 20)],
+    foes: [['廢棄艦隊', '？？？', 'dmg', 9, ['charge', 'focus'], 'balanced', 0.45, 'line', 'push'],
+      ['廢棄艦隊', '？？？', 'shield', 8, ['wall'], 'heavy', 0.35, 'crescent', 'push'],
+      ['廢棄艦隊', '？？？', 'speed', 8, ['charge'], 'raider', 0.25, 'wedge', 'flank']],
+    allies: [['不明艦隊', '？？？', 'shield', 9, ['jam', 'focus'], 'heavy', 0.8, 'crescent', 'push', 0, null, 4, [85, 'right']]],
+    lines: [[3, '賽隆', '沒有退路了。全艦，陣形收緊。'], [60, '「鐵顎」柯爾', '（通訊）左翼快撐不住了……'], [77, '「快手」莎夏', '（通訊）團長，右舷……空間在扭曲！'], [85, '通訊官', '不明艦隊跳躍出現！不是人類的船！'], [91, '？？？', '（通訊）偵測到未感染的人類個體。介入。'], [97, '賽隆', '……不管你們是誰，歡迎。']],
+    after: '不明艦隊和灰鴉一起殲滅了廢棄艦隊。它們沒有對灰鴉開火，只是安靜地停在原地，像在等什麼。' },
+  'x4': { budget: 4600, time: 300, fleets: 1, lv: 5, enemyFac: 5, intel: [0.85, []],
+    terrain: [stT('rock', -260, -80, 70, 30), stT('nebula', 300, -60, 180)],
+    foes: [['感染艦群', '？？？', 'dmg', 8, ['charge'], 'balanced', 0.45, 'line', 'push']],
+    ev: [['感染艦群', null, 0.2, 'raider', 'wedge', 'left', [120, 170]]],
+    allies: [['機械智慧族艦隊', '賽弗', 'shield', 8, ['jam', 'focus'], 'heavy', 0.45, 'crescent', 'kite', 380, null, 4]],
+    lines: [[3, '賽弗', '（通訊）人類個體。我們是你們會稱為「機械」的存在。指定名稱：賽弗。'], [9, '賽隆', '灰鴉傭兵團，賽隆。……你們是什麼人？'], [14, '賽弗', '（通訊）問題無效，「人」不適用。先處理感染體，成功率 94%。'],
+      [120, '賽弗', '（通訊）說明：你們稱為「廢棄艦隊」的對象，是被蟲族感染的人類。宿主已經不存在。'], [127, '賽隆', '蟲族……宇宙裡還有別的東西？'], [132, '賽弗', '（通訊）修正：宇宙裡「主要」是別的東西。']],
+    after: '賽弗說明了一切：三十年前的殖民船團抵達新伊甸，在那裡遇上了蟲族。人類第一次知道，宇宙裡不只有人類。賽弗提議合作：清理新伊甸，救出還活著的人。灰鴉需要船和人，賽隆答應了。' },
+  'x5': { budget: 5600, time: 420, fleets: 2, lv: 5, enemyFac: 5, ground: 'city', intel: [0.65, ['events']],
+    foes: [['地表據點守軍', '？？？', 'shield', 9, ['wall'], 'heavy', 0.5, 'line', 'kite'],
+      ['感染艦群', '？？？', 'dmg', 8, ['charge'], 'raider', 0.35, 'wedge', 'flank']],
+    ev: [['感染艦群', null, 0.2, 'balanced', 'line', 'right', [140, 200], 0.8]],
+    allies: [['機械智慧族艦隊', '賽弗', 'shield', 8, ['jam', 'focus'], 'balanced', 0.35, 'crescent', 'push', -380, null, 4]],
+    lines: [[3, '賽弗', '（通訊）地表偵測到人類訊號。微弱，但持續。'], [8, '賽隆', '三十年了……還有人活著？'], [12, '「鐵顎」柯爾', '那就去把他們接出來。全艦降低高度，小心防空砲。'],
+      [150, '米拉・哈特', '（通訊）這裡是新伊甸防衛軍！不管你們是誰——快一點！'], [156, '賽隆', '聽到了。清出一條路！']],
+    after: '據點的守軍被擊潰了。地下避難所裡走出來的，是新伊甸殖民地防衛軍最後的軍官，米拉・哈特。她守了三十年。' },
+  'x6': { budget: 5600, time: 330, fleets: 2, lv: 5, enemyFac: 5, goal: 'escort', vip: { name: '倖存者船團', comp: [0, 0, 0, 0, 40, 60] }, intel: [0.7, ['events']],
+    terrain: [stT('asteroid', -280, -40, 170), stT('asteroid', 300, 20, 160), stT('rock', 40, -200, 65, 10)],
+    foes: [['封鎖艦隊', '？？？', 'shield', 9, ['wall'], 'heavy', 0.45, 'line', 'push'],
+      ['感染艦群', '？？？', 'speed', 9, ['charge'], 'raider', 0.35, 'wedge', 'flank']],
+    ev: [['感染艦群', null, 0.25, 'raider', 'wedge', 'left', [120, 170]]],
+    lines: [[3, '「老錨」歐文', '（通訊）這艘船三十年沒飛過了。你們說要護送，就護送到底。'], [8, '米拉・哈特', '老錨，你只管飛。剩下的交給我們。'], [180, '「老錨」歐文', '（通訊）引擎……撐住了！'], [290, '米拉・哈特', '封鎖線過了！']],
+    after: '倖存者船團突破了封鎖。殖民船團的老船長「老錨」歐文，把他的船隊交給了灰鴉調度。' },
+  // 第 7 關：靜默節點（中立的機械智慧族，AI 友軍）要淨化行星；撤離船從地表起飛，掩護到後方。擊沉越多感染艦，淨化延得越久
+  'x7': { budget: 6000, time: 300, fleets: 3, lv: 5, enemyFac: 5, goal: 'rescue', intel: [0.7, ['events']],
+    terrain: [stT('rock', -420, -40, 70, 30), stT('rock', 420, -60, 65, -40)],
+    rescue: { name: '撤離船', at: [15, 40, 65, 90, 115, 140, 170, 200], from: [[-300, -380], [0, -440], [300, -380]], need: 4, comp: [0, 0, 0, 0, 20, 30], ext: 30, per: 0.2, max: 3 },
+    foes: [['感染艦群', '？？？', 'dmg', 9, ['charge'], 'balanced', 0.4, 'line', 'push', -260],
+      ['感染艦群', '？？？', 'speed', 8, ['charge'], 'raider', 0.35, 'wedge', 'flank', 260]],
+    ev: [['感染艦群', null, 0.25, 'raider', 'wedge', 'left', [100, 150]], ['感染艦群', null, 0.25, 'balanced', 'line', 'right', [160, 210]]],
+    allies: [['靜默節點艦隊', '靜默節點', 'shield', 9, ['wall'], 'heavy', 0.35, 'line', 'kite', 0, null, 4]],
+    lines: [[3, '靜默節點', '（通訊）行星淨化程序已排定。剩餘時間：300 秒。'], [8, '米拉・哈特', '淨化？地表上還有人！'], [13, '靜默節點', '（通訊）已計算。救援的成本高於淨化。'], [19, '賽弗', '（通訊）賽隆，我會跟它談。你們要證明，救人也可以有效率。'], [25, '賽隆', '聽到了。清出航道，讓撤離船上來！']],
+    after: '淨化照計畫進行了。被救出來的人看著行星在身後燒起來。靜默節點沒有道歉，只留下一句：「效率修正，已記錄。」賽弗說，這是它們表達敬意的方式。' },
+  'x8': { budget: 6000, time: 420, fleets: 3, lv: 5, enemyFac: 6, intel: [0.5, ['comp', 'events']],
+    terrain: [stT('asteroid', -300, -100, 200), stT('asteroid', 300, -80, 190), stT('rock', 0, 100, 70, 20)],
+    foes: [['蟲群', '？？？', 'dmg', 9, ['charge'], 'carrier', 0.45, 'crescent', 'push'],
+      ['蟲群', '？？？', 'speed', 9, ['charge'], 'raider', 0.4, 'wedge', 'breakthrough']],
+    ev: [['蟲群', null, 0.25, 'raider', 'wedge', 'right', [130, 190]]],
+    allies: [['機械智慧族艦隊', '賽弗', 'shield', 8, ['jam', 'focus'], 'heavy', 0.35, 'crescent', 'kite', 380, null, 4]],
+    lines: [[3, '「鐵顎」柯爾', '那些……不是船。是活的。'], [8, '賽弗', '（通訊）蟲族。不會潰逃，不會投降。只有全滅。'], [12, '賽隆', '拉開距離，用主砲。別讓牠們貼上來。'], [200, '「快手」莎夏', '（通訊）牠們的艦載機……是孵出來的！']],
+    after: '灰鴉第一次跟真正的蟲族交手。牠們不會潰逃，一直打到最後一隻。賽弗說：「這只是先遣。」' },
+  'x9': { budget: 6200, time: 420, fleets: 3, lv: 5, enemyFac: 5, intel: [0.55, ['tactic', 'events']],
+    terrain: [stT('nebula', -320, -100, 220), stT('nebula', 320, -60, 200), stT('rock', 0, -40, 70, 30)],
+    foes: [['感染艦隊', '？？？', 'dmg', 9, ['charge', 'focus'], 'raider', 0.45, 'wedge', 'flank', -300],
+      ['感染艦隊', '？？？', 'speed', 9, ['charge', 'evade'], 'raider', 0.35, 'wedge', 'flank', 300],
+      ['感染艦隊', '？？？', 'shield', 8, ['wall'], 'balanced', 0.3, 'line', 'breakthrough']],
+    lines: [[3, '米拉・哈特', '牠們在繞……這不像之前那些感染體。'], [60, '「快手」莎夏', '（通訊）左翼的那群在後退……不對，是誘餌！'], [66, '賽隆', '假撤退、繞側翼……這是海盜的打法。'], [200, '賽隆', '……不可能。']],
+    after: '感染艦隊被擊退了。賽隆一直盯著戰術紀錄，那種打法他太熟悉了，熟悉到他不願意說出那個名字。賽弗讓它的艦隊直接接受灰鴉的調度。' },
+  // 第 10 關：擊沉母巢（foes[0]）就勝利；蟲族不會潰走
+  'x10': { budget: 6600, time: 480, fleets: 3, lv: 5, enemyFac: 6, goal: 'target', target: 0, intel: [0.6, ['events']],
+    terrain: [stT('asteroid', -320, -200, 190), stT('asteroid', 320, -220, 190), stT('rock', 0, -360, 100, 0)],
+    foes: [['母巢', '母巢', 'shield', 10, ['wall'], 'carrier', 0.4, 'ring', 'kite', 0],
+      ['巢穴護衛群', '？？？', 'dmg', 9, ['charge'], 'balanced', 0.3, 'crescent', 'push', -360],
+      ['感染艦隊', '？？？', 'speed', 9, ['charge', 'focus'], 'raider', 0.25, 'wedge', 'flank', 360, 5]],
+    ev: [['孵化蟲群', null, 0.2, 'raider', 'wedge', 'left', [150, 210]]],
+    allies: [['機械智慧族艦隊', '機械智慧族', 'shield', 9, ['jam', 'focus'], 'heavy', 0.35, 'crescent', 'push', 380, null, 4]],
+    lines: [[3, '賽隆', '打掉母巢，新伊甸就乾淨了。'], [8, '賽弗', '母巢的指揮個體不在這裡。機率 71%。'], [200, '「鐵顎」柯爾', '那支感染艦隊……又是那種打法。']],
+    after: '母巢沉沒的瞬間，所有頻道同時響起一個聲音：「我們記住你們了，小小的播種者。」賽弗說，那是蟲族的指揮官阿瑪蘭，機械智慧族追了它很久，從來沒有贏過。通訊畫面裡，站在阿瑪蘭身邊的人，半張臉已經不是人類了。「賽隆。」那是杜蘭的聲音。「這裡打輸了，就換個地方再播種。下次見面，我會把灰鴉全部帶走。」殘存的蟲群與感染艦隊撤出了新伊甸。' },
+  'x11': { budget: 6000, time: 330, fleets: 3, lv: 5, enemyFac: 6, goal: 'escort', vip: { name: '倖存者船團', comp: [0, 0, 0, 0, 60, 80] }, intel: [0.6, ['events']],
+    terrain: [stT('nebula', -300, -40, 220), stT('rock', 280, -100, 70, 20)],
+    foes: [['蟲族追兵', '？？？', 'speed', 8, ['charge'], 'raider', 0.35, 'wedge', 'push'],
+      ['感染艦隊', '？？？', 'dmg', 9, ['charge', 'focus'], 'balanced', 0.3, 'line', 'push', null, 5]],
+    ev: [['蟲族追兵', null, 0.2, 'raider', 'wedge', 'right', [140, 190]]],
+    lines: [[3, '「老錨」歐文', '回家……我出發的時候，還是個年輕人。'], [8, '賽弗', '（通訊）蟲族追兵接近。牠們不想讓你們回去報信。'], [200, '米拉・哈特', '（通訊）星圖邊緣到了！']],
+    after: '船團穿過了星圖的邊緣。人類星域的燈火就在前方，可是迎接他們的，是{V}邊境要塞的警報。' },
+  // 第 12 關：叛軍是戰敗一方的殘黨（loser：帝國贏＝聯盟外觀，聯盟贏＝帝國攝政派外觀）；{V}的邊境守備艦隊是友軍（victor）
+  'x12': { budget: 6200, time: 420, fleets: 3, lv: 5, enemyFac: 'loser', intel: [0.75, ['events']],
+    terrain: [stT('rock', 0, -320, 110, 0), stT('asteroid', -340, -80, 170), stT('asteroid', 340, -80, 170)],
+    foes: [['叛軍主力', '韋伯上校', 'shield', 9, ['wall', 'focus'], 'heavy', 0.45, 'line', 'push'],
+      ['叛軍突擊隊', '洛克', 'dmg', 8, ['charge', 'rapid'], 'raider', 0.35, 'wedge', 'flank']],
+    ev: [['叛軍增援', null, 0.2, 'balanced', 'line', 'left', [130, 180], 0.7]],
+    allies: [['邊境守備艦隊', '霍夫曼', 'shield', 7, ['wall'], 'balanced', 0.3, 'line', 'kite', -380, null, 'victor']],
+    lines: [[3, '霍夫曼', '（通訊）不明艦隊，立刻停止前進！……等等，那是灰鴉？'], [8, '賽隆', '我們帶了三十年前的殖民者回來。還有一些朋友。'], [13, '霍夫曼', '（通訊）叛軍正在攻擊要塞，我們沒空管你們——'], [17, '賽隆', '那就讓我們幫忙。'], [24, '賽弗', '（通訊）人類之間也會互相攻擊。紀錄。']],
+    after: '叛亂平定了。霍夫曼在戰報上寫：「灰鴉傭兵團與不明艦隊協助作戰，表現可靠。」那份戰報，讓{V}願意坐下來聽賽隆說話。' },
   // ── 支線：灰鴉傭兵團（敵軍外觀＝傭兵 enemyFac 2）──
   's1': { budget: 3000, time: 300, fleets: 2, lv: 2, enemyFac: 2, intel: [0.6, ['tactic', 'events']],
     terrain: [stT('asteroid', -220, -80, 190), stT('asteroid', 260, 40, 150), stT('rock', 40, -160, 60, 40)],
@@ -11815,6 +12256,7 @@ const STORY_DIFF = [
 const storyDiffOf = (p) => STORY_DIFF[GAME.storyDiffForce != null ? GAME.storyDiffForce : p && p.diff != null ? p.diff : 1] || STORY_DIFF[1];   // storyDiffForce：測試用（自動代打），不寫進存檔
 // 建議等級：這一關敵方指揮官的平均等級（套用難度）減 1
 function storyRec(id, D = storyDiffOf(storyLoad())) {
+  if (!STORY_WAR[id]) return 1;   // 只有劇情的關卡
   const lv = STORY_WAR[id].foes.map((f) => Math.max(1, f[3] + D.lv));
   return Math.max(1, Math.round(lv.reduce((a, b) => a + b, 0) / lv.length) - 1);
 }
@@ -11825,22 +12267,30 @@ function storyScenario(id) {
     const A = CAMP_ARCHETYPES.find((a) => a.key === arch), per = A.mix.reduce((t, m, i) => t + m * SHIP_TYPES[i].cost, 0), n = B * pow * D.pow / per;
     return A.mix.map((m) => Math.round(n * m / 10) * 10);
   };
-  const nF = W.foes.length;
-  const enemy = W.foes.map(([name, cn, trait, level, skills, arch, pow, formation, tactic, x], i) => ({ name, commander: { name: cn, trait, level: Math.max(1, level + D.lv), skills: skills.slice() },
-    comp: comp(arch, pow), formation, tactic, x: x != null ? x : nF === 1 ? 0 : Math.round(-380 + 760 * i / (nF - 1)), y: 0, z: -660 - (i % 2) * 60, h: 0 }));
+  const nF = W.foes.length, vic = storyVictor(), facX = (f) => (f === 'victor' ? (vic === '聯盟' ? 1 : 0) : f === 'loser' ? (vic === '帝國' ? 1 : 7) : f);
+  const enemy = W.foes.map(([name, cn, trait, level, skills, arch, pow, formation, tactic, x, fac], i) => ({ name, commander: { name: cn, trait, level: Math.max(1, level + D.lv), skills: skills.slice() },
+    comp: comp(arch, pow), formation, tactic, x: x != null ? x : nF === 1 ? 0 : Math.round(-380 + 760 * i / (nF - 1)), y: 0, z: -660 - (i % 2) * 60, h: 0, ...(fac != null ? { fac: facX(fac) } : {}) }));
   const sc = { id: 'story-' + id, saga: true, stageId: id, side: s.side, cast: s.cast.slice(),
-    dead: Object.keys(STORY_DEATH).filter((c) => { const d = seq.indexOf(STORY_DEATH[c]); return d >= 0 && d < k; }).concat(s.line === 'm' ? [] : STORY_MERCS),   // 帝國篇、聯盟篇裡灰鴉的人是敵人
-    name: `雙星記・${s.name}`, size: B < 3400 ? '小型' : B < 4800 ? '中型' : '大型', timeLimit: W.time, budget: B, maxFleets: Math.max(W.fleets, s.cast.length), level: Math.max(1, Math.min(5, W.lv + D.ai)), diff: D.key,
-    seed: 5000 + k * 37 + (s.line === 'a' ? 7 : s.line === 'm' ? 13 : 0) + (s.sub ? 900 + STORY_SUBS.indexOf(s) * 53 : 0), terrain: W.terrain || [], enemy, story: storyText(s.story),
-    events: (W.ev || []).map(([name, cm, pow, arch, formation, edge, at, chance]) => ({ type: 'reinforce', chance: chance == null ? 1 : chance, at, name, comp: comp(arch, pow), formation, edge,
+    dead: Object.keys(STORY_DEATH).filter((c) => { const d = seq.indexOf(STORY_DEATH[c]); return d >= 0 && d < k; }).concat(s.line === 'm' || s.line === 'x' ? [] : STORY_MERCS).concat(STORY_LINE[s.line].absent || []),   // 帝國篇、聯盟篇裡灰鴉的人是敵人；absent＝這一篇不能派的人（〈星海之外〉的杜蘭）
+    name: `${STORY_LINE[s.line].title || '雙星記'}・${s.name}`, size: B < 3400 ? '小型' : B < 4800 ? '中型' : '大型', timeLimit: W.time, budget: B, maxFleets: Math.max(W.fleets, s.cast.length), level: Math.max(1, Math.min(5, W.lv + D.ai)), diff: D.key,
+    seed: 5000 + k * 37 + (s.line === 'a' ? 7 : s.line === 'm' ? 13 : s.line === 'x' ? 19 : 0) + (s.sub ? 900 + STORY_SUBS.indexOf(s) * 53 : 0), terrain: W.terrain || [], enemy, story: storyText(s.story),
+    events: (W.ev || []).map(([name, cm, pow, arch, formation, edge, at, chance, fac]) => ({ type: 'reinforce', chance: chance == null ? 1 : chance, at, name, comp: comp(arch, pow), formation, edge, ...(fac != null ? { fac: facX(fac) } : {}),
       ...(cm ? { commander: { name: cm[0], trait: cm[1], level: Math.max(1, cm[2] + D.lv), skills: cm[3].slice() } } : {}) })),
     intel: { accuracy: W.intel ? W.intel[0] : 0.8, hide: W.intel ? W.intel[1].slice() : [] },
     enemySupply: W.supply ? { comp: aiSupplyComp(B * W.supply), formation: 'ring', x: enemy[0].x, z: enemy[0].z - 230, h: 0, follow: 0 } : null,
     goal: W.goal ? { type: W.goal, ...(W.vip ? { name: W.vip.name } : {}) } : null, lines: W.lines ? W.lines.map(([t, who, msg]) => [t, who, storyText(msg)]) : null, dlines: W.dlines ? W.dlines.map(([t, who, msg]) => [t, who, storyText(msg)]) : null, defect: W.defect || null, after: storyText(W.after || ''), decoy: W.decoy || 0 };
   if (W.goal !== 'survive' && W.goal !== 'escort') sc.untimed = true;   // 主線只有防守任務（撐到時限、護送）有時限；其他關的時間只當目標時間（越快打完獎勵越多）
-  if (W.enemyFac != null) sc.enemyFac = W.enemyFac;
-  if (W.allies) sc.allies = W.allies.map(([name, cn, trait, level, skills, arch, pow, formation, tactic, x, defect, fac]) => ({ name, commander: { name: cn, trait, level: Math.max(1, level + D.lv), skills: skills.slice() },
-    comp: comp(arch, pow), formation, tactic, x, z: 300 + ZONE_SHIFT - 40, h: Math.PI, fac: fac != null ? fac : 2, defectAt: defect != null ? defect : null }));
+  if (W.enemyFac != null) sc.enemyFac = facX(W.enemyFac);
+  if (W.allies) sc.allies = W.allies.map(([name, cn, trait, level, skills, arch, pow, formation, tactic, x, defect, fac, arrive]) => ({ name, commander: { name: cn, trait, level: Math.max(1, level + D.lv), skills: skills.slice() },
+    comp: comp(arch, pow), formation, tactic, x, z: 300 + ZONE_SHIFT - 40, h: Math.PI, fac: fac != null ? facX(fac) : 2, defectAt: defect != null ? defect : null, ...(arrive ? { arrive: arrive.slice() } : {}) }));
+  if (W.ground) { sc.terrain = []; sc.ground = { scene: W.ground, seed: 7000 + k * 13, def: 1 }; }
+  if (W.doom) sc.doom = { name: W.allies[W.doom.ally][0], at: W.doom.at };
+  if (W.goal === 'target') sc.goal = { type: 'target', name: W.foes[W.target][0] };
+  if (W.rescue) {
+    const Q = W.rescue;
+    sc.rescue = { name: Q.name, at: Q.at.slice(), from: Q.from.map(([x, z]) => ({ x, z })), toZ: MAP_BOUNDS.z1 - 80, comp: Q.comp.slice(), ext: Q.ext, per: Q.per, max: Q.max };
+    sc.goal = { type: 'rescue', name: Q.name, need: Q.need, waves: Q.at.length };
+  }
   if (W.vip) sc.vip = { name: W.vip.name, comp: W.vip.comp.slice(), formation: 'ring', x: 0, z: DEPLOY_ZONE.z1 - 40, h: Math.PI };
   return sc;
 }
@@ -11868,13 +12318,16 @@ function storyGoalRows(sc) {
   const par = `沒有時限・${min} 分鐘內獲勝有額外經驗與功勳（${SPEED_TIERS.map((b) => `${Math.round(b.at * 100)}% 時間內 +${Math.round(b.add * 100)}%`).join('、')}）`;
   const T = !G ? ['殲滅敵軍，或' + er, rout, par]
     : G.type === 'survive' ? [`撐過 ${min} 分鐘，或${er}`, rout, `${min} 分鐘（撐到時間就是勝利）`]
+    : G.type === 'target' ? [`擊沉${G.name}，或殲滅敵軍`, rout, par]
+    : G.type === 'rescue' ? [`淨化開始前至少救出 ${G.need} 批${G.name}（共 ${G.waves} 批，把它們掩護到後方的撤離點），或殲滅敵軍`, `淨化開始時救出的不到 ${G.need} 批，或${rout}`, `${min} 分鐘後開始淨化：每擊沉約 ${Math.round(sc.rescue.per * 100)}% 的敵軍延後 ${sc.rescue.ext} 秒（最多 ${sc.rescue.max} 次）`]
     : G.type === 'escort' ? [`保護${G.name}撐過 ${min} 分鐘，或${er}`, `${G.name}損失超過 ${Math.round((1 - VIP_KEEP) * 100)}%，或${rout}`, `${min} 分鐘（${G.name}撐到時間就是勝利）`]
     : [`擊沉敵方所有補給艦，或${er}`, rout, par];
   return `<dt>勝利條件</dt><dd>${T[0]}</dd><dt>敗北條件</dt><dd>${T[1]}</dd><dt>${sc.untimed ? '目標時間' : '時間限制'}</dt><dd>${T[2]}</dd>`;
 }
 // 作戰簡報
 function storyBriefing(id) {
-  const s = STORY_BY[id], sc = storyScenario(id), ch = STORY_CH[s.ch], side = STORY_SIDE[s.side], other = STORY_SIDE[1 - s.side];
+  if (STORY_BY[id].talk) { storyTalk(id); return; }   // 只有劇情的關卡
+  const s = STORY_BY[id], sc = storyScenario(id), ch = storyChOf(s), side = STORY_SIDE[s.side], other = STORY_SIDE[1 - s.side];
   storyEnsureCast(s.cast);
   GAME.sc = sc;
   // 假情報：只看得到第一支艦隊，而且兵力被低估，也看不到增援
@@ -11885,9 +12338,9 @@ function storyBriefing(id) {
   const D = storyDiffOf(storyLoad()), rec = storyRec(id, D);
   const low = s.cast.map((cid) => COMMANDERS.find((o) => o.id === cid)).filter((c) => c && cmdrLevel(c.id) < rec);
   overlay(`<div class="g-wrap">
-    <div class="g-head"><h2>${s.name}</h2><span class="crumb">雙星記${s.line === 'm' ? '番外' : ''}　·　${ch.no}　${ch.name}・${storyNo(s)}　·　<span class="g-${side.cls}">${side.name}</span>　·　${s.place}　·　難度${D.name}</span><span class="g-sp"></span><button class="g-btn" id="sb-back">← 星圖</button></div>
+    <div class="g-head"><h2>${s.name}</h2><span class="crumb">${STORY_LINE[s.line].title || '雙星記'}${s.line === 'm' ? '番外' : ''}　·　${ch.no}　${ch.name}・${storyNo(s)}　·　<span class="g-${side.cls}">${side.name}</span>　·　${s.place}　·　難度${D.name}</span><span class="g-sp"></span><button class="g-btn" id="sb-back">← 星圖</button></div>
     <div style="display:flex;flex-direction:column;gap:12px">
-      ${s.inter ? `<div class="g-card st-inter ${s.line === 'm' ? '' : other.cls}"><h3>與此同時${s.line === 'm' ? '' : `・<span class="g-${other.cls}">${other.name}</span>`}</h3><p>${storyText(s.inter)}</p></div>` : ''}
+      ${s.inter ? `<div class="g-card st-inter ${s.side === 2 ? '' : other.cls}"><h3>與此同時${s.side === 2 ? '' : `・<span class="g-${other.cls}">${other.name}</span>`}</h3><p>${storyText(s.inter)}</p></div>` : ''}
       <div class="g-card st-brief ${side.cls}"><h3>狀況</h3>${s.when ? `<div class="st-when">時間點：${s.when}</div>` : ''}<p>${sc.story}</p>
         <dl class="kv"><dt>出擊指揮官</dt><dd>${cast}</dd><dt>作戰目標</dt><dd><b>${s.goal}</b></dd>${storyGoalRows(sc)}
         <dt>編成預算</dt><dd>${fmtN(sc.budget)} 點　最多 ${sc.maxFleets} 支艦隊</dd><dt>建議等級</dt><dd>Lv ${rec} 以上（${D.name}）${low.length ? `　<span class="g-warn">${low.map((c) => `${c.name} 只有 Lv ${cmdrLevel(c.id)}`).join('、')}：可以先到無限戰場或隨機戰役練等，或在星圖上調低難度</span>` : '　<span class="g-good">出擊指揮官都達到了</span>'}</dd>
@@ -11897,6 +12350,31 @@ function storyBriefing(id) {
     </div></div>`);
   gEl('sb-back').onclick = () => showStory();
   gEl('sb-next').onclick = showLoadout;
+}
+// 只有劇情、沒有戰鬥的關卡（talk）：一段對話；按「完成」記進度、有人加入就加入，最後一關顯示結局
+function storyTalk(id, fin) {
+  const s = STORY_BY[id], L = STORY_LINE[s.line], ch = storyChOf(s), side = STORY_SIDE[s.side], p = storyLoad();
+  setPhase('briefing');
+  const rows = s.scenes.map(([who, t]) => (who ? `<p class="st-say"><b>${who}</b>${storyText(t)}</p>` : `<p class="st-narr">${storyText(t)}</p>`)).join('');
+  const gains = fin && GAME.storyGains && GAME.storyGains.length ? `<div class="st-end"><b>解鎖</b><p>${GAME.storyGains.join('<br>')}</p></div>` : '';
+  overlay(`<div class="g-wrap">
+    <div class="g-head"><h2>${s.name}</h2><span class="crumb">${L.title || '雙星記'}　·　${ch.no}　${ch.name}・${storyNo(s)}　·　${s.place}</span><span class="g-sp"></span><button class="g-btn" id="tk-back">← 星圖</button></div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      ${s.inter ? `<div class="g-card st-inter"><h3>與此同時</h3><p>${storyText(s.inter)}</p></div>` : ''}
+      <div class="g-card st-brief st-talk ${side.cls}"><h3>${storyText(s.story)}</h3>${rows}</div>
+      ${fin ? `<div class="g-card st-after ${side.cls}">${gains}${s.ending ? `<div class="st-end"><b>結局</b><p>${storyText(s.ending)}</p></div>` : ''}</div>` : ''}
+      <div class="g-row"><span class="g-sp"></span><button class="g-btn pri" id="tk-done">${fin ? '回到星圖 →' : p.done[id] ? '看完了・回到星圖' : '完成'}</button></div>
+    </div></div>`);
+  const back = () => { if (GAME.storyView) GAME.storyView.sel = null; showStory(); };
+  gEl('tk-back').onclick = back;
+  gEl('tk-done').onclick = () => {
+    if (fin || p.done[id]) { back(); return; }
+    p.done[id] = Date.now(); storySave(p);
+    GAME.storyGains = [];
+    for (const cid of s.joins || []) if (storyJoin(cid)) { const c = STORY_CMDRS.find((o) => o.id === cid); GAME.storyGains.push(`${c.title} ${c.name}加入了${side.name}（Lv ${c.lv}，之後各模式都能派）`); }
+    const V = GAME.storyView; if (V) { V.sel = null; V.vb = null; if (V.selBy) delete V.selBy[s.line]; }
+    storyTalk(id, true);
+  };
 }
 // 打完一場（只在第一次產生戰報時呼叫）：打贏就記進度；有人加入就放進指揮官名單
 function storyResult(R) {
@@ -11908,7 +12386,7 @@ function storyResult(R) {
   const V = GAME.storyView; if (V) { V.sel = null; V.vb = null; if (V.selBy) delete V.selBy[s.line]; }   // 回到星圖時聚焦到下一場
   // 傭兵：第一次打完跟傭兵有關的任務 → 酒館出現傭兵指揮官；打下灰鴉的基地 → 可以買傭兵支援
   GAME.storyGains = [];
-  for (const id of s.joins || []) if (storyJoin(id)) { const c = STORY_CMDRS.find((o) => o.id === id); GAME.storyGains.push(`${c.title} ${c.name}加入了${STORY_SIDE[c.faction].name}（Lv ${c.lv}，之後各模式都能派）`); }
+  for (const id of s.joins || []) if (storyJoin(id)) { const c = STORY_CMDRS.find((o) => o.id === id); GAME.storyGains.push(`${c.title} ${c.name}加入了${STORY_SIDE[s.side].name}（Lv ${c.lv}，之後各模式都能派）`); }
   if (s.merc && !ROSTER.mercs) { ROSTER.mercs = true; GAME.storyGains.push('星際酒館開始出現灰鴉傭兵團的指揮官（兩個陣營都能派）'); tavernRefresh(); }
   if ((sc.stageId === 's3' || sc.stageId === 's3a') && !ROSTER.mercSup) { ROSTER.mercSup = true; GAME.storyGains.push('傭兵支援：之後每場戰鬥可以花功勳呼叫一次灰鴉的艦隊'); }
   rosterSave();
@@ -11916,7 +12394,7 @@ function storyResult(R) {
 function storyAfterHTML(R) {
   const s = STORY_BY[GAME.sc.stageId]; if (R.kind !== 'win') return '';
   const U = GAME.storyGains || [];
-  return `<div class="g-card st-after ${STORY_SIDE[s.side].cls}" style="margin-bottom:12px"><p>${GAME.sc.after}</p>${U.length ? `<div class="st-end"><b>解鎖</b><p>${U.join('<br>')}</p></div>` : ''}${s.ending ? `<div class="st-end"><b>結局</b><p>${storyText(s.ending)}</p></div>` : ''}</div>`;
+  return `<div class="g-card st-after ${STORY_SIDE[s.side].cls}" style="margin-bottom:12px">${R.rescued != null ? `<p><b>救出了 ${R.rescued}／${R.waves} 批倖存者</b></p>` : ''}<p>${GAME.sc.after}</p>${U.length ? `<div class="st-end"><b>解鎖</b><p>${U.join('<br>')}</p></div>` : ''}${s.ending ? `<div class="st-end"><b>結局</b><p>${storyText(s.ending)}</p></div>` : ''}</div>`;
 }
 function storyAgainLabel(R) { const nx = R.kind === 'win' && storyNext(GAME.sc.stageId); return R.kind !== 'win' ? '重打這一關（回到編成）' : nx ? `下一場作戰：${STORY_BY[nx].name} →` : '回到星圖 →'; }
 function storyAgain(R) {
@@ -11981,7 +12459,7 @@ rosterApply();
 // 劇情加入的指揮官（STORY_CMDRS）：放進 hired，之後就跟招募來的一樣；已經在名單裡（或被解雇過又回來）就只補回名單
 function storyJoin(id) {
   const d = STORY_CMDRS.find((o) => o.id === id); if (!d || COMMANDERS.some((o) => o.id === id)) return false;
-  const def = { id: d.id, name: d.name, title: d.title, trait: d.trait, skills: d.skills.slice(), faction: d.faction, story: true, bio: d.bio };
+  const def = { id: d.id, name: d.name, title: d.title, trait: d.trait, skills: d.skills.slice(), faction: d.faction, story: true, bio: d.bio, ...(d.leads ? { leads: d.leads.slice() } : {}) };
   ROSTER.hired.push(def); COMMANDERS.push(def);
   if (!CMDR_SAVE[id]) { CMDR_SAVE[id] = { xp: XP_PER_LEVEL * (d.lv - 1), tal: {} }; saveCmdrs(CMDR_SAVE); }
   rosterSave();
@@ -21222,6 +21700,7 @@ function renderSettings() {
         <select class="g-sel" id="set-cmdslow">${[[0, '關閉'], [0.1, '×0.1'], [0.2, '×0.2'], [0.5, '×0.5']].map(([v, n]) => `<option value="${v}" ${SETTINGS.cmdSlow === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
       <label class="set-row set-chk"><span>打開戰術面板時自動暫停<br><small class="g-dim">只限單人模式</small></span><input type="checkbox" id="set-tacpause" ${SETTINGS.tacPause ? 'checked' : ''}></label>
       <label class="set-row set-chk"><span>過場動畫<br><small class="g-dim">開戰、勝利／敗北／平手、戰鬥回放時的文字切入（APNG）</small></span><input type="checkbox" id="set-cutin" ${SETTINGS.cutin !== false ? 'checked' : ''}></label>
+      <label class="set-row set-chk"><span>開戰運鏡<br><small class="g-dim">開戰時鏡頭從敵軍掃過戰場、經過我軍，再回到指揮視角（約 5 秒，戰鬥暫停；任何按鍵或點擊略過）</small></span><input type="checkbox" id="set-introcam" ${SETTINGS.introCam !== false ? 'checked' : ''}></label>
       <div class="set-row"><span>過場動畫工坊<br><small class="g-dim">自己打字做切入動畫，預覽並下載成 APNG</small></span><button class="g-btn sm" id="set-cutstudio">工坊…</button></div>
       <div class="set-h">指揮官視角（艦橋，${keyText('bridge')}）</div>
       <label class="set-row set-chk"><span>低頭看戰術台時自動暫停<br><small class="g-dim">只限單人模式；預設不暫停，邊看戰場邊下令</small></span><input type="checkbox" id="set-brpause" ${SETTINGS.bridgePause ? 'checked' : ''}></label>
@@ -21239,12 +21718,13 @@ function renderSettings() {
       <div class="set-row"><span>模型工坊<br><small class="g-dim">修正 GLB：船頭朝向、原點、合併成一個網格、減面、刪除多餘的面</small></span><button class="g-btn sm" id="set-mtool">模型工坊…</button></div>
       <div class="set-row"><span>畫面</span><span class="g-row"><button class="g-btn sm ${mode3D ? '' : 'pri'}" data-rm="2d">2D 像素</button><button class="g-btn sm ${mode3D ? 'pri' : ''}" data-rm="3d">3D 模型</button></span></div>`;
   } else if (SET.tab === 'sound') {
-    const A = sndOpts(), sl = (id, v, name, desc) => `<div class="set-row"><span>${name}<br><small class="g-dim">${desc}</small></span>
-        <span class="g-row"><input type="range" min="0" max="100" step="5" id="${id}" value="${Math.round(v * 100)}"><span class="g-dim" id="${id}-v" style="min-width:3em;text-align:right">${Math.round(v * 100)}%</span></span></div>`;
-    body = `<label class="set-row set-chk"><span>聲音<br><small class="g-dim">關掉＝完全靜音（戰場、介面都沒有聲音）</small></span><input type="checkbox" id="set-snd-on" ${A.on ? 'checked' : ''}></label>
-      ${sl('set-snd-m', A.m, '主音量', '全部聲音的音量')}
-      ${sl('set-snd-s', A.s, '戰場音效', '開火、命中、爆炸、推進器；看得越近越大聲，左右依畫面位置')}
-      ${sl('set-snd-u', A.u, '介面音效', '按鈕、下令、開戰與結算的提示音')}
+    // 每一列：開關＋音量。關掉的那一列音量條變暗（主音量關掉＝全部靜音）
+    const A = sndOpts(), sl = (k, on, v, name, desc) => `<div class="set-row"><span>${name}<br><small class="g-dim">${desc}</small></span>
+        <span class="g-row"><input type="checkbox" id="set-snd-${k}on" title="啟用" ${on ? 'checked' : ''}><input type="range" min="0" max="100" step="5" id="set-snd-${k}" value="${Math.round(v * 100)}" style="${on && (k === 'm' || A.on) ? '' : 'opacity:.35'}"><span class="g-dim" id="set-snd-${k}-v" style="min-width:3em;text-align:right">${Math.round(v * 100)}%</span></span></div>`;
+    body = `${sl('m', A.on, A.m, '主音量', '全部聲音；關掉＝完全靜音')}
+      ${sl('s', A.sOn, A.s, '戰場音效', '開火、命中、爆炸、推進器；看得越近越大聲，左右依畫面位置')}
+      ${sl('u', A.uOn, A.u, '介面音效', '按鈕、下令、開戰與結算的提示音')}
+      ${sl('b', A.bOn, A.b, '背景音樂', '依戰況切換：還沒接觸、逼近、交戰；關掉＝不播')}
       <div class="set-row"><span>試聽<br><small class="g-dim">${SND.ctx ? (SND.pack ? '素材已載入' : '素材載入中…（先用合成音）') : '點一下任何地方後才會啟用聲音'}</small></span><button class="g-btn sm" id="set-snd-test">播放</button></div>
       <div class="set-h">音效授權</div>
       <p class="g-dim set-note">${SND_CREDITS.join('<br>')}</p>`;
@@ -21265,10 +21745,11 @@ function renderSettings() {
   q('#set-close').onclick = closeSettings;
   qa('[data-tab]').forEach((b) => (b.onclick = () => { SET.tab = b.dataset.tab; SET.capture = null; SET.msg = ''; renderSettings(); }));
   qa('.set-key').forEach((b) => (b.onclick = () => { SET.capture = b.dataset.k; SET.msg = ''; renderSettings(); }));
+  if (q('#set-introcam')) q('#set-introcam').onchange = (e) => { SETTINGS.introCam = e.target.checked; saveSettings(); };
   if (q('#set-pfx')) q('#set-pfx').onchange = (e) => { SETTINGS.particles = e.target.value; saveSettings(); };
   if (q('#set-shake')) q('#set-shake').onchange = (e) => { SETTINGS.shake = e.target.checked; saveSettings(); };
-  if (q('#set-snd-on')) q('#set-snd-on').onchange = (e) => { SETTINGS.audio.on = e.target.checked; saveSettings(); SND.setVol(); };
-  for (const k of ['m', 's', 'u']) if (q('#set-snd-' + k)) q('#set-snd-' + k).oninput = (e) => { SETTINGS.audio[k] = +e.target.value / 100; q('#set-snd-' + k + '-v').textContent = e.target.value + '%'; saveSettings(); SND.setVol(); };
+  for (const [k, f] of [['m', 'on'], ['s', 'sOn'], ['u', 'uOn'], ['b', 'bOn']]) if (q('#set-snd-' + k + 'on')) q('#set-snd-' + k + 'on').onchange = (e) => { SETTINGS.audio[f] = e.target.checked; saveSettings(); SND.setVol(); renderSettings(); };
+  for (const k of ['m', 's', 'u', 'b']) if (q('#set-snd-' + k)) q('#set-snd-' + k).oninput = (e) => { SETTINGS.audio[k] = +e.target.value / 100; q('#set-snd-' + k + '-v').textContent = e.target.value + '%'; saveSettings(); SND.setVol(); };
   if (q('#set-snd-test')) q('#set-snd-test').onclick = () => { SND.init(); setTimeout(() => sndCue('test'), 60); };
   if (q('#set-pradar')) q('#set-pradar').onchange = (e) => { SETTINGS.pilotRadar = e.target.value; saveSettings(); };
   if (q('#set-qmod')) q('#set-qmod').onchange = (e) => { SETTINGS.queueMod = e.target.value; saveSettings(); };
@@ -21417,7 +21898,7 @@ applyUISettings();
 Object.assign(window.__demo, { cStats, C_SRC, rocks: () => ROCKS, shipWorld3(i) { shipWorldCPU(i, _a); return [_a.x, _a.y, _a.z]; }, fleetMods, U: () => U.uTime.value, gunStats: () => gunStats, pending: () => pending, wInfo: () => ({ dmg: wDmg.map((a) => a.map(Math.round)), w: wStats.map((s) => Object.fromEntries(Object.entries(s).map(([k, v]) => [k, Math.round(v)]))), air: [aliveF[0].length, aliveF[1].length], alive: [sideAlive(0), sideAlive(1)] }), SETTINGS, openSettings, closeSettings, keyOf, BR, enterBridge, exitBridge, ships: () => ships, bridgeLook, bridgeConsoleK, camera: () => camera });
 Object.assign(window.__demo, { RIG, rigFire });   // 武器動畫的除錯：開火紀錄、手動觸發
 Object.assign(window.__demo, { CUT, CUT_STYLES, cutPlay, cutPrepare, cutEncode, cutLayout, cutDraw, openCutStudio });
-Object.assign(window.__demo, { MOUNTS: () => MOUNTS, mountsOf, openWeaponEditor, closeWeaponEditor, WE, WA, buildWeaponAtlas, shipMat, getModel, MODEL_SRC, MODEL_LOAD, STORE: () => STORE, showRecords, showCampaign, showCampBriefing, campLoad, campStage, campEnemy, showTavern, storyUnlock, showStory, storyBriefing, storyScenario, storyLoad, STORY_STAGES, STORY_WAR, roster: () => ROSTER, fleets: () => fleets, skills: () => SKILLS, sideFac: () => SIDE_FAC, COMMANDERS });
+Object.assign(window.__demo, { MOUNTS: () => MOUNTS, mountsOf, openWeaponEditor, closeWeaponEditor, WE, WA, buildWeaponAtlas, shipMat, getModel, MODEL_SRC, MODEL_LOAD, STORE: () => STORE, showRecords, showCampaign, showCampBriefing, campLoad, campStage, campEnemy, showTavern, storyUnlock, showStory, showStoryLine, storyTalk, storyBriefing, storyScenario, storyLoad, STORY_STAGES, STORY_WAR, roster: () => ROSTER, fleets: () => fleets, skills: () => SKILLS, sideFac: () => SIDE_FAC, COMMANDERS });
 // 載入伺服器模型資料夾裡的模型（啟動畫面顯示進度），完成後才進選單
 (async () => {
   const B = window.BOOT;
@@ -21455,6 +21936,7 @@ async function autoStory(id, o = {}) {
       f.commander.level = lv; if (o.like) delete f.commander.tal; else f.commander.tal = {}; f.commander.skills = c.skills.slice();
       f.ai = { tactic: tac, level: o.ai || 3 };
     }
+    GAME.reportShown = true;   // 不跳結算畫面（不然上一場的結算計時器會在下一場代打中途切走畫面）
     GAME.watch = true; GAME.replaying = false; GAME.result = null; GAME.lineK = 0; GAME.dlineK = 0; GAME.log = []; GAME.simCtl = null; GAME.phase = 'battle';
     newBattle(sc.seed + 1, setup); setRule('fire', true); setRule('advance', false);
     GAME.init = [sideAlive(0), sideAlive(1)];

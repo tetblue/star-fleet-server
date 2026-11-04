@@ -53,6 +53,7 @@ function renderSettings() {
         <select class="g-sel" id="set-cmdslow">${[[0, '關閉'], [0.1, '×0.1'], [0.2, '×0.2'], [0.5, '×0.5']].map(([v, n]) => `<option value="${v}" ${SETTINGS.cmdSlow === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
       <label class="set-row set-chk"><span>打開戰術面板時自動暫停<br><small class="g-dim">只限單人模式</small></span><input type="checkbox" id="set-tacpause" ${SETTINGS.tacPause ? 'checked' : ''}></label>
       <label class="set-row set-chk"><span>過場動畫<br><small class="g-dim">開戰、勝利／敗北／平手、戰鬥回放時的文字切入（APNG）</small></span><input type="checkbox" id="set-cutin" ${SETTINGS.cutin !== false ? 'checked' : ''}></label>
+      <label class="set-row set-chk"><span>開戰運鏡<br><small class="g-dim">開戰時鏡頭從敵軍掃過戰場、經過我軍，再回到指揮視角（約 5 秒，戰鬥暫停；任何按鍵或點擊略過）</small></span><input type="checkbox" id="set-introcam" ${SETTINGS.introCam !== false ? 'checked' : ''}></label>
       <div class="set-row"><span>過場動畫工坊<br><small class="g-dim">自己打字做切入動畫，預覽並下載成 APNG</small></span><button class="g-btn sm" id="set-cutstudio">工坊…</button></div>
       <div class="set-h">指揮官視角（艦橋，${keyText('bridge')}）</div>
       <label class="set-row set-chk"><span>低頭看戰術台時自動暫停<br><small class="g-dim">只限單人模式；預設不暫停，邊看戰場邊下令</small></span><input type="checkbox" id="set-brpause" ${SETTINGS.bridgePause ? 'checked' : ''}></label>
@@ -70,12 +71,13 @@ function renderSettings() {
       <div class="set-row"><span>模型工坊<br><small class="g-dim">修正 GLB：船頭朝向、原點、合併成一個網格、減面、刪除多餘的面</small></span><button class="g-btn sm" id="set-mtool">模型工坊…</button></div>
       <div class="set-row"><span>畫面</span><span class="g-row"><button class="g-btn sm ${mode3D ? '' : 'pri'}" data-rm="2d">2D 像素</button><button class="g-btn sm ${mode3D ? 'pri' : ''}" data-rm="3d">3D 模型</button></span></div>`;
   } else if (SET.tab === 'sound') {
-    const A = sndOpts(), sl = (id, v, name, desc) => `<div class="set-row"><span>${name}<br><small class="g-dim">${desc}</small></span>
-        <span class="g-row"><input type="range" min="0" max="100" step="5" id="${id}" value="${Math.round(v * 100)}"><span class="g-dim" id="${id}-v" style="min-width:3em;text-align:right">${Math.round(v * 100)}%</span></span></div>`;
-    body = `<label class="set-row set-chk"><span>聲音<br><small class="g-dim">關掉＝完全靜音（戰場、介面都沒有聲音）</small></span><input type="checkbox" id="set-snd-on" ${A.on ? 'checked' : ''}></label>
-      ${sl('set-snd-m', A.m, '主音量', '全部聲音的音量')}
-      ${sl('set-snd-s', A.s, '戰場音效', '開火、命中、爆炸、推進器；看得越近越大聲，左右依畫面位置')}
-      ${sl('set-snd-u', A.u, '介面音效', '按鈕、下令、開戰與結算的提示音')}
+    // 每一列：開關＋音量。關掉的那一列音量條變暗（主音量關掉＝全部靜音）
+    const A = sndOpts(), sl = (k, on, v, name, desc) => `<div class="set-row"><span>${name}<br><small class="g-dim">${desc}</small></span>
+        <span class="g-row"><input type="checkbox" id="set-snd-${k}on" title="啟用" ${on ? 'checked' : ''}><input type="range" min="0" max="100" step="5" id="set-snd-${k}" value="${Math.round(v * 100)}" style="${on && (k === 'm' || A.on) ? '' : 'opacity:.35'}"><span class="g-dim" id="set-snd-${k}-v" style="min-width:3em;text-align:right">${Math.round(v * 100)}%</span></span></div>`;
+    body = `${sl('m', A.on, A.m, '主音量', '全部聲音；關掉＝完全靜音')}
+      ${sl('s', A.sOn, A.s, '戰場音效', '開火、命中、爆炸、推進器；看得越近越大聲，左右依畫面位置')}
+      ${sl('u', A.uOn, A.u, '介面音效', '按鈕、下令、開戰與結算的提示音')}
+      ${sl('b', A.bOn, A.b, '背景音樂', '依戰況切換：還沒接觸、逼近、交戰；關掉＝不播')}
       <div class="set-row"><span>試聽<br><small class="g-dim">${SND.ctx ? (SND.pack ? '素材已載入' : '素材載入中…（先用合成音）') : '點一下任何地方後才會啟用聲音'}</small></span><button class="g-btn sm" id="set-snd-test">播放</button></div>
       <div class="set-h">音效授權</div>
       <p class="g-dim set-note">${SND_CREDITS.join('<br>')}</p>`;
@@ -96,10 +98,11 @@ function renderSettings() {
   q('#set-close').onclick = closeSettings;
   qa('[data-tab]').forEach((b) => (b.onclick = () => { SET.tab = b.dataset.tab; SET.capture = null; SET.msg = ''; renderSettings(); }));
   qa('.set-key').forEach((b) => (b.onclick = () => { SET.capture = b.dataset.k; SET.msg = ''; renderSettings(); }));
+  if (q('#set-introcam')) q('#set-introcam').onchange = (e) => { SETTINGS.introCam = e.target.checked; saveSettings(); };
   if (q('#set-pfx')) q('#set-pfx').onchange = (e) => { SETTINGS.particles = e.target.value; saveSettings(); };
   if (q('#set-shake')) q('#set-shake').onchange = (e) => { SETTINGS.shake = e.target.checked; saveSettings(); };
-  if (q('#set-snd-on')) q('#set-snd-on').onchange = (e) => { SETTINGS.audio.on = e.target.checked; saveSettings(); SND.setVol(); };
-  for (const k of ['m', 's', 'u']) if (q('#set-snd-' + k)) q('#set-snd-' + k).oninput = (e) => { SETTINGS.audio[k] = +e.target.value / 100; q('#set-snd-' + k + '-v').textContent = e.target.value + '%'; saveSettings(); SND.setVol(); };
+  for (const [k, f] of [['m', 'on'], ['s', 'sOn'], ['u', 'uOn'], ['b', 'bOn']]) if (q('#set-snd-' + k + 'on')) q('#set-snd-' + k + 'on').onchange = (e) => { SETTINGS.audio[f] = e.target.checked; saveSettings(); SND.setVol(); renderSettings(); };
+  for (const k of ['m', 's', 'u', 'b']) if (q('#set-snd-' + k)) q('#set-snd-' + k).oninput = (e) => { SETTINGS.audio[k] = +e.target.value / 100; q('#set-snd-' + k + '-v').textContent = e.target.value + '%'; saveSettings(); SND.setVol(); };
   if (q('#set-snd-test')) q('#set-snd-test').onclick = () => { SND.init(); setTimeout(() => sndCue('test'), 60); };
   if (q('#set-pradar')) q('#set-pradar').onchange = (e) => { SETTINGS.pilotRadar = e.target.value; saveSettings(); };
   if (q('#set-qmod')) q('#set-qmod').onchange = (e) => { SETTINGS.queueMod = e.target.value; saveSettings(); };
