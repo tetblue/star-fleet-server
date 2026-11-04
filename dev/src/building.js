@@ -36,7 +36,7 @@ function bldFileV(file) { const f = BLD.files.find((o) => o.file === file); retu
 function bldSnapshot(M) {
   return { id: M.id, name: M.name, keep: !!M.keep, items: (M.items || []).map((it) => {
     const T = BLD.data.types[it.t]; if (!T || !T.file) return null;
-    return { name: T.name, file: T.file, v: bldFileV(T.file), h: T.h, rot: (T.rot || 0) + (it.rot || 0), oy: T.oy || 0, lum: T.lum || 1, hp: T.hp || 1000, coll: T.coll || 'pil',
+    return { name: T.name, file: T.file, v: bldFileV(T.file), h: T.h, rot: (T.rot || 0) + (it.rot || 0), oy: T.oy || 0, lum: T.lum || 1, hp: T.hp || 1000, coll: T.coll || 'pil', fall: T.fall || null,
       r: T.r, top: T.top, fw: T.fw, fd: T.fd, x: it.x, z: it.z, s: it.s || 1 };
   }).filter(Boolean) };
 }
@@ -61,7 +61,7 @@ function bldApplyMap(D, C) {
     const F = bldFoot(it), y0 = GROUND_Y + (it.oy || 0) * (it.s || 1);
     let ms = null;
     if (it.coll !== 'none') {
-      ms = gMs(D, { name: it.name, hp: Math.max(1, it.hp || 1000) }, it.x, it.z, F.r, GROUND_Y + F.top);
+      ms = gMs(D, { name: it.name, hp: Math.max(1, it.hp || 1000), fall: it.fall }, it.x, it.z, F.r, GROUND_Y + F.top);
       if (it.coll === 'box') D.boxes.push({ x: it.x, z: it.z, w: F.w, d: F.d, h: F.top, y0: GROUND_Y, col: [0, 0, 0], coll: true, hide: true, ms });
       else D.pil.push({ x: it.x, z: it.z, r: F.r, top: GROUND_Y + F.top, ms });
       cnt[it.name] = (cnt[it.name] || 0) + 1;
@@ -109,18 +109,19 @@ function bldMat(P, m, lum, cache) {
   const c = m.color || new THREE.Color(1, 1, 1), e = m.emissive || new THREE.Color(0, 0, 0), ei = m.emissiveIntensity != null ? m.emissiveIntensity : 1;
   o = new THREE.ShaderMaterial({
     uniforms: gUni(P, { uMap: { value: m.map || null }, uHas: { value: m.map ? 1 : 0 }, uCol: { value: new THREE.Vector3(c.r, c.g, c.b) }, uEm: { value: m.emissiveMap || null }, uHasEm: { value: m.emissiveMap ? 1 : 0 },
-      uEmC: { value: new THREE.Vector3(e.r * ei, e.g * ei, e.b * ei) }, uLum: { value: lum }, uChar: { value: 0 } }),
+      uEmC: { value: new THREE.Vector3(e.r * ei, e.g * ei, e.b * ei) }, uLum: { value: lum }, uChar: { value: 0 }, uHeat: { value: 0 } }),
     side: THREE.DoubleSide,
     vertexShader: `varying vec3 vW; varying vec3 vN; varying vec2 vUv;
       void main(){ vec4 w = modelMatrix * vec4(position, 1.); vW = w.xyz; vN = normalize(mat3(modelMatrix) * normal); vUv = uv; gl_Position = projectionMatrix * viewMatrix * w; }`,
     fragmentShader: GROUND_FOG_GLSL + /* glsl */`
-      uniform sampler2D uMap, uEm; uniform float uHas, uHasEm, uLum, uChar; uniform vec3 uCol, uEmC; varying vec3 vW; varying vec3 vN; varying vec2 vUv;
+      uniform sampler2D uMap, uEm; uniform float uHas, uHasEm, uLum, uChar, uHeat, uTime; uniform vec3 uCol, uEmC; varying vec3 vW; varying vec3 vN; varying vec2 vUv;
       void main(){
         vec3 N = normalize(vN); if (!gl_FrontFacing) N = -N;
         vec3 base = uCol * (uHas > .5 ? texture2D(uMap, vUv).rgb : vec3(1.));
         if (uChar > 0.) base = mix(base, vec3(dot(base, vec3(.3, .59, .11))) * vec3(.85, .72, .6) * (.55 + .45 * gn(vW.xz * .7 + vW.y)), uChar);   // 燒焦：褪色成焦黑
         vec3 col = base * (uAmb * (1.1 + .4 * N.y) + uLSun * max(dot(N, uSun), 0.) * 1.2) * uLum;
         if (uHasEm > .5) col += texture2D(uEm, vUv).rgb * uEmC; else col += uEmC * base;
+        col += gHeat(vW, uHeat, uTime);
         gl_FragColor = vec4(fogMix(col, vW), 1.);
       }`,
   });
@@ -338,6 +339,8 @@ function bldTypeHtml() {
       <div class="sim-sub">碰撞與耐久</div>
       <div class="sim-row"><span>碰撞</span><div class="wed-seg" id="be-tcoll">${[['pil', '柱體'], ['box', '方塊'], ['none', '沒有（裝飾）']].map(([k, n]) => `<button data-v="${k}" class="${(T.coll || 'pil') === k ? 'on' : ''}">${n}</button>`).join('')}</div></div>
       <div class="g-dim sim-note">柱體＝直立圓柱（細高的塔）；方塊＝底面外框壓進地形高度（矮胖的堡壘、船塢）；裝飾＝只是畫面。</div>
+      ${(T.coll || 'pil') !== 'none' ? `<div class="sim-row"><span>倒塌方式</span><div class="wed-seg" id="be-tfall">${Object.entries(CL_KIND_NAME).map(([k, n]) => `<button data-v="${k}" class="${(T.fall || 'auto') === k ? 'on' : ''}">${n}</button>`).join('')}</div></div>
+      <div class="g-dim sim-note">被摧毀時怎麼倒：高樓＝整棟倒下／逐層壓垮／上段斷落／歪斜；鋼架＝骨牌式壓平／屋頂凹陷／燒成骨架；武器＝砲塔頭炸飛／炸成碎塊／熔毀；穹頂＝塌陷／炸開；長牆＝崩開缺口；矮胖＝半邊塌掉／塌成一堆。每次從該種類的幾種倒法裡隨機挑。自動＝依名稱與形狀判斷。</div>` : ''}
       ${(T.coll || 'pil') !== 'none' ? `<div class="sim-comp">${(T.coll || 'pil') === 'pil' ? `<label>柱體半徑（公里）<input class="g-in" type="number" step="0.1" min="0.1" data-tk="r" value="${bldKm(T.r || 5)}"></label>` : ''}
         <label>碰撞高度（公里）<input class="g-in" type="number" step="0.5" min="0.1" data-tk="top" value="${bldKm(T.top || T.h)}"></label>
         <label>耐久<input class="g-in" type="number" step="100" min="1" data-tk="hp" value="${T.hp}"></label></div>
@@ -408,6 +411,7 @@ function bldBindType(el, q, on) {
     delete BLD.data.types[BE.typeId]; BE.typeId = Object.keys(BLD.data.types)[0] || null; BE.dirty = true; bldSyncObjs(); bldRender();
   });
   q('#be-tcoll [data-v]').forEach((b) => (b.onclick = () => { T.coll = b.dataset.v; bldChanged(); }));
+  q('#be-tfall [data-v]').forEach((b) => (b.onclick = () => { if (b.dataset.v === 'auto') delete T.fall; else T.fall = b.dataset.v; bldChanged(); }));
   on('be-fit', 'onclick', () => { bldMeasure(T, true); BE.dirty = true; });
   q('[data-tk]').forEach((e) => (e.onchange = () => {
     const k = e.dataset.tk, U = 1 / GROUND_KM;

@@ -313,7 +313,7 @@ function gTower(D, x, z, r, h, col, win = 0, y0 = GROUND_Y, msDef = null) {
   D.pil.push({ x, z, r, top: y0 + h, ms });
 }
 // 巨型結構（可以被摧毀）：名稱、耐久、中心、半徑、頂端高度；組成的零件（圓柱、方塊、穹頂、柱子、球形障礙）帶 ms＝編號
-function gMs(D, o, x, z, r, top) { const id = D.ms.length; D.ms.push({ id, name: o.name, hp: o.hp, x, z, r, top }); return id; }
+function gMs(D, o, x, z, r, top) { const id = D.ms.length; D.ms.push({ id, name: o.name, hp: o.hp, x, z, r, top, fall: o.fall || null }); return id; }
 const GROUND_GEN = {
   // 都市：街區（5.5 單位≈1 公里一格），幾個市中心越高（最高約 1 公里）；4～5 座生態巨塔
   city(D, R, H) {
@@ -499,6 +499,11 @@ const GROUND_FOG_GLSL = /* glsl */`
   float gh(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
   float gn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.-2.*f); return mix(mix(gh(i), gh(i+vec2(1,0)), f.x), mix(gh(i+vec2(0,1)), gh(i+vec2(1,1)), f.x), f.y); }
   uniform float uHaze;
+  vec3 gHeat(vec3 w, float h, float t){   // 倒塌後燒紅的餘燼（h＝uHeat，0＝沒有）
+    if (h <= 0.) return vec3(0.);
+    float e = gn(w.xz * .45 + vec2(w.y * .7, t * .15)) * .7 + gn(w.xz * 1.7 - w.y * 1.3) * .3;
+    return vec3(1., .34, .07) * min(h, 3.) * smoothstep(.72 - min(h, 2.) * .1, .95, e) * (.7 + .3 * sin(t * 5. + w.y * 2. + w.x));
+  }
   vec3 fogMix(vec3 col, vec3 w){
     float d = max(0., distance(w, cameraPosition) - uFogNear), f = 1. - exp(-d * uFogD);
     float hz = exp(-max(0., w.y - float(${GROUND_Y})) / 7.) * uHaze * (1. - exp(-(d + 40.) * uFogD * 5.)) * (.75 + .5 * gn(w.xz / 90.));   // 貼地的霧
@@ -510,10 +515,10 @@ function gUni(P, extra = {}) {
 // 巨型結構、碼頭等合併幾何用的材質（窗戶：依世界座標畫細格子，一部分亮燈）
 function groundMat(P) {
   const m = new THREE.ShaderMaterial({
-    uniforms: gUni(P, { uWinCol: { value: new THREE.Vector3(...P.win) }, uWinK: { value: P.winK }, uDim: { value: 1 } }),
+    uniforms: gUni(P, { uWinCol: { value: new THREE.Vector3(...P.win) }, uWinK: { value: P.winK }, uDim: { value: 1 }, uHeat: { value: 0 } }),
     vertexShader: GROUND_VS, side: THREE.DoubleSide,
     fragmentShader: GROUND_FOG_GLSL + /* glsl */`
-      uniform vec3 uWinCol; uniform float uWinK; uniform float uDim;
+      uniform vec3 uWinCol; uniform float uWinK; uniform float uDim; uniform float uHeat; uniform float uTime;
       varying vec3 vW; varying vec3 vN; varying vec3 vC; varying float vWin;
       void main(){
         vec3 N = normalize(vN); if (!gl_FrontFacing) N = -N;
@@ -525,6 +530,7 @@ function groundMat(P) {
           float lit = step(1. - uWinK, gh(id + floor(vWin) * 7.31));
           col += uWinCol * win * lit * (.25 + .35 * gh(id + 3.1)) * uDim;
         }
+        col += gHeat(vW, uHeat, uTime);
         gl_FragColor = vec4(fogMix(col, vW), 1.);
       }`,
   });
@@ -764,10 +770,10 @@ function groundMsHit(e) {
   M.hpNow -= e.dmg;
   if (Math.random() < 0.5) spawnFx(e.x, e.y, e.z, e.side, 2 + Math.random() * 1.5, 22);
   const kill = M.hpNow <= 0;
-  if (kill) groundMsKill(M, e.side, e.x, e.z);   // 命中點在打過來的那一面：往反方向倒
+  if (kill) groundMsKill(M, e.side, e.x, e.z, e.y);   // 命中點在打過來的那一面：往反方向倒；命中的高度決定從哪裡斷
   if (typeof CAP !== 'undefined' && CAP.on) capCreditMs(M, e.dmg, kill);
 }
-function groundMsKill(M, side, sx = null, sz = null) {
+function groundMsKill(M, side, sx = null, sz = null, sy = null) {
   const t = U.uTime.value;
   M.dead = true; M.hpNow = 0; M.deadT = t;
   // 碰撞、遮蔽：柱子、球形障礙拿掉，碰撞箱壓入的高度還原
@@ -786,149 +792,9 @@ function groundMsKill(M, side, sx = null, sz = null) {
   groundPlume(M.x, M.z, t, 200, Math.max(10, M.r * 1.4), 2);
   groundScar(M.x, GROUND_Y, M.z, M.r * 1.8);
   if (GV.beacons) { const a = GV.beacons.pts.geometry.attributes.position; GV.beacons.list.forEach((b, k) => { if (b.ms === M.id) a.setY(k, -1e4); }); a.needsUpdate = true; }
-  groundMsCollapse(M, side, sx, sz);
+  groundMsCollapse(M, side, sx, sz, sy);
 }
-// ═════ 巨型結構倒塌（只是畫面，用 Math.random；新的一場由 groundRestore 還原）═════
-//   細高的（高 > 底面直徑 1.6 倍）：整棟以倒向那一側的底邊為軸倒下（離開打擊點的方向，越倒越快），掃過的一般建築被壓垮，
-//     落地時沿著長度炸開、揚起一長排塵土、噴出碎塊；倒下的塔身燒焦後留在地上冒煙，原地留下一圈燒焦的殘基
-//   矮胖的：原地塌成一堆（壓扁、歪斜），周圍的建築被震垮，燒焦後留著冒煙
-//   太高的（軌道電梯的纜繩）：照舊往下沉、消失
-const MS_FALL = { delay: 0.7, th: 1.45, sink: 0.08, stump: 0.13, burnt: 0.32 };
-GV.msFx = [];
-// 燒焦：網格換成變暗的材質副本（uniform 共用原本的物件，只換亮度）；回傳還原用的清單
-function msBurnt(o, k, keep) {
-  const done = new Map();
-  const swap = (m) => {
-    let n = done.get(m); if (n) return n;
-    n = m.clone(); n.uniforms = { ...m.uniforms };
-    if (m.uniforms.uDim) n.uniforms.uDim = { value: m.uniforms.uDim.value * k };
-    if (m.uniforms.uLum) n.uniforms.uLum = { value: m.uniforms.uLum.value * k };
-    if (m.uniforms.uEmC) n.uniforms.uEmC = { value: new THREE.Vector3(0, 0, 0) };
-    if (m.uniforms.uChar) n.uniforms.uChar = { value: 1 };   // 燈光、發光的部分也熄掉
-    done.set(m, n); GV.mats.push(n); return n;
-  };
-  const ok = (m) => m && m.uniforms;
-  o.traverse((c) => {
-    if (!c.isMesh || !c.material) return;
-    if (Array.isArray(c.material)) { if (!c.material.some(ok)) return; keep.push([c, c.material]); c.material = c.material.map((m) => (ok(m) ? swap(m) : m)); }
-    else if (ok(c.material)) { keep.push([c, c.material]); c.material = swap(c.material); }
-  });
-}
-// 碎塊：從 (x, y, z) 往外噴（dx, dz＝主要方向，0＝四散）
-function msDebris(x, y, z, n, size, dx, dz, t) {
-  if (typeof debOn !== 'function' || !debOn()) return;
-  n = Math.max(1, Math.round(n * debMul()));
-  for (let k = 0; k < n; k++) {
-    const a = Math.random() * TAU, s = 2 + Math.random() * 6, v = 0.5 + Math.random() * 0.4;
-    debPiece(x + (Math.random() - 0.5) * size * 3, y, z + (Math.random() - 0.5) * size * 3, Math.cos(a) * s + dx * 4, 3 + Math.random() * 7, Math.sin(a) * s + dz * 4, t,
-      size * (0.4 + Math.random() * 0.9), [0.3 * v, 0.29 * v, 0.28 * v], 400, true, Math.random() < 0.3 ? 1 : 0, Math.random() < 0.5);
-  }
-}
-function groundMsCollapse(M, side, sx, sz) {
-  const g = GV.ms && GV.ms[M.id]; if (!g) return;
-  const t = U.uTime.value, h = M.top - GROUND_Y, r = Math.max(1, M.r);
-  if (h > 300) { GV.msFx[M.id] = { kind: 'sink', t0: t, g }; return; }   // 軌道電梯：照舊
-  const F = { t0: t, g, h, r, keep: [], side, landed: false, nextFx: t };
-  GV.msFx[M.id] = F;
-  if (h > r * 3.2) {
-    // 倒向：離開打擊點（加一點亂數）；沒有打擊點就隨機
-    let a = sx != null && Math.hypot(M.x - sx, M.z - sz) > 1 ? Math.atan2(M.z - sz, M.x - sx) : Math.random() * TAU;
-    a += (Math.random() - 0.5) * 0.7;
-    const dx = Math.cos(a), dz = Math.sin(a), T = 2 + Math.sqrt(h) * 0.55;
-    Object.assign(F, { kind: 'fall', dx, dz, a, T });
-    // 殘基：同一棟壓扁成一圈燒焦的底座（共用幾何）
-    const st = g.clone(true); st.scale.set(1.08, MS_FALL.stump, 1.08); st.rotation.set((Math.random() - 0.5) * 0.06, g.rotation.y, (Math.random() - 0.5) * 0.06);
-    msBurnt(st, MS_FALL.burnt * 0.8, F.keep); GV.group.add(st); F.stump = st;
-    // 倒下的塔身：掛在倒向那一側底邊的支點上
-    const P = new THREE.Group(); P.position.set(M.x + dx * r, GROUND_Y, M.z + dz * r);
-    GV.group.add(P); P.add(g); g.position.set(-dx * r, 0, -dz * r); F.pivot = P;
-    F.axis = new THREE.Vector3(dz, 0, -dx);
-    msBurnt(g, MS_FALL.burnt, F.keep);
-    // 掃過的一般建築：塔身碰到它頂端的那一刻壓垮（順著倒的方向倒）
-    const B = GV.bld, Q = GV.bldQ || (GV.bldQ = []);
-    if (B && GV.key === GRD.key) {
-      // 塔身寬度用模型看起來的寬度（碰撞半徑通常比較小）；兩側再往外一圈被落地的衝擊波推倒（往外倒）
-      const L = h * Math.sin(MS_FALL.th) + r, px = P.position.x, pz = P.position.z, seen = new Set(), body = r * 1.45 + 1.5, shock = r * 2.6 + 4, tLand = t + MS_FALL.delay + T;
-      for (let s = -r; s <= L + r * 0.5; s += 5) for (let o = -shock - 3; o <= shock + 3; o += 5) {
-        const L2 = B.idx.get(Math.floor((px + dx * s - dz * o) / 10) * 4099 + Math.floor((pz + dz * s + dx * o) / 10)); if (!L2) continue;
-        for (const j of L2) {
-          if (seen.has(j) || B.ic.array[j * 4 + 1] >= 0 || B.iB[j * 4] <= 0) continue; seen.add(j);
-          const ex = B.iA[j * 4] - px, ez = B.iA[j * 4 + 1] - pz, al = ex * dx + ez * dz, cr = ex * dz - ez * dx, pe = Math.abs(cr);
-          if (al > L + r * 0.5 || al < -r) continue;
-          if (pe <= body * (0.85 + 0.3 * Math.random())) {   // 塔身壓到：碰到頂端的那一刻
-            const th = Math.min(MS_FALL.th, Math.atan2(Math.max(0.5, al), B.ic.array[j * 4 + 2] + B.iB[j * 4] - GROUND_Y + 0.5));
-            Q.push({ i: j, t: t + MS_FALL.delay + T * Math.sqrt(th / MS_FALL.th), a: a + (Math.random() - 0.5) * 0.8, depth: BLD_CHAIN_MAX, x: px - dx * 3, z: pz - dz * 3 });
-          } else if (pe <= shock && Math.random() < 1.15 - (pe - body) / (shock - body)) {   // 衝擊波：離塔身越遠越少、越晚
-            const out = Math.atan2(cr > 0 ? -dx : dx, cr > 0 ? dz : -dz);   // 垂直塔身、往外
-            Q.push({ i: j, t: tLand + (pe - body) / 25 + Math.random() * 0.3, a: out + (Math.random() - 0.5) * 0.6, depth: BLD_CHAIN_MAX, x: B.iA[j * 4] - Math.cos(out) * 5, z: B.iA[j * 4 + 1] - Math.sin(out) * 5 });
-          }
-        }
-      }
-    }
-  } else {
-    const T = 2.5 + Math.sqrt(h) * 0.35, tilt = [(Math.random() - 0.5) * 0.12, (Math.random() - 0.5) * 0.12];
-    Object.assign(F, { kind: 'crumble', T, tilt, s0: g.scale.y });
-    msBurnt(g, MS_FALL.burnt, F.keep);
-    // 周圍的建築被震垮（往外倒）
-    const R = r * 1.5 + 4;
-    groundBldEach(M.x, M.z, R, -1e9, 1e9, (j) => { const B = GV.bld; (GV.bldQ || (GV.bldQ = [])).push({ i: j, t: t + 0.3 + Math.random() * T * 0.8, a: Math.atan2(B.iA[j * 4 + 1] - M.z, B.iA[j * 4] - M.x), depth: BLD_CHAIN_MAX, x: M.x, z: M.z }); });
-    msDebris(M.x, GROUND_Y + h * 0.6, M.z, 24, Math.max(0.7, r * 0.1), 0, 0, t);
-  }
-}
-// 每幀：倒下、塌陷的進度，落地的爆炸、塵土與碎塊，殘骸冒煙
-const _msQ = new THREE.Quaternion();
-function msCollapseFrame(M, F, t) {
-  const u = (t - F.t0 - MS_FALL.delay) / F.T, jx = () => (Math.random() - 0.5) * F.r * 1.6;
-  if (F.kind === 'fall') {
-    const k = Math.max(0, Math.min(1, u)), th = MS_FALL.th * k * k;
-    F.pivot.quaternion.setFromAxisAngle(F.axis, th);
-    F.pivot.position.y = GROUND_Y - F.h * MS_FALL.sink * k;
-    if (u < 1) {   // 倒下途中：折斷處與塔身零星爆炸、掉碎塊
-      if (t >= F.nextFx) {
-        F.nextFx = t + 0.12 + Math.random() * 0.2;
-        const s = Math.random() * F.h, px = F.pivot.position.x + F.dx * s * Math.sin(th), pz = F.pivot.position.z + F.dz * s * Math.sin(th), py = GROUND_Y + s * Math.cos(th);
-        spawnFx(px + jx() * 0.4, py, pz + jx() * 0.4, F.side, 3 + Math.random() * 4, 18);
-        if (Math.random() < 0.6) msDebris(px, py, pz, 3, Math.max(0.6, F.r * 0.09), F.dx, F.dz, t);
-      }
-      return;
-    }
-    if (!F.landed) {   // 落地：沿著塔身一連串爆炸、一長排塵土、碎塊往兩側噴，躺著的塔身冒煙
-      F.landed = true;
-      const L = F.h * Math.sin(MS_FALL.th), n = Math.max(6, Math.round(L / 5));
-      for (let m = 0; m < n; m++) {
-        const s = L * (m + 0.5) / n, x = F.pivot.position.x + F.dx * s, z = F.pivot.position.z + F.dz * s, y = terrainHAt(x, z) + 0.5, side = (Math.random() - 0.5) * F.r * 2;
-        const ox = x - F.dz * side, oz = z + F.dx * side;
-        if (m % 2 === 0) spawnFx(ox, y + Math.random() * F.r, oz, F.side, 4 + Math.random() * 6, 20);
-        for (let p = 0; p < 2; p++) smokePuff(ox, y, oz, t, 14 + Math.random() * 10, F.r * 0.4, F.r * (1.6 + Math.random()), 0.8, WIND[0] * 0.4 - F.dz * (p ? 1 : -1) * 1.5, WIND[1] * 0.4 + F.dx * (p ? 1 : -1) * 1.5, 1.2);
-        msDebris(ox, y + 1, oz, 5, Math.max(0.7, F.r * 0.12), -F.dz * (Math.random() < 0.5 ? 1 : -1), F.dx * (Math.random() < 0.5 ? 1 : -1), t);
-        groundScar(ox, GROUND_Y, oz, F.r * 0.7);
-      }
-      for (const s of [0.25, 0.6, 0.9]) groundPlume(F.pivot.position.x + F.dx * L * s, F.pivot.position.z + F.dz * L * s, t, 240, Math.max(10, F.r * 1.2), 1.2);
-    }
-    return;
-  }
-  // 塌陷：壓扁、歪斜，往下陷一點
-  const k = Math.max(0, Math.min(1, u)), e = 1 - (1 - k) * (1 - k);
-  F.g.scale.y = F.s0 * (1 - 0.68 * e); F.g.rotation.x = F.tilt[0] * e; F.g.rotation.z = F.tilt[1] * e; F.g.position.y = GROUND_Y - F.h * 0.06 * e;
-  if (u < 1 && t >= F.nextFx) {
-    F.nextFx = t + 0.15 + Math.random() * 0.2;
-    spawnFx(M.x + jx(), GROUND_Y + Math.random() * F.h * (1 - 0.6 * e), M.z + jx(), F.side, 3 + Math.random() * 4, 18);
-    smokePuff(M.x + jx(), GROUND_Y + 0.5, M.z + jx(), t, 12 + Math.random() * 8, F.r * 0.3, F.r * 1.4, 0.7, WIND[0] * 0.5, WIND[1] * 0.5, 1.2);
-  }
-  if (u >= 1 && !F.landed) { F.landed = true; groundPlume(M.x, M.z, t, 240, Math.max(10, F.r * 1.3), 1.4); msDebris(M.x, GROUND_Y + 2, M.z, 16, Math.max(0.7, F.r * 0.1), 0, 0, t); }
-}
-// 新的一場：倒下、塌陷的巨型結構恢復原狀
-function msCollapseRestore() {
-  for (const [id, F] of (GV.msFx || []).entries()) {
-    if (!F) continue;
-    for (const [c, m] of F.keep || []) c.material = m;
-    if (F.pivot) { F.pivot.remove(F.g); GV.group.add(F.g); GV.group.remove(F.pivot); }
-    if (F.stump) GV.group.remove(F.stump);
-    F.g.scale.set(1, 1, 1);
-    GV.msFx[id] = null;
-  }
-  GV.msFx = [];
-}
+// 巨型結構倒塌的畫面：collapse.js（groundMsCollapse、msCollapseFrame、msCollapseRestore）
 // 照碰撞箱的範圍走過每一格（同 gRaster）
 function gRasterCells(b, f) {
   let ix0 = Math.ceil((b.x - b.w / 2 + GROUND_EXT) / GROUND_CELL - 0.5), ix1 = Math.floor((b.x + b.w / 2 + GROUND_EXT) / GROUND_CELL - 0.5);
@@ -1116,6 +982,26 @@ function gbDome(G, x, y0, z, r, col, seg = 14, rings = 5) {
     gbQuad(G, v(p0, a0), v(p0, a1), v(p1, a1), v(p1, a0), [Math.cos(pm) * Math.cos(amid), Math.sin(pm), Math.cos(pm) * Math.sin(amid)], col, 0);
   }
 }
+// 把太長的三角形對半切（巨型結構倒塌時依三角形分塊，太大的面切不開）：最長邊超過 lim 就從中點切，三角形最多 max 個
+function gbSplit(G, lim, max = 40000) {
+  for (let pass = 0; pass < 20; pass++) {
+    const P = G.p, N = G.n, C = G.c, Wn = G.w, nT = P.length / 9; let n = nT, any = false;
+    const p = [], nn = [], c = [], w = [];
+    const put = (k, i) => { const o = k * 9 + i * 3; p.push(P[o], P[o + 1], P[o + 2]); nn.push(N[o], N[o + 1], N[o + 2]); c.push(C[o], C[o + 1], C[o + 2]); w.push(Wn[k * 3 + i]); };
+    const mid = (k, i, j) => { const a = k * 9 + i * 3, b = k * 9 + j * 3; for (const [A, B] of [[P, p], [N, nn], [C, c]]) B.push((A[a] + A[b]) / 2, (A[a + 1] + A[b + 1]) / 2, (A[a + 2] + A[b + 2]) / 2); w.push(Wn[k * 3 + i]); };
+    const len = (k, i, j) => { const a = k * 9 + i * 3, b = k * 9 + j * 3; return Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2]); };
+    for (let k = 0; k < nT; k++) {
+      const l0 = len(k, 0, 1), l1 = len(k, 1, 2), l2 = len(k, 2, 0), e = l0 >= l1 && l0 >= l2 ? 0 : l1 >= l2 ? 1 : 2, le = [l0, l1, l2][e];
+      if (le <= lim || le > 5000 || n >= max) { put(k, 0); put(k, 1); put(k, 2); continue; }
+      const i = e, j = (e + 1) % 3, o = (e + 2) % 3;   // 切 i–j 邊：(i, m, o)、(m, j, o)
+      put(k, i); mid(k, i, j); put(k, o); mid(k, i, j); put(k, j); put(k, o);
+      n++; any = true;
+    }
+    G.p = p; G.n = nn; G.c = c; G.w = w;
+    if (!any) break;
+  }
+  return G;
+}
 function gbMesh(G, mat) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(G.p, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(G.n, 3));
@@ -1297,7 +1183,7 @@ function groundSync() {
     }
     GV.group.add(gbMesh(G, mat));
     GV.ms = [];   // 巨型結構：以底部中心為支點的群組（倒塌時往下沉、傾斜）
-    for (const [id, g] of MG) { const M = D.ms[id], grp = new THREE.Group(), m = gbMesh(g, mat); grp.position.set(M.x, GROUND_Y, M.z); m.position.set(-M.x, -GROUND_Y, -M.z); grp.add(m); GV.group.add(grp); GV.ms[id] = grp; }
+    for (const [id, g] of MG) { const M = D.ms[id], top = M.top - GROUND_Y; if (top < 300) { let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9; for (let k = 0; k < g.p.length; k += 3) { x0 = Math.min(x0, g.p[k]); x1 = Math.max(x1, g.p[k]); z0 = Math.min(z0, g.p[k + 2]); z1 = Math.max(z1, g.p[k + 2]); } gbSplit(g, Math.max(2.5, top / 10, (x1 - x0) / 40, (z1 - z0) / 40)); } const grp = new THREE.Group(), m = gbMesh(g, mat); grp.position.set(M.x, GROUND_Y, M.z); m.position.set(-M.x, -GROUND_Y, -M.z); grp.add(m); GV.group.add(grp); GV.ms[id] = grp; }
     if (D.glb.length) bldGroundModels(P, D);   // 自訂地圖的 GLB 建築（非同步載入，building.js）
     const bm = groundBldMesh(P, D); if (bm) GV.group.add(bm);
     GV.group.add(groundScarMesh(P));
