@@ -1,0 +1,54 @@
+<!doctype html><meta charset="utf-8"><title>機甲武裝編輯器</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+html,body{margin:0;height:100%;background:#1d2026;color:#e8ecf2;font:13px "Microsoft JhengHei",sans-serif;overflow:hidden}
+#app{display:grid;grid-template-columns:200px 1fr 290px;grid-template-rows:38px 1fr 24px;height:100%}
+#bar{grid-column:1/4;display:flex;gap:6px;align-items:center;padding:0 8px;background:#262b34;border-bottom:1px solid #3a4250}
+#bar .sp{flex:1}
+#list{overflow:auto;background:#22262e;border-right:1px solid #3a4250;padding:4px 0}
+#view{position:relative;overflow:hidden}
+#view canvas{display:block}
+#side{overflow:auto;background:#22262e;border-left:1px solid #3a4250;padding:8px}
+#status{grid-column:1/4;background:#262b34;border-top:1px solid #3a4250;padding:3px 8px;color:#aab4c4;white-space:nowrap;overflow:hidden}
+button,select,input{font:inherit;background:#2b3140;color:#e8ecf2;border:1px solid #4a5468;border-radius:4px;padding:2px 7px}
+button{cursor:pointer}button:hover{background:#354055}
+button.on{background:#3f6fb0;border-color:#6d9ae0}
+button.warn{border-color:#a05a5a}
+input[type=number]{width:56px}
+input[type=range]{min-width:0;padding:0}
+#side{overflow-x:hidden}
+.fac{padding:6px 10px 2px;color:#8f9bb0;font-size:12px}
+.u{padding:3px 10px 3px 16px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.u:hover{background:#2c323d}.u.sel{background:#34507a}
+.u .ch{color:#8f9bb0;font-size:11px;margin-left:4px}
+h3{margin:10px 0 6px;font-size:13px;color:#9fb6d8;border-bottom:1px solid #3a4250;padding-bottom:3px}
+.row{display:flex;align-items:center;gap:6px;margin:4px 0}
+.row label{width:52px;color:#aab4c4;flex:none}
+.row input[type=text]{flex:1;min-width:0}
+.w{padding:3px 6px;border-radius:4px;cursor:pointer;display:flex;gap:6px;align-items:center}
+.w:hover{background:#2c323d}.w.sel{background:#34507a}
+.w .n{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.w .k{color:#8f9bb0;font-size:11px}
+.btns{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}
+#help{position:absolute;right:8px;bottom:8px;background:#000a;padding:6px 8px;border-radius:6px;line-height:1.55;color:#cfd6e2;font-size:12px;pointer-events:none}
+#dirty{color:#ffb347}
+</style>
+<script type="importmap">{"imports":{"three":"/three/build/three.module.js","three/addons/":"/three/examples/jsm/"}}</script>
+<div id="app">
+  <div id="bar">
+    <b>武裝編輯器</b>
+    <button id="m-move" class="on" title="W">移動 W</button>
+    <button id="m-rot" title="E">轉向 E</button>
+    <span class="sp"></span>
+    <span id="dirty"></span>
+    <button id="b-undo" title="Ctrl+Z">復原</button>
+    <button id="b-save" title="Ctrl+S">存檔</button>
+    <button id="b-anim">動作預覽</button>
+    <button id="b-glb">匯出 GLB</button>
+  </div>
+  <div id="list"></div>
+  <div id="view"><div id="help">左鍵點武器選取・拖曳箭頭移動／圓環轉向<br>右鍵拖曳平移視角・滾輪縮放<br>W 移動　E 轉向　Del 刪除　Ctrl+D 複製　M 鏡像<br>方向鍵微調（Shift 加大）　PgUp／PgDn 上下</div></div>
+  <div id="side"></div>
+  <div id="status">載入中…</div>
+</div>
+<script type="module" src="/editor.js"></script>

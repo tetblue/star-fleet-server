@@ -1,5 +1,6 @@
 // 機甲組裝工具：node server.mjs → 瀏覽器開 http://localhost:8098/
 // /three/* → three 套件，/parts/* → rubicon 機甲零件（四足、履帶、背部武器），/models/* → 遊戲的模型資料夾（艦砲武器），/out/* POST → 存檔
+// 頁面：mech.html 預覽表、anim.html 動作預覽、editor.html 武裝編輯器（POST /save/units.js 存回 units.js）
 import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const THREE_DIR = path.join(here, '../../node_modules/three'), MODELS = path.join(here, '../../../models'), OUT = path.join(here, 'out');
@@ -10,6 +11,16 @@ http.createServer((req, res) => {
     const rel = u.slice(5).replace(/\.\./g, ''); const f = path.join(OUT, rel); fs.mkdirSync(path.dirname(f), { recursive: true });
     const parts = []; req.on('data', (c) => parts.push(c));
     req.on('end', () => { fs.writeFileSync(f, Buffer.concat(parts)); res.end('ok'); }); return;
+  }
+  // 武裝編輯器存檔：覆寫 units.js（舊檔備份到 out/units_backup/）
+  if (req.method === 'POST' && u === '/save/units.js') {
+    const parts = []; req.on('data', (c) => parts.push(c));
+    req.on('end', () => {
+      const src = path.join(here, 'units.js'), bak = path.join(OUT, 'units_backup');
+      fs.mkdirSync(bak, { recursive: true });
+      fs.copyFileSync(src, path.join(bak, `units_${new Date().toISOString().replace(/[:.]/g, '-')}.js`));
+      fs.writeFileSync(src, Buffer.concat(parts)); res.end('ok');
+    }); return;
   }
   let f;
   if (u.startsWith('/three/')) f = path.join(THREE_DIR, u.slice(7));
