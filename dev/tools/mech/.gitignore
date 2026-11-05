@@ -1,0 +1,5 @@
+# 測試截圖、影片：可以重新產生，不進版控（保留 out/glb 和 out/sheet1/2.jpg）
+out/*
+!out/glb/
+!out/sheet1.jpg
+!out/sheet2.jpg

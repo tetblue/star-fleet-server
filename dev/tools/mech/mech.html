@@ -1,0 +1,43 @@
+<!doctype html><meta charset="utf-8"><title>機甲組裝</title>
+<style>body{margin:0;background:#1d2026;color:#eee;font:12px sans-serif}canvas{display:block}#lab{position:fixed;left:6px;top:4px;white-space:pre}</style>
+<script type="importmap">{"imports":{"three":"/three/build/three.module.js","three/addons/":"/three/examples/jsm/"}}</script>
+<div id="lab"></div>
+<script type="module">
+import * as THREE from 'three'; import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+window.THREE = THREE;
+const W = 1200, H = 800, r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); r.setSize(W, H); r.outputColorSpace = THREE.SRGBColorSpace; document.body.appendChild(r.domElement);
+window.R = r;
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x2a2e36);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x404050, 2.0)); const dl = new THREE.DirectionalLight(0xffffff, 2.2); dl.position.set(2, 4, 3); scene.add(dl);
+const dl2 = new THREE.DirectionalLight(0xd8dde6, 0.6); dl2.position.set(-3, 1, -2); scene.add(dl2);
+window.scene = scene;
+const loader = new GLTFLoader(), cache = {};
+window.glb = async (url) => { if (!cache[url]) cache[url] = loader.loadAsync(url); const g = await cache[url]; return g.scene.clone(true); };
+window.J = await (await fetch('/parts/joints.json')).json();
+window.box = (o) => { o.updateMatrixWorld(true); const b = new THREE.Box3().setFromObject(o); return { min: b.min.toArray().map((v) => +v.toFixed(2)), max: b.max.toArray().map((v) => +v.toFixed(2)) }; };
+let shown = null;
+window.show = (o) => { if (shown) scene.remove(shown); shown = o; if (o) scene.add(o); };
+// view: 方向、縮放（半高）、中心
+window.view = (v = 'iso', half = 5, c = [0, 3, 0]) => {
+  const a = W / H, cam = new THREE.OrthographicCamera(-half * a, half * a, half, -half, -200, 200);
+  const P = { top: [0, 50, 0.001], side: [50, 0, 0], front: [0, 0, 50], back: [0, 0, -50], iso: [30, 22, 30], iso2: [-30, 22, 30], isob: [-30, 22, -30] }[v];
+  cam.position.set(c[0] + P[0], c[1] + P[1], c[2] + P[2]); cam.lookAt(c[0], c[1], c[2]); r.render(scene, cam);
+};
+window.label = (t) => (document.getElementById('lab').textContent = t);
+window.snap = async (name) => { const b = await new Promise((res) => r.domElement.toBlob(res, 'image/png')); await fetch('/out/' + name, { method: 'POST', body: b }); return name; };
+const B = await import('/build.js'); const { UNITS } = await import('/units.js'); await B.init(); window.B = B; window.UNITS = UNITS;
+// 預覽表：每格一個單位（iso），寫到 out/<file>
+window.sheet = async (list, file, cols = 5, tw = 480, th = 360, v = 'iso', zoom = 9.2) => {
+  const rows = Math.ceil(list.length / cols), cv = document.createElement('canvas'); cv.width = cols * tw; cv.height = rows * th; const g = cv.getContext('2d');
+  g.fillStyle = '#2a2e36'; g.fillRect(0, 0, cv.width, cv.height);
+  for (let i = 0; i < list.length; i++) {
+    const U = list[i], o = B.gameLook(await B.build(U)); show(o); const bb = o.userData.mech.box; view(v, zoom, [0, (bb[0][1] + bb[1][1]) / 2, 0]);
+    const x0 = (i % cols) * tw, y0 = Math.floor(i / cols) * th;
+    g.drawImage(r.domElement, 0, 0, W, H, x0, y0, tw, th);
+    g.fillStyle = '#fff'; g.font = 'bold 20px sans-serif'; g.fillText(`${UNITS.indexOf(U) + 1}. ${U.name}`, x0 + 10, y0 + 28);
+    g.font = '15px sans-serif'; g.fillStyle = '#bcd'; g.fillText(`${U.id}・${['標準', '重型', '巨型'][U.size]}・${U.role}`, x0 + 10, y0 + 50);
+  }
+  const b = await new Promise((res) => cv.toBlob(res, 'image/jpeg', 0.9)); await fetch('/out/' + file, { method: 'POST', body: b }); return file;
+};
+window.ready = true;
+</script>

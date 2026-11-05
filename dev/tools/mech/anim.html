@@ -1,0 +1,21 @@
+<!doctype html><meta charset="utf-8"><title>機甲動作預覽</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+html,body{margin:0;height:100%;background:#1d2026;color:#e8ecf2;font:13px "Microsoft JhengHei",sans-serif;overflow:hidden}
+canvas{display:block}
+#ui{position:fixed;left:8px;top:8px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:#0009;padding:6px 8px;border-radius:6px;max-width:calc(100% - 32px)}
+#ui select,#ui button{font:inherit;background:#2b3140;color:#e8ecf2;border:1px solid #4a5468;border-radius:4px;padding:3px 8px;cursor:pointer}
+#ui button.on{background:#3f6fb0;border-color:#6d9ae0}
+#info{position:fixed;left:8px;bottom:8px;background:#0009;padding:6px 8px;border-radius:6px;white-space:pre;line-height:1.5}
+</style>
+<script type="importmap">{"imports":{"three":"/three/build/three.module.js","three/addons/":"/three/examples/jsm/"}}</script>
+<div id="ui">
+  <select id="sel"></select>
+  <button id="b-walk" class="on">移動</button>
+  <button id="b-fire" class="on">開火</button>
+  <button id="b-cam" class="on">鏡頭跟隨</button>
+  <button id="b-all">全部 20 台</button>
+  <button id="b-rec">錄 10 秒影片</button>
+</div>
+<div id="info"></div>
+<script type="module" src="/anim.js"></script>
