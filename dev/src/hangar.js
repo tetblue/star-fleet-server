@@ -45,16 +45,20 @@ function hgInit() {
   const r = HG.r = new THREE.WebGLRenderer({ canvas: HG.cv, antialias: true });
   r.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5)); r.outputColorSpace = THREE.SRGBColorSpace;
   r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.25;
-  const S = HG.scene = new THREE.Scene(); S.background = new THREE.Color(0x05070c); S.fog = new THREE.Fog(0x05070c, 70, 190);
+  const S = HG.scene = new THREE.Scene(); S.background = new THREE.Color(0x0b0e14); S.fog = new THREE.Fog(0x0b0e14, 110, 260);
   HG.cam = new THREE.PerspectiveCamera(40, 2, 0.5, 600);
   HG.glowTex = typeof dockGlowTex === 'function' ? dockGlowTex() : null;
   // 燈光：天花板的探照燈打在機體上，兩側偏冷、偏暖的補光
-  S.add(new THREE.HemisphereLight(0x9db4e0, 0x1a1612, 0.75), new THREE.AmbientLight(0x30343c, 0.6));
+  S.add(new THREE.HemisphereLight(0xc8d6f0, 0x2a2622, 1.25), new THREE.AmbientLight(0x404650, 0.9));   // 參考圖：明亮的白色機庫
   const key = new THREE.SpotLight(0xfff0d8, 900, 120, 0.55, 0.5, 1.6); key.position.set(6, 42, 14); key.target.position.set(0, 0, 0); S.add(key, key.target);
   const fill = new THREE.PointLight(0x6fa8ff, 160, 90, 1.6); fill.position.set(-30, 18, 18); S.add(fill);
   const rim = new THREE.PointLight(0xffb070, 140, 90, 1.6); rim.position.set(28, 14, -26); S.add(rim);
   hgMats();
   hgBuildRoom(); hgBuildRacks(); hgBuildArms();
+  hgPlaceProps(S, HG_PROP_LAYOUT, HG_PROP_K);
+  // 兩側工作區：天花板探照燈；照明塔的燈頭真的會亮
+  for (const sd of [-1, 1]) { const sp = new THREE.SpotLight(sd < 0 ? 0xdfe8ff : 0xffe2c0, 2600, 140, 0.8, 0.6, 1.5); sp.position.set(sd * 46, 40, 0); sp.target.position.set(sd * 48, 0, -2); S.add(sp, sp.target); }
+  for (const [name, x, z] of HG_PROP_LAYOUT) if (/^1[34]_/.test(name)) hgLamp(S, x, 0.17 * HG_PROP_K, z, 0xffe6b8);
   // 選中的掛架：底下一圈光
   HG.ring = new THREE.Mesh(new THREE.RingGeometry(0.75, 1, 40), new THREE.MeshBasicMaterial({ color: 0xf2b35a, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
   HG.ring.rotation.x = -Math.PI / 2; S.add(HG.ring);
@@ -77,7 +81,7 @@ function hgSize() {
 function hgBuildRoom() {
   const S = HG.scene, M = HG.mats, h = HG_HOLE / 2;
   const floorTex = hgTex(256, 256, (g, w) => {
-    g.fillStyle = '#1b2029'; g.fillRect(0, 0, w, w);
+    g.fillStyle = '#3a414c'; g.fillRect(0, 0, w, w);
     g.strokeStyle = 'rgba(150,170,200,.16)'; g.lineWidth = 2; g.strokeRect(1, 1, w - 2, w - 2);
     g.strokeStyle = 'rgba(150,170,200,.07)'; g.lineWidth = 1; g.beginPath(); g.moveTo(w / 2, 0); g.lineTo(w / 2, w); g.moveTo(0, w / 2); g.lineTo(w, w / 2); g.stroke();
     for (let i = 0; i < 40; i++) { g.fillStyle = `rgba(255,255,255,${Math.random() * 0.03})`; g.fillRect(Math.random() * w, Math.random() * w, 2 + Math.random() * 18, 1 + Math.random() * 3); }
@@ -120,21 +124,13 @@ function hgBuildRoom() {
     if (s) { s.scale.setScalar(6); s.position.set(x, 1.3, z); S.add(s); }
     HG.beacons.push({ b, s });
   }
-  // 牆面：後牆與兩側，嵌燈條；天花板燈條
-  const wallTex = hgTex(512, 256, (g, w, hh) => {
-    g.fillStyle = '#161b23'; g.fillRect(0, 0, w, hh);
-    for (let x = 0; x < w; x += 64) for (let y = 0; y < hh; y += 64) { g.fillStyle = `rgba(255,255,255,${0.02 + Math.random() * 0.03})`; g.fillRect(x + 3, y + 3, 58, 58); }
-    g.fillStyle = 'rgba(140,190,255,.9)'; g.fillRect(0, hh * 0.62, w, 4);
-    g.fillStyle = 'rgba(255,170,80,.7)'; for (let x = 24; x < w; x += 128) g.fillRect(x, hh * 0.3, 30, 6);
-  }, [4, 1]);
-  const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, metalness: 0.4, roughness: 0.7, emissive: 0xffffff, emissiveMap: wallTex, emissiveIntensity: 0.35 });
-  const wall = (w, hh, x, z, ry) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, hh), wallMat); m.position.set(x, hh / 2, z); m.rotation.y = ry; S.add(m); };
+  // 牆面（參考圖：白色牆板、深色骨架、深藍腰帶、V 形標誌、藍色燈條）：後牆與兩側；兩側牆在 x ±HG_WALL
+  const W = HG_WALL, wall = (w, hh, x, z, ry) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, hh), hgWallMat(w, hh)); m.position.set(x, hh / 2, z); m.rotation.y = ry; S.add(m); };
   // 後牆中間留出彈射艙門的開口（寬 HG_DOOR.w、高 HG_DOOR.h）
-  const DW = HG_DOOR.w / 2, DH = HG_DOOR.h, wallP = (x0, x1, y0, y1) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, y1 - y0), wallMat); m.position.set((x0 + x1) / 2, (y0 + y1) / 2, -48); S.add(m); };
-  wallP(-110, -DW, 0, 44); wallP(DW, 110, 0, 44); wallP(-DW, DW, DH, 44);
-  wall(150, 44, -82, 20, Math.PI / 2); wall(150, 44, 82, 20, -Math.PI / 2);
-  const strip = M.glow(0xdfe8ff, 1.6);
-  for (let k = -2; k <= 2; k++) { const m = new THREE.Mesh(new THREE.BoxGeometry(2, 0.4, 90), strip); m.position.set(k * 16, 40, 0); S.add(m); }
+  const DW = HG_DOOR.w / 2, DH = HG_DOOR.h, wallP = (x0, x1, y0, y1) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, y1 - y0), hgWallMat(x1 - x0, y1 - y0, y0 / 44)); m.position.set((x0 + x1) / 2, (y0 + y1) / 2, -48); S.add(m); };
+  wallP(-W, -DW, 0, 44); wallP(DW, W, 0, 44); wallP(-DW, DW, DH, 44);
+  wall(130, 44, -W, 17, Math.PI / 2); wall(130, 44, W, 17, -Math.PI / 2);
+  hgBuildDecor(S, W);
   // 彈射艙門：左右兩扇，出擊時往兩邊滑開，外面是太空
   const doorTex = hgTex(256, 256, (g, w) => { g.fillStyle = '#20262f'; g.fillRect(0, 0, w, w); g.strokeStyle = 'rgba(160,180,210,.25)'; g.lineWidth = 3; for (let y = 32; y < w; y += 48) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); } g.fillStyle = '#d6a21e'; for (let y = 8; y < w; y += 64) g.fillRect(w - 18, y, 10, 28); });
   const doorMat = new THREE.MeshStandardMaterial({ map: doorTex, metalness: 0.6, roughness: 0.5 });
@@ -159,6 +155,122 @@ function hgBuildRoom() {
   const plate = new THREE.Mesh(new THREE.BoxGeometry(12, 4, 0.4), new THREE.MeshStandardMaterial({ map: hazard.clone(), metalness: 0.4, roughness: 0.6 })); plate.position.y = 2; plate.material.map.repeat.set(3, 4); plate.material.map.needsUpdate = true; defl.add(plate);
   defl.rotation.x = Math.PI / 2; defl.visible = false; S.add(defl);
 }
+
+// ── 參考圖風格的牆板：白色牆板＋深色骨架、深藍腰帶、V 形標誌；只有藍色燈條發光（另一張發光貼圖）。一張貼圖＝牆寬 64、高 44 ──
+const HG_WALL = 64;   // 機庫兩側牆的位置（x ±）
+let HG_PANEL = null;
+function hgChevron(g, cx, cy, s, col) {
+  g.fillStyle = col;
+  for (const dy of [0, s * 0.55]) { g.beginPath(); g.moveTo(cx - s, cy + dy - s * 0.35); g.lineTo(cx, cy + dy + s * 0.25); g.lineTo(cx + s, cy + dy - s * 0.35); g.lineTo(cx + s, cy + dy - s * 0.05); g.lineTo(cx, cy + dy + s * 0.55); g.lineTo(cx - s, cy + dy - s * 0.05); g.closePath(); g.fill(); }
+}
+function hgPanelTex() {
+  if (HG_PANEL) return HG_PANEL;
+  const w = 1024, h = 704, strips = (g, col) => { g.fillStyle = col; for (let x = 0; x < w; x += 256) g.fillRect(x + 44, h * 0.13, 180, 10); };
+  const map = hgTex(w, h, (g) => {
+    g.fillStyle = '#c4ccd6'; g.fillRect(0, 0, w, h);
+    for (let x = 0; x < w; x += 128) for (let y = 0; y < h * 0.78; y += 140) { g.fillStyle = `rgba(255,255,255,${0.12 + Math.random() * 0.1})`; g.fillRect(x + 32, y + 8, 90, 124); g.strokeStyle = 'rgba(70,80,100,.35)'; g.lineWidth = 2; g.strokeRect(x + 32, y + 8, 90, 124); }
+    g.fillStyle = '#1f3158'; g.fillRect(0, h * 0.74, w, h * 0.06);   // 深藍腰帶
+    g.fillStyle = '#9aa4b2'; g.fillRect(0, h * 0.8, w, h * 0.13); g.fillStyle = '#4a5262'; g.fillRect(0, h * 0.93, w, h * 0.07);   // 下方踢腳板
+    for (let x = 0; x < w; x += 256) { g.fillStyle = '#58616f'; g.fillRect(x, 0, 28, h); g.fillStyle = '#3a414e'; g.fillRect(x + 6, 0, 7, h); g.fillStyle = '#6c7584'; g.fillRect(x + 22, 0, 4, h); }   // 骨架
+    hgChevron(g, 640, h * 0.42, 46, '#1f3158');
+    g.fillStyle = 'rgba(40,50,70,.5)'; g.fillRect(150, h * 0.5, 60, 8); g.fillRect(150, h * 0.53, 40, 6);   // 牆上的小標示
+    strips(g, '#d8f0ff');
+  });
+  const em = hgTex(w, h, (g) => { g.fillStyle = '#000'; g.fillRect(0, 0, w, h); strips(g, '#7cc8ff'); });
+  return (HG_PANEL = { map, em });
+}
+function hgWallMat(width, height, v0 = 0) {
+  const P = hgPanelTex(), rep = (t) => { const c = t.clone(); c.needsUpdate = true; c.wrapS = c.wrapT = THREE.RepeatWrapping; c.repeat.set(width / 64, height / 44); c.offset.set(0, v0); return c; };
+  return new THREE.MeshStandardMaterial({ map: rep(P.map), emissive: 0xffffff, emissiveMap: rep(P.em), emissiveIntensity: 1.6, metalness: 0.25, roughness: 0.6 });
+}
+// 機庫的細節：天花板桁架、管線、地上的導引線與標誌、側門、小東西（梯子、工具箱、油桶、消防栓、貨架、飛彈推車）
+function hgBuildDecor(S, W) {
+  const M = HG.mats, steel = new THREE.MeshStandardMaterial({ color: 0x4a515c, metalness: 0.6, roughness: 0.45 }), pipeM = new THREE.MeshStandardMaterial({ color: 0x5b626d, metalness: 0.55, roughness: 0.4 });
+  const box = (w, h, d, x, y, z, m, ry = 0) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.position.set(x, y, z); o.rotation.y = ry; S.add(o); return o; };
+  const cyl = (r, h, x, y, z, m, rx = 0, rz = 0) => { const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 14), m); o.position.set(x, y, z); o.rotation.set(rx, 0, rz); S.add(o); return o; };
+  // 天花板桁架（主樑＋次樑＋斜撐），燈條掛在主樑下
+  const TY = 44, Z0 = -48, Z1 = 82;
+  for (let x = -W; x <= W + 0.1; x += 16) { box(1.4, 2.6, Z1 - Z0, x, TY, (Z0 + Z1) / 2, steel); box(1.4, 0.5, Z1 - Z0, x, TY - 4, (Z0 + Z1) / 2, steel);
+    for (let z = Z0; z < Z1; z += 5) { const d = new THREE.Mesh(new THREE.BoxGeometry(0.35, 4.6, 0.35), steel); d.position.set(x, TY - 2, z + 2.5); d.rotation.x = 0.6 * ((Math.round((z - Z0) / 5) % 2) ? 1 : -1); S.add(d); } }
+  for (let z = Z0 + 10; z < Z1; z += 18) box(W * 2, 1.6, 1, 0, TY, z, steel);
+  const strip = M.glow(0xdfe8ff, 1.6);
+  for (let x = -W + 8; x < W; x += 16) box(1.6, 0.35, 90, x, TY - 4.6, 2, strip);
+  // 管線：後牆兩條橫管、兩側牆的橫管與往下的直管
+  for (const y of [33, 35.4]) cyl(0.55, W * 2, 0, y, -47.2, pipeM, 0, Math.PI / 2);
+  for (const sd of [-1, 1]) {
+    for (const y of [31, 33.2]) cyl(0.5, 120, sd * (W - 0.8), y, 17, pipeM, Math.PI / 2);
+    for (const z of [-30, 8, 46]) { cyl(0.45, 31, sd * (W - 0.8), 15.5, z, pipeM); cyl(0.6, 1.2, sd * (W - 0.8), 3, z, M.dark); }
+  }
+  // 左牆的側門（門框、警示燈、V 標誌）
+  const door = hgTex(256, 256, (g, w) => { g.fillStyle = '#8e97a4'; g.fillRect(0, 0, w, w); g.strokeStyle = '#4b5361'; g.lineWidth = 8; g.strokeRect(10, 10, w - 20, w - 20); g.strokeRect(40, 40, w / 2 - 50, w - 80); g.strokeRect(w / 2 + 10, 40, w / 2 - 50, w - 80); hgChevron(g, w / 2, w * 0.45, 26, '#1f3158'); g.fillStyle = '#d6a21e'; g.fillRect(10, w - 26, w - 20, 14); });
+  const dm = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), new THREE.MeshStandardMaterial({ map: door, metalness: 0.4, roughness: 0.5 })); dm.position.set(-W + 0.15, 6, -6); dm.rotation.y = Math.PI / 2; S.add(dm);
+  box(0.6, 13.6, 1, -W + 0.3, 6.8, -12.5, M.dark); box(0.6, 13.6, 1, -W + 0.3, 6.8, 0.5, M.dark); box(0.6, 1, 14, -W + 0.3, 12.8, -6, M.dark);
+  for (const z of [-11, -1]) box(0.5, 0.5, 0.8, -W + 0.4, 13.8, z, M.glow(0xff4030, 1.4));
+  // 地上：導引線、停機框、V 標誌（貼在地面上的透明貼圖）
+  const decal = (w, d, x, z, draw, ry = 0) => { const t = hgTex(256, Math.round(256 * d / w), draw); const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ map: t, transparent: true, depthWrite: false, metalness: 0.2, roughness: 0.7 })); m.rotation.x = -Math.PI / 2; m.rotation.z = ry; m.position.set(x, 0.03, z); S.add(m); };
+  const yl = (g, w, h) => { g.fillStyle = '#d6a21e'; g.fillRect(0, h / 2 - 3, w, 6); };
+  decal(2, 40, -14, 34, (g, w, h) => { g.fillStyle = '#d6a21e'; g.fillRect(w / 2 - 20, 0, 40, h); });
+  decal(2, 40, 14, 34, (g, w, h) => { g.fillStyle = '#d6a21e'; g.fillRect(w / 2 - 20, 0, 40, h); });
+  decal(70, 1.2, -36, 18, yl); decal(70, 1.2, 36, 18, yl);
+  for (const [x, z] of [[-38, 30], [-38, 42], [36, 42]]) decal(10, 6, x, z, (g, w, h) => { g.strokeStyle = '#e8ecf2'; g.lineWidth = 8; g.strokeRect(6, 6, w - 12, h - 12); g.beginPath(); g.moveTo(w / 2, 6); g.lineTo(w / 2, h - 6); g.stroke(); });
+  for (const [x, z] of [[0, 34], [-30, 6], [30, 6]]) decal(5, 4, x, z, (g, w, h) => hgChevron(g, w / 2, h * 0.32, w * 0.36, '#e8ecf2'), Math.PI);
+  // 小東西
+  const ladder = (x, z, ry) => { const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = ry; S.add(g);
+    for (const sx of [-0.6, 0.6]) for (const sz of [-0.9, 0.9]) { const r = new THREE.Mesh(new THREE.BoxGeometry(0.15, 4.4, 0.18), M.metal); r.position.set(sx, 2.1, sz * 0.55); r.rotation.x = sz * 0.22; g.add(r); }
+    for (let k = 0; k < 5; k++) { const s = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.12, 0.36), M.metal); s.position.set(0, 0.6 + k * 0.85, -0.5 + k * 0.1); g.add(s); }
+    const top = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.18, 0.9), M.dark); top.position.y = 4.3; g.add(top); };
+  ladder(14.5, 7, 0.4); ladder(-26, 34, -0.3);
+  const tb = (w, h, d, x, z, col, ry) => { const b = box(w, h, d, x, h / 2, z, new THREE.MeshStandardMaterial({ color: col, metalness: 0.4, roughness: 0.5 }), ry); box(w * 1.02, 0.18, d * 1.02, x, h + 0.09, z, M.dark, ry); return b; };
+  tb(2.6, 1.6, 1.6, -18, 32, 0x1f4a6e, 0.2); tb(2.2, 1.3, 1.4, -14.6, 33, 0xb8bec8, -0.1); tb(2.4, 1.0, 1.4, -21, 35, 0xa08a5a, 0.4); tb(1.6, 0.8, 1.1, -44, 30, 0x9e2b25, 0.3);
+  for (const [x, z] of [[-60, 30], [-57.6, 30.6], [-59, 33]]) { cyl(0.9, 2.4, x, 1.2, z, new THREE.MeshStandardMaterial({ color: 0x9aa2ae, metalness: 0.5, roughness: 0.45 })); cyl(0.93, 0.18, x, 0.7, z, M.dark); cyl(0.93, 0.18, x, 1.8, z, M.dark); }
+  cyl(0.55, 2.2, -W + 2.5, 1.1, -38, M.red); cyl(0.7, 0.4, -W + 2.5, 2.3, -38, M.red); cyl(0.25, 1.4, -W + 2.5, 1.5, -38, M.red, 0, Math.PI / 2);   // 消防栓
+  for (const sx of [-1, 1]) {   // 後牆兩邊的貨架（放彈藥箱）
+    const x = sx * (W - 12); for (const y of [0.2, 2.2, 4.2, 6.2]) box(8, 0.2, 2.4, x, y, -46.4, M.dark); for (const dx of [-3.9, 3.9]) box(0.25, 6.6, 2.4, x + dx, 3.3, -46.4, M.dark);
+    for (let k = 0; k < 9; k++) box(1.4, 1.2, 1.6, x - 3 + (k % 3) * 2.6 + (Math.random() - 0.5) * 0.4, 0.95 + Math.floor(k / 3) * 2, -46.4, new THREE.MeshStandardMaterial({ color: [0x6b5b3a, 0x3d4d3a, 0x5c626e][k % 3], roughness: 0.7 }));
+  }
+  // 飛彈推車：車架＋輪子，上面放整備庫的飛彈架（hgPlaceProps 另外擺）
+  box(7, 0.6, 3.4, 46, 1.1, 6, M.metal, -0.3); for (const [dx, dz] of [[-2.6, -1.5], [2.6, -1.5], [-2.6, 1.5], [2.6, 1.5]]) { const wv = cyl(0.55, 0.4, 46 + dx * Math.cos(0.3) + dz * Math.sin(0.3), 0.55, 6 - dx * Math.sin(0.3) + dz * Math.cos(0.3), M.dark, 0, Math.PI / 2); wv.rotation.y = -0.3; }
+}
+
+// ── 整備庫元件：models/機庫/整備庫_XX_名稱.glb（TRIPO 戰艦整備庫拆成的 23 件；底面 y＝0、xz 置中，原始單位＝整個整備庫寬 1）──
+// 機庫與艦長的戰艦庫共用；同一件只下載一次，擺的時候複製（幾何、材質共用）
+const HG_PROPS = {};
+function hgProp(name) {
+  return HG_PROPS[name] || (HG_PROPS[name] = (async () => {
+    const r = await fetch(`models/${encodeURIComponent('機庫')}/${encodeURIComponent(`整備庫_${name}.glb`)}`);
+    if (!r.ok) throw new Error(`${name}：HTTP ${r.status}`);
+    if (!MODEL_LOAD.loader) MODEL_LOAD.loader = new GLTFLoader();
+    const g = await MODEL_LOAD.loader.parseAsync(await r.arrayBuffer(), '');
+    g.scene.traverse((o) => { if (!o.isMesh) return; const m = o.material; if (m.map) { m.map.colorSpace = THREE.SRGBColorSpace; m.map.anisotropy = 4; } m.metalness = 0.45; m.roughness = 0.55; });
+    return g.scene;
+  })().catch((e) => { delete HG_PROPS[name]; throw e; }));
+}
+// list：[名稱, x, z, 轉向（弧度）, 縮放倍率, 離地高度]；k＝原始單位 → 世界單位
+function hgPlaceProps(S, list, k) {
+  const out = [];
+  for (const [name, x, z, ry = 0, s = 1, y = 0] of list) {
+    const hold = new THREE.Group(); hold.position.set(x, y, z); hold.rotation.y = ry; hold.scale.setScalar(k * s); S.add(hold); out.push(hold);
+    hgProp(name).then((src) => hold.add(src.clone(true))).catch((e) => console.warn('整備庫元件載入失敗', e.message));
+  }
+  return out;
+}
+// 燈：點光源＋發光圓點（照明塔的燈頭、船塢的工作燈）
+function hgLamp(S, x, y, z, col, k = 90, d = 40) {
+  const l = new THREE.PointLight(col, k, d, 1.6); l.position.set(x, y, z); S.add(l);
+  const tex = HG.glowTex || CB.glowTex;
+  if (tex) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color: col, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false })); s.scale.setScalar(4); s.position.set(x, y, z); S.add(s); }
+}
+// 王牌飛行員機庫的擺設（機體長 10；升降梯 ±11、手臂底座 x ±18、武器吊架 z −22、牆 x ±82、後牆 z −48）
+const HG_PROP_K = 46;
+const HG_PROP_LAYOUT = [
+  ['22_登艦梯', -16.5, 5, Math.PI / 2],                                   // 升降梯旁的登機梯
+  ['13_照明塔A', -32, 15, 0.6], ['14_照明塔B', 32, 15, -0.6],
+  ['10_升降工作台', -42, 6, 0.2], ['17_剪式升降車', -44, -10, 0.5], ['15_氣瓶組', -58, 0, Math.PI / 2], ['19_雙聯儲槽', -58, -9], ['21_圓頂儲槽', -57, 11],
+  ['05_運輸卡車', -46, 44, 0.45], ['01_管制塔', -55, -38, Math.PI / 2], ['07_機械臂B', -43, -30, 0.3],
+  ['04_飛彈架', 46, 6, -0.3, 1, 1.4], ['16_雙管砲塔', 50, -8, -0.7], ['12_雙推進器艙', 40, 22, 0.4], ['20_小型機械爪', 57, -16, -Math.PI / 2],
+  ['23_履帶車', 44, 40, -0.5], ['18_物料艙', 57, 22, -Math.PI / 2], ['11_加工站', 56, -30, -Math.PI / 2], ['03_輸送架', 47, -41, 0], ['06_機械臂A', 44, -28, -0.3],
+  ['02_天車', -40, -6, 0, 1.3, 30], ['02_天車', 40, -6, 0, 1.3, 30],      // 天花板的吊車
+];
 
 // ── 武器模型（程式產生，前方 +Z；userData.r＝中心到頂部的高度，掛架從頂部接上）──
 function hgCylZ(r1, r2, L, mat, z = 0, seg = 18) { const m = new THREE.Mesh(new THREE.CylinderGeometry(r2, r1, L, seg), mat); m.rotation.x = Math.PI / 2; m.position.z = z; return m; }

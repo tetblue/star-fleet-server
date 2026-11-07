@@ -392,7 +392,19 @@
   .dock-bg canvas:active { cursor: grabbing; }
   /* 王牌飛行員的機庫：背景是全螢幕 3D 機庫（hangar.js） */
   body:not(.hg-on) .hg-bg { display: none; } body.hg-on .hg-bg { display: block; }
-  body.hg-on #game { background: linear-gradient(90deg, rgba(2,4,10,.55), rgba(2,4,10,0) 40%), linear-gradient(180deg, rgba(2,4,10,.5), rgba(2,4,10,0) 16%); backdrop-filter: none; pointer-events: none; overflow: hidden; }
+  /* 艦長的戰艦庫：背景是全螢幕 3D 船塢（capbay.js） */
+  body:not(.cb-on) .cb-bg { display: none; } body.cb-on .cb-bg { display: block; }
+  /* 戰艦庫的單艦視角：收起側欄，下方一條換船列 */
+  .cb-fbar { display: none; }
+  .cb-focus .ld-side { display: none; }
+  .cb-focus .cb-fbar { display: flex; position: absolute; left: 50%; bottom: calc(18px * var(--sp)); transform: translateX(-50%); align-items: center; gap: 14px; pointer-events: auto; }
+  .cb-fbar .g-btn { font-size: calc(22px * var(--ui)); padding: 4px 16px; }
+  .cb-fname { min-width: 180px; text-align: center; padding: 6px 18px; border-radius: 6px; background: rgba(6,10,18,.62); border: 1px solid rgba(160,190,230,.25); }
+  .cb-fname small { display: block; color: var(--dim); font-size: calc(11px * var(--ui)); }
+  .cb-fname b { display: block; font-size: calc(19px * var(--ui)); letter-spacing: .08em; }
+  .cb-fname span { color: var(--dim); font-size: calc(11px * var(--ui)); letter-spacing: .1em; }
+  body.cb-on:has(.cb-focus) #game { background: linear-gradient(180deg, rgba(2,4,10,.45), rgba(2,4,10,0) 14%); }
+  body.hg-on #game, body.cb-on #game { background: linear-gradient(90deg, rgba(2,4,10,.55), rgba(2,4,10,0) 40%), linear-gradient(180deg, rgba(2,4,10,.5), rgba(2,4,10,0) 16%); backdrop-filter: none; pointer-events: none; overflow: hidden; }
   .hg-cine { position: fixed; inset: 0; pointer-events: auto; cursor: pointer; }
   .hg-cine::before, .hg-cine::after { content: ''; position: absolute; left: 0; right: 0; height: 9vh; background: #000; }   /* 電影黑邊 */
   .hg-cine::before { top: 0; } .hg-cine::after { bottom: 0; }
