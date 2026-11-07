@@ -56,9 +56,11 @@ function features(r, w, opt) {
   const n = r.start, A = n.map((c) => sideSum(c, (f) => shipA(f, w))), D = n.map((c) => sideSum(c, (f) => shipD(f, w)));
   const x = [Math.log(A[0] / A[1]), Math.log(D[0] / D[1])];
   if (opt.cmd) { x.push(r.sides[0].lv - r.sides[1].lv); for (let k = 1; k < TACS.length; k++) x.push((r.sides[0].tac === TACS[k]) - (r.sides[1].tac === TACS[k])); }
+  if (opt.cmd && HAS_FAC) x.push(r.fac === 1 ? 1 : -1);   // 陣營：邊 0 是聯盟＝+1、帝國＝−1（陣營特性的差距）
   x.push(1);
   return x;
 }
+const HAS_FAC = rows.length > 0 && rows.every((r) => r.fac != null);   // 2026-11-08 起的資料有記錄陣營
 const y = rows.map((r) => (r.winner === 0 ? 1 : 0));
 console.log(`戰鬥 ${rows.length} 場（小型 ${rows.filter((r) => r.size === 0).length}、中型 ${rows.filter((r) => r.size === 1).length}）\n`);
 
@@ -83,7 +85,7 @@ console.log(`  只看造價（cost）             ${pct(ec.acc)}　log loss ${ec
 console.log(`  艦種數值                     ${pct(es.acc)}　log loss ${es.ll.toFixed(3)}`);
 console.log(`  艦種數值＋難度＋打法         ${pct(best.e.acc)}　log loss ${best.e.ll.toFixed(3)}`);
 console.log(`\n權重 ${JSON.stringify(best.w)}`);
-console.log(`係數　攻擊 γ=${coef[0].toFixed(2)}　耐久 δ=${coef[1].toFixed(2)}　難度每級 λ=${coef[2].toFixed(2)}　打法（相對推進）${TACS.slice(1).map((t, k) => `${t} ${coef[3 + k].toFixed(2)}`).join('、')}　常數 ${coef[6].toFixed(2)}`);
+console.log(`係數　攻擊 γ=${coef[0].toFixed(2)}　耐久 δ=${coef[1].toFixed(2)}　難度每級 λ=${coef[2].toFixed(2)}　打法（相對推進）${TACS.slice(1).map((t, k) => `${t} ${coef[3 + k].toFixed(2)}`).join('、')}${HAS_FAC ? `　陣營（邊 0 是聯盟＝+1）${coef[6].toFixed(2)}` : ''}　常數 ${coef[coef.length - 1].toFixed(2)}`);
 console.log('\n各艦種的換算（攻擊、耐久、戰力值＝√(攻擊×耐久)，以護衛艦＝1；對照現在的造價）');
 const v = feat.map((f) => Math.sqrt(shipA(f, best.w) * shipD(f, best.w))), v4 = v[4];
 TYPES.forEach((t, i) => console.log(`  ${t.name.padEnd(4, '　')} 攻擊 ${shipA(feat[i], best.w).toFixed(2).padStart(6)}　耐久 ${shipD(feat[i], best.w).toFixed(0).padStart(4)}　戰力值 ${(v[i] / v4).toFixed(2).padStart(5)}　造價 ${t.cost}`));

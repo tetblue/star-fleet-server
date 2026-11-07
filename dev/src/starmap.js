@@ -33,7 +33,8 @@ const SM_RULE = {
 // 戰力公式（tools/powerfit.mjs 擬合 tools/battlecal.mjs 的真實 AI 對 AI 戰鬥；改艦種數值會自動跟著變）
 //   一方的優勢 x＝g·ln(攻擊比) ＋ d·ln(耐久比) ＋ lv·(指揮官等級差) ＋ fac·(陣營)；勝率＝1/(1+e^−x)
 //   勝方損失＝lossA ＋ lossB ×（1 − 勝率）^lossK；敗方打到全滅，或在撤退門檻撤退
-const SM_CAL = { w: { wA: 1, wM: 0, wF: 4, wS: 0.5, wR: 0 }, g: 3.22, d: 4.22, lv: 0.27, fac: 0.35, lossA: 0.05, lossB: 0.55, lossK: 1.2 };
+// 2026-11-08 校正（cal2：598 場，打到全滅、沒有陣營偏差）：預測勝負 86.6%，各區間預測與實際吻合；陣營差距 0.02（隨機布局下幾乎沒有）
+const SM_CAL = { w: { wA: 2, wM: 0, wF: 4, wS: 1.5, wR: 1 }, g: 3.73, d: 3.45, lv: 0.26, fac: 0.02, tac: { push: 0, kite: 0.15, flank: -2.09, breakthrough: 1.03 }, lossA: 0.06, lossB: 0.6, lossK: 0.6 };
 const SM_TIER = ['荒地', '聚落', '城鎮', '都市', '巨型都市'];
 const SM_TIER_CAP = [2, 4, 8, 14, 22];
 const SM_MEGA = { dock: '大型船塢', elev: '軌道電梯', radar: '深空雷達', gate: '跳躍門', shield: '行星護盾' };
@@ -218,13 +219,14 @@ function smMoveAll(S) {
 }
 
 /* ───── 戰鬥（計算）───── */
-function smWinP(c0, c1, lv0, lv1, fac0, fac1) {
+function smWinP(c0, c1, lv0, lv1, fac0, fac1, tac0 = 0, tac1 = 0) {
   const C = SM_CAL, A0 = smAtk(c0), A1 = smAtk(c1), D0 = smDur(c0), D1 = smDur(c1);
   if (A1 <= 0 || D1 <= 0) return 1; if (A0 <= 0 || D0 <= 0) return 0;
   const fx = (f) => (SM_FAC[f].game === 1 ? 1 : SM_FAC[f].game === 0 ? -1 : 0);
-  const x = C.g * Math.log(A0 / A1) + C.d * Math.log(D0 / D1) + C.lv * (lv0 - lv1) + C.fac * (fx(fac0) - fx(fac1)) / 2;
+  const x = C.g * Math.log(A0 / A1) + C.d * Math.log(D0 / D1) + C.lv * (lv0 - lv1) + C.fac * (fx(fac0) - fx(fac1)) / 2 + tac0 - tac1;
   return 1 / (1 + Math.exp(-x));
 }
+const smTac = (fs) => { let n = 0, s = 0; for (const f of fs) { const k = smShips(f.comp); n += k; s += k * (SM_CAL.tac[f.cmdr.tac] || 0); } return n ? s / n : 0; };   // 打法修正（以推進為 0）
 const smLv = (fs) => { let n = 0, s = 0; for (const f of fs) { const k = smShips(f.comp); n += k; s += k * f.cmdr.lv; } return n ? s / n : 1; };
 // 列出這回合的戰鬥：同一個星系裡有互相交戰的艦隊
 function smBattles(S) {
@@ -267,7 +269,7 @@ function smFight(S, s, fa, fb) {
     const n = c.map(smShips);
     // 超過每波上限的部分（單支艦隊太大）：按比例只讓 cap 艘上場
     const k = n.map((x) => (x > cap ? cap / x : 1)), cf = c.map((cc, i) => smScale(cc, k[i]));
-    const p0 = smWinP(cf[0], cf[1], smLv(field[0]), smLv(field[1]), fa, fb), win = smRnd(S) < p0 ? 0 : 1, pw = win ? 1 - p0 : p0;
+    const p0 = smWinP(cf[0], cf[1], smLv(field[0]), smLv(field[1]), fa, fb, smTac(field[0]), smTac(field[1])), win = smRnd(S) < p0 ? 0 : 1, pw = win ? 1 - p0 : p0;
     const lw = smClamp(SM_CAL.lossA + SM_CAL.lossB * Math.pow(1 - pw, SM_CAL.lossK) * (0.7 + 0.6 * smRnd(S)), 0, 0.95);
     const W = { n: n.slice(), p: Math.round(p0 * 100), win, lost: [0, 0], retreat: [[], []] };
     for (const side of [0, 1]) {

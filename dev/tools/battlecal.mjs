@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, arg, sleep, startServer, register, launchBrowser, connect, openGame } from './harness.mjs';
 
-const N = +arg('n', 600), TABS = +arg('tabs', 5), BIG = +arg('big', 0.2), maxMin = +arg('maxmin', 12), seed0 = +arg('seed', 1);
+const N = +arg('n', 600), TABS = +arg('tabs', 5), BIG = +arg('big', 0.2), maxMin = +arg('maxmin', 20), seed0 = +arg('seed', 1);
 const tag = arg('tag', new Date().toISOString().slice(0, 16).replace(/[-:T]/g, ''));
 const outDir = path.join(ROOT, 'dev', 'test-results');
 fs.mkdirSync(outDir, { recursive: true });
@@ -40,7 +40,7 @@ try {
           for (const f of D.SIM.m.fleets) if (f.side === 1) f.comp = f.comp.map((n) => Math.round(n * ${scale}));
           D.simStart(); D.setPaused(true);
           const typeAlive = (s) => { const a = [0, 0, 0, 0, 0, 0]; for (const f of D.fleets()) if (f.side === s && !f.reserve) for (const q of f.sqs) q.typeAlive.forEach((n, k) => (a[k] += Math.max(0, n))); return a; };
-          return JSON.stringify({ sides: D.SIM.m.sides, fleets: D.SIM.m.fleets.map((f) => ({ side: f.side, supply: !!f.supply, comp: f.comp, formation: f.formation, cmdr: { level: f.cmdr.level, trait: f.cmdr.trait, skills: f.cmdr.skills }, ai: f.ai })),
+          return JSON.stringify({ sides: D.SIM.m.ais || D.SIM.m.sides, fac: D.SIM.m.fac || 0, fleets: D.SIM.m.fleets.map((f) => ({ side: f.side, supply: !!f.supply, comp: f.comp, formation: f.formation, cmdr: { level: f.cmdr.level, trait: f.cmdr.trait, skills: f.cmdr.skills }, ai: f.ai })),
             start: [typeAlive(0), typeAlive(1)], player: D.GAME.playerSide });
         })()`));
         let ticks = 0, wall = 0, res = null;
