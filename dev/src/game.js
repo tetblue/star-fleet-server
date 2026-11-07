@@ -810,6 +810,7 @@ function menuBg() {
 // ───── 選單圖示與圖塊（主選單、單人戰鬥的模式選擇、模式大廳共用） ─────
 // 線條圖示（24×24，顏色跟著 currentColor）
 const MENU_ICONS = {
+  career: '<circle cx="6" cy="7" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="M8 7.5l7.8-1M7.2 9l3.8 7M16.9 8l-3.8 8"/>',
   single: '<path d="M12 2.5 19 20l-7-4-7 4z"/><path d="M12 8v6"/>',
   multi: '<path d="M4 4l11 11M20 4 9 15M13 17l4-4M7 13l4 4M16.5 16.5 20 20M7.5 16.5 4 20"/>',
   rec: '<circle cx="12" cy="12" r="9"/><path d="M10 8.5l5.5 3.5-5.5 3.5z"/>',
@@ -886,9 +887,12 @@ const SP_MODES = [
     st: () => pilotSummary() },
   { key: 'captain', icon: 'captain', en: 'CAPTAIN', name: '艦長', desc: '特種部隊隊長：帶 1～5 艘特製戰艦執行敵後作戰。直接操控戰艦的上下左右，潛入、破壞、斬首，再撤離',
     st: () => capSummary() },
+  { key: 'career', icon: 'career', en: 'STAR CAREER', name: '星海生涯', desc: '回合制的星圖沙盒：從聯盟的艦隊指揮官開始，調動艦隊、攻佔星系，你的選擇決定局勢與結局',
+    st: () => smSummary() },
 ];
 function showSingle() {
   const M = SP_MODES.find((m) => m.key === GAME.spMode);
+  if (M && M.key === 'career') return showStarmap();   // 星海生涯：沒有大廳，直接進星圖
   if (M) return showSpHub(M);
   mpQuit(); pvpExit();
   setPhase('menu'); GAME.replaying = false; GAME.playerSide = 0; menuBg();
