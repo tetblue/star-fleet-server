@@ -40,26 +40,30 @@ function showStarmap() {
 }
 function smuNewDialog() {
   overlay(`<style>${SMU_CSS}</style><div class="g-wrap sp-wrap"><div class="g-head"><h2>星海生涯</h2><span class="crumb">開新局</span><span class="g-sp"></span><button class="g-btn" id="sm-back">← 返回</button></div>
-    <p class="g-dim">你是聯盟的艦隊指揮官，帶著兩支分艦隊從前線出發。每一回合是一週：下令移動艦隊，結束回合後所有勢力同時行動，碰上敵軍就開戰。</p>
+    <p class="g-dim">回合制的星圖：每一回合是一週。下令移動艦隊，結束回合後所有勢力同時行動，碰上敵軍就開戰。立下戰功、完成上級與派系交辦的任務來升遷，你的選擇決定局勢與結局。</p>
+    <div class="sm-opt" style="margin:14px 0"><span class="g-dim">開局身分</span><label><input type="radio" name="sm-start" value="cap" checked> 聯盟艦長（帶特戰小隊，執行艦長任務）</label><label><input type="radio" name="sm-start" value="cmd"> 聯盟艦隊指揮官（帶兩支分艦隊；之後改由周目解鎖）</label></div>
     <div class="sm-opt" style="margin:14px 0"><span class="g-dim">難度</span>${['簡單', '普通', '困難', '殘酷'].map((n, i) => `<label><input type="radio" name="sm-diff" value="${i}" ${i === 1 ? 'checked' : ''}> ${n}</label>`).join('')}</div>
     <button class="g-btn primary" id="sm-go">開始</button></div>`);
   gEl('sm-back').onclick = () => { GAME.spMode = null; showSingle(); };
   gEl('sm-go').onclick = () => {
     const d = +(document.querySelector('input[name="sm-diff"]:checked') || { value: 1 }).value;
-    const S = smNewGame({ seed: (Math.random() * 1e9) >>> 0, diff: d });
+    const st = (document.querySelector('input[name="sm-start"]:checked') || { value: 'cap' }).value;
+    const S = smNewGame({ seed: (Math.random() * 1e9) >>> 0, diff: d, start: st });
     smSave(S); SMU = { S, sel: new Set(), sys: -1, view: null }; smuRender();
   };
 }
 function smuRender() {
   const S = SMU.S, c = smCounts(S);
   overlay(`<style>${SMU_CSS}</style><div class="sm-wrap">
-    <div class="sm-top"><h2>星海生涯</h2><span class="sm-chip">第 ${S.turn} 週</span><span class="sm-chip">資金 ${smuN(S.pl.money)}</span>
+    <div class="sm-top"><h2>星海生涯</h2><span class="sm-chip">第 ${S.turn} 週</span><span class="sm-chip">資金 ${smuN(S.pl.money)}</span><span class="sm-chip">${smRankName(S)}</span><span class="sm-chip">戰功 ${Math.round(S.pl.merit)}${S.pl.gov < 0 && S.pl.mil < 4 ? `／${SM_MIL_MERIT[S.pl.mil + 1]}` : ''}</span><span class="sm-chip">信任 ${Math.round(S.pl.trust)}</span>
       ${[SM_A, SM_E, SM_P, SM_N].map((f) => `<span class="sm-chip"><i style="background:${SM_FAC[f].col}"></i>${SM_FAC[f].name} ${c[f]}</span>`).join('')}
       <span class="sm-chip">${smAtWar(S, SM_A, SM_E) ? '聯盟與帝國交戰中' : '聯盟與帝國停戰中'}</span>
-      <span class="g-sp"></span><button class="g-btn" id="sm-rep">戰報</button><button class="g-btn primary" id="sm-end">結束回合</button><button class="g-btn" id="sm-quit">離開</button></div>
+      <span class="g-sp"></span><button class="g-btn" id="sm-car">生涯</button><button class="g-btn" id="sm-rep">戰報</button><button class="g-btn primary" id="sm-end">結束回合</button><button class="g-btn" id="sm-quit">離開</button></div>
     <div class="sm-body"><div class="sm-map" id="sm-map"><canvas id="sm-cv"></canvas></div><div class="sm-side" id="sm-side"></div></div></div>`);
   gEl('sm-quit').onclick = () => { smSave(S); window.removeEventListener('resize', smuDraw); GAME.spMode = null; showSingle(); };
-  gEl('sm-end').onclick = smuEndTurn;
+  gEl('sm-end').onclick = () => (S.pl.status === '終結' ? toast('生涯已經結束') : smuEndTurn());
+  gEl('sm-car').onclick = smuCareer;
+  if (S.pl.offerGov && !S.pl.offerAsked) { S.pl.offerAsked = true; smSave(S); smuOfferGov(); }
   gEl('sm-rep').onclick = () => smuReports(S.reports.slice(-12).reverse(), '最近的戰報');
   const cv = gEl('sm-cv');
   cv.onclick = (e) => { const r = cv.getBoundingClientRect(), id = smuHit(e.clientX - r.left, e.clientY - r.top); if (id >= 0) { SMU.sys = id; smuSide(); smuDraw(); } };
@@ -102,6 +106,8 @@ function smuDraw() {
       g.fillStyle = SM_FAC[fac].col + 'cc'; g.fillRect(x - w / 2, by, w, 14); if (pl) { g.strokeStyle = '#3fbf7f'; g.lineWidth = 2; g.strokeRect(x - w / 2, by, w, 14); }
       g.fillStyle = '#fff'; g.font = '11px sans-serif'; g.fillText(tx, x, by + 11);
     });
+    const sq = S.fleets.find((f) => f.pl && f.cap && f.sys === s.id);   // 特戰小隊：綠色菱形
+    if (sq) { const qx = x - r - 10, qy = y; g.fillStyle = '#3fbf7f'; g.beginPath(); g.moveTo(qx, qy - 6); g.lineTo(qx + 5, qy); g.lineTo(qx, qy + 6); g.lineTo(qx - 5, qy); g.closePath(); g.fill(); }
     if (S.pend && S.pend.some((b) => b.sys === s.id && !b.done)) { g.font = '16px sans-serif'; g.fillText('⚔', x + r + 9, y + 5); }
   }
 }
@@ -112,11 +118,11 @@ function smuSide() {
     const s = S.sys[f.sys], ord = f.path ? `→ ${S.sys[f.path[f.path.length - 1]].name}${f.lock ? '（會開戰，已鎖定）' : ''}` : '待命';
     const rs = smCanResupply(S, f) ? smResupplyCost(S, f) : null;
     return `<div class="sm-fl ${SMU.sel.has(f.id) ? 'on' : ''}"><input type="checkbox" data-sel="${f.id}" ${SMU.sel.has(f.id) ? 'checked' : ''}>
-      <span class="nm">${smuEsc(f.name)}</span><span>${smuShip(smShips(f.comp))} 艘</span>
+      <span class="nm">${smuEsc(f.name)}${f.loan ? '<span class="g-dim">（任務支援）</span>' : ''}</span><span>${f.cap ? `特戰艦 ${smShips(f.comp)} 艘` : `${smuShip(smShips(f.comp))} 艘`}</span>
       <span class="sub">在 ${smuEsc(s.name)}・${ord}${f.path && !f.lock ? ` <a href="#" data-cancel="${f.id}">取消</a>` : ''}</span>
-      <span class="sub">撤退門檻 <select data-rt="${f.id}">${[0, 10, 20, 30, 40, 50].map((v) => `<option value="${v}" ${Math.round(f.retreat * 100) === v ? 'selected' : ''}>${v ? v + '%' : '不撤退'}</option>`).join('')}</select>
-      ${rs && rs.cost > 0 ? `<button class="g-btn" data-rs="${f.id}">補充 ${smuShip(smShips(rs.miss))} 艘（${smuN(rs.cost)}）</button>` : ''}</span></div>`;
-  }).join('')}<div class="g-dim">勾選艦隊，再點星圖上的星系下令移動。門檻越高，保住越多船，但越容易輸。</div></div>`;
+      ${f.cap ? '<span class="sub">不參加艦隊戰；到目標星系執行艦長任務</span>' : `<span class="sub">撤退門檻 <select data-rt="${f.id}">${[0, 10, 20, 30, 40, 50].map((v) => `<option value="${v}" ${Math.round(f.retreat * 100) === v ? 'selected' : ''}>${v ? v + '%' : '不撤退'}</option>`).join('')}</select>
+      ${rs && rs.cost > 0 ? `<button class="g-btn" data-rs="${f.id}">補充 ${smuShip(smShips(rs.miss))} 艘（${smuN(rs.cost)}）</button>` : ''}</span>`}</div>`;
+  }).join('')}<div class="g-dim">勾選艦隊，再點星圖上的星系下令移動。門檻越高，保住越多船，但越容易輸。</div></div>` + smuMissions();
   if (SMU.sys >= 0) h += smuSysPanel(S.sys[SMU.sys]);
   h += `<div class="sm-sec"><h3>日誌</h3><div class="sm-log">${S.log.slice(-14).reverse().map((l) => `<div class="sm-${l.c}">第 ${l.turn} 週・${smuEsc(l.t)}</div>`).join('')}</div></div>`;
   el.innerHTML = h;
@@ -125,6 +131,11 @@ function smuSide() {
   el.querySelectorAll('[data-rt]').forEach((b) => (b.onchange = () => { S.fleets.find((f) => f.id === +b.dataset.rt).retreat = +b.value / 100; smSave(S); }));
   el.querySelectorAll('[data-rs]').forEach((b) => (b.onclick = () => { const n = smResupply(S, S.fleets.find((f) => f.id === +b.dataset.rs)); if (n) toast(`補充了 ${smuShip(n)} 艘`); smuRefresh(); }));
   const mv = gEl('sm-move'); if (mv) mv.onclick = smuMove;
+  el.querySelectorAll('[data-acc]').forEach((b) => (b.onclick = () => { const M = S.pl.missions.find((x) => x.id === +b.dataset.acc), w = smAccept(S, M); if (w) toast(w, 'bad'); smuRefresh(); }));
+  el.querySelectorAll('[data-dec]').forEach((b) => (b.onclick = () => { smDecline(S, S.pl.missions.find((x) => x.id === +b.dataset.dec)); smuRefresh(); }));
+  el.querySelectorAll('[data-op]').forEach((b) => (b.onclick = () => smuOp(S.pl.missions.find((x) => x.id === +b.dataset.op))));
+  el.querySelectorAll('[data-bld]').forEach((b) => (b.onclick = () => { if (smBuild(S, SMU.sys, b.dataset.bld)) { smSave(S); smuRender(); } }));
+  el.querySelectorAll('[data-goto]').forEach((b) => (b.onclick = (e) => { e.preventDefault(); SMU.sys = +b.dataset.goto; smuSide(); smuDraw(); }));
   const ac = gEl('sm-as-cmd'); if (ac) ac.onclick = () => smuAssault('cmd');
   const aw = gEl('sm-as-watch'); if (aw) aw.onclick = () => smuAssault('watch');
   const as = gEl('sm-assault'); if (as) as.onclick = () => { const s = S.sys[SMU.sys]; s.assault = s.assault === S.turn ? -1 : S.turn; smuRefresh(); };
@@ -153,6 +164,11 @@ function smuSysPanel(s) {
   if (s.sg && s.sg.f === S.pl.fac && fs.some((f) => f.pl)) {
     h += s.assaulted === S.turn ? '<div class="g-dim">這一週已經強攻過了。</div>' : `<div class="g-dim" style="margin-top:8px">強攻地面：快，但建築受損、繁榮下降。不強攻的話，控制軌道 ${SM_RULE.siegeT} 週後星球投降。</div>
       <div class="sm-btns"><button class="g-btn" id="sm-as-cmd">強攻：親自指揮</button><button class="g-btn ${s.assault === S.turn ? 'primary' : ''}" id="sm-assault">${s.assault === S.turn ? '已交給艦隊指揮官：本週結束時強攻（再按取消）' : '強攻：交給艦隊指揮官'}</button>${S.pl.skipWatch ? '' : '<button class="g-btn" id="sm-as-watch">強攻：觀戰</button>'}</div>`;
+  }
+  // 政務：轄區的建設
+  if (S.pl.gs.includes(s.id) && s.owner === S.pl.fac) {
+    const funds = S.pl.gov === 3 ? S.fac[S.pl.fac].money : S.pl.money;
+    h += `<div class="g-dim" style="margin-top:8px">你的轄區・建設（${S.pl.gov === 3 ? '聯盟國庫' : '你的資金'} ${smuN(funds)}）</div><div class="sm-btns">${Object.entries(SM_BUILD).filter(([, B]) => B.ok(s)).map(([k, B]) => `<button class="g-btn" data-bld="${k}" ${smCanBuild(S, s, k) ? '' : 'disabled'}>${B.name}（${smuN(B.cost(s))}）</button>`).join('')}</div>`;
   }
   return h + '</div>';
 }
@@ -293,7 +309,7 @@ function smuLayout(S, sid, fa, fb, how) {
 }
 // 每個模擬步：躍遷撤退（剩下的比例低於門檻 → 充能 10 秒後離場）、場上空出來就讓待命的艦隊進場
 function smbTick(t) {
-  const B = SMB; if (!B) return;
+  const B = SMB; if (!B || !B.th) return;
   const alive = (f) => f.sqs.reduce((a, q) => a + Math.max(0, q.alive), 0);
   for (let s = 0; s < 2; s++) {
     const mine = fleets.filter((f) => f.side === s && !f.supply && f.id < B.th.length);
@@ -317,6 +333,7 @@ function smuBattleDone() {
   const S = SMU.S, B = SMB, m = SIM.m, R = GAME.result || { kind: 'end' };
   if (!S || !B) { setPhase('menu'); showStarmap(); return; }
   if (B.assault) return smuAssaultDone();
+  if (B.op) return smuOpDone();
   const quit = R.kind === 'end' && B.how === 'cmd';   // 親自指揮時按了撤退：我方全部躍遷離開
   const res = { fleets: m.career.map.map((id, i) => {
     const f = fleets.find((o) => o.id === i), orig = m.fleets[i].comp, comp = orig.map(() => 0);
@@ -360,3 +377,59 @@ function smuCloseModal() { const d = gEl('sm-modal'); if (d) d.remove(); }
 function smSummary() { const S = smLoad(); return S && S.v === 1 ? `第 ${S.turn} 週・資金 ${smuN(S.pl.money)}・艦隊 ${smPlFleets(S).length} 支` : '還沒開始'; }
 // 測試用（tools/starmap-ui.mjs）：打包後的函式不是全域的，從這裡取
 window.__sm = { get SMU() { return SMU; }, SM_RULE, get SMB() { return SMB; }, showStarmap, smuXY, smuEndTurn, smuRender, smNewGame, smSave, smTurnMove, smAutoTurn, smPlFleets, smShips };
+
+// ───── 生涯：任務面板、艦長任務、政務邀請、生涯紀錄 ─────
+function smuMissions() {
+  const S = SMU.S, L = S.pl.missions.filter((M) => M.state === 'open' || M.state === 'offer');
+  return `<div class="sm-sec"><h3>任務</h3>${L.length ? L.map((M) => {
+    const left = smMisLeft(S, M), R = M.reward || {};
+    return `<div class="sm-fl"><span></span><span class="nm">${M.kind === 'order' ? '命令' : '委託'}：${smuEsc(smMisText(S, M))}</span><span class="${left <= 2 ? 'sm-bad' : 'g-dim'}">剩 ${left} 週</span>
+      <span class="sub">來自 ${smuEsc(M.from.name)}（${smuEsc(M.from.role)}）${M.sys != null ? `・<a href="#" data-goto="${M.sys}">看目標</a>` : ''}</span>
+      <span class="sub">情報：${M.intel || '無情報'}${M.support && (M.support.got || M.support.money) ? `・支援：${[M.support.got, M.support.money ? `資金 ${M.support.money}` : ''].filter(Boolean).join('、')}` : '・沒有支援'}</span>
+      <span class="sub">報酬：${[R.merit ? `戰功 ${R.merit}` : '', R.money ? `資金 ${R.money}` : '', R.trust ? `信任 ${R.trust}` : '', R.sup ? `${SM_SUP[R.sup[0]]}支持 ${R.sup[1]}` : ''].filter(Boolean).join('、') || '—'}</span>
+      ${M.state === 'offer' ? `<span class="sub"><button class="g-btn primary" data-acc="${M.id}">接受</button> <button class="g-btn" data-dec="${M.id}">婉拒</button></span>` : ''}
+      ${M.type === 'op' && M.state === 'open' ? (smOpReady(S, M) ? `<span class="sub"><button class="g-btn primary" data-op="${M.id}">執行${SM_OP[M.op]}任務（艦長模式）</button></span>` : '<span class="sub g-dim">先把特戰小隊移到目標星系</span>') : ''}</div>`;
+  }).join('') : '<div class="g-dim">目前沒有任務。</div>'}</div>`;
+}
+// 艦長任務：用艦長模式打（captain.js 的隨機任務，指定任務類型與難度）
+function smuOp(M) {
+  const S = SMU.S; if (!smOpReady(S, M)) return;
+  const t = S.sys[M.sys], li = Math.max(0, Math.min(4, Math.max(0, SM_INTEL.indexOf(smIntel(S, M.sys, S.pl.fac)) - 2) + (t.def >= 4 ? 1 : 0) + S.diff - 1));
+  const p = { ...capLoad(), seed: (S.turn * 7919 + t.id * 104729 + S.r) % 100000, diff: li, mis: M.op, env: 0, fac: SM_FAC[S.pl.fac].game === 0 ? 0 : 1 };
+  smSave(S);
+  simEndMid(); overlay(null);
+  const m = capLayout(p); m.career = { op: M.id }; m.name = `${t.name}・${m.name}`;
+  SIM.m = m; SIM.sel = null; camAnim = null;
+  SMB = { op: M.id };
+  simStart();
+}
+function smuOpDone() {
+  const S = SMU.S, R = GAME.result || {}, M = S.pl.missions.find((x) => x.id === SMB.op);
+  if (M) smOpResult(S, M, !!R.capOk);
+  SMB = null; smSave(S);
+  setPhase('menu'); smuRender();
+  toast(R.capOk ? '艦長任務完成' : `艦長任務失敗${R.why ? '：' + R.why : ''}`, R.capOk ? '' : 'bad');
+}
+function smuOfferGov() {
+  const S = SMU.S;
+  smuModal(`<h3>議會的邀請</h3><p>聯盟議會希望你轉任政務，出任一個星系的行星司令：管理轄區的建設與繁榮，之後依政績與派系支持升任星區總督、議員，甚至元首。</p>
+    <p class="g-dim">轉任後不再接軍職的命令；能指揮的艦隊依政務職位。也可以留在軍職，繼續升遷到元帥。</p>
+    <div class="sm-btns"><button class="g-btn primary" id="sm-gov-yes">轉任政務</button><button class="g-btn" id="sm-gov-no">留在軍職</button></div>`);
+  gEl('sm-gov-yes').onclick = () => { smTakeGov(S); smSave(S); smuCloseModal(); smuRender(); };
+  gEl('sm-gov-no').onclick = () => { S.pl.offerGov = false; smSave(S); smuCloseModal(); };
+}
+function smuCareer() {
+  const S = SMU.S, p = S.pl, R = p.gov >= 0 ? SM_GOV_REQ[p.gov + 1] : null;
+  smuModal(`<h3>生涯・${smRankName(S)}</h3><dl class="sm-kv">
+    <dt>戰功</dt><dd>${Math.round(p.merit)}${p.gov < 0 && p.mil < 4 ? `（升${SM_MIL[p.mil + 1]}要 ${SM_MIL_MERIT[p.mil + 1]}，再通過考核）` : ''}</dd>
+    <dt>上級信任</dt><dd>${Math.round(p.trust)}</dd>
+    <dt>派系支持</dt><dd>${SM_SUP.map((n, i) => `${n} ${Math.round(p.sup[i])}`).join('・')}</dd>
+    ${p.gov >= 0 ? `<dt>政績</dt><dd>轄區平均繁榮 ${Math.round(smGovPerf(S))}${R ? `（升${SM_GOV[p.gov + 1]}要 ${R.perf}，且最高的派系支持 ${R.sup}）` : ''}</dd><dt>轄區</dt><dd>${p.gs.map((i) => S.sys[i].name).join('、') || '無'}</dd>` : ''}
+    <dt>能指揮的艦隊</dt><dd>${smFleetCap(S) >= 99 ? '不限' : smFleetCap(S) + ' 支'}</dd>
+    <dt>擊沉</dt><dd>${smuShip(p.kills)} 艘・親自佔領 ${p.caps} 個星系</dd></dl>
+    <h3 style="margin-top:14px">里程碑</h3><div class="sm-log">${p.ms.map((m) => `<div>第 ${m.turn} 週・${smuEsc(m.t)}</div>`).join('')}</div>
+    ${p.status === '終結' ? '<p class="sm-bad">生涯已經結束。可以開新局。</p><div class="sm-btns"><button class="g-btn" id="sm-new">開新局</button></div>' : ''}
+    <div class="sm-btns"><button class="g-btn primary" id="sm-close">關閉</button></div>`);
+  gEl('sm-close').onclick = smuCloseModal;
+  const nb = gEl('sm-new'); if (nb) nb.onclick = () => { smuCloseModal(); STORE.removeItem(SM_STORE); smuNewDialog(); };
+}

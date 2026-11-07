@@ -145,13 +145,17 @@ function smNewGame(o = {}) {
       smNewFleet(S, f, at.id, smArchComp(arch, ships), { arch, retreat: SM_RULE.retreat + (smRnd(S) - 0.5) * 0.1 });
     }
   }
-  // 玩家：聯盟的艦隊指揮官，帶兩支艦隊從前線出發
+  // 玩家：聯盟艦長（帶特戰小隊）或艦隊指揮官（帶兩支分艦隊），從前線出發
   const front = S.sys.filter((s) => s.owner === SM_A && S.adj[s.id].some((j) => S.sys[j].owner !== SM_A)).sort((a, b) => b.x - a.x)[0] || S.sys[0];
-  for (let k = 0; k < 2; k++) {
+  const start = o.start === 'cmd' ? 'cmd' : 'cap';
+  const sq = smNewFleet(S, SM_A, front.id, [0, 0, 0, 1, 2, 0], { pl: true, name: '特戰小隊', cmdr: { name: '你', lv: 2, tac: 'push' } }); sq.cap = true; sq.retreat = 0; S.pl.fleets.push(sq.id);
+  if (start === 'cmd') for (let k = 0; k < 2; k++) {
     const f = smNewFleet(S, SM_A, front.id, smArchComp(k ? 2 : 0, 400), { arch: k ? 2 : 0, pl: true, name: k ? '第二分艦隊' : '第一分艦隊', cmdr: { name: k ? '副官' : '你', lv: 2, tac: 'push' } });
     S.pl.fleets.push(f.id);
   }
-  smLog(S, `你奉命指揮兩支分艦隊，駐守前線的 ${front.name}`, 'ev');
+  smCareerInit(S, start);
+  smLog(S, start === 'cmd' ? `你奉命指揮兩支分艦隊，駐守前線的 ${front.name}` : `你是聯盟的艦長，帶著特戰小隊駐守前線的 ${front.name}，等候上級的命令`, 'ev');
+  smGenMissions(S);
   return S;
 }
 function smLog(S, t, c) { S.log.push({ turn: S.turn, t, c: c || '' }); if (S.log.length > 400) S.log.splice(0, S.log.length - 400); }
@@ -160,7 +164,7 @@ function smLog(S, t, c) { S.log.push({ turn: S.turn, t, c: c || '' }); if (S.log
 const smOwned = (S, f) => S.sys.filter((s) => s.owner === f);
 const smAtWar = (S, a, b) => a !== b && a !== SM_N && b !== SM_N && S.rel[a][b] < 0;
 const smHostileSys = (S, f, s) => s.owner !== f && (s.owner === SM_N || smAtWar(S, f, s.owner));   // 可以進攻的星系（中立可以被佔領）
-const smFleetsAt = (S, sid) => S.fleets.filter((f) => f.sys === sid && smShips(f.comp) > 0);
+const smFleetsAt = (S, sid) => S.fleets.filter((f) => f.sys === sid && !f.cap && smShips(f.comp) > 0);   // 特戰小隊（f.cap）不算：它不參加艦隊戰
 const smPlFleets = (S) => S.fleets.filter((f) => f.pl && smShips(f.comp) > 0);
 const smSysIncome = (s) => s.pop * (0.4 + s.prosp / 100) * 0.6 * (s.mega.elev ? 1.15 : 1) * (s.sg ? 0 : 1) * SM_RULE.incMul;
 const smGround = (s) => (s.gar + s.def * 60) * (s.mega.shield ? 1.5 : 1);   // 地面戰力（戰力值單位）
@@ -177,8 +181,8 @@ function smPlanMove(S, fl, to) {
   if (hops > SM_RULE.jump) return { ok: false, why: `太遠了：要跨 ${hops} 個星系（一道命令最多 ${SM_RULE.jump} 個）`, path, hops };
   const cost = Math.round(hops * smCost(fl.comp) * SM_RULE.moveCost);
   const mid = path.slice(1, -1).filter((i) => smEnemyAt(S, fl.fac, i).length);
-  const dest = S.sys[to], fight = smEnemyAt(S, fl.fac, to).length > 0 || smHostileSys(S, fl.fac, dest);
-  return { ok: true, path, hops, cost, mid, fight };
+  const dest = S.sys[to], fight = !fl.cap && (smEnemyAt(S, fl.fac, to).length > 0 || smHostileSys(S, fl.fac, dest));
+  return { ok: true, path, hops, cost: fl.cap ? Math.min(cost, 20) : cost, mid: fl.cap ? [] : mid, fight };
 }
 function smOrder(S, fl, to) {
   const P = smPlanMove(S, fl, to);
@@ -198,7 +202,7 @@ function smMoveAll(S) {
     const p = f.path; f.path = null; f.lock = false;
     for (let k = 1; k < p.length; k++) {
       f.sys = p[k];
-      if (k === p.length - 1) break;
+      if (k === p.length - 1 || f.cap) { if (k === p.length - 1) break; continue; }   // 特戰小隊：避開敵軍，不會被攔
       const en = smEnemyAt(S, f.fac, p[k]); if (!en.length) continue;
       const ratio = Math.min(1, en.reduce((a, o) => a + smShips(o.comp), 0) / Math.max(1, smShips(f.comp)));
       if (smRnd(S) < SM_RULE.intercept * ratio) { f.icp = true; if (f.pl) smLog(S, `${f.name} 途經 ${S.sys[p[k]].name} 時被敵軍攔截`, 'bad'); break; }
@@ -313,6 +317,13 @@ function smFightEnd(S, s, F, sides, gone, fa, fb) {
     for (const f of winners) { const lost = f.init.map((x, t) => Math.max(0, x - f.comp[t])), fix = smScale(lost, SM_RULE.repair); f.comp = smAdd(f.comp, fix); rep = smAdd(rep, fix); }
     F.salvage = salv; F.repaired = smShips(rep); F.end = sides.map((L) => L.reduce((c, f) => smAdd(c, f.comp), [0, 0, 0, 0, 0, 0]));
   }
+  // 玩家的戰果：照我方艦數比例分到擊沉數；打贏另外給戰功
+  for (const side of [0, 1]) {
+    const pn = F.fleets[side].filter((o) => S.fleets.some((f) => f.id === o.id && f.pl)).reduce((a, o) => a + o.ships, 0), tot = smShips(F.start[side]);
+    if (!pn || !tot) continue;
+    S.pl.kills += smShips(F.lost[1 - side]) * pn / tot;
+    if (F.win === side) S.pl.merit += Math.round(smVal(F.lost[1 - side]) * pn / tot / 40) + 2;
+  }
   // 厭戰、日誌
   for (const [fac, k] of [[fa, 0], [fb, 1]]) S.fac[fac].ww += smShips(F.lost[k]) / 200;
   const nm = (k) => SM_FAC[k ? fb : fa].name;
@@ -369,6 +380,7 @@ function smCapture(S, s, fac, how) {
   s.owner = fac; s.sg = null; s.hit = S.turn; s.gar = Math.max(40, s.gar * 0.3); s.prosp = smClamp(s.prosp - (how === 'assault' ? 25 : 10), 0, 100);
   if (how === 'assault') { s.def = Math.max(0, s.def - 2); if (s.tier > 1 && smRnd(S) < 0.4) s.tier--; }
   S.st.cap[fac]++;
+  if (fac === S.pl.fac && smFleetsAt(S, s.id).some((f) => f.pl)) { S.pl.caps++; S.pl.merit += 20; for (const M of S.pl.missions) if (M.state === 'open' && M.type === 'capture' && M.sys === s.id) M.byPl = true; }
   smLog(S, `${SM_FAC[fac].name}${how === 'assault' ? '強攻' : '圍城'}佔領 ${s.name}（原屬${SM_FAC[was].name}）`, fac === S.pl.fac ? 'good' : was === S.pl.fac ? 'bad' : '');
 }
 function smSiegeTick(S) {
@@ -401,7 +413,7 @@ function smLoseVal(S, fs, v) {
 /* ───── AI ───── */
 function smAiTurn(S, fac) {
   const my = smOwned(S, fac); if (!my.length) return;
-  const mine = S.fleets.filter((f) => f.fac === fac && !f.pl && smShips(f.comp) > 0);
+  const mine = S.fleets.filter((f) => f.fac === fac && !f.pl && !f.cap && smShips(f.comp) > 0);
   const free = new Set(mine.filter((f) => !f.path));
   // 1. 防守：敵方艦隊在相鄰星系、而且比這裡的守軍強 → 從附近調艦隊過來（首都優先）
   const sieges = S.sys.filter((s) => s.sg && s.sg.f === fac && s.owner !== fac);   // 自己的圍城也要守：對方可能來解圍
@@ -456,7 +468,7 @@ function smEconomy(S, fac) {
   const F = S.fac[fac], my = smOwned(S, fac); if (!my.length) return;
   const inc = my.reduce((a, s) => a + smSysIncome(s), 0) * (fac !== S.pl.fac ? [0.85, 1, 1.15, 1.3][S.diff] || 1 : 1) * Math.max(0.5, 1 - 0.03 * Math.max(0, my.length - SM_RULE.overExt));   // 過度擴張
   F.money += inc;
-  const fls = S.fleets.filter((f) => f.fac === fac && !f.pl && smShips(f.comp) > 0);
+  const fls = S.fleets.filter((f) => f.fac === fac && !f.pl && !f.cap && smShips(f.comp) > 0);
   F.money -= fls.reduce((a, f) => a + smCost(f.comp), 0) * SM_RULE.upkeep;
   for (const s of my) { if (s.sg) continue; const tgt = (s.cap ? 400 : smFront(S, s) ? 160 : 90), need = Math.max(0, tgt - s.gar), pay = Math.min(need, Math.max(0, F.money) * 0.3 / SM_RULE.garCost); s.gar += pay; F.money -= pay * SM_RULE.garCost; }
   // 建設（錢多才蓋）：都市升級 → 前線防衛建築
@@ -505,8 +517,7 @@ function smTurnEnd(S) {
   S.pend = null;
   smSiegeTick(S);
   for (const f of [SM_A, SM_E, SM_P]) smEconomy(S, f);
-  // 玩家：薪餉
-  S.pl.money += 60;
+  smCareerTick(S);   // 薪餉、任務、升遷、政務、失敗（starmap_career.js）
   // 成長與繁榮
   for (const s of S.sys) {
     const cap = SM_TIER_CAP[s.tier];
@@ -517,10 +528,11 @@ function smTurnEnd(S) {
   // 清掉全滅的艦隊（玩家的保留紀錄）
   S.fleets = S.fleets.filter((f) => smShips(f.comp) > 0 || (f.pl && S.turn - (f.deadT || (f.deadT = S.turn)) < 3));
   S.pl.fleets = S.pl.fleets.filter((id) => S.fleets.some((f) => f.id === id));
-  // 玩家的艦隊都沒了：聯盟重新撥一支（之後的生涯階段改成懲處）
-  if (!smPlFleets(S).length) {
-    const cap = smOwned(S, S.pl.fac).find((s) => s.cap) || smOwned(S, S.pl.fac)[0];
-    if (cap) { const f = smNewFleet(S, S.pl.fac, cap.id, smArchComp(0, 300), { pl: true, name: '重建分艦隊', cmdr: { name: '你', lv: 2, tac: 'push' } }); S.pl.fleets.push(f.id); smLog(S, `聯盟在 ${cap.name} 重新撥給你一支分艦隊`, 'bad'); }
+  // 玩家的艦隊都沒了（艦長以外）：聯盟重新撥給你，但信任與戰功受罰
+  if (S.pl.status !== '終結' && smFleetCap(S) > 0 && !S.fleets.some((f) => f.pl && !f.cap && smShips(f.comp) > 0) && smOwned(S, S.pl.fac).length) {
+    S.pl.trust = smClamp(S.pl.trust - 10, 0, 100); S.pl.merit = Math.max(0, S.pl.merit - 20);
+    smLog(S, '你的艦隊全軍覆沒。獲救後聯盟重新撥給你艦隊（信任 −10、戰功 −20）', 'bad');
+    smAssignFleets(S);
   }
   smEvents(S);
   S.turn++;
@@ -547,6 +559,7 @@ function smEvents(S) {
 }
 // 自動跑一整回合（測試、AI 代打用）：玩家的艦隊照 AI 的方式行動
 function smAutoTurn(S) {
+  smAutoCareer(S);
   for (const f of smPlFleets(S)) f.pl = false;
   const ids = S.pl.fleets.slice();
   smTurnMove(S);

@@ -13,7 +13,7 @@ try {
   await b.ev(`window.addEventListener('error', (e) => (window.__smErr = (window.__smErr || []).concat(String(e.message))))`);
   await b.ev(`(() => { STORE.removeItem('fleet.career1'); document.getElementById('m-single').click(); document.querySelector('[data-spm="career"]').click(); return true; })()`);
   await sleep(300); await b.shot(path.join(out, '0-new.png'));
-  await b.ev(`document.getElementById('sm-go').click()`); await sleep(400);
+  await b.ev(`(() => { const r = document.querySelector('input[name="sm-start"][value="' + '${arg('start', 'cmd')}' + '"]'); if (r) r.click(); document.getElementById('sm-go').click(); return true; })()`); await sleep(400);
   await b.shot(path.join(out, '1-map.png'));
   for (let t = 0; t < TURNS; t++) {
     // 選第一支艦隊，派往相鄰的非己方星系（沒有就隨便一個相鄰星系）

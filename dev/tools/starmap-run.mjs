@@ -7,12 +7,12 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url)), src = path.join(here, '..', 'src');
 const arg = (n, d) => { const a = process.argv.find((s) => s.startsWith(`--${n}=`)); return a ? a.slice(n.length + 3) : d; };
 const data = fs.readFileSync(path.join(src, 'data.js'), 'utf8'), s0 = data.indexOf('const SHIP_TYPES = ['), s1 = data.indexOf('\n];', s0);
-const code = data.slice(s0, s1 + 3) + '\nconst STORE = { getItem: () => null, setItem: () => {} };\n' + fs.readFileSync(path.join(src, 'starmap.js'), 'utf8') +
-  '\nreturn { smNewGame, smAutoTurn, smCounts, smShips, smVal, smOwned, smPlFleets, SM_FAC, SM_A, SM_E, SM_P, SM_N };';
+const code = data.slice(s0, s1 + 3) + '\nconst STORE = { getItem: () => null, setItem: () => {} };\n' + fs.readFileSync(path.join(src, 'starmap.js'), 'utf8') + '\n' + fs.readFileSync(path.join(src, 'starmap_career.js'), 'utf8') +
+  '\nreturn { smRankName, SM_MIL, smNewGame, smAutoTurn, smCounts, smShips, smVal, smOwned, smPlFleets, SM_FAC, SM_A, SM_E, SM_P, SM_N };';
 const M = new Function(code)();
 const RUNS = +arg('runs', 50), TURNS = +arg('turns', 300), DIFF = +arg('diff', 1);
 
-const agg = { err: 0, cap: [0, 0, 0, 0], battles: 0, plBattles: 0, churn: 0, unify: [0, 0], dead: [0, 0, 0], ships: [], sys: [], fleets: [], waves: 0, maxWaves: 0, retreats: 0, truce: 0, ms: [] };
+const agg = { rank: {}, msT: {}, mis: { done: 0, fail: 0 }, err: 0, cap: [0, 0, 0, 0], battles: 0, plBattles: 0, churn: 0, unify: [0, 0], dead: [0, 0, 0], ships: [], sys: [], fleets: [], waves: 0, maxWaves: 0, retreats: 0, truce: 0, ms: [] };
 const t0 = Date.now();
 for (let r = 0; r < RUNS; r++) {
   const S = M.smNewGame({ seed: 1000 + r, diff: DIFF });
@@ -33,6 +33,9 @@ for (let r = 0; r < RUNS; r++) {
   if (uni) { agg.unify[uni.f]++; agg.ms.push(uni.t); }
   const c = M.smCounts(S); [0, 1, 2].forEach((f) => { if (!c[f]) agg.dead[f]++; });
   agg.truce += S.log.filter((l) => l.t.includes('停戰協定')).length;
+  agg.rank[M.smRankName(S)] = (agg.rank[M.smRankName(S)] || 0) + 1;
+  for (const m of S.pl.ms) { agg.msT[m.t] = agg.msT[m.t] || []; agg.msT[m.t].push(m.turn); }
+  agg.mis.done += S.log.filter((l) => l.t.startsWith('任務完成')).length; agg.mis.fail += S.log.filter((l) => l.t.startsWith('任務失敗')).length;
 }
 const per = (v) => (v / RUNS).toFixed(1);
 console.log(`\n${RUNS} 局 × ${TURNS} 週（難度 ${DIFF}），${((Date.now() - t0) / 1000).toFixed(1)} 秒，出錯 ${agg.err} 局`);
@@ -40,5 +43,7 @@ console.log(`每局：戰鬥 ${per(agg.battles)} 場（玩家參與 ${per(agg.pl
 console.log(`佔領次數／局：聯盟 ${per(agg.cap[0])}、帝國 ${per(agg.cap[1])}、海盜 ${per(agg.cap[2])}`);
 console.log(`戰鬥：平均 ${(agg.waves / Math.max(1, agg.battles)).toFixed(2)} 波、最多 ${agg.maxWaves} 波；撤退 ${per(agg.retreats)} 支／局`);
 console.log(`統一（佔 80% 星系）：聯盟 ${agg.unify[0]} 局、帝國 ${agg.unify[1]} 局${agg.ms.length ? `，中位第 ${agg.ms.sort((a, b) => a - b)[Math.floor(agg.ms.length / 2)]} 週` : ''}；滅亡：聯盟 ${agg.dead[0]}、帝國 ${agg.dead[1]}、海盜 ${agg.dead[2]} 局`);
+console.log(`生涯：最後的職位 ${Object.entries(agg.rank).map(([k, v]) => `${k} ${v}`).join('、')}；任務完成 ${per(agg.mis.done)}、失敗 ${per(agg.mis.fail)} 次／局（日誌只留最近 400 筆）`);
+console.log('里程碑（達成局數、中位週數）：' + Object.entries(agg.msT).map(([k, v]) => `${k} ${v.length}（第 ${v.sort((a, b) => a - b)[Math.floor(v.length / 2)]} 週）`).join('、'));
 console.log('星系數（聯盟／帝國／海盜／中立）與艦數（聯盟／帝國／海盜），每 50 週的平均：');
 agg.sys.forEach((c, k) => console.log(`  第 ${k * 50 + 1} 週：${c.map((v) => (v / RUNS).toFixed(1)).join('／')}　艦數 ${agg.ships[k].map((v) => Math.round(v / RUNS)).join('／')}`));
