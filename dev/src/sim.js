@@ -160,7 +160,7 @@ function simFieldHtml(m) {
     <div class="g-dim sim-note">開＝只看得到偵測範圍內（或掃描到）的敵軍，自動攻擊也只打看得到的；關＝雙方都看得到全部</div>
     <div class="sim-row"><span>${SIM.mid ? '繼續時指揮' : '開戰時指揮'}</span><div class="wed-seg" id="sim-ctl">${Array.from({ length: simSideN(m) }, (_, s) => `<button data-v="${s}" class="${m.ctl === s ? 'on' : ''}">${s === 0 ? '我方' : s === 1 ? '敵方' : escH(simSideName(m, s))}</button>`).join('')}</div></div>
     ${simSideN(m) > 2 ? simRelHtml(m) : ''}
-    <div class="sim-row"><span>勝負判定</span><label><input type="checkbox" id="sim-vic" ${m.victory ? 'checked' : ''}> 一方全滅或潰走（剩 ${Math.round(ROUT_AT * 100)}% 以下）就結束</label></div>
+    <div class="sim-row"><span>勝負判定</span><label><input type="checkbox" id="sim-vic" ${m.victory ? 'checked' : ''}> 地圖上只剩一方（其他方全滅）就結束</label></div>
     <div class="sim-row"><span>時限</span><span class="g-dim">模擬室沒有時間限制</span></div>
     <div class="sim-row"><span>隨機種子</span><input class="g-in" type="number" id="sim-seed" value="${m.seed}" style="width:110px"><button class="g-btn sm" id="sim-reseed">換一個</button></div>
     <div class="g-dim" style="font-size:calc(11.5px * var(--ui));margin-top:6px">同一個布局＋同一個種子＋同樣的指令＝同樣的結果；換種子會改變陣型細節與命中的隨機性。<br>規則與正式作戰相同（持續交火、不自動前進、主砲只打前方）。</div></div>`;

@@ -584,15 +584,15 @@ function noRout(side) { let any = false; for (const f of fleets) if (f.side === 
 // 劇情戰役的護送目標：剩不到 VIP_KEEP 就算護送失敗
 const VIP_KEEP = 0.4;
 function vipLost() { const f = fleets.find((o) => o.vip); if (!f) return false; let n = 0; for (const q of f.sqs) n += q.alive; return n < f.initial * VIP_KEEP; }
-// 模擬室（三方以上）：還沒潰走的各方之間沒有敵對了就結束；邊 0 在裡面＝勝利
+// 模擬室（三方以上）：地圖上還有船（或待命艦隊）的各方之間沒有敵對了就結束；邊 0 在裡面＝勝利（不算潰走）
 function simMultiVictory() {
   const live = [];
   for (let s = 0; s < SIDES; s++) {
     const n = sideAlive(s), wait = fleets.some((f) => f.side === s && f.reserve && f.activateAt != null);
-    if (wait || (n > 0 && (n / Math.max(1, GAME.init[s]) >= ROUT_AT || noRout(s)))) live.push(s);
+    if (wait || n > 0) live.push(s);
   }
   if (live.some((a) => live.some((b) => hostile(a, b)))) return;
-  GAME.result = battleResult(live.includes(0) ? 'win' : live.length ? 'lose' : 'draw', live.length ? `${live.map(sideName).join('、')} 勝利` : '各方都潰走了');
+  GAME.result = battleResult(live.includes(0) ? 'win' : live.length ? 'lose' : 'draw', live.length ? `${live.map(sideName).join('、')} 勝利` : '各方同時全滅');
 }
 function checkVictory() {
   if (SIDES > 2 && battleSetup.scenario === 'sim') { simMultiVictory(); return; }
@@ -601,16 +601,17 @@ function checkVictory() {
   const RR = battleSetup.relRule, relBad = RR && RR.act === 'fail' ? (battleSetup.rel || []).find(([x, y, v]) => v === 1 && (x === 0 || y === 0) && (relOver(0, x || y) || hostile(0, x || y))) : null;   // 關卡：誤傷或攻擊中立的一方＝失敗
   let r = null;
   const pend = fleets.some((f) => f.ally && f.defectAt != null && !f.reserve) || (battleSetup.doom && t < battleSetup.doom.at + 4);   // 劇情演出（倒戈、強制擊沉）還沒發生：先不判勝利   // 還有友軍沒倒戈（劇情的倒戈）：先不判勝利，等倒戈發生
-  // 模擬室（含觀摩）：還有排定進場的待命艦隊＝還沒輸（同多方勢力的判定）；雙方同時潰走＝平手（不因為先檢查敵方而偏向邊 0）
+  // 模擬室（含觀摩、星圖的真實戰鬥）：勝負只看地圖上還有沒有敵軍，不算潰走；還有排定進場的待命艦隊＝還在場上；雙方同時全滅＝平手
   const sim = battleSetup.scenario === 'sim', wait = (s) => sim && fleets.some((f) => f.side === s && f.reserve && f.activateAt != null);
   const w0 = wait(0), w1 = foeSides(0).some(wait);
-  const out1 = !pend && !w1 && (a1 === 0 || (e < ROUT_AT && !foeSides(0).some((s) => sideAlive(s) > 0 && noRout(s)))), out0 = !w0 && (a0 === 0 || (p < ROUT_AT && !noRout(0)));
+  const rout1 = !sim && e < ROUT_AT && !foeSides(0).some((s) => sideAlive(s) > 0 && noRout(s)), rout0 = !sim && p < ROUT_AT && !noRout(0);
+  const out1 = !pend && !w1 && (a1 === 0 || rout1), out0 = !w0 && (a0 === 0 || rout0);
   if (relBad) { const b = relBad[0] || relBad[1]; r = ['lose', hostile(0, b) ? `與${sideName(b)}開戰` : `誤傷${sideName(b)}太多`]; }
-  else if (sim && out0 && out1) r = ['draw', '雙方都潰走了'];
+  else if (sim && out0 && out1) r = ['draw', '雙方同時全滅'];
   else if (a1 === 0 && !pend && !w1) r = ['win', '殲滅敵軍'];
-  else if (e < ROUT_AT && !foeSides(0).some((s) => sideAlive(s) > 0 && noRout(s)) && !pend && !w1) r = ['win', '敵軍潰走'];
+  else if (rout1 && !pend && !w1) r = ['win', '敵軍潰走'];
   else if (a0 === 0 && !w0) r = ['lose', '我軍全滅'];
-  else if (p < ROUT_AT && !noRout(0) && !w0) r = ['lose', '我軍潰走'];
+  else if (rout0 && !w0) r = ['lose', '我軍潰走'];
   else if (G && G.type === 'escort' && vipLost()) r = ['lose', `${G.name}損失過重`];
   else if (G && G.type === 'target' && !fleets.some((f) => f.side === 1 && f.name === G.name && fleetAlive(f).length)) r = ['win', `${G.name}被擊沉`];
   else if (G && G.type === 'rescue' && t >= rescuePurgeAt()) { const n = rescueCount(); r = n.saved >= G.need ? ['win', `淨化開始・救出了 ${n.saved} 批倖存者`] : ['lose', `淨化開始・只救出 ${n.saved} 批倖存者（至少要 ${G.need} 批）`]; }
