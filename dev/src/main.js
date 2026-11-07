@@ -910,11 +910,17 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
   for (let s = SIDE_FAC.length; s < SIDES; s++) { const f = setup.fleets.find((o) => o.side === s && o.fac != null); SIDE_FAC[s] = f ? f.fac : 1; }   // 沒寫陣營的那一方：用它第一支艦隊的外觀
   REL = relTable(setup.rel); relVer++; for (const a of relDmg) a.fill(0); relHP0.fill(0);   // 勢力關係：setup.rel＝[[a, b, 關係], ...]
   applySideNames(); applyPlayerTheme();
-  const R = rand(12345);
+  const R = rand(12345);   // 測試場的背景艦隊
+  // 每支艦隊的佈陣亂數（陣型的點、艦種前後、外觀）與開火冷卻的錯開：用「這場的種子＋它是這一邊的第幾支艦隊」決定。
+  //   鏡像對戰（雙方同樣的艦隊）的第 k 支會拿到一模一樣的陣型，且每場不同；以前全部共用固定種子、依艦隊順序抽，
+  //   邊 0 永遠先抽 → 每場同樣的佈陣差異，AI 對 AI 的勝負會一直偏向同一邊
+  const sideK = new Array(SIDE_N).fill(0), sideShip = new Array(SIDE_N).fill(0), seedOff = (battleSeed % 4093) * 3.7;
+  const fleetRand = (side) => rand(Math.imul((battleSeed ^ 0x5bd1e995) >>> 0, 2654435761) ^ Math.imul(++sideK[side || 0], 40503) ^ 0x2545f491);
 
   // 先決定每支分艦隊的艦數與落點
   const plans = [];
   setup.fleets.forEach((fd, fi) => {
+    const FR = fleetRand(fd.side);
     const fcomp = SHIP_TYPES.map((_, t) => fd.comp[t] || 0);   // 舊資料只有 5 種艦
     if (fcomp.reduce((a, b) => a + b, 0) <= 0) return;
     const dorm = fleetDorm(fd, fd.fac != null ? fd.fac : SIDE_FAC[fd.side], setup);   // 種族：預留的空位（寄生、孵化用，開戰時是空的）
@@ -926,7 +932,7 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
     const flagK = Math.floor((K - 1) / 2);
     if (!fd.supply && !fd.cap) { counts[flagK]++; comps[flagK][1]++; }   // 本隊多一艘旗艦（戰列艦）；補給艦隊沒有旗艦
     const order = counts.map((_, i) => i);
-    const lay = fd.orderly ? genOrderly(fd.formation, counts, order, fd.layers || 1) : genFormation(fd.formation, counts, order, R);
+    const lay = fd.orderly ? genOrderly(fd.formation, counts, order, fd.layers || 1) : genFormation(fd.formation, counts, order, FR);
     const fleet = { id: fi, side: fd.side, name: fd.name, commander: fd.commander || null, hangar: fd.hangar || null, sqs: [], reserve: !!fd.reserve, entry: fd.entry || null,
       supply: !!fd.supply, vip: !!fd.vip, fac: fd.fac != null ? fd.fac : SIDE_FAC[fd.side], ally: !!fd.ally, defectAt: fd.defectAt != null ? fd.defectAt : null, follow: fd.follow != null ? fd.follow : -1, reinfOf: fd.reinfOf != null ? fd.reinfOf : null, mercOf: fd.mercOf != null ? fd.mercOf : null, keep: fd.keep || null,
       skills: {}, initial: total - nDorm + (fd.supply || fd.cap ? 0 : 1), cap: !!fd.cap, capRole: fd.capRole || null, dorm, paraLive: 0, parts: 0, built: 0, ai: fd.ai || null, activateAt: fd.activateAt != null ? fd.activateAt : null, aiS: {} };
@@ -944,7 +950,7 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
     groups.push(grp);
     for (let k = 0; k < K; k++) {
       const name = fd.names ? fd.names[k] : (k === flagK ? '本隊（旗艦）' : SQ_NAMES[k < flagK ? k : k - 1]);
-      plans.push({ side: fd.side, fleet: grp, fleetObj: fleet, name: fd.cap ? fd.name : fd.supply ? (K > 1 ? `補給第${'一二三四五六'[k]}隊` : '補給隊') : name, n: counts[k], comp: comps[k], lay: lay[k], flagship: k === flagK && !fd.supply && !fd.cap });
+      plans.push({ side: fd.side, fleet: grp, fleetObj: fleet, name: fd.cap ? fd.name : fd.supply ? (K > 1 ? `補給第${'一二三四五六'[k]}隊` : '補給隊') : name, n: counts[k], comp: comps[k], lay: lay[k], R: FR, flagship: k === flagK && !fd.supply && !fd.cap });
     }
   });
   // 遠方增援艦隊（只在測試場）：固定在背景，不參與陣型
@@ -1003,9 +1009,9 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
       x: p.x || 0, y: (p.fleet && p.fleet.ay) || 0, p: 0, z: p.z || 0, h: p.h != null ? p.h : p.fleet.to,
       tFrom: p.h != null ? p.h : p.fleet.to, tTo: p.h != null ? p.h : p.fleet.to, tStart: 0, tDur: 0,
     };
-    const local = p.lay ? p.lay.local : p.local;
+    const local = p.lay ? p.lay.local : p.local, PR = p.R || R;
     // 依前後分配艦種：前排小船、後排大船、航母最後
-    const order = local.map((l, i) => ({ i, k: l[2] + (R() - 0.5) * 20 })).sort((a, b) => b.k - a.k);
+    const order = local.map((l, i) => ({ i, k: l[2] + (PR() - 0.5) * 20 })).sort((a, b) => b.k - a.k);
     const typeOf = new Array(local.length);
     if (p.comp) {
       // 依艦種數量由前到後擺：護衛、驅逐、巡洋、戰列、航母
@@ -1018,7 +1024,7 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
     let flagSlot = -1;
     if (p.flagship) { let best = 1e9; local.forEach((l, i) => { const d = Math.hypot(l[0], l[2] + 8); if (d < best) { best = d; flagSlot = i; } }); }
     local.forEach((l, k) => {
-      const isFlag = k === flagSlot;
+      const isFlag = k === flagSlot, hi = sideShip[p.side]++ + seedOff;   // hi：冷卻錯開用（這一邊的第幾艘＋種子）
       const t = isFlag ? 1 : typeOf[k];
       ships.sq[si] = sqi; ships.type[si] = t; ships.alive[si] = 1; ships.side[si] = p.side;
       const bm = fleetMods(p.fleetObj || null);   // shMul：機械改造、感染的護盾比較薄，蟲族沒有；hpMul：蟲族船體比較厚
@@ -1026,9 +1032,9 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
       ships.hpCap[si] = bm.hpMul; ships.hp[si] = st.hp * (isFlag ? 3 : 1) * bm.hpMul;
       ships.shMax[si] = ships.sh[si] = st.sh * (isFlag ? 3 : 1) * (1 + bm.shield) * bm.shMul; ships.shT[si] = -99;
       // 各類砲的冷卻錯開（固定雜湊，不動到佈陣的亂數）
-      ships.cd[si] = st.guns.main ? st.guns.main.cd * (0.3 + 0.9 * hash01(si * 1.7 + 4)) : 0;
-      ships.cd1[si] = st.guns.sec ? st.guns.sec.cd * (0.3 + 0.9 * hash01(si * 2.9 + 5)) : 0;
-      ships.cd2[si] = st.guns.aa ? st.guns.aa.cd * (0.3 + 0.9 * hash01(si * 4.3 + 6)) : 0;
+      ships.cd[si] = st.guns.main ? st.guns.main.cd * (0.3 + 0.9 * hash01(hi * 1.7 + 4)) : 0;
+      ships.cd1[si] = st.guns.sec ? st.guns.sec.cd * (0.3 + 0.9 * hash01(hi * 2.9 + 5)) : 0;
+      ships.cd2[si] = st.guns.aa ? st.guns.aa.cd * (0.3 + 0.9 * hash01(hi * 4.3 + 6)) : 0;
       ships.ammo[si] = st.missile ? st.missile.n : 0; ships.stock[si] = st.supply ? st.supply.stock : 0; ships.ftr[si] = 0;
       const kp = p.fleetObj && p.fleetObj.keep;   // 模擬室接續：照平均比例套回耐久、護盾、飛彈與補給存量
       if (kp) {
@@ -1037,14 +1043,14 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
         if (st.supply) ships.stock[si] = Math.round(st.supply.stock * (kp.stock ?? 1));
       } if (st.fighters) { const mx = hangarMix(p.fleetObj, st.fighters.n); for (let r = 0; r < 4; r++) { ships.hang[si * 4 + r] = mx[r]; ships.ftr[si] += mx[r]; } } ships.rep[si] = st.repair ? st.repair.n : 0;
       // 開戰時的冷卻錯開（用固定雜湊，不動到佈陣的亂數）
-      ships.mcd[si] = st.missile ? st.missile.cd * (0.25 + 0.75 * hash01(si * 3.1 + 1)) : 0; ships.fcd[si] = st.fighters ? 2 + 6 * hash01(si * 5.7 + 2) : 0; ships.rcd[si] = 3 * hash01(si * 2.3 + 3);
+      ships.mcd[si] = st.missile ? st.missile.cd * (0.25 + 0.75 * hash01(hi * 3.1 + 1)) : 0; ships.fcd[si] = st.fighters ? 2 + 6 * hash01(hi * 5.7 + 2) : 0; ships.rcd[si] = 3 * hash01(hi * 2.3 + 3);
       sq.typeAlive[t]++;
       ships.lx0[si] = ships.lx1[si] = l[0]; ships.ly0[si] = ships.ly1[si] = p.fleet && (p.fleet.orderly || p.fleet.formation === 'hcone') ? l[1] : isFlag ? 4 : l[1] * (t <= 1 ? 0.6 : 1); ships.lz0[si] = ships.lz1[si] = l[2];
-      ships.lag[si] = R() * 1.6 + R() * 0.6;
+      ships.lag[si] = PR() * 1.6 + PR() * 0.6;
       aLocal.set([ships.lx0[si], ships.ly0[si], ships.lz0[si]], si * 3); aLocal2.set([ships.lx0[si], ships.ly0[si], ships.lz0[si]], si * 3);
-      aInfo.set([sqi, st.look != null ? st.look + 0.5 : t, p.fleetObj && p.fleetObj.fac != null ? p.fleetObj.fac : SIDE_FAC[p.side], R()], si * 4);   // 貼圖列；借用外觀的艦種 +0.5（著色器換色區分）
+      aInfo.set([sqi, st.look != null ? st.look + 0.5 : t, p.fleetObj && p.fleetObj.fac != null ? p.fleetObj.fac : SIDE_FAC[p.side], PR()], si * 4);   // 貼圖列；借用外觀的艦種 +0.5（著色器換色區分）
       aState.set([0, ships.lag[si]], si * 2);
-      aScale[si] = isFlag ? TYPE_W[1] * 2.4 : TYPE_W[t] * (0.92 + R() * 0.16);
+      aScale[si] = isFlag ? TYPE_W[1] * 2.4 : TYPE_W[t] * (0.92 + PR() * 0.16);
       if (isFlag) sq.flagship = si;
       sq.list.push(si); sq.alive++;
       si++;

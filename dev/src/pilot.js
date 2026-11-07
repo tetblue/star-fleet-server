@@ -261,11 +261,11 @@ function pilotLayout(p) {
   const ge = GROUND_ENV[p.env || 0].g, scene = ge ? groundPick(ge, mulberry32(campHash(p.seed, 77))) : null;   // 近地作戰
   const li = p.ai < 0 ? Math.floor(R() * WATCH_LV.length) : p.ai, L = WATCH_LV[li].cl, mis = pilotMisRoll(R, li, S.time, scene);
   const m = { name: '', fac: p.fac === 1 ? 1 : 0, victory: true, ctl: -1, pilot: { frame: p.frame, slots: p.slots.slice(), gear: p.gear, tal: { ...p.tal }, prof: Object.fromEntries([...p.slots, p.gear].filter(Boolean).map((id) => [id, pilotProf(p.wxp[id] || 0).lv])), mis }, timeLimit: S.time,
-    seed: campHash(p.seed, p.size + 1, 13) % 100000, fleets: [], terrain: st < 0 ? [] : campTerrain(R, st), sides: [] };
+    seed: campHash(p.seed, p.size + 1, 13) % 100000, fleets: [], terrain: st < 0 ? [] : campTerrain(R, st), ais: [] };
   const names = CAMP_NAMES.slice();
   for (const side of [0, 1]) {
     const tac = pick(WATCH_TAC), nF = 1 + Math.floor(R() * S.maxFleets);
-    m.sides.push({ lv: li, tac });
+    m.ais.push({ lv: li, tac });   // 雙方 AI 的設定（不是 m.sides：那是多方勢力的第 3 方以後）
     const sup = li + 1 >= AI_SUPPLY.minLv, budget = S.budget * (sup ? 1 - AI_SUPPLY.escort - AI_SUPPLY.supply : 1);
     const first = m.fleets.length;
     for (let k = 0; k < nF; k++) {
@@ -280,7 +280,7 @@ function pilotLayout(p) {
       const cn = names.splice(Math.floor(R() * names.length), 1)[0] || '指揮官';
       m.fleets.push({ side, name: `第${SIM_CN[k]}艦隊（${A.name}）`, cmdr: { base: null, name: cn, title: '', trait: pick(['dmg', 'shield', 'speed']), level: L, mode: 'lv', tal: {}, skills },
         comp, hangar: HANGAR_DEFAULT.slice(), formation: tac === 'breakthrough' ? 'spindle' : pick(A.formations), orderly: false, layers: 1,
-        x: nF === 1 ? 0 : Math.round(-380 + 760 * k / (nF - 1)), z: side ? -360 : 360, y: 0, h: side ? 0 : Math.PI,
+        x: nF === 1 ? 0 : Math.round((side ? -1 : 1) * (-380 + 760 * k / (nF - 1))), z: side ? -360 : 360, y: 0, h: side ? 0 : Math.PI,   // 雙方以原點旋轉 180° 對稱：各自的第 1 艦隊都在自己的右翼（左右鏡射會讓兩邊的陣型左右手相反，同樣的艦隊也不公平）
         ai: { tactic: t, level: li + 1 }, reserve: false, at: 60 });
     }
     if (sup) m.fleets.push({ side, name: '補給艦隊', supply: true, follow: first, cmdr: { base: null, name: '', title: '', trait: 'shield', level: 1, mode: 'lv', tal: {}, skills: [] },

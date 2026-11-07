@@ -13,6 +13,11 @@ const SIM_TERR_MAX_SOLID = 8;   // 實體障礙最多 8 個（著色器與碰撞
 // 多方勢力：邊 0、1＝原本的我方、敵方（帝國／聯盟，m.fac 決定哪邊是誰）；邊 2 以後＝m.sides[邊−2]＝{ fac, name }
 //   m.rel＝[[a, b, 關係], ...]（0 敵對、1 中立、2 同盟；沒寫的＝敵對）
 const simSideN = (m) => 2 + ((m.sides && m.sides.length) || 0);
+// 觀摩／駕駛的雙方 AI 設定（{ lv, tac }）放在 m.ais；舊的布局（和測試腳本）放在 m.sides，會被當成多出來的兩方（沒有陣營的空勢力）→ 搬回 m.ais
+function simFixSides(m) {
+  if (m && m.sides && m.sides.some((s) => !s || s.fac == null)) { if (!m.ais) m.ais = m.sides.filter((s) => s && s.lv != null); m.sides = m.sides.filter((s) => s && s.fac != null); }
+  return m;
+}
 const simSideFac = (m, side) => (side >= 2 ? (m.sides[side - 2] || { fac: 1 }).fac : side ? 1 - m.fac : m.fac);
 const simSideName = (m, side) => (side >= 2 ? ((m.sides && m.sides[side - 2] && m.sides[side - 2].name) || FACTION_NAME[simSideFac(m, side)] + `（第 ${side + 1} 方）`) : FACTION_NAME[side ? 1 - m.fac : m.fac]);
 const simRel = (m, a, b) => { if (a === b) return 2; const e = (m.rel || []).find(([x, y]) => (x === a && y === b) || (x === b && y === a)); return e ? e[2] : 0; };
@@ -89,6 +94,7 @@ function showSim(m) {
   simEndMid();
   GAME.watch = false;
   if (m) SIM.m = m; else if (!SIM.m || SIM.m.watch) SIM.m = simLoadLast();   // 剛看完觀摩：回到自己上次的布局
+  simFixSides(SIM.m);
   if (SIM.m.watch) { SIM.m.watch = false; SIM.m.ctl = 0; }   // 觀摩的布局拿到模擬室：可以編輯、接管
   overlay(null); setPhase('simedit'); GAME.replaying = false; GAME.result = null; GAME.sc = null;
   GAME.playerSide = 0; setCmdSide(0, false);
@@ -386,7 +392,7 @@ function simPointer(type, e) {
 function simGo() { if (SIM.mid && SIM.live && !SIM.dirty) simResumeLive(); else simStart(); }
 // 開戰（SIM.mid＝戰鬥中編輯完，從暫停時的戰況接著打）
 function simStart() {
-  const m = SIM.m, cont = SIM.mid;
+  const m = simFixSides(SIM.m), cont = SIM.mid;
   const has = Array.from({ length: simSideN(m) }, (_, s) => s).filter((s) => m.fleets.some((f) => f.side === s && !f.reserve && simComp(f) > 0));
   if (simSideN(m) <= 2 ? has.length < 2 : !has.some((a) => has.some((b) => simRel(m, a, b) === 0))) { toast(simSideN(m) <= 2 ? '雙方都至少要有一支（非增援的）艦隊' : '至少要有兩方互相敵對、而且都有（非增援的）艦隊'); return; }
   if (cont) SIM.t0 += SIM.snapT; else { SIM.base = JSON.parse(JSON.stringify(m)); SIM.t0 = 0; if (!m.watch && !m.pilot && !m.captain) simSave(); }   // 觀摩不覆蓋模擬室「上次的布局」

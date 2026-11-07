@@ -57,12 +57,12 @@ function watchLayout(o) {
   const pick = (a) => a[Math.floor(R() * a.length)];
   const S = RAND_SIZES[o.size >= 0 ? o.size : Math.floor(R() * RAND_SIZES.length)];
   let st = RAND_TERR[o.terr].st; if (st == null) st = R() < 0.15 ? -1 : Math.floor(R() * 15);
-  const m = { name: '', fac: 0, victory: true, ctl: -1, watch: true, seed: campHash(o.seed, o.size + 1, 5) % 100000, fleets: [], terrain: st < 0 ? [] : campTerrain(R, st), sides: [] };
+  const m = { name: '', fac: 0, victory: true, ctl: -1, watch: true, seed: campHash(o.seed, o.size + 1, 5) % 100000, fleets: [], terrain: st < 0 ? [] : campTerrain(R, st), ais: [] };
   const names = CAMP_NAMES.slice();
   o.s.forEach((sd, side) => {
     const li = sd.lv < 0 ? Math.floor(R() * WATCH_LV.length) : sd.lv, L = WATCH_LV[li].cl, tac = sd.tac === 'rand' ? pick(WATCH_TAC) : sd.tac;
     const nF = sd.n < 0 ? 1 + Math.floor(R() * S.maxFleets) : Math.max(1, Math.min(S.maxFleets, sd.n));
-    m.sides.push({ lv: li, tac });
+    m.ais.push({ lv: li, tac });   // 雙方 AI 的設定（不是 m.sides：那是多方勢力的第 3 方以後）
     const sup = li + 1 >= AI_SUPPLY.minLv, budget = S.budget * (sup ? 1 - AI_SUPPLY.escort - AI_SUPPLY.supply : 1);   // 高難度帶補給艦隊（從總兵力裡分出來，雙方點數仍相同）
     const first = m.fleets.length;
     for (let k = 0; k < nF; k++) {
@@ -75,14 +75,14 @@ function watchLayout(o) {
       const cn = names.splice(Math.floor(R() * names.length), 1)[0] || '指揮官';
       m.fleets.push({ side, name: `第${SIM_CN[k]}艦隊（${A.name}）`, cmdr: { base: null, name: cn, title: '', trait: pick(['dmg', 'shield', 'speed']), level: L, mode: 'lv', tal: {}, skills },
         comp, hangar: HANGAR_DEFAULT.slice(), formation: tac === 'breakthrough' ? 'spindle' : pick(A.formations), orderly: false, layers: 1,
-        x: nF === 1 ? 0 : Math.round(-380 + 760 * k / (nF - 1)), z: side ? -360 : 360, y: 0, h: side ? 0 : Math.PI,
+        x: nF === 1 ? 0 : Math.round((side ? -1 : 1) * (-380 + 760 * k / (nF - 1))), z: side ? -360 : 360, y: 0, h: side ? 0 : Math.PI,   // 雙方以原點旋轉 180° 對稱：各自的第 1 艦隊都在自己的右翼（左右鏡射會讓兩邊的陣型左右手相反，同樣的艦隊也不公平）
         ai: { tactic: t, level: li + 1 }, reserve: false, at: 60 });
     }
     if (sup) m.fleets.push({ side, name: '補給艦隊', supply: true, follow: first, cmdr: { base: null, name: '', title: '', trait: 'shield', level: 1, mode: 'lv', tal: {}, skills: [] },
       comp: aiSupplyComp(S.budget), hangar: HANGAR_DEFAULT.slice(), formation: 'ring', orderly: false, layers: 1,
       x: 0, z: side ? -360 - SUPPLY_RULE.follow : 360 + SUPPLY_RULE.follow, y: 0, h: side ? 0 : Math.PI, ai: null, reserve: false, at: 60 });
   });
-  m.name = `${S.name}・` + m.sides.map((s) => `${WATCH_LV[s.lv].name}・${TACTICS[s.tac].name}`).join(' vs ');
+  m.name = `${S.name}・` + m.ais.map((s) => `${WATCH_LV[s.lv].name}・${TACTICS[s.tac].name}`).join(' vs ');
   return m;
 }
 function watchGo(reroll) {
@@ -148,7 +148,7 @@ function watchFrame() {
   const el = gEl('watchbar'); if (!el) return;
   { const h = gEl('hud'), r = h && getComputedStyle(h).display !== 'none' ? h.getBoundingClientRect() : null; const top = r && r.height ? r.bottom + 8 : 70; el.style.top = top + 'px'; el.style.maxHeight = `calc(100vh - ${top + 90}px)`; }   // 放在左上角資訊欄的下面
   const m = SIM.m || {}, side = (s) => {   // 劇情自動代打（autoStory）也開觀摩模式，但沒有模擬室的設定
-    const info = m.sides && m.sides[s], col = FACTION[SIDE_FAC[s]].ui;
+    const info = m.ais && m.ais[s], col = FACTION[SIDE_FAC[s]].ui;
     const rows = fleets.filter((f) => f.side === s).map((f) => {
       const n = sumA(f.sqs.map((q) => q.alive)), g = fleetGroup(f), dead = n <= 0;
       const note = dead ? '全滅' : f.reserve ? '尚未出場' : (f.aiS && f.aiS.note) || '觀察戰場中…';
@@ -170,10 +170,10 @@ function watchReportHtml(m, R) {
     lines.push(`${nm(s)} 一共用了 ${sk} 次技能。`);
   }
   if (R.kind === 'win' || R.kind === 'lose') {
-    const w = R.kind === 'win' ? 0 : 1, info = m.sides && m.sides[w];
+    const w = R.kind === 'win' ? 0 : 1, info = m.ais && m.ais[w];
     if (info) lines.unshift(`<b>${nm(w)}（${WATCH_LV[info.lv].name}・${TACTICS[info.tac].name}）獲勝</b>，剩餘兵力 ${Math.round(R.ratio[w] * 100)}%。`);
   }
-  const card = (s) => { const info = m.sides && m.sides[s]; if (!info) return ''; return `<div class="g-card"><h3 class="${s ? 'g-ec' : 'g-pc'}">${nm(s)}：${WATCH_LV[info.lv].name}・${TACTICS[info.tac].name}</h3>
+  const card = (s) => { const info = m.ais && m.ais[s]; if (!info) return ''; return `<div class="g-card"><h3 class="${s ? 'g-ec' : 'g-pc'}">${nm(s)}：${WATCH_LV[info.lv].name}・${TACTICS[info.tac].name}</h3>
     <div style="line-height:1.65">${watchTacDesc(info.tac)}<br><span class="g-dim">AI 等級：${WATCH_LV[info.lv].desc}</span><br>觀戰重點：${WATCH_TIPS[info.tac]}</div></div>`; };
   return `<div class="g-card" style="margin-top:12px"><h3>這場的重點</h3><div style="line-height:1.7">${lines.join('<br>')}</div></div>
     <div class="intel-grid" style="margin-top:12px">${card(0)}${card(1)}</div>`;
