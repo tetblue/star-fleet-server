@@ -343,6 +343,26 @@ function smApplyReal(S, sid, fa, fb, res, how) {
   return rep;
 }
 
+// 真打的強攻（近地戰）結束：res＝{ fleets: [{ id, comp, gone }], win, turLeft, turTot, defLost }
+function smApplyAssault(S, sid, res, how) {
+  const s = S.sys[sid], fac = S.pl.fac, mine = smFleetsAt(S, sid).filter((f) => f.fac === fac);
+  const F = { a: fac, b: s.owner, pl: true, real: how, assault: true, start: [mine.reduce((c, f) => smAdd(c, f.comp), [0, 0, 0, 0, 0, 0]), [0, 0, 0, 0, 0, 0]], waves: [], retreated: [[], []], lost: [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]] };
+  const W = { n: [smShips(F.start[0]), 0], win: res.win ? 0 : 1, lost: [0, res.defLost || 0], retreat: [[], []], real: true };
+  for (const r of res.fleets) {
+    const f = S.fleets.find((o) => o.id === r.id); if (!f) continue;
+    const lost = f.comp.map((x, t) => Math.max(0, x - (r.comp[t] || 0)));
+    F.lost[0] = smAdd(F.lost[0], lost); W.lost[0] += smShips(lost); f.comp = f.comp.map((x, t) => Math.min(x, r.comp[t] || 0));
+  }
+  F.waves.push(W); F.win = res.win ? 0 : 1; F.end = [mine.reduce((c, f) => smAdd(c, f.comp), [0, 0, 0, 0, 0, 0]), [0, 0, 0, 0, 0, 0]];
+  F.tur = [res.turTot, res.turLeft];
+  s.assaulted = S.turn;
+  if (res.win) smCapture(S, s, fac, 'assault');
+  else { if (res.turTot) s.def = Math.round(s.def * res.turLeft / res.turTot); s.gar = Math.max(20, s.gar - (res.defLost || 0) * 2); smLog(S, `強攻 ${s.name} 沒有成功（地面砲台剩 ${res.turLeft}／${res.turTot}）`, 'bad'); }
+  const rep = { turn: S.turn, sys: sid, name: s.name, how, fights: [F] };
+  S.reports.push(rep); if (S.reports.length > 60) S.reports.splice(0, S.reports.length - 60);
+  return rep;
+}
+
 /* ───── 佔領：圍城與強攻 ───── */
 function smCapture(S, s, fac, how) {
   const was = s.owner;
@@ -384,10 +404,11 @@ function smAiTurn(S, fac) {
   const mine = S.fleets.filter((f) => f.fac === fac && !f.pl && smShips(f.comp) > 0);
   const free = new Set(mine.filter((f) => !f.path));
   // 1. 防守：敵方艦隊在相鄰星系、而且比這裡的守軍強 → 從附近調艦隊過來（首都優先）
-  const threats = my.map((s) => {
+  const sieges = S.sys.filter((s) => s.sg && s.sg.f === fac && s.owner !== fac);   // 自己的圍城也要守：對方可能來解圍
+  const threats = [...my, ...sieges].map((s) => {
     const near = S.adj[s.id].flatMap((j) => smEnemyAt(S, fac, j)).reduce((a, f) => a + smVal(f.comp), 0) + smEnemyAt(S, fac, s.id).reduce((a, f) => a + smVal(f.comp), 0);
     const here = mine.filter((f) => f.sys === s.id).reduce((a, f) => a + smVal(f.comp), 0);
-    return { s, need: near * 0.9 - here - (s.sg ? 0 : smGround(s) * 0.3) };
+    return { s, need: near * 0.9 - here - (s.owner === fac && !s.sg ? smGround(s) * 0.3 : 0) };
   }).filter((o) => o.need > 0).sort((a, b) => (b.s.cap ? 1 : 0) - (a.s.cap ? 1 : 0) || b.need - a.need);
   for (const T of threats) {
     let need = T.need;
@@ -396,6 +417,7 @@ function smAiTurn(S, fac) {
       if (f.sys === T.s.id) { free.delete(f); need -= smVal(f.comp); continue; }
       const p = smPath(S, f.sys, T.s.id, (x) => x.owner === fac || !smEnemyAt(S, fac, x.id).length);
       if (!p || p.length - 1 > SM_RULE.jump) continue;
+      if (T.s.owner !== fac) S.st.sgSup = (S.st.sgSup || 0) + 1;
       f.path = p; free.delete(f); need -= smVal(f.comp);
     }
   }

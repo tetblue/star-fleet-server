@@ -597,7 +597,8 @@ function simMultiVictory() {
 function checkVictory() {
   if (SIDES > 2 && battleSetup.scenario === 'sim') { simMultiVictory(); return; }
   const t = U.uTime.value, tl = battleSetup.timeLimit, G = battleSetup.goal;
-  const a0 = sideAlive(0), a1 = foeAlive(0), p = a0 / Math.max(1, GAME.init[0]), e = a1 / Math.max(1, foeInit(0));
+  const turs = (s) => (SIM.m && SIM.m.career && SIM.m.career.assault && GRD && GRD.def === s ? GRD.live : 0);   // 星海生涯的強攻：地面砲台也算敵人
+  const a0 = sideAlive(0) + turs(0), a1 = foeAlive(0) + turs(1), p = a0 / Math.max(1, GAME.init[0]), e = a1 / Math.max(1, foeInit(0));
   const RR = battleSetup.relRule, relBad = RR && RR.act === 'fail' ? (battleSetup.rel || []).find(([x, y, v]) => v === 1 && (x === 0 || y === 0) && (relOver(0, x || y) || hostile(0, x || y))) : null;   // 關卡：誤傷或攻擊中立的一方＝失敗
   let r = null;
   const pend = fleets.some((f) => f.ally && f.defectAt != null && !f.reserve) || (battleSetup.doom && t < battleSetup.doom.at + 4);   // 劇情演出（倒戈、強制擊沉）還沒發生：先不判勝利   // 還有友軍沒倒戈（劇情的倒戈）：先不判勝利，等倒戈發生

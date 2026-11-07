@@ -155,7 +155,7 @@ function watchFrame() {
       return `<button class="wb-f ${dead ? 'dead' : ''}" data-wf="${f.id}"><span class="wb-t"><b>${escH(f.name)}</b><span>${Math.round(n / Math.max(1, f.initial) * 100)}%</span></span>
         <small>${f.ai ? `${TACTICS[f.ai.tactic].name}・難度 ${f.ai.level}` : ''}${g && FORMATIONS[g.formation] ? `・${FORMATIONS[g.formation].name}` : ''}・${escH(f.commander ? f.commander.name : '')}</small><i>${escH(note)}</i></button>`;
     }).join('');
-    return `<div class="wb-side"><div class="wb-sn" style="color:${col}">${FACTION_NAME[SIDE_FAC[s]]}${info ? `<span>${WATCH_LV[info.lv].name}・${TACTICS[info.tac].name}</span>` : ''}</div>${rows}</div>`;
+    return `<div class="wb-side"><div class="wb-sn" style="color:${col}">${SIM.m && SIM.m.names && SIM.m.names[s] ? SIM.m.names[s] : FACTION_NAME[SIDE_FAC[s]]}${info ? `<span>${WATCH_LV[info.lv].name}・${TACTICS[info.tac].name}</span>` : ''}</div>${rows}</div>`;
   };
   el.innerHTML = `<div class="wb-h"><b>AI 即時判斷</b><span class="g-dim">點這裡收合</span></div><div class="wb-body">${side(0)}${side(1)}</div>`;
 }
