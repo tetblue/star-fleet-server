@@ -939,6 +939,7 @@ function showSpHub(M) {
     subs = [
       { id: 'sp-tal', icon: 'tal', name: '天賦', desc: `飛行員 Lv ${L.lv}・戰功 ${fmtN(p.merit)}`, badge: free > 0 ? free : 0 },
       { id: 'sp-hang', icon: 'hang', name: '機庫', desc: `${PILOT_FRAMES[p.frame].name}・調整機體、武裝與纏鬥裝備`, tag: own },
+      { id: 'sp-plog', icon: 'rec', name: '飛行紀錄', desc: `${grCallsign() ? `呼號「${escH(grCallsign())}」・` : ''}擊墜 ${p.kf}・稱號、標記與個人紀錄`, tag: own },
     ];
   }
   overlay(`<div class="g-wrap sp-wrap mt-hub">
@@ -963,6 +964,7 @@ function showSpHub(M) {
   else {
     gEl('sp-rand').onclick = () => showPilot('rand');
     gEl('sp-hang').onclick = () => showPilot('hangar');
+    gEl('sp-plog').onclick = () => showPilotLog();
     gEl('sp-tal').onclick = () => showPilot('tal');
   }
 }

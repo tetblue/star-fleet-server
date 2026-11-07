@@ -1683,6 +1683,7 @@ function pilotReport() {
     PL.saved = true; PL.savedBefore = before; PL.lv0 = lv0; PL.wx0 = wx0;
     p.xp += gain; for (const [id, x] of Object.entries(S.wxp || {})) p.wxp[id] = (p.wxp[id] || 0) + x;
     p.merit += gain; p.sorties++; if (ok) p.wins++; p.kf += S.kf; p.ks += S.ks; p.deaths += S.deaths; pilotSave(p);
+    grAfterPilot(S, p, M, ok);   // 稱號、紀錄（growth.js）
   }
   const fresh = PILOT_WPN_ORDER.filter((id) => PILOT_WEAPONS[id].unlock > before && PILOT_WEAPONS[id].unlock <= p.merit).map((id) => PILOT_WEAPONS[id].name);
   const next = PILOT_WPN_ORDER.map((id) => PILOT_WEAPONS[id]).find((w) => w.unlock > p.merit);

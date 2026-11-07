@@ -432,6 +432,7 @@ function smuOp(M) {
 function smuOpDone() {
   const S = SMU.S, R = GAME.result || {}, M = S.pl.missions.find((x) => x.id === SMB.op);
   if (M) smOpResult(S, M, !!R.capOk);
+  grAfterCaptain(!!R.capOk, M ? SM_OP[M.op] : '', S.sys[M ? M.sys : 0].name, CAP.stats && CAP.stats.alarmed);   // 船員的經歷（growth.js）
   SMB = null; smSave(S);
   setPhase('menu'); smuRender();
   toast(R.capOk ? '艦長任務完成' : `艦長任務失敗${R.why ? '：' + R.why : ''}`, R.capOk ? '' : 'bad');
@@ -475,7 +476,7 @@ function smuRaid(t) {
 }
 function smuRaidDone() {
   const S = SMU.S, R = GAME.result || {}, t = S.sys[SMB.raid];
-  smRaidResult(S, t, !!R.capOk); SMB = null; smSave(S);
+  smRaidResult(S, t, !!R.capOk); grAfterCaptain(!!R.capOk, '突襲', t.name, CAP.stats && CAP.stats.alarmed); SMB = null; smSave(S);
   setPhase('menu'); smuRender();
   toast(R.capOk ? `突襲成功：${t.name} 的地面防禦癱瘓 ${SM_RAID_T} 週` : '突襲失敗', R.capOk ? '' : 'bad');
 }

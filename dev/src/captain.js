@@ -115,10 +115,11 @@ function capHubItems(own) {
       { id: 'sp-sand', icon: 'sim', en: 'SIMULATOR', name: '模擬室', desc: '自由布置敵軍與目標', off: true },
       { id: 'sp-train', icon: 'train', en: 'TRAINING', name: '訓練場', desc: '操艦、潛行、火控的教學', off: true },
     ],
-    subs: [{ id: 'sp-capsq', icon: 'hang', name: '戰艦庫', desc: `小隊的特製戰艦・${p.slots.filter(Boolean).map((k) => CAP_HULLS[k].name).join('、')}`, tag: own }],
+    subs: [{ id: 'sp-capsq', icon: 'hang', name: '戰艦庫', desc: `小隊的特製戰艦・${p.slots.filter(Boolean).map((k) => CAP_HULLS[k].name).join('、')}`, tag: own },
+      { id: 'sp-crew', icon: 'tav', name: '船員', desc: `各艦的軍官、經歷與紀念牆・陣亡 ${grLoad().fallen.length} 人`, tag: own }],
   };
 }
-function capHubBind() { gEl('sp-rand').onclick = () => showCaptain(); gEl('sp-capsq').onclick = () => showCapBay(); }
+function capHubBind() { gEl('sp-rand').onclick = () => showCaptain(); gEl('sp-capsq').onclick = () => showCapBay(); gEl('sp-crew').onclick = () => showCrew(); }
 
 // ───── 出擊設定 ─────
 function capKeyRows() {
@@ -1503,13 +1504,14 @@ function capTargetGeo(G, g, box, ac) {
 // ───── 任務報告 ─────
 function capReport() {
   const R = GAME.result, S = CAP.stats || { ks: 0, kg: 0, kf: 0, dmg: 0, lost: 0, shots: 0, msl: 0, merit: 0, alarmed: false, kills: [] }, m = SIM.m, M = CAP.mis, C = m.captain;
+  const snap = grCapSnap();   // 各艦的狀態：報告畫面一開就會清掉
   setPhase('report');
   const ok = !!R.capOk, li = C.li, ghost = ok && !S.alarmed, noLoss = ok && S.lost === 0;
   const base = ok ? CAP_MERIT.mission[li] : 0, bonus = (ghost ? CAP_MERIT.ghost : 0) + (noLoss ? CAP_MERIT.noLoss : 0);
   const gain = Math.round(S.merit + base + bonus);
   const grade = !ok ? '失敗' : ghost && noLoss ? 'S' : ghost || noLoss ? 'A' : 'B';
   const p = capLoad();
-  if (!CAP.saved) { CAP.saved = true; p.merit += gain; p.sorties++; if (ok) p.wins++; if (ghost) p.ghost++; p.kills += S.ks + S.kg; p.lost += S.lost; capSave(p); }
+  if (!CAP.saved) { CAP.saved = true; p.merit += gain; p.sorties++; if (ok) p.wins++; if (ghost) p.ghost++; p.kills += S.ks + S.kg; p.lost += S.lost; capSave(p); grAfterCaptain(ok, M ? CAP_MIS[M.type].name : '', C.scene && GROUND_SCENES[C.scene] ? GROUND_SCENES[C.scene].name : '', S.alarmed, snap); }   // 船員與戰痕（growth.js）
   const why = ok ? '' : R.retreat ? '中途結束任務' : R.why;
   const kills = {}; for (const k of S.kills) kills[k] = (kills[k] || 0) + 1;
   overlay(`<div class="g-wrap" style="max-width:820px">
