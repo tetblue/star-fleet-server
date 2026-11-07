@@ -5633,6 +5633,7 @@ function frame() {
   updateMarkers();
   updateStalks();
   gameFrame(dt);
+  cineFrame(dt);     // 運鏡：開戰時掃過戰場（cinecam.js）
   sndFrame(dt);      // 聲音：播到時間的事件、循環音（audio.js）
   pfxFrame();        // 粒子：時鐘、預算（particles.js）
   const t = U.uTime.value;
@@ -5693,7 +5694,6 @@ function frame() {
     sq.label.style.transform = `translate(${(proj.x * 0.5 + 0.5) * VW}px, ${(-proj.y * 0.5 + 0.5) * VH}px) translate(-50%, 0)`;
   }
   U.uSpriteFade.value = 1.0;
-  cineFrame(dt);     // 運鏡：開戰時掃過戰場（cinecam.js）
 
   // 背景視差
   bgMat.uniforms.uOff.value.set(view.target.x * ppu, -view.target.z * Math.sin(ELEV) * ppu);
