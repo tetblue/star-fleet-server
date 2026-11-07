@@ -35,6 +35,7 @@ const smGovPerf = (S) => (S.pl.gs.length ? S.pl.gs.reduce((a, i) => a + S.sys[i]
 
 /* ───── 情報（第 5 階段再細分來源與時效；現在依敵方兵力和這個星系每波上限的比例）───── */
 function smIntel(S, sid, fac) {
+  if (S.pl.intel) return smIntelOf(S, sid).text;   // 第 5 階段：用玩家手上的情報
   const s = S.sys[sid], en = smEnemyAt(S, fac, sid).reduce((a, f) => a + smShips(f.comp), 0);
   if (!en) return SM_INTEL[1];
   const r = en / SM_RULE.wave[s.size];
@@ -144,11 +145,11 @@ function smGenMissions(S) {
 function smPickTarget(S, targets, op) {
   const L = targets.filter((t) => (op ? t.owner !== SM_N : true));
   if (!L.length) return null;
-  const val = (t) => (t.pop + 3) / (smEnemyAt(S, S.pl.fac, t.id).reduce((a, f) => a + smVal(f.comp), 0) + smGround(t) * 0.5 + 30);
+  const val = (t) => (t.pop + 3) / (smEnemyAt(S, S.pl.fac, t.id).reduce((a, f) => a + smVal(f.comp), 0) + smGround(t, S) * 0.5 + 30);
   return L.sort((a, b) => val(b) - val(a))[Math.floor(smRnd(S) * Math.min(3, L.length))];
 }
 // 艦長任務：特戰小隊在目標星系才能執行；真打用艦長模式（starmap_ui.js），自動代打用機率
-function smOpReady(S, M) { const q = smSquad(S); return M.type === 'op' && M.state === 'open' && q && q.sys === M.sys && S.pl.opCd <= S.turn; }
+function smOpReady(S, M) { const q = smSquad(S); return M.type === 'op' && M.state === 'open' && q && q.sys === M.sys && S.pl.opCd <= S.turn && !!smRaidCond(S, S.sys[M.sys]); }   // 敵方艦隊在軌道上：要有太陽風暴或匿蹤科技
 function smOpResult(S, M, ok) {
   S.pl.opCd = S.turn + 1;
   if (ok) smMisDone(S, M); else { smLog(S, `${SM_OP[M.op]}任務失敗，特戰小隊撤離`, 'bad'); S.pl.trust = smClamp(S.pl.trust - 3, 0, 100); }
@@ -235,5 +236,7 @@ function smAutoCareer(S) {
     if (M.state === 'open' && M.type === 'op') { const q = smSquad(S); if (q) { q.sys = M.sys; if (smOpReady(S, M)) smOpResult(S, M, smRnd(S) < 0.7); } }
   }
   if (p.offerGov && smRnd(S) < 0.3) smTakeGov(S);
+  const q = smSquad(S); if (q && smCanRaid(S, S.sys[q.sys]) && smRnd(S) < 0.5) smRaidAuto(S, S.sys[q.sys]);
+  if (!smTechInit(S).cur) { const k = Object.keys(SM_TECH).find((x) => !smHas(S, x)); if (k && p.money > SM_TECH[k].rp * 2) smResearch(S, k); }
   for (const i of p.gs) for (const k of ['city', 'def', 'elev', 'radar']) if (smRnd(S) < 0.3) smBuild(S, i, k);
 }

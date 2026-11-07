@@ -10,7 +10,7 @@ const SMU_CSS = `
 .sm-chip i{width:9px;height:9px;border-radius:50%;display:inline-block}
 .sm-body{flex:1;display:flex;min-height:0}
 .sm-map{flex:1;position:relative;min-width:0}.sm-map canvas{position:absolute;inset:0;width:100%;height:100%;cursor:pointer}
-.sm-side{width:360px;max-width:42vw;overflow-y:auto;border-left:1px solid #1d2838;background:#0a0f18;padding:10px 12px}
+.sm-side{width:360px;max-width:42vw;overflow-y:auto;overflow-x:hidden;border-left:1px solid #1d2838;background:#0a0f18;padding:10px 12px}
 .sm-sec{margin:4px 0 14px}.sm-sec h3{font-size:13px;margin:0 0 6px;color:#9fb3cc;font-weight:600;letter-spacing:1px}
 .sm-fl{display:grid;grid-template-columns:auto 1fr auto;gap:2px 8px;align-items:center;padding:6px 8px;border:1px solid #1d2838;border-radius:6px;margin-bottom:6px;background:#0d1522}
 .sm-fl.on{border-color:#3fbf7f;background:#0f1d18}.sm-fl .nm{font-weight:600}.sm-fl .sub{grid-column:2/4;color:#8b9bb0;font-size:12px}
@@ -58,11 +58,12 @@ function smuRender() {
     <div class="sm-top"><h2>星海生涯</h2><span class="sm-chip">第 ${S.turn} 週</span><span class="sm-chip">資金 ${smuN(S.pl.money)}</span><span class="sm-chip">${smRankName(S)}</span><span class="sm-chip">戰功 ${Math.round(S.pl.merit)}${S.pl.gov < 0 && S.pl.mil < 4 ? `／${SM_MIL_MERIT[S.pl.mil + 1]}` : ''}</span><span class="sm-chip">信任 ${Math.round(S.pl.trust)}</span>
       ${[SM_A, SM_E, SM_P, SM_N].map((f) => `<span class="sm-chip"><i style="background:${SM_FAC[f].col}"></i>${SM_FAC[f].name} ${c[f]}</span>`).join('')}
       <span class="sm-chip">${smAtWar(S, SM_A, SM_E) ? '聯盟與帝國交戰中' : '聯盟與帝國停戰中'}</span>
-      <span class="g-sp"></span><button class="g-btn" id="sm-car">生涯</button><button class="g-btn" id="sm-rep">戰報</button><button class="g-btn primary" id="sm-end">結束回合</button><button class="g-btn" id="sm-quit">離開</button></div>
+      <span class="g-sp"></span><button class="g-btn" id="sm-car">生涯</button><button class="g-btn" id="sm-tech">科技</button><button class="g-btn" id="sm-rep">戰報</button><button class="g-btn primary" id="sm-end">結束回合</button><button class="g-btn" id="sm-quit">離開</button></div>
     <div class="sm-body"><div class="sm-map" id="sm-map"><canvas id="sm-cv"></canvas></div><div class="sm-side" id="sm-side"></div></div></div>`);
   gEl('sm-quit').onclick = () => { smSave(S); window.removeEventListener('resize', smuDraw); GAME.spMode = null; showSingle(); };
   gEl('sm-end').onclick = () => (S.pl.status === '終結' ? toast('生涯已經結束') : smuEndTurn());
   gEl('sm-car').onclick = smuCareer;
+  gEl('sm-tech').onclick = smuTech;
   if (S.pl.offerGov && !S.pl.offerAsked) { S.pl.offerAsked = true; smSave(S); smuOfferGov(); }
   gEl('sm-rep').onclick = () => smuReports(S.reports.slice(-12).reverse(), '最近的戰報');
   const cv = gEl('sm-cv');
@@ -99,13 +100,18 @@ function smuDraw() {
     if (s.cap) { g.strokeStyle = '#ffe28a'; g.lineWidth = 1.5; g.beginPath(); g.arc(x, y, r + 1.5, 0, 7); g.stroke(); }
     g.fillStyle = '#cfd8e3'; g.font = '12px sans-serif'; g.textAlign = 'center'; g.fillText(s.name + (s.mega.dock || s.cap ? ' ⚓' : ''), x, y - r - 5);
     // 停在這裡的艦隊：各勢力一個標籤（艦數），我方的用綠框
-    const fs = smFleetsAt(S, s.id), facs = [...new Set(fs.map((f) => f.fac))];
-    facs.forEach((fac, n) => {
-      const L = fs.filter((f) => f.fac === fac), ships = L.reduce((a, f) => a + smShips(f.comp), 0), pl = L.some((f) => f.pl);
-      const tx = `${L.length}隊 ${smuShip(ships)}`, w = g.measureText(tx).width + 10, by = y + r + 6 + n * 16;
-      g.fillStyle = SM_FAC[fac].col + 'cc'; g.fillRect(x - w / 2, by, w, 14); if (pl) { g.strokeStyle = '#3fbf7f'; g.lineWidth = 2; g.strokeRect(x - w / 2, by, w, 14); }
-      g.fillStyle = '#fff'; g.font = '11px sans-serif'; g.fillText(tx, x, by + 11);
+    // 停在這裡的艦隊：友方照實顯示；敵方照情報（看得到才有數字，否則是等級或「?」）
+    const fs = smFleetsAt(S, s.id).filter((f) => !smAtWar(S, S.pl.fac, f.fac)), facs = [...new Set(fs.map((f) => f.fac))], tags = [];
+    facs.forEach((fac) => { const L = fs.filter((f) => f.fac === fac); tags.push({ col: SM_FAC[fac].col, tx: `${L.length}隊 ${smuShip(L.reduce((a, f) => a + smShips(f.comp), 0))}`, pl: L.some((f) => f.pl) }); });
+    const IN = smIntelOf(S, s.id);
+    if (IN.known && IN.I.en > 0) tags.push({ col: SM_FAC[IN.I.fac[0] != null ? IN.I.fac[0] : SM_E].col, tx: IN.exact ? `敵 ${smuShip(IN.I.en)}` : `敵 ${IN.text}${IN.age ? `（${IN.age}週前）` : ''}` });
+    else if (!IN.known && s.owner !== S.pl.fac) tags.push({ col: '#555c66', tx: '?' });
+    tags.forEach((T, n) => {
+      const w = g.measureText(T.tx).width + 10, by = y + r + 6 + n * 16;
+      g.fillStyle = T.col + 'cc'; g.fillRect(x - w / 2, by, w, 14); if (T.pl) { g.strokeStyle = '#3fbf7f'; g.lineWidth = 2; g.strokeRect(x - w / 2, by, w, 14); }
+      g.fillStyle = '#fff'; g.font = '11px sans-serif'; g.fillText(T.tx, x, by + 11);
     });
+    const wx = smWxNow(S, s); if (wx) { g.font = '13px sans-serif'; g.fillStyle = '#ffd36a'; g.fillText({ solar: '☀', ion: '≋', grav: '◎' }[wx], x - r - 9, y - r + 2); }
     const sq = S.fleets.find((f) => f.pl && f.cap && f.sys === s.id);   // 特戰小隊：綠色菱形
     if (sq) { const qx = x - r - 10, qy = y; g.fillStyle = '#3fbf7f'; g.beginPath(); g.moveTo(qx, qy - 6); g.lineTo(qx + 5, qy); g.lineTo(qx, qy + 6); g.lineTo(qx - 5, qy); g.closePath(); g.fill(); }
     if (S.pend && S.pend.some((b) => b.sys === s.id && !b.done)) { g.font = '16px sans-serif'; g.fillText('⚔', x + r + 9, y + 5); }
@@ -131,6 +137,9 @@ function smuSide() {
   el.querySelectorAll('[data-rt]').forEach((b) => (b.onchange = () => { S.fleets.find((f) => f.id === +b.dataset.rt).retreat = +b.value / 100; smSave(S); }));
   el.querySelectorAll('[data-rs]').forEach((b) => (b.onclick = () => { const n = smResupply(S, S.fleets.find((f) => f.id === +b.dataset.rs)); if (n) toast(`補充了 ${smuShip(n)} 艘`); smuRefresh(); }));
   const mv = gEl('sm-move'); if (mv) mv.onclick = smuMove;
+  const by = gEl('sm-buy'); if (by) by.onclick = () => { const w = smBuyIntel(S, SMU.sys); if (w) toast(w, 'bad'); smuRefresh(); };
+  const sc = gEl('sm-scout'); if (sc) sc.onclick = () => { const w = smScout(S, SMU.sys); if (w) toast(w, 'bad'); smuRefresh(); };
+  const rd = gEl('sm-raid'); if (rd) rd.onclick = () => smuRaid(S.sys[SMU.sys]);
   el.querySelectorAll('[data-acc]').forEach((b) => (b.onclick = () => { const M = S.pl.missions.find((x) => x.id === +b.dataset.acc), w = smAccept(S, M); if (w) toast(w, 'bad'); smuRefresh(); }));
   el.querySelectorAll('[data-dec]').forEach((b) => (b.onclick = () => { smDecline(S, S.pl.missions.find((x) => x.id === +b.dataset.dec)); smuRefresh(); }));
   el.querySelectorAll('[data-op]').forEach((b) => (b.onclick = () => smuOp(S.pl.missions.find((x) => x.id === +b.dataset.op))));
@@ -141,15 +150,31 @@ function smuSide() {
   const as = gEl('sm-assault'); if (as) as.onclick = () => { const s = S.sys[SMU.sys]; s.assault = s.assault === S.turn ? -1 : S.turn; smuRefresh(); };
 }
 function smuSysPanel(s) {
-  const S = SMU.S, fs = smFleetsAt(S, s.id), facs = [...new Set(fs.map((f) => f.fac))];
+  const S = SMU.S, fs = smFleetsAt(S, s.id).filter((f) => !smAtWar(S, S.pl.fac, f.fac)), facs = [...new Set(fs.map((f) => f.fac))];
+  const IN = smIntelOf(S, s.id), I = IN.I, mine = s.owner === S.pl.fac, kn = mine || IN.known;
+  const wx = s.wx ? SM_WX[s.wx.k] : null, nx = smWxNext(S, s), wxNow = smWxNow(S, s);
+  const kinds = I && I.q >= 1 && I.en > 0 ? I.comp.map((n, t) => (n ? smShipV()[t].name : '')).filter(Boolean).join('、') : '';
+  const nb = S.adj[s.id].map((j) => S.sys[j]), risky = nb.filter((t) => { const J = smIntelOf(S, t.id); return J.known && J.I.en > 0; });
   let h = `<div class="sm-sec"><h3>${smuEsc(s.name)}${s.cap ? '（首都）' : ''}</h3><dl class="sm-kv">
     <dt>所屬</dt><dd style="color:${SM_FAC[s.owner].col}">${SM_FAC[s.owner].name}</dd>
-    <dt>都市</dt><dd>${SM_TIER[s.tier]}・人口 ${s.pop}・繁榮 ${s.prosp}</dd>
-    <dt>地面防禦</dt><dd>守軍 ${smuN(s.gar)}・防衛建築 ${s.def}${s.mega.shield ? '・行星護盾' : ''}</dd>
-    <dt>巨型建築</dt><dd>${Object.keys(s.mega).map((k) => SM_MEGA[k]).join('、') || '無'}</dd>
-    <dt>戰鬥空間</dt><dd>${SM_SIZE[s.size]}（每波每方最多 ${smuShip(SM_RULE.wave[s.size])} 艘）</dd>
-    ${s.sg ? `<dt>軌道</dt><dd style="color:${SM_FAC[s.sg.f].col}">${SM_FAC[s.sg.f].name}控制中，圍城第 ${s.sg.t}／${SM_RULE.siegeT} 週</dd>` : ''}
-    <dt>艦隊</dt><dd>${facs.length ? facs.map((fac) => { const L = fs.filter((f) => f.fac === fac); return `<span style="color:${SM_FAC[fac].col}">${SM_FAC[fac].name} ${L.length} 支・${smuShip(L.reduce((a, f) => a + smShips(f.comp), 0))} 艘</span>`; }).join('<br>') : '無'}</dd></dl>`;
+    <dt>友方艦隊</dt><dd>${facs.length ? facs.map((fac) => { const L = fs.filter((f) => f.fac === fac); return `<span style="color:${SM_FAC[fac].col}">${SM_FAC[fac].name} ${L.length} 支・${smuShip(L.reduce((a, f) => a + smShips(f.comp), 0))} 艘</span>`; }).join('<br>') : '無'}</dd>
+    <dt>敵方兵力</dt><dd>${IN.text}${IN.exact ? `（${smuShip(I.en)} 艘、${I.nf} 支）` : ''}${kinds ? `<br><span class="g-dim">艦種：${kinds}</span>` : ''}</dd>
+    <dt>星球防禦</dt><dd>${kn ? `守軍 ${smuN(mine ? s.gar : I.gar)}・防衛建築 ${mine ? s.def : I.def}${(mine ? s.mega.shield : I.shield) ? '・行星護盾' : ''}${s.dis > S.turn ? `<br><span class="sm-good">癱瘓中（到第 ${s.dis} 週）</span>` : ''}` : SM_INTEL[0]}</dd>
+    <dt>天氣</dt><dd>${wx ? `${wxNow ? `<b>${wx.name}</b>（現在）` : `${wx.name}：${nx} 週後出現`}・每 ${s.wx.per} 週一次、持續 ${s.wx.len} 週<br><span class="g-dim">${wx.desc}</span>` : '穩定'}</dd>
+    <dt>經濟</dt><dd>${kn ? `${SM_TIER[mine ? s.tier : I.tier]}・人口 ${mine ? s.pop : I.pop}・繁榮 ${mine ? s.prosp : I.prosp}${mine ? `・收入 ${smuN(smSysIncome(s))}／週` : ''}` : SM_INTEL[0]}</dd>
+    <dt>政治民心</dt><dd>${s.sg ? `<span style="color:${SM_FAC[s.sg.f].col}">${SM_FAC[s.sg.f].name}控制軌道，圍城第 ${s.sg.t}／${SM_RULE.siegeT} 週</span>` : s.hit > S.turn - 3 ? '剛易手，人心不穩' : '安定'}</dd>
+    <dt>航道</dt><dd>${nb.map((t) => t.name).join('、')}${risky.length ? `<br><span class="sm-warn">有敵軍：${risky.map((t) => t.name).join('、')}（經過可能被攔截）</span>` : ''}</dd>
+    <dt>戰鬥空間</dt><dd>${SM_SIZE[s.size]}（每波每方最多 ${smuShip(smWaveCap(S, s))} 艘）</dd>
+    <dt>巨型建築</dt><dd>${kn ? Object.keys(s.mega).map((k) => SM_MEGA[k]).join('、') || '無' : SM_INTEL[0]}</dd>
+    <dt>情報時效</dt><dd>${mine ? '即時（己方星系）' : IN.known ? `${IN.age ? `${IN.age} 週前` : '本週'}・來源：${I.src}` : '沒有情報'}</dd></dl>
+    ${mine ? '' : `<div class="sm-btns"><button class="g-btn" id="sm-buy">跟商人買情報（${SM_MERCHANT}）</button>${smHas(S, 'scout') ? `<button class="g-btn" id="sm-scout" ${(S.pl.scoutCd || 0) > S.turn ? 'disabled' : ''}>偵察${(S.pl.scoutCd || 0) > S.turn ? `（第 ${S.pl.scoutCd} 週可用）` : ''}</button>` : ''}</div>`}`;
+  // 地面突襲：特戰小隊在這裡、條件符合
+  const q = smSquad(S);
+  if (q && q.sys === s.id && smHostileSys(S, S.pl.fac, s) && s.owner !== SM_N) {
+    const c = smRaidCond(S, s);
+    h += c && smCanRaid(S, s) ? `<div class="sm-btns"><button class="g-btn primary" id="sm-raid">地面突襲（${SM_RAID_NAME[c]}・潛入成功率 ${Math.round(SM_RAID_INF[c] * 100)}%）</button></div><div class="g-dim">成功的話，地面防禦癱瘓 ${SM_RAID_T} 週。</div>`
+      : `<div class="g-dim" style="margin-top:6px">${s.dis > S.turn ? '地面防禦已經癱瘓。' : (S.pl.raidCd || 0) > S.turn ? `特戰小隊整備中（第 ${S.pl.raidCd} 週可用）。` : '敵方艦隊在軌道上：要等太陽風暴，或研究「匿蹤躍遷」才能突襲。'}</div>`;
+  }
   // 下令：勾選的艦隊移動到這裡
   const sel = smPlFleets(SMU.S).filter((f) => SMU.sel.has(f.id) && f.sys !== s.id);
   if (sel.length) {
@@ -194,7 +219,7 @@ function smuEndTurn() {
   smuModal(`<h3>第 ${S.turn} 週・我方艦隊的戰鬥</h3><p class="g-dim">選擇每一場戰鬥要怎麼打。結果在選擇之後才會揭曉。</p>
     ${mine.map((b, i) => {
       const s = S.sys[b.sys], my = fsAt(b.sys, (f) => f.fac === S.pl.fac), en = fsAt(b.sys, (f) => smAtWar(S, S.pl.fac, f.fac));
-      return `<div class="sm-bt"><b>${smuEsc(s.name)}</b>　<span class="g-dim">戰鬥空間${SM_SIZE[s.size]}（每波每方最多 ${smuShip(SM_RULE.wave[s.size])} 艘）</span>
+      return `<div class="sm-bt"><b>${smuEsc(s.name)}</b>　<span class="g-dim">戰鬥空間${SM_SIZE[s.size]}（每波每方最多 ${smuShip(smWaveCap(S, s))} 艘）</span>
         <div>我方：${my.map((f) => `${smuEsc(f.name)} ${smuShip(smShips(f.comp))} 艘`).join('、')}</div>
         <div>敵方：${[...new Set(en.map((f) => f.fac))].map((fac) => `<span style="color:${SM_FAC[fac].col}">${SM_FAC[fac].name} ${en.filter((f) => f.fac === fac).length} 支・${smuShip(en.filter((f) => f.fac === fac).reduce((a, f) => a + smShips(f.comp), 0))} 艘</span>`).join('、')}</div>
         <div class="sm-opt"><label><input type="radio" name="sm-how${i}" value="cmd"> 親自指揮</label>
@@ -229,7 +254,7 @@ function smuNextLive() {
     smSave(S);
     simEndMid(); overlay(null); SIM.m = m; SIM.sel = null;
     camAnim = null; view.target.x = 0; view.target.z = 0; view.height = 1500; view.yaw = 0; view.pitch = ELEV; updateCamera();
-    SMB = { sys: b.sys, fa: S.pl.fac, fb, how: b.how, cap: SM_RULE.wave[S.sys[b.sys].size], th: m.fleets.map((f) => f.th || 0), gone: new Set(), jump: {}, saved: {} };
+    SMB = { sys: b.sys, fa: S.pl.fac, fb, how: b.how, cap: smWaveCap(S, S.sys[b.sys]), charge: smHas(S, 'charge') ? 6 : 10, th: m.fleets.map((f) => f.th || 0), gone: new Set(), jump: {}, saved: {} };
     simStart();
     return;
   }
@@ -245,7 +270,7 @@ function smuAssault(how) {
   if (!confirm(`強攻 ${s.name}：打下來就佔領，建築會受損、繁榮下降。現在就開打？`)) return;
   const fs = smFleetsAt(S, s.id).filter((f) => f.fac === S.pl.fac).sort((a, b) => (b.pl ? 1 : 0) - (a.pl ? 1 : 0)).slice(0, 6);
   const keys = GROUND_KEYS.filter((k) => k !== 'city'), scene = s.tier >= 2 || !keys.length ? 'city' : keys[s.id % keys.length];
-  const seed = (S.turn * 7919 + s.id * 104729 + S.r) % 100000, cap = SM_RULE.wave[s.size];
+  const seed = (S.turn * 7919 + s.id * 104729 + S.r) % 100000, cap = smWaveCap(S, s);
   const m = { name: `強攻 ${s.name}（第 ${S.turn} 週）`, fac: SM_FAC[S.pl.fac].game === 0 ? 0 : 1, victory: true, ctl: how === 'cmd' ? 0 : -1, watch: how === 'watch', seed, fleets: [], terrain: [], ais: [],
     ground: { scene, seed: seed + 1, def: 1 }, names: [SM_FAC[S.pl.fac].name + '軍', SM_FAC[s.owner].name + '守軍'], career: { sys: s.id, fa: S.pl.fac, fb: s.owner, how, map: [], assault: true } };
   let n = 0;
@@ -285,7 +310,7 @@ function smuAssaultDone() {
 }
 // 星圖的艦隊 → 戰場布局：我方在南、敵方在北；每一方先上場到每波上限，其餘在場外待命，場上空出來就補上
 function smuLayout(S, sid, fa, fb, how) {
-  const s = S.sys[sid], cap = SM_RULE.wave[s.size], seed = (S.turn * 7919 + sid * 104729 + S.r) % 100000;
+  const s = S.sys[sid], cap = smWaveCap(S, s), seed = (S.turn * 7919 + sid * 104729 + S.r) % 100000;
   const m = { name: `${s.name}（第 ${S.turn} 週）`, fac: SM_FAC[fa].game === 0 ? 0 : 1, victory: true, ctl: how === 'cmd' ? 0 : -1, watch: how === 'watch', seed, fleets: [], terrain: [], ais: [],
     names: [SM_FAC[fa].name + '軍', SM_FAC[fb].name + '軍'], career: { sys: sid, fa, fb, how, map: [] } };
   for (const [side, fac] of [[0, fa], [1, fb]]) {
@@ -316,7 +341,7 @@ function smbTick(t) {
     for (const f of mine) {
       if (f.reserve || B.gone.has(f.id)) continue;
       const n = alive(f), th = B.th[f.id] || 0;
-      if (B.jump[f.id] == null && n > 0 && th > 0 && n / Math.max(1, f.initial) < th) { B.jump[f.id] = t + 10; if (s === GAME.playerSide || GAME.watch) toast(`${f.name} 開始躍遷充能（10 秒後撤離戰場）`); }
+      if (B.jump[f.id] == null && n > 0 && th > 0 && n / Math.max(1, f.initial) < th) { B.jump[f.id] = t + (s === 0 && B.charge ? B.charge : 10); if (s === GAME.playerSide || GAME.watch) toast(`${f.name} 開始躍遷充能（10 秒後撤離戰場）`); }
       if (B.jump[f.id] != null && t >= B.jump[f.id] && n > 0) {
         B.saved[f.id] = f.sqs.reduce((c, q) => c.map((x, k) => x + Math.max(0, q.typeAlive[k] || 0)), new Array(NT).fill(0));   // 躍遷當下的艦數（離場的分隊之後會被清掉）
         B.gone.add(f.id); f.reserve = true; f.activateAt = null; GAME.init[s] = Math.max(1, GAME.init[s] - f.initial);
@@ -334,6 +359,7 @@ function smuBattleDone() {
   if (!S || !B) { setPhase('menu'); showStarmap(); return; }
   if (B.assault) return smuAssaultDone();
   if (B.op) return smuOpDone();
+  if (B.raid != null) return smuRaidDone();
   const quit = R.kind === 'end' && B.how === 'cmd';   // 親自指揮時按了撤退：我方全部躍遷離開
   const res = { fleets: m.career.map.map((id, i) => {
     const f = fleets.find((o) => o.id === i), orig = m.fleets[i].comp, comp = orig.map(() => 0);
@@ -432,4 +458,36 @@ function smuCareer() {
     <div class="sm-btns"><button class="g-btn primary" id="sm-close">關閉</button></div>`);
   gEl('sm-close').onclick = smuCloseModal;
   const nb = gEl('sm-new'); if (nb) nb.onclick = () => { smuCloseModal(); STORE.removeItem(SM_STORE); smuNewDialog(); };
+}
+
+// ───── 地面突襲：先擲潛入，成功才進艦長模式（破壞任務）─────
+function smuRaid(t) {
+  const S = SMU.S; if (!smCanRaid(S, t)) return;
+  const c = smRaidCond(S, t);
+  if (!confirm(`突襲 ${t.name}：${SM_RAID_NAME[c]}，潛入成功率 ${Math.round(SM_RAID_INF[c] * 100)}%。被發現的話任務取消。要出發嗎？`)) return;
+  if (!smRaidInfiltrate(S, t)) { smSave(S); smuRender(); toast('潛入時被發現，任務取消', 'bad'); return; }
+  const li = Math.max(0, Math.min(4, Math.round(t.def / 2) + S.diff - 1));
+  const p = { ...capLoad(), seed: (S.turn * 7919 + t.id * 104729 + S.r) % 100000, diff: li, mis: 'sabotage', env: 0, fac: SM_FAC[S.pl.fac].game === 0 ? 0 : 1 };
+  smSave(S); simEndMid(); overlay(null);
+  const m = capLayout(p); m.career = { raid: t.id }; m.name = `突襲 ${t.name}・${m.name}`;
+  SIM.m = m; SIM.sel = null; camAnim = null; SMB = { raid: t.id };
+  simStart();
+}
+function smuRaidDone() {
+  const S = SMU.S, R = GAME.result || {}, t = S.sys[SMB.raid];
+  smRaidResult(S, t, !!R.capOk); SMB = null; smSave(S);
+  setPhase('menu'); smuRender();
+  toast(R.capOk ? `突襲成功：${t.name} 的地面防禦癱瘓 ${SM_RAID_T} 週` : '突襲失敗', R.capOk ? '' : 'bad');
+}
+// ───── 科技 ─────
+function smuTech() {
+  const S = SMU.S, T = smTechInit(S);
+  smuModal(`<h3>科技研發</h3><p class="g-dim">投入資金換研究點數（每點 ${SM_RP_PRICE} 資金），等待幾週後完成。一次研究一項。</p>
+    ${['艦隊', '建築'].map((br) => `<h3 style="margin-top:10px">${br}科技</h3>${Object.entries(SM_TECH).filter(([, x]) => x.br === br).map(([k, x]) => {
+      const st = smHas(S, k) ? '<span class="sm-good">已完成</span>' : T.cur === k ? `<span class="sm-ev">研究中（第 ${T.start + x.turns} 週完成）</span>` : `<button class="g-btn" data-tech="${k}" ${T.cur ? 'disabled' : ''}>研究（${x.rp * SM_RP_PRICE} 資金・${x.turns} 週）</button>`;
+      return `<div class="sm-bt"><b>${x.name}</b>　${st}<div class="g-dim">${x.desc}</div></div>`;
+    }).join('')}`).join('')}
+    <div class="sm-btns"><button class="g-btn primary" id="sm-close">關閉</button></div>`);
+  gEl('sm-close').onclick = smuCloseModal;
+  document.querySelectorAll('[data-tech]').forEach((b) => (b.onclick = () => { const w = smResearch(S, b.dataset.tech); if (w) toast(w, 'bad'); smSave(S); smuRender(); smuTech(); }));
 }

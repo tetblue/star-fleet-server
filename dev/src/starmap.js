@@ -154,6 +154,7 @@ function smNewGame(o = {}) {
     S.pl.fleets.push(f.id);
   }
   smCareerInit(S, start);
+  smTechInit(S); smIntelTick(S);
   smLog(S, start === 'cmd' ? `你奉命指揮兩支分艦隊，駐守前線的 ${front.name}` : `你是聯盟的艦長，帶著特戰小隊駐守前線的 ${front.name}，等候上級的命令`, 'ev');
   smGenMissions(S);
   return S;
@@ -167,7 +168,12 @@ const smHostileSys = (S, f, s) => s.owner !== f && (s.owner === SM_N || smAtWar(
 const smFleetsAt = (S, sid) => S.fleets.filter((f) => f.sys === sid && !f.cap && smShips(f.comp) > 0);   // 特戰小隊（f.cap）不算：它不參加艦隊戰
 const smPlFleets = (S) => S.fleets.filter((f) => f.pl && smShips(f.comp) > 0);
 const smSysIncome = (s) => s.pop * (0.4 + s.prosp / 100) * 0.6 * (s.mega.elev ? 1.15 : 1) * (s.sg ? 0 : 1) * SM_RULE.incMul;
-const smGround = (s) => (s.gar + s.def * 60) * (s.mega.shield ? 1.5 : 1);   // 地面戰力（戰力值單位）
+// 地面戰力（戰力值單位）：守軍＋防衛建築（離子星雲 ×0.7；突襲癱瘓時只剩守軍）× 行星護盾
+function smGround(s, S) {
+  const off = S && s.dis > S.turn, ion = S && smWxOn(S, s, 'ion');
+  const sh = s.mega.shield && !off ? (S && s.owner === S.pl.fac && S.pl.gs.includes(s.id) && smHas(S, 'shield') ? 1.8 : 1.5) : 1;
+  return (s.gar + (off ? 0 : s.def * 60 * (ion ? 0.7 : 1))) * sh;
+}
 const smFacVal = (S, f) => S.fleets.filter((o) => o.fac === f).reduce((a, o) => a + smVal(o.comp), 0);
 const smFront = (S, s) => S.adj[s.id].some((j) => S.sys[j].owner !== s.owner);
 function smEnemyAt(S, fac, sid) { return smFleetsAt(S, sid).filter((o) => smAtWar(S, fac, o.fac)); }
@@ -249,7 +255,7 @@ function smResolve(S, sid, how) {
 const smFacValAt = (S, sid, fac) => smFleetsAt(S, sid).filter((f) => f.fac === fac).reduce((a, f) => a + smVal(f.comp), 0);
 // 兩個勢力的車輪戰：每一方場上最多 cap 艘，其餘待命；每一波打完，存活的留在場上，再從待命補滿
 function smFight(S, s, fa, fb) {
-  const cap = SM_RULE.wave[s.size], sides = [fa, fb].map((fac) => smFleetsAt(S, s.id).filter((f) => f.fac === fac).sort((a, b) => (b.pl ? 1 : 0) - (a.pl ? 1 : 0) || smVal(b.comp) - smVal(a.comp)));
+  const cap = smWaveCap(S, s), sides = [fa, fb].map((fac) => smFleetsAt(S, s.id).filter((f) => f.fac === fac).sort((a, b) => (b.pl ? 1 : 0) - (a.pl ? 1 : 0) || smVal(b.comp) - smVal(a.comp)));
   const F = { a: fa, b: fb, pl: sides.some((L) => L.some((f) => f.pl)), start: sides.map((L) => L.reduce((c, f) => smAdd(c, f.comp), [0, 0, 0, 0, 0, 0])), fleets: sides.map((L) => L.map((f) => ({ id: f.id, name: f.name, ships: smShips(f.comp) }))), waves: [], retreated: [[], []], lost: [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]] };
   const field = [[], []], wait = [sides[0].slice(), sides[1].slice()], gone = [new Set(), new Set()];
   const fill = (k) => { let n = field[k].reduce((a, f) => a + smShips(f.comp), 0); while (wait[k].length && (n < cap || !field[k].length)) { const f = wait[k].shift(); field[k].push(f); n += smShips(f.comp); } };
@@ -271,7 +277,7 @@ function smFight(S, s, fa, fb) {
         let after;
         if (side !== win && th > 0) {   // 撤退：撐到門檻再躍遷，充能時再損失三分之一；有一定機率失敗
           const ok = smRnd(S) < SM_RULE.retreatOk;
-          after = ok ? smScale(onField, th * (1 - SM_RULE.charge)) : onField.map(() => 0);
+          after = ok ? smScale(onField, th * (1 - (f.pl && smHas(S, 'charge') ? 0.2 : SM_RULE.charge))) : onField.map(() => 0);
           if (ok) { W.retreat[side].push(f.name); gone[side].add(f); }
         } else if (side === win && th > 0 && 1 - loss < th) {   // 勝方的艦隊損失太重也會撤
           after = smScale(onField, th * (1 - SM_RULE.charge)); W.retreat[side].push(f.name); gone[side].add(f);
@@ -314,7 +320,8 @@ function smFightEnd(S, s, F, sides, gone, fa, fb) {
     const winners = left[F.win], plShare = winners.some((f) => f.pl);
     if (plShare) S.pl.money += salv; else S.fac[wf].money += salv;
     let rep = [0, 0, 0, 0, 0, 0];
-    for (const f of winners) { const lost = f.init.map((x, t) => Math.max(0, x - f.comp[t])), fix = smScale(lost, SM_RULE.repair); f.comp = smAdd(f.comp, fix); rep = smAdd(rep, fix); }
+    const rr = plShare && smHas(S, 'repair') ? 0.4 : SM_RULE.repair;
+    for (const f of winners) { const lost = f.init.map((x, t) => Math.max(0, x - f.comp[t])), fix = smScale(lost, rr); f.comp = smAdd(f.comp, fix); rep = smAdd(rep, fix); }
     F.salvage = salv; F.repaired = smShips(rep); F.end = sides.map((L) => L.reduce((c, f) => smAdd(c, f.comp), [0, 0, 0, 0, 0, 0]));
   }
   // 玩家的戰果：照我方艦數比例分到擊沉數；打贏另外給戰功
@@ -389,7 +396,7 @@ function smSiegeTick(S) {
     const holder = facs.length === 1 && !fs.some((f) => f.fac === s.owner) ? facs[0] : null;
     if (holder == null) { s.sg = null; continue; }
     if (!s.sg || s.sg.f !== holder) s.sg = { f: holder, t: 0 };
-    const val = fs.filter((f) => f.fac === holder).reduce((a, f) => a + smVal(f.comp), 0), G = smGround(s);
+    const val = fs.filter((f) => f.fac === holder).reduce((a, f) => a + smVal(f.comp), 0), G = smGround(s, S);
     const plHere = fs.some((f) => f.pl);
     const doAssault = plHere ? s.assault === S.turn : val > G * SM_RULE.assault;   // 玩家的艦隊在場：玩家下令才強攻
     if (doAssault) {   // 強攻：損失和地面戰力成比例
@@ -420,7 +427,7 @@ function smAiTurn(S, fac) {
   const threats = [...my, ...sieges].map((s) => {
     const near = S.adj[s.id].flatMap((j) => smEnemyAt(S, fac, j)).reduce((a, f) => a + smVal(f.comp), 0) + smEnemyAt(S, fac, s.id).reduce((a, f) => a + smVal(f.comp), 0);
     const here = mine.filter((f) => f.sys === s.id).reduce((a, f) => a + smVal(f.comp), 0);
-    return { s, need: near * 0.9 - here - (s.owner === fac && !s.sg ? smGround(s) * 0.3 : 0) };
+    return { s, need: near * 0.9 - here - (s.owner === fac && !s.sg ? smGround(s, S) * 0.3 : 0) };
   }).filter((o) => o.need > 0).sort((a, b) => (b.s.cap ? 1 : 0) - (a.s.cap ? 1 : 0) || b.need - a.need);
   for (const T of threats) {
     let need = T.need;
@@ -437,7 +444,7 @@ function smAiTurn(S, fac) {
   const aggr = (fac === SM_P ? 0.5 : 0.35) * (fac === S.pl.fac ? 1 : [0.75, 1, 1.25, 1.6][S.diff] || 1);
   if (smRnd(S) < aggr) {
     const tg = [...new Set(my.flatMap((s) => S.adj[s.id]))].map((i) => S.sys[i]).filter((t) => smHostileSys(S, fac, t) && !(t.sg && t.sg.f !== fac));
-    const est = (t) => smEnemyAt(S, fac, t.id).reduce((a, f) => a + smVal(f.comp), 0) + smGround(t) * 0.5 + 30;
+    const est = (t) => smEnemyAt(S, fac, t.id).reduce((a, f) => a + smVal(f.comp), 0) + smGround(t, S) * 0.5 + 30;
     const val = (t) => (t.pop + 3) * (t.cap ? 1.5 : 1) * (t.owner === SM_N ? 0.8 : 1) / est(t);
     const t = tg.sort((a, b) => val(b) - val(a))[smRnd(S) < 0.7 ? 0 : Math.floor(smRnd(S) * tg.length)];
     if (t) {
@@ -518,6 +525,7 @@ function smTurnEnd(S) {
   smSiegeTick(S);
   for (const f of [SM_A, SM_E, SM_P]) smEconomy(S, f);
   smCareerTick(S);   // 薪餉、任務、升遷、政務、失敗（starmap_career.js）
+  smTechTick(S);   // 科技（starmap_world.js）
   // 成長與繁榮
   for (const s of S.sys) {
     const cap = SM_TIER_CAP[s.tier];
@@ -536,6 +544,7 @@ function smTurnEnd(S) {
   }
   smEvents(S);
   S.turn++;
+  smIntelTick(S);   // 新的一週：更新情報（太陽風暴的星系看不到）
 }
 function smEvents(S) {
   for (const f of [SM_A, SM_E, SM_P]) S.fac[f].ww = Math.max(0, S.fac[f].ww - 0.4);

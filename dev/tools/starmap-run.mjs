@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url)), src = path.join(here, '..', 'src');
 const arg = (n, d) => { const a = process.argv.find((s) => s.startsWith(`--${n}=`)); return a ? a.slice(n.length + 3) : d; };
 const data = fs.readFileSync(path.join(src, 'data.js'), 'utf8'), s0 = data.indexOf('const SHIP_TYPES = ['), s1 = data.indexOf('\n];', s0);
-const code = data.slice(s0, s1 + 3) + '\nconst STORE = { getItem: () => null, setItem: () => {} };\n' + fs.readFileSync(path.join(src, 'starmap.js'), 'utf8') + '\n' + fs.readFileSync(path.join(src, 'starmap_career.js'), 'utf8') +
+const code = data.slice(s0, s1 + 3) + '\nconst STORE = { getItem: () => null, setItem: () => {} };\n' + fs.readFileSync(path.join(src, 'starmap.js'), 'utf8') + '\n' + fs.readFileSync(path.join(src, 'starmap_career.js'), 'utf8') + '\n' + fs.readFileSync(path.join(src, 'starmap_world.js'), 'utf8') +
   '\nreturn { smRankName, SM_MIL, smNewGame, smAutoTurn, smCounts, smShips, smVal, smOwned, smPlFleets, SM_FAC, SM_A, SM_E, SM_P, SM_N };';
 const M = new Function(code)();
 const RUNS = +arg('runs', 50), TURNS = +arg('turns', 300), DIFF = +arg('diff', 1);
