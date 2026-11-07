@@ -1,0 +1,1016 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>星圖戰役模擬器</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--fg:#1d2330;--mut:#6b7280;--line:#dde1e7;--acc:#2f6fd6;--good:#1f9d55;--bad:#d64545;--warn:#c98a00;--chip:#eef1f5}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12151b;--card:#1b2029;--fg:#e4e8ef;--mut:#8b93a3;--line:#2b323e;--acc:#5b9bf0;--good:#3ccf7d;--bad:#f06a6a;--warn:#e6b23c;--chip:#252c38}}
+:root[data-theme="dark"]{--bg:#12151b;--card:#1b2029;--fg:#e4e8ef;--mut:#8b93a3;--line:#2b323e;--acc:#5b9bf0;--good:#3ccf7d;--bad:#f06a6a;--warn:#e6b23c;--chip:#252c38}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.5 system-ui,"Microsoft JhengHei","PingFang TC",sans-serif}
+header{padding:10px 16px;border-bottom:1px solid var(--line);background:var(--card);display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
+header h1{font-size:16px;margin:0 8px 0 0}
+label{color:var(--mut);display:inline-flex;gap:4px;align-items:center}
+input,select,button{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:3px 6px}
+input[type=number]{width:58px}
+button{cursor:pointer;background:var(--chip)}
+button:hover:not(:disabled){border-color:var(--acc)}
+button:disabled{opacity:.45;cursor:default}
+button.pri{background:var(--acc);color:#fff;border-color:var(--acc)}
+main{display:grid;grid-template-columns:330px 1fr 360px;gap:12px;padding:12px 16px;align-items:start}
+@media (max-width:1200px){main{grid-template-columns:1fr 1fr}#colLog{grid-column:1/-1}}
+@media (max-width:760px){main{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;overflow-x:auto}
+.card h2{font-size:14px;margin:0 0 8px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 10px}
+.kv dt{color:var(--mut)}.kv dd{margin:0}
+.bar{height:6px;background:var(--chip);border-radius:3px;overflow:hidden;margin-top:2px}
+.bar i{display:block;height:100%;background:var(--acc)}
+.acts{display:flex;flex-direction:column;gap:6px}
+.act{text-align:left;padding:6px 8px}
+.act b{display:block}.act small{color:var(--mut)}
+table{border-collapse:collapse;width:100%;font-size:12px}
+th,td{padding:3px 5px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--mut);font-weight:500}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;vertical-align:middle}
+.log{max-height:78vh;overflow:auto}
+.turn{border-bottom:1px solid var(--line);padding:6px 0}
+.turn h3{font-size:12px;margin:0 0 2px}
+.turn p{margin:1px 0;color:var(--mut)}
+.turn p.ev{color:var(--fg)}.turn p.star{color:var(--warn);font-weight:600}.turn p.bad{color:var(--bad)}
+.delta{font-size:11px}
+.up{color:var(--good)}.dn{color:var(--bad)}
+.req{background:var(--chip);border-radius:6px;padding:6px 8px;margin-top:8px}
+.req .ok{color:var(--good)}.req .no{color:var(--bad)}
+.tag{display:inline-block;background:var(--chip);border-radius:4px;padding:0 5px;margin:1px 2px 1px 0;font-size:11px}
+.bld button{padding:1px 5px;font-size:11px}
+details summary{cursor:pointer;color:var(--acc)}
+.rules{color:var(--mut);font-size:12px}
+.rules li{margin:2px 0}
+.cmp td.n{font-variant-numeric:tabular-nums}
+svg text{fill:var(--mut);font-size:8px}
+</style>
+</head>
+<body>
+<header>
+  <h1>星圖戰役模擬器</h1>
+  <label>開局身分 <select id="optId">
+    <option value="cap">聯盟艦長（第一週目）</option>
+    <option value="cmd">聯盟艦隊指揮官</option>
+    <option value="gov">聯盟行星司令</option>
+    <option value="head">聯盟元首</option>
+  </select></label>
+  <label>難度 <select id="optDiff"></select></label>
+  <label title="AI 艦隊建造效率">AI強度<input id="dStr" type="number" step="0.05"></label>
+  <label title="每週發動攻擊的機率">攻擊慾望<input id="dAggr" type="number" step="0.05"></label>
+  <label title="敵對 AI 的收入倍率">資源產出<input id="dInc" type="number" step="0.05"></label>
+  <label title="AI 選最佳目標的機率，其餘隨機">決策品質<input id="dSmart" type="number" step="0.05"></label>
+  <label title="某勢力佔領比例超過此值，其他勢力優先攻擊它；0 = 關閉">聯手壓制<input id="dGang" type="number" step="0.05"></label>
+  <label title="玩家艦隊在戰鬥中的損失倍率">玩家損失<input id="dLoss" type="number" step="0.05"></label>
+  <label title="升遷所需戰功的倍率（不影響難度，只影響節奏）">升遷節奏<input id="optPace" type="number" step="0.1" value="1"></label>
+  <label title="代表玩家實際打仗的手感：玩家艦隊的有效戰力倍率">操作水準<input id="optSkill" type="number" step="0.1" value="1"></label>
+  <label>種子<input id="optSeed" type="number" value="1" style="width:80px"></label>
+  <button class="pri" id="btnNew">新局</button>
+</header>
+<main>
+  <div id="colL">
+    <div class="card" id="cardPl"></div>
+    <div class="card"><h2>本週行動</h2>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+        <button id="btnCmp">比較所有選項</button>
+        <button id="btnUndo">上一週</button>
+        <label><input type="checkbox" id="optDecline"> 拒絕升遷</label>
+      </div>
+      <div class="acts" id="acts"></div>
+    </div>
+    <div class="card"><h2>自動推進</h2>
+      <label>策略 <select id="optStrat"></select></label>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button data-auto="1">1 週</button><button data-auto="10">10 週</button><button data-auto="50">50 週</button>
+      </div>
+    </div>
+  </div>
+  <div id="colM">
+    <div class="card" id="cardCmp" hidden></div>
+    <div class="card"><h2>勢力</h2><div id="facTbl"></div><svg id="chart" viewBox="0 0 300 90" style="width:100%;margin-top:8px"></svg></div>
+    <div class="card"><h2>星系</h2><div id="sysTbl"></div></div>
+    <div class="card"><h2>節奏模擬（多局統計）</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <label>策略 <select id="pStrat"></select></label>
+        <label>局數<input id="pRuns" type="number" value="20"></label>
+        <label>每局週數<input id="pTurns" type="number" value="300"></label>
+        <button id="btnPace">執行</button>
+      </div>
+      <p class="rules">用目前的難度和節奏設定，從聯盟艦長開局，自動玩很多局，統計每個官階和里程碑平均第幾週達成。</p>
+      <div id="paceOut"></div>
+    </div>
+    <div class="card"><details><summary>規則摘要（目前的數值公式）</summary><ul class="rules" id="rules"></ul></details></div>
+  </div>
+  <div id="colLog"><div class="card"><h2>紀錄（最新在上）</h2><div class="log" id="log"></div></div></div>
+</main>
+<script>
+'use strict';
+/* ───────── 常數 ───────── */
+const A = 0, E = 1, P = 2, X = 3, N = 4;
+const FN = ['聯盟', '帝國', '海盜', '玩家', '中立'];
+const FC = ['#4a8fe0', '#e05a4a', '#c9a227', '#3fbf7f', '#8a8f98'];
+const MIL = ['艦長', '分隊長', '艦隊指揮官', '方面軍司令', '元帥'];
+const MIL_MERIT = [0, 60, 180, 400, 800];
+const MIL_CAP = [12, 45, 160, 220, 300];
+const MIL_SAL = [4, 8, 15, 25, 40];
+const MIL_CREW = [2, 4, 8, 10, 12];
+const MIL_TF = [0.3, 0.3, 0.25, 0.4, 0.5];          // 執行命令時聯盟撥給的兵力比例
+const GOV = ['行星司令', '星區總督', '議員', '元首'];
+const GOV_REQ = [null, { perf: 55, sup: 45 }, { perf: 62, sup: 60 }, { perf: 68, sup: 75 }];
+const GOV_SAL = [12, 22, 35, 0];
+const GOV_CREW = [3, 5, 7, 15];
+const SUP = ['鷹派', '鴿派', '財團'];
+const TIER = ['荒地', '聚落', '城鎮', '都市', '巨型都市'];
+const TIER_CAP = [2, 4, 8, 14, 22];
+const TIER_MODELS = [0, 6, 18, 40, 80];
+const MEGA = { dock: { n: '大型船塢', c: 120 }, elev: { n: '軌道電梯', c: 100 }, radar: { n: '深空雷達', c: 80 }, gate: { n: '跳躍門', c: 150 }, shield: { n: '行星護盾', c: 130 } };
+const DIFF = {
+  easy:   { n: '簡單', str: 0.8, aggr: 0.25, inc: 0.85, smart: 0.5, gang: 0, loss: 0.8 },
+  normal: { n: '普通', str: 1.0, aggr: 0.35, inc: 1.0, smart: 0.7, gang: 0.5, loss: 1.0 },
+  hard:   { n: '困難', str: 1.2, aggr: 0.45, inc: 1.15, smart: 0.85, gang: 0.45, loss: 1.15 },
+  brutal: { n: '殘酷', str: 1.4, aggr: 0.6, inc: 1.3, smart: 1.0, gang: 0.4, loss: 1.3 },
+};
+const NAMES = ['阿爾泰', '貝倫', '卡斯托', '德米亞', '埃里多', '法洛斯', '蓋亞斯', '赫利恩', '伊歐拉', '賈納斯', '凱倫', '莉薇拉', '摩頓', '諾瓦', '奧利昂', '佩拉', '奎林', '瑞亞', '賽洛斯', '塔倫', '烏爾', '薇恩', '韋斯塔', '澤菲爾', '亞特', '布蘭', '席恩', '多拉'];
+const NPC = ['巴爾克', '霍斯特', '佩蕾', '格倫', '奧德', '薇拉', '卡蘭', '索恩', '伊格', '莫蘭', '黛菈', '雷文', '芙蕾', '戈爾', '尤里', '艾德', '娜塔', '羅森'];
+const NPC_EXIT = ['調任後方', '光榮退役', '戰死沙場', '因醜聞去職', '升任他職', '病倒退休'];
+
+/* ───────── 亂數（狀態存在 S 裡，複製狀態＝可重現） ───────── */
+function rnd(S) { let t = (S.r = (S.r + 0x6D2B79F5) >>> 0); t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }
+const pick = (S, a) => a[Math.floor(rnd(S) * a.length)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const r1 = (v) => Math.round(v * 10) / 10;
+
+/* ───────── 地圖 ───────── */
+function adj(S, i) { const o = []; for (const e of S.edges) { if (e[0] === i) o.push(e[1]); else if (e[1] === i) o.push(e[0]); } return o; }
+function genMap(S) {
+  const pts = []; let minD = 12, tries = 0;
+  while (pts.length < 24) { tries++; if (tries % 3000 === 0) minD -= 1; const x = 4 + rnd(S) * 92, y = 4 + rnd(S) * 52; if (pts.every((p) => Math.hypot(p.x - x, p.y - y) > minD)) pts.push({ x, y }); }
+  pts.sort((a, b) => a.x - b.x);
+  const has = (a, b) => S.edges.some((e) => (e[0] === a && e[1] === b) || (e[0] === b && e[1] === a));
+  S.edges = [];
+  pts.forEach((p, i) => { pts.map((q, j) => ({ j, d: Math.hypot(p.x - q.x, p.y - q.y) })).filter((o) => o.j !== i).sort((a, b) => a.d - b.d).slice(0, 2).forEach((o) => { if (!has(i, o.j)) S.edges.push([i, o.j]); }); });
+  // 保證連通
+  for (;;) {
+    const seen = new Set([0]), st = [0];
+    while (st.length) { const i = st.pop(); for (const j of adjRaw(S.edges, i)) if (!seen.has(j)) { seen.add(j); st.push(j); } }
+    if (seen.size === pts.length) break;
+    let best = null;
+    for (const i of seen) for (let j = 0; j < pts.length; j++) if (!seen.has(j)) { const d = Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y); if (!best || d < best.d) best = { i, j, d }; }
+    S.edges.push([best.i, best.j]);
+  }
+  const mid = [8, 9, 10, 11, 12, 13, 14, 15];
+  for (let i = mid.length - 1; i > 0; i--) { const j = Math.floor(rnd(S) * (i + 1)); [mid[i], mid[j]] = [mid[j], mid[i]]; }
+  const names = NAMES.slice();
+  S.sys = pts.map((p, i) => {
+    const owner = i < 8 ? A : i >= 16 ? E : mid.indexOf(i) < 4 ? P : N;
+    const cap = i === 0 || i === 23;
+    const tier = cap ? 3 : owner === N ? 1 : owner === P ? 1 : 1 + (rnd(S) < 0.4 ? 1 : 0);
+    const nm = names.splice(Math.floor(rnd(S) * names.length), 1)[0];
+    const wx = { k: ['solar', 'ion', 'grav'][Math.floor(rnd(S) * 3)], per: 6 + Math.floor(rnd(S) * 7), len: 2, ph: Math.floor(rnd(S) * 12) };   // 每個星系一種週期性天氣：每 per 週出現 len 週
+    return { id: i, name: nm, x: p.x, y: p.y, owner, cap, tier, pop: cap ? 12 : r1(TIER_CAP[tier] * (0.5 + rnd(S) * 0.4)), prosp: cap ? 70 : 35 + Math.round(rnd(S) * 20), def: cap ? 6 : owner === N ? 1 : 2 + Math.floor(rnd(S) * 3), gar: cap ? 45 : 20, mega: cap ? { dock: 1, shield: 1 } : {}, hit: -99, sg: null, dis: -1, wx };
+  });
+}
+function adjRaw(edges, i) { const o = []; for (const e of edges) { if (e[0] === i) o.push(e[1]); else if (e[1] === i) o.push(e[0]); } return o; }
+
+/* ───────── 新局 ───────── */
+function newGame(o) {
+  const S = { r: (o.seed >>> 0) || 1, turn: 1, ww: [0, 0, 0, 0, 0], diff: { ...o.diff }, pace: o.pace, log: [], cur: [], hist: [], ms: [], unlock: [], firsts: {}, policy: { aggr: 0.35 }, rules: { ...RULES0, ...(o.rules || {}) },
+    st: { cap: 0, capSiege: 0, capAssault: 0, space: 0, relief: 0, raid: 0, raidOk: 0, plCap: 0, plSiege: 0, sgSup: 0, why: { pl: [0, 0], ai: [0, 0] }, rc: {} } };
+  genMap(S);
+  S.fac = [0, 1, 2, 3, 4].map((f) => ({ money: 60, field: f === A || f === E ? 300 : f === P ? 100 : 0, aggr: f === P ? 0.5 : 0.35 }));
+  S.rel = [0, 1, 2, 3, 4].map(() => [0, 0, 0, 0, 0]);
+  setRel(S, A, E, -60); setRel(S, A, P, -100); setRel(S, E, P, -100); setRel(S, X, P, -40);
+  const pl = S.pl = { aff: A, mil: 0, gov: -1, merit: 0, trust: 50, sup: [30, 30, 30], money: 30, crew: 20, fleet: 12, gs: [], backer: -1, examPassed: false, order: null, miss: null, guard: -1, raid: 0, peace: 0, status: '正常', decline: false, skill: o.skill, acted: '', expand: 0, merc: 0, garT: 20 };
+  if (o.id === 'cmd') { pl.mil = 2; pl.merit = 180; pl.fleet = 160; }
+  if (o.id === 'gov') { pl.gov = 0; pl.gs = [govPick(S)]; pl.fleet = 45; pl.money = 60; }
+  if (o.id === 'head') { pl.gov = 3; pl.mil = 0; pl.gs = owned(S, A).map((s) => s.id); pl.fleet = 145; pl.sup = [40, 40, 40]; }
+  genOrders(S);
+  S.hist.push(counts(S));
+  return S;
+}
+function setRel(S, a, b, v) { S.rel[a][b] = S.rel[b][a] = clamp(v, -100, 100); }
+
+/* ───────── 查詢 ───────── */
+const owned = (S, f) => S.sys.filter((s) => s.owner === f);
+const counts = (S) => [A, E, P, X, N].map((f) => owned(S, f).length);
+function atWar(S, a, b) { if (a === b || a === N || b === N) return false; return S.rel[a][b] < 0; }
+function hostile(S, f) { return S.pl.aff === X ? f !== X : f !== A && f !== X; }
+const frontier = (S, s) => adj(S, s.id).some((j) => S.sys[j].owner !== s.owner);
+const sysIncome = (s) => s.pop * (0.4 + s.prosp / 100) * 0.6 * (s.mega.elev ? 1.15 : 1) * (s.unrest > 0 ? 0.3 : 1) * (s.sg ? 0 : 1);   // 被圍城：沒有收入
+const facIncome = (S, f) => owned(S, f).reduce((a, s) => a + sysIncome(s), 0);
+/* ───────── 佔領流程（S.rules.flow）：太空戰奪軌道 → 下一回合起「強攻」或「圍城 siegeT 回合投降」；突襲癱瘓地面防禦 raidT 回合 ───────── */
+const RULES0 = { flow: true, siegeT: 3, raidT: 5, raid: true, wx: 'all', support: true, stealth: false };   // wx：天氣（all／none／solar／ion／grav）；support：圍城方增援與護航；stealth：玩家有匿蹤躍遷科技
+const WX = { solar: '太陽風暴', ion: '離子星雲', grav: '重力潮汐' };
+const RAID_INF = { siege: 1, noFleet: 0.9, storm: 0.7, stealth: 0.6 };   // 突襲的條件 → 成功潛入的機率（被發現＝任務取消、特種部隊受損）
+// 太空：所屬勢力的野戰艦隊 30%（雷達 ×1.3）＋玩家在這裡的艦隊
+function spacePow(S, s) {
+  let d = 0;
+  if (s.owner < X) d += S.fac[s.owner].field * 0.3 * (s.mega.radar && !storm(S, s) ? 1.3 : 1);
+  if (s.owner === X) d += S.pl.fleet * S.pl.skill * 0.6;
+  if (S.pl.guard === s.id) d += S.pl.fleet * S.pl.skill;
+  return d;
+}
+// 地面：守軍＋防衛建築×8（行星護盾 ×1.5）；突襲成功＝防衛建築與護盾停擺
+function groundPow(S, s) { const off = s.dis > S.turn; return (s.gar + (off ? 0 : s.def * 8 * (ionOn(S, s) ? 0.7 : 1))) * (s.mega.shield && !off ? 1.5 : 1); }
+// 天氣：每個星系自帶週期性的太陽風暴（雷達失效，可以突襲）
+const wxOn = (S, s, k) => s.wx && s.wx.k === k && (S.rules.wx === 'all' || S.rules.wx === k) && (S.turn + s.wx.ph) % s.wx.per < s.wx.len;
+const storm = (S, s) => wxOn(S, s, 'solar');                // 太陽風暴：雷達失效、情報中斷，特種部隊可以避開艦隊突襲
+const ionOn = (S, s) => wxOn(S, s, 'ion');                  // 離子星雲：光束武器射程縮短 → 地面砲台（光束）效能 ×0.7
+const gravOn = (S, s) => wxOn(S, s, 'grav');                // 重力潮汐：可航行空間縮小 → 進場兵力上限 ×0.6
+const hasFleet = (S, s) => spacePow(S, s) >= 30;
+function defPow(S, s) {
+  if (S.rules && S.rules.flow) return s.sg ? groundPow(S, s) : spacePow(S, s) + groundPow(S, s);   // 進攻方面對的：被圍的只剩地面
+  let d = s.gar + s.def * 8; if (s.mega.shield) d *= 1.5;
+  if (s.owner < X) d += S.fac[s.owner].field * 0.3 * (s.mega.radar ? 1.3 : 1);
+  if (s.owner === X) d += S.pl.fleet * S.pl.skill * 0.6;
+  if (S.pl.guard === s.id) d += S.pl.fleet * S.pl.skill;
+  return d;
+}
+function plCap(S) {
+  const p = S.pl;
+  if (p.aff === X) { const my = owned(S, X); return Math.max(p.baseCap || 0, 60 + 15 * my.length + 40 * my.filter((s) => s.mega.dock).length) + 30 * (p.expand || 0); }
+  if (p.gov >= 0) return 45 + 40 * p.gs.filter((i) => S.sys[i].mega.dock).length + (p.gov === 3 ? 100 : 0);
+  return MIL_CAP[p.mil];
+}
+function rankLabel(S) {
+  const p = S.pl;
+  if (p.status === '終結') return '已終結';
+  if (p.aff === X) return owned(S, X).length ? '獨立領主' : '流亡船長';
+  return p.gov >= 0 ? `聯盟${GOV[p.gov]}` : `聯盟${MIL[p.mil]}`;
+}
+const govPerf = (S) => (S.pl.gs.length ? S.pl.gs.reduce((a, i) => a + S.sys[i].prosp, 0) / S.pl.gs.length : 0);
+function govPick(S) { const c = owned(S, A).filter((s) => !s.cap).sort((a, b) => a.prosp - b.prosp); return (c[Math.floor(c.length / 2)] || owned(S, A)[0]).id; }
+function nearest(S, from, list, k) { const f = S.sys[from]; return list.filter((s) => s.id !== from).sort((a, b) => Math.hypot(a.x - f.x, a.y - f.y) - Math.hypot(b.x - f.x, b.y - f.y)).slice(0, k).map((s) => s.id); }
+function enemyTargets(S, f, filt) {
+  const set = new Set();
+  for (const s of owned(S, f)) for (const j of adj(S, s.id)) { const t = S.sys[j]; if (t.owner !== f && (atWar(S, f, t.owner) || t.owner === N) && (!filt || filt(t))) set.add(j); }
+  return [...set].map((i) => S.sys[i]);
+}
+function budget(S) { return S.pl.aff === A && S.pl.gov === 3 ? S.fac[A].money : S.pl.money; }
+function spend(S, v) { if (S.pl.aff === A && S.pl.gov === 3) S.fac[A].money -= v; else S.pl.money -= v; }
+function L(S, t, c) { if (S.cur) S.cur.push({ t, c: c || '' }); }
+function first(S, key) { if (S.firsts[key] == null) S.firsts[key] = S.turn; }
+function unlock(S, u) { if (!S.unlock.includes(u)) { S.unlock.push(u); L(S, `★ 週目解鎖：${u}`, 'star'); } }
+
+/* ───────── 戰鬥 ───────── */
+function battle(S, af, force, sid) {
+  const s = S.sys[sid], df = s.owner;
+  const guardedByPl = S.pl.guard === sid, plDef = df === X;
+  const reinf = df < X ? S.fac[df].field * 0.3 : 0;
+  const Araw = force * (0.85 + 0.3 * rnd(S)), D = defPow(S, s) * (0.85 + 0.3 * rnd(S));
+  const q = Math.max(0.01, Araw / Math.max(1, D)), win = q > 1;
+  const attLoss = win ? Math.min(0.6, 0.4 / q) : Math.min(0.85, 0.5 / Math.sqrt(q));
+  let gar = 0;
+  if (S.ww) { if (win && df < N) S.ww[df] += 4; if (!win && af < N) S.ww[af] += 1.5; }
+  if (win) {
+    if (df < X) S.fac[df].field = Math.max(0, S.fac[df].field - reinf * 0.5);
+    if (plDef) S.pl.fleet *= 0.8;
+    if (guardedByPl) { S.pl.fleet *= 0.6; L(S, `你協防的 ${s.name} 失守，艦隊重創`, 'bad'); }
+    gar = force * (1 - attLoss) * 0.15;
+    s.owner = af; s.gar = gar; s.unrest = 8; s.prosp = Math.max(0, s.prosp - (s.mega.shield ? 10 : 25)); s.def = Math.floor(s.def / 2); s.pop = r1(s.pop * 0.85); s.hit = S.turn;
+    for (const k of Object.keys(s.mega)) if (rnd(S) < (s.mega.shield ? 0.15 : 0.3)) { delete s.mega[k]; L(S, `${s.name} 的${MEGA[k].n}在戰鬥中倒塌`, 'bad'); if (k === 'gate') S.edges = S.edges.filter((e) => !(e[2] === 'g' && (e[0] === sid || e[1] === sid))); }
+    if (s.cap && df < N) L(S, `${FN[df]}首都 ${s.name} 陷落！`, 'ev');
+    if (S.st) { S.st.cap++; S.st.capAssault++; if (af === X || (af === A && S.pl.aff === A)) S.st.plCap++; }
+  } else {
+    s.gar *= 1 - 0.4 * q; s.prosp = Math.max(0, s.prosp - 8); s.hit = S.turn;
+    if (df < X) S.fac[df].field = Math.max(0, S.fac[df].field - reinf * 0.3 * q);
+    if (plDef) S.pl.fleet *= 1 - 0.1 * q;
+    if (guardedByPl) { S.pl.fleet *= 1 - 0.25 * q; S.pl.merit += 10; L(S, `你協防 ${s.name}，擊退了${FN[af]}的進攻（戰功 +10）`, 'ev'); }
+  }
+  return { win, attLoss, q, df, s, gar };
+}
+// 佔領：mode＝'assault'（強攻：繁榮 -25、防衛減半、巨型建築可能倒塌）或 'siege'（投降：損害小）
+function capture(S, af, s, force, mode) {
+  const df = s.owner, sid = s.id;
+  if (df < N && S.st.why) { const mob = df === X ? S.pl.fleet * S.pl.skill : S.fac[df].field, side = df === X || (df === A && S.pl.aff === A) ? 'pl' : 'ai'; S.st.why[side][mob < force ? 0 : 1]++; }
+  if (S.pl.gs.includes(sid) && af !== A) { const pen = S.pl.gov === 3 ? 3 : 12; S.pl.gs = S.pl.gs.filter((i) => i !== sid); S.pl.trust -= pen; L(S, `你的轄區 ${s.name} 失守（${S.pl.gov === 3 ? '民意' : '信任'} -${pen}）`, 'bad'); }
+  if (S.ww && df < N) S.ww[df] += 4;
+  if (df === X) S.pl.fleet *= 0.8;
+  const gar = force * 0.15;
+  s.owner = af; s.gar = gar; s.sg = null; s.dis = -1; s.hit = S.turn;
+  if (mode === 'siege') { s.unrest = 4; s.prosp = Math.max(0, s.prosp - 5); s.pop = r1(s.pop * 0.97); }
+  else {
+    s.unrest = 8; s.prosp = Math.max(0, s.prosp - (s.mega.shield ? 10 : 25)); s.def = Math.floor(s.def / 2); s.pop = r1(s.pop * 0.85);
+    for (const k of Object.keys(s.mega)) if (rnd(S) < (s.mega.shield ? 0.15 : 0.3)) { delete s.mega[k]; L(S, `${s.name} 的${MEGA[k].n}在戰鬥中倒塌`, 'bad'); if (k === 'gate') S.edges = S.edges.filter((e) => !(e[2] === 'g' && (e[0] === sid || e[1] === sid))); }
+  }
+  if (s.cap && df < N) L(S, `${FN[df]}首都 ${s.name} 陷落！`, 'ev');
+  S.st.cap++; if (mode === 'siege') S.st.capSiege++; else S.st.capAssault++;
+  if (af === X || (af === A && S.pl.aff === A)) { S.st.plCap++; if (mode === 'siege') S.st.plSiege++; }
+  return gar;
+}
+const roll = (S) => 0.85 + 0.3 * rnd(S);
+// 新流程的一次進攻：回傳 { win, cap（這一仗是否佔領）, phase, attLoss, q, df, s, gar, keep（留在軌道圍城的兵力） }
+function attackSys(S, af, force, sid) {
+  const s = S.sys[sid], df = s.owner;
+  if (S.rules.flow && gravOn(S, s)) { force *= 0.6; S.st.grav = (S.st.grav || 0) + 1; }   // 重力潮汐：塞不進那麼多船
+  if (!S.rules.flow) { const r = battle(S, af, force, sid); return { ...r, cap: r.win, phase: 'old', keep: 0 }; }
+  const res = (win, q, phase) => ({ win, q, phase, attLoss: win ? Math.min(0.6, 0.4 / q) : Math.min(0.85, 0.5 / Math.sqrt(q)), df, s, gar: 0, cap: false, keep: 0 });
+  if (s.sg && s.sg.f === af) {   // 強攻：已經控制軌道，打地面
+    const q = Math.max(0.01, (force + s.sg.force) * roll(S) / Math.max(1, groundPow(S, s) * roll(S))), r = res(q > 1, q, 'assault');
+    if (r.win) { r.gar = capture(S, af, s, (force + s.sg.force) * (1 - r.attLoss), 'assault'); r.cap = true; r.back = s.sg ? 0 : 0; }
+    else { s.gar *= 1 - 0.3 * Math.min(1, q); s.sg.force *= 1 - r.attLoss * 0.5; if (S.ww && af < N) S.ww[af] += 1.5; }
+    return r;
+  }
+  if (s.sg && s.sg.f !== af) {   // 解圍：打軌道上的圍城艦隊
+    const guard = S.pl.sgGuard === sid && (s.sg.f === S.pl.aff) ? S.pl.fleet * S.pl.skill : 0;   // 玩家的艦隊在軌道上護航
+    const q = Math.max(0.01, force * roll(S) / Math.max(1, (s.sg.force + guard) * roll(S))), r = res(q > 1, q, 'relief');
+    if (guard) { S.pl.fleet *= 1 - Math.min(0.6, (r.win ? 0.5 : 0.2) / Math.max(0.3, q)) * S.diff.loss; if (!r.win) L(S, `你的艦隊守住了 ${s.name} 的圍城`, 'ev'); }
+    if (r.win) { S.st.relief++; if (s.sg.f === X) S.pl.fleet *= 0.85; L(S, `${FN[af]} 解除了 ${s.name} 的圍城（${FN[s.sg.f]}的圍城艦隊被擊退）`, s.sg.f === X || s.sg.f === S.pl.aff ? 'bad' : ''); s.sg = null; }
+    else s.sg.force *= 1 - 0.3 * Math.min(1, q);
+    return r;
+  }
+  // 太空戰：奪取軌道
+  const D = spacePow(S, s), q = D < 1 ? 9 : Math.max(0.01, force * roll(S) / Math.max(1, D * roll(S))), r = res(q > 1, q, 'space');
+  if (D < 1) r.attLoss = 0;
+  S.st.space++;
+  if (r.win) { r.keep = force * (1 - r.attLoss) * 0.6; s.sg = { f: af, force: r.keep, t: 0 }; s.hit = S.turn; if (df < X) S.fac[df].field = Math.max(0, S.fac[df].field - D * 0.5); if (df === X) S.pl.fleet *= 0.8; }
+  else { s.hit = S.turn; if (df < X) S.fac[df].field = Math.max(0, S.fac[df].field - D * 0.3 * q); if (S.ww && af < N) S.ww[af] += 1.5; }
+  return r;
+}
+// 每回合：圍城計時，滿 siegeT 回合投降；圍城艦隊每回合耗損 3%
+function siegeTick(S) {
+  for (const s of S.sys) {
+    if (!s.sg) continue;
+    if (s.sg.f === s.owner || (s.sg.f < N && s.sg.f !== X && !owned(S, s.sg.f).length) || s.sg.force < 1) { s.sg = null; continue; }
+    s.sg.t++; s.sg.force *= 0.97;
+    if (s.sg.t >= S.rules.siegeT) {
+      const f = s.sg.f, force = s.sg.force, was = s.owner;
+      const gar = capture(S, f, s, force, 'siege');
+      if (f < X) S.fac[f].field += Math.max(0, force - gar); else if (f === X) S.pl.fleet += Math.max(0, force - gar) / S.pl.skill * 0.5;
+      L(S, `${s.name}（${FN[was]}）圍城 ${S.rules.siegeT} 回合後投降 ${FN[f]}`, f === S.pl.aff || f === X || was === X || S.pl.gs.includes(s.id) ? 'ev' : '');
+    }
+  }
+}
+// 特種部隊突襲（玩家，不佔行動、冷卻 3 回合）：目標沒有艦隊駐守，或正在颳太陽風暴；成功＝地面防禦癱瘓 raidT 回合
+const sfPow = (S) => (20 + 6 * Math.max(S.pl.mil, S.pl.gov + 1, owned(S, X).length ? 3 : 0)) * S.pl.skill;
+// 突襲的條件（照優先順序）：我方控制軌道 → 沒有艦隊駐守 → 太陽風暴 → 匿蹤躍遷科技；都不符合就不能突襲
+function raidCond(S, s) { if (s.sg && s.sg.f === S.pl.aff) return 'siege'; if (!hasFleet(S, s)) return 'noFleet'; if (storm(S, s)) return 'storm'; if (S.rules.stealth) return 'stealth'; return null; }
+function canSF(S, s) { return S.rules.flow && S.rules.raid && S.pl.status !== '終結' && (S.pl.sfCd || 0) <= S.turn && s.dis <= S.turn && hostile(S, s.owner) && s.owner !== N && !!raidCond(S, s); }
+function sfRaid(S, sid) {
+  const s = S.sys[sid]; if (!canSF(S, s)) return false;
+  S.st.raid++; S.pl.sfCd = S.turn + 3;
+  const c = raidCond(S, s), rc = S.st.rc[c] = S.st.rc[c] || [0, 0, 0];   // [嘗試, 潛入成功, 任務成功]
+  rc[0]++;
+  if (rnd(S) >= RAID_INF[c]) { L(S, `特種部隊潛入 ${s.name} 時被發現，任務取消`, 'bad'); S.pl.sfCd = S.turn + 5; return false; }
+  rc[1]++;
+  const A2 = sfPow(S) ** 2, D2 = ((s.gar * 0.5 + s.def * 4 * (ionOn(S, s) ? 0.7 : 1)) * (storm(S, s) ? 0.8 : 1) * 1.6) ** 2;   // 任務勝率＝A²/(A²+D²)
+  const ok = rnd(S) < A2 / (A2 + D2);
+  if (ok) rc[2]++;
+  if (ok) { s.dis = S.turn + S.rules.raidT; S.st.raidOk++; L(S, `特種部隊突襲 ${s.name}${storm(S, s) ? '（趁太陽風暴）' : ''}：地面防禦癱瘓 ${S.rules.raidT} 回合`, 'ev'); }
+  else L(S, `特種部隊突襲 ${s.name} 失敗`, 'bad');
+  return ok;
+}
+// 玩家參與的進攻（聯盟撥兵 share）
+function plAttack(S, sid, share) {
+  const p = S.pl, F = S.fac[A];
+  const tf = p.aff === A ? F.field * share : 0, pf = p.fleet * p.skill, mf = p.merc || 0, force = tf + pf + mf;
+  const r = attackSys(S, p.aff, force, sid);
+  if (mf) { L(S, `傭兵 ${Math.round(mf)} 參戰後離開`); p.merc = 0; }
+  p.fleet *= 1 - Math.min(0.95, r.attLoss * S.diff.loss / Math.sqrt(p.skill));
+  // 留在軌道圍城的兵力：聯盟時期由聯盟撥的部隊出（不夠才動用你的艦隊）；自立時由你的艦隊出
+  const keepA = p.aff === A ? Math.min(r.keep, tf * (1 - r.attLoss)) : 0, keepP = r.keep - keepA;
+  if (p.aff === A) { F.field = Math.max(0, F.field - tf * r.attLoss - keepA - (r.cap ? r.gar : 0)); if (keepP > 0) p.fleet = Math.max(0, p.fleet - keepP / p.skill); }
+  else { if (r.cap) p.fleet = Math.max(0, p.fleet - r.gar); if (keepP > 0) p.fleet = Math.max(0, p.fleet - keepP / p.skill * 0.5); }
+  r.sh = (pf + mf) / Math.max(1, force);
+  r.merit = r.win ? Math.round((10 + 30 * r.sh) * (r.s.cap ? 2 : 1)) : 2;
+  return r;
+}
+function raid(S, af, force, sid) {
+  const s = S.sys[sid], D = defPow(S, s) * 0.5 * (0.85 + 0.3 * rnd(S)), win = force > D;
+  let loot = 0;
+  if (win) { const o = s.owner === X ? S.pl : S.fac[s.owner]; loot = Math.round(Math.min(50, Math.max(0, o.money) * 0.25) + 10); o.money -= loot - 10; s.prosp = Math.max(0, s.prosp - 15); }
+  s.hit = S.turn;
+  return { win, loot, loss: win ? 0.08 : 0.3 };
+}
+
+/* ───────── AI ───────── */
+function aiTurn(S, f) {
+  const F = S.fac[f], my = owned(S, f), d = S.diff, h = hostile(S, f), p = S.pl;
+  if (!my.length) { F.field = 0; return; }
+  let inc = facIncome(S, f) * (h ? d.inc : 1);
+  if (f === A && p.aff === A && p.backer === 2) inc *= 1.15;
+  F.money += inc;
+  for (const s of my) { if (s.sg) continue; /* 被圍：補不進去 */ const need = Math.max(0, 15 + (frontier(S, s) ? 15 : 0) + (s.cap ? 25 : 0) - s.gar), pay = Math.min(need, Math.max(0, F.money) * 0.5); s.gar += pay; F.money -= pay; }
+  if (!(f === A && p.aff === A && p.gov === 3)) aiBuild(S, f, my);
+  const sp = Math.max(0, F.money - 30) * 0.7; F.money -= sp; F.field += sp * 0.8 * (h ? d.str : 1) * (1 + 0.07 * Math.max(0, 8 - my.length)); F.field *= 0.98 - 0.003 * Math.max(0, my.length - 8);   // 過度擴張：星系越多維持成本越高
+  if (S.rules.flow) {
+    // 解圍優先：自己被圍的星系（首都先）
+    const bes = my.filter((s) => s.sg && s.sg.f !== f).sort((a, b) => (b.cap ? 1 : 0) - (a.cap ? 1 : 0) || b.pop - a.pop)[0];
+    if (bes && F.field * 0.5 > bes.sg.force * 0.7) { const force = F.field * 0.5, r = attackSys(S, f, force, bes.id); F.field = Math.max(0, F.field - force * r.attLoss); return; }
+    // 自己的圍城：兵力夠就強攻，不夠就等它投降
+    const mine = S.sys.filter((s) => s.sg && s.sg.f === f);
+    if (S.rules.support) for (const s of mine) {   // 圍城方增援：對方可能來解圍時，從野戰艦隊補兵到軌道
+      const threat = s.owner < X ? S.fac[s.owner].field * 0.5 : s.owner === X ? S.pl.fleet * S.pl.skill : 0, need = threat * 1.1 - s.sg.force;
+      if (need > 0) { const add = Math.min(need, F.field * 0.25); s.sg.force += add; F.field -= add; S.st.sgSup++; }
+    }
+    for (const s of mine) {
+      const force = F.field * 0.4, sgf = s.sg.force;
+      if (force + sgf > groundPow(S, s) * 1.2 && !(f === A && p.aff === A && p.opThisTurn)) {
+        const tn = s.name, towner = s.owner, r = attackSys(S, f, force, s.id);
+        F.field = Math.max(0, F.field - force * r.attLoss);
+        if (r.cap) { F.field += Math.max(0, sgf * (1 - r.attLoss) - r.gar); L(S, `${FN[f]} 強攻佔領 ${tn}（原屬${FN[towner]}）`, towner === X || towner === p.aff ? 'bad' : ''); }
+        return;
+      }
+    }
+    if (mine.length >= 2) return;   // 同時最多圍兩處
+  }
+  if (f === A && p.aff === A && p.opThisTurn) return;   // 玩家執行的進攻命令就是聯盟本週的攻勢
+  let aggr = F.aggr * (h ? d.aggr / 0.35 : 1);
+  if (f === A && p.aff === A) { if (p.gov === 3) aggr = S.policy.aggr; else if (p.backer === 0) aggr += 0.15; }
+  if (rnd(S) > aggr) return;
+  const tg = enemyTargets(S, f, S.rules.flow ? (t) => !t.sg : null);   // 新流程：別人正在圍的不去搶
+  if (!tg.length) return;
+  const share = counts(S).map((c) => c / S.sys.length);
+  const val = (t) => (t.pop + 3) * (t.cap ? 1.5 : 1) * (d.gang && t.owner < N && share[t.owner] > d.gang && t.owner !== f ? 1.6 : 1) * (t.owner === N ? 0.8 : 1) / Math.max(5, defPow(S, t));
+  const t = rnd(S) < d.smart ? tg.sort((a, b) => val(b) - val(a))[0] : pick(S, tg);
+  const force = F.field * 0.5;
+  if (force < defPow(S, t) * 0.8 && rnd(S) > 0.2) return;
+  const tn = t.name, towner = t.owner, involve = towner === X || p.gs.includes(t.id) || p.guard === t.id;
+  if (f === P && towner !== N && rnd(S) < 0.6) {
+    const r = raid(S, P, force, t.id); F.field -= force * r.loss; F.money += r.loot;
+    if (involve || towner === p.aff) L(S, `海盜劫掠 ${tn}（${FN[towner]}）${r.win ? `，搶走 ${r.loot}` : '，被擊退'}`, involve ? 'bad' : '');
+    return;
+  }
+  if (S.rules.flow) {   // 新流程：太空戰奪軌道，留下兵力圍城
+    const r = attackSys(S, f, force, t.id);
+    F.field = Math.max(0, F.field - force * r.attLoss - r.keep);
+    if (r.win) L(S, `${FN[f]} 奪得 ${tn}（${FN[towner]}）的軌道，開始圍城`, involve ? 'bad' : '');
+    else if (involve) L(S, `${FN[f]} 進攻 ${tn} 失敗`, 'ev');
+    return;
+  }
+  const r = battle(S, f, force, t.id);
+  F.field = Math.max(0, F.field - force * r.attLoss - (r.win ? r.gar : 0));
+  if (r.win) {
+    L(S, `${FN[f]} 攻佔 ${tn}（原屬${FN[towner]}）`, involve ? 'bad' : '');
+    if (p.gs.includes(t.id)) { const pen = p.gov === 3 ? 3 : 12; p.gs = p.gs.filter((i) => i !== t.id); p.trust -= pen; L(S, `你的轄區 ${tn} 失守（${p.gov === 3 ? '民意' : '信任'} -${pen}）`, 'bad'); }
+  } else if (involve) L(S, `${FN[f]} 進攻 ${tn} 失敗`, 'ev');
+}
+function aiBuild(S, f, my) {
+  const F = S.fac[f]; if (F.money < 120) return;
+  const city = my.filter((s) => s.tier < 4 && s.pop >= TIER_CAP[s.tier] * 0.7).sort((a, b) => b.pop - a.pop)[0];
+  if (city && F.money >= 40 * (city.tier + 1)) { F.money -= 40 * (city.tier + 1); city.tier++; return; }
+  const fr = my.filter((s) => frontier(S, s) && s.def < 6).sort((a, b) => a.def - b.def)[0];
+  if (fr) { F.money -= 25; fr.def++; return; }
+  if (rnd(S) < 0.2) { const s = my.filter((x) => x.tier >= 2)[0]; if (s) { const k = ['dock', 'elev', 'radar', 'shield'].find((k2) => !s.mega[k2]); if (k && F.money >= MEGA[k].c) { F.money -= MEGA[k].c; s.mega[k] = 1; } } }
+}
+
+/* ───────── 命令與派系任務 ───────── */
+function genOrders(S) {
+  const p = S.pl; p.order = null; p.miss = null;
+  if (p.aff !== A || p.status === '終結') return;
+  const warE = atWar(S, A, E);
+  const eT = enemyTargets(S, A, (t) => t.owner === E), oT = enemyTargets(S, A, (t) => t.owner !== E);
+  const weak = (l) => l.slice().sort((a, b) => defPow(S, a) - defPow(S, b))[0];
+  const strong = (l) => l.slice().sort((a, b) => defPow(S, b) - defPow(S, a))[0];
+  if (p.gov < 0) {
+    const nx = p.mil + 1, req = nx <= 4 ? MIL_MERIT[nx] * S.pace : Infinity;
+    const examReady = nx <= 4 && p.merit >= req && (nx < 4 || p.sup[0] >= 50) && !p.decline;
+    const pool = warE && eT.length ? eT : oT;
+    // 考核目標：在「預估兵力打得下」的目標裡挑最難的；都打不下就挑最弱的
+    const est = S.fac[A].field * MIL_TF[p.mil] + p.fleet * p.skill;
+    const feas = pool.filter((t) => defPow(S, t) <= est * 0.95);
+    if (examReady && pool.length) p.order = { kind: 'attack', t: (feas.length ? strong(feas) : weak(pool)).id, exam: true };
+    else {
+      const thr = owned(S, A).filter((s) => adj(S, s.id).some((j) => atWar(S, A, S.sys[j].owner))).sort((a, b) => defPow(S, a) - defPow(S, b))[0];
+      const r = rnd(S);
+      if (thr && r < 0.3) p.order = { kind: 'defend', t: thr.id };
+      else if (pool.length) p.order = { kind: 'attack', t: (warE && eT.length && r < 0.85 ? weak(eT) : weak(pool)).id };
+    }
+  }
+  const hawkT = (warE && eT.length ? strong(eT) : strong(oT));
+  const invest = p.gs.length ? S.sys[p.gs.slice().sort((a, b) => S.sys[a].prosp - S.sys[b].prosp)[0]] : owned(S, A).sort((a, b) => a.prosp - b.prosp)[0];
+  p.miss = [hawkT ? { t: hawkT.id } : null, { kind: warE ? 'escort' : 'relief' }, invest ? { t: invest.id } : null];
+}
+
+/* ───────── 行動清單 ───────── */
+function actions(S) {
+  const p = S.pl, o = [];
+  if (p.status === '終結') return o;
+  const nm = (i) => S.sys[i].name;
+  if (p.aff === A) {
+    if (p.order) {
+      const t = S.sys[p.order.t];
+      o.push({ id: 'order', label: p.order.exam ? `★ 考核任務：攻擊 ${t.name}` : p.order.kind === 'attack' ? `執行命令：攻擊 ${t.name}` : `執行命令：協防 ${t.name}`, desc: `${p.order.exam ? '通過即觸發晉升。' : ''}${FN[t.owner]}，防禦 ${Math.round(defPow(S, t))}；聯盟撥兵 ${Math.round(S.fac[A].field * MIL_TF[p.mil])}` });
+    }
+    const skip = p.order ? '（放棄命令：信任 -4）' : '';
+    if (p.miss && p.miss[0]) o.push({ id: 'hawk', label: `鷹派任務：強攻 ${nm(p.miss[0].t)}`, desc: `鷹派 +12／鴿派 -5${skip}` });
+    if (p.miss) o.push({ id: 'dove', label: p.miss[1].kind === 'escort' ? '鴿派任務：護送和談使節' : '鴿派任務：賑災', desc: `${p.miss[1].kind === 'escort' ? '聯盟—帝國關係 +12，有 25% 遭海盜伏擊' : '受災星系繁榮 +10'}；鴿派 +12／鷹派 -6${skip}` });
+    if (p.miss && p.miss[2]) o.push({ id: 'biz', label: `財團任務：投資 ${nm(p.miss[2].t)}`, desc: `花費 40；繁榮 +12、人口 +0.5；財團 +12／鷹派 -3${skip}`, dis: budget(S) < 40 });
+    if (p.gov >= 0) o.push({ id: 'govwork', label: '巡視轄區', desc: `所有轄區繁榮 +4，信任 +2（政績目前 ${Math.round(govPerf(S))}）` });
+    if (p.gov === 3) {
+      if (atWar(S, A, E)) o.push({ id: 'truce', label: '元首：向帝國提出停戰', desc: '花費聯盟國庫 80，關係 +40', dis: S.fac[A].money < 80 });
+      else o.push({ id: 'war', label: '元首：對帝國宣戰', desc: '關係設為 -60' });
+    }
+    enemyTargets(S, A).sort((a, b) => defPow(S, a) - defPow(S, b)).slice(0, 3).forEach((t) => {
+      o.push({ id: 'free:' + t.id, label: `擅自進攻 ${t.name}`, desc: `${FN[t.owner]}，防禦 ${Math.round(defPow(S, t))}；只有少量友軍支援，信任 -2${skip}` });
+    });
+    const rt = enemyTargets(S, A, (t) => t.owner !== N).sort((a, b) => defPow(S, a) - defPow(S, b))[0];
+    if (rt) o.push({ id: 'raid:' + rt.id, label: `劫掠 ${rt.name}`, desc: `搶奪資金；信任 -3、鷹派 +2${skip}` });
+    o.push({ id: 'rest', label: '休整', desc: `艦隊補充速度加倍${p.order ? '（信任 -2）' : ''}` });
+    if (p.gov < 0 && p.mil >= 2) o.push({ id: 'togov', label: '轉任行星司令', desc: '改走政務線，保留目前軍階；直屬艦隊縮為衛隊' });
+    o.push({ id: 'defect', label: p.gov === 3 ? '政變稱帝（自立）' : '叛變自立', desc: defectDesc(S) });
+  } else {
+    const my = owned(S, X);
+    const reach = p.fleet * p.skill + (p.merc || 0) + Math.max(0, p.money) / MERC_PRICE;   // 流亡時連可雇的傭兵一起算
+    let tg = my.length ? enemyTargets(S, X) : S.sys.filter((s) => s.owner !== X && !s.cap && defPow(S, s) < reach * 1.2);
+    tg = tg.sort((a, b) => defPow(S, a) - defPow(S, b)).slice(0, 5);
+    S.sys.filter((s) => s.sg && s.sg.f === X).forEach((s) => o.push({ id: 'sgguard:' + s.id, label: `守住 ${s.name} 的圍城`, desc: `艦隊留在軌道護航（第 ${s.sg.t}／${S.rules.siegeT} 回合）` }));
+    my.filter((s) => s.sg).forEach((s) => o.push({ id: 'relieve:' + s.id, label: `解圍 ${s.name}`, desc: `${FN[s.sg.f]}圍城中（第 ${s.sg.t} 回合，圍城兵力 ${Math.round(s.sg.force)}）` }));
+    tg.forEach((t) => o.push({ id: 'xatk:' + t.id, label: `進攻 ${t.name}`, desc: `${FN[t.owner]}，防禦 ${Math.round(defPow(S, t))}／我方 ${Math.round(p.fleet * p.skill)}${p.merc ? `＋傭兵 ${Math.round(p.merc)}` : ''}` }));
+    const rt = tg.find((t) => t.owner !== N);
+    if (rt) o.push({ id: 'xraid:' + rt.id, label: `劫掠 ${rt.name}`, desc: '搶奪資金，與對方關係 -10' });
+    [A, E].forEach((f) => { if (owned(S, f).length && S.rel[X][f] > -60) o.push({ id: 'merc:' + f, label: `接${FN[f]}的傭兵委託`, desc: `資金 +${30 + Math.round(plCap(S) * 0.2)}，關係 +8，有 30% 要打一仗` }); });
+    [A, E, P].forEach((f) => { if (owned(S, f).length && S.rel[X][f] >= 0) o.push({ id: 'xwar:' + f, label: `對${FN[f]}宣戰`, desc: `關係設為 -60；其他勢力對你的關係 -10（背信）` }); });
+    [A, E, P].forEach((f) => { if (owned(S, f).length && S.rel[X][f] < 0) o.push({ id: 'diplo:' + f, label: `與${FN[f]}談判`, desc: `花費 50，關係 +30（目前 ${S.rel[X][f]}）`, dis: p.money < 50 }); });
+    o.push({ id: 'rest', label: '休整', desc: '艦隊補充速度加倍' });
+  }
+  return o;
+}
+function defectDesc(S) {
+  const p = S.pl;
+  if (p.gov === 3) return '所有聯盟星系歸你，聯盟消滅；與帝國、海盜開戰';
+  const take = p.gov >= 0 ? p.gs.length : p.mil >= 4 ? 5 : p.mil >= 3 ? 3 : 0;
+  return `帶走艦隊${take ? `與 ${take} 個星系` : '（無星系，進入流亡）'}；與聯盟開戰`;
+}
+
+/* ───────── 執行行動 ───────── */
+const winText = (r, tn) => (r.phase === 'space' ? `奪得 ${tn} 的軌道，開始圍城（下回合起可強攻，或等它投降）` : r.phase === 'assault' ? `強攻佔領 ${tn}` : r.phase === 'relief' ? `解除 ${tn} 的圍城` : `攻下 ${tn}`);
+function skipOrder(S) { if (S.pl.order) { S.pl.trust -= 4; L(S, '放棄上級命令（信任 -4）', 'bad'); } }
+function applyAction(S, id) {
+  const p = S.pl, [k, arg] = id.split(':'), ai = arg != null ? +arg : -1;
+  p.acted = k; p.guard = -1; p.sgGuard = -1; p.opThisTurn = (k === 'order' && p.order && p.order.kind === 'attack') || k === 'hawk';
+  if (k === 'order') {
+    const o = p.order, t = S.sys[o.t];
+    if (o.kind === 'defend') { p.guard = o.t; L(S, `奉命協防 ${t.name}`); return; }
+    const r = plAttack(S, o.t, MIL_TF[p.mil]);
+    if (r.win) { p.merit += r.merit + 10; p.trust += o.exam ? 8 : 5; if (o.exam && r.cap) p.examPassed = true; /* 考核要真的佔領：只奪下軌道不算 */ L(S, `${winText(r, t.name)}（戰功 +${r.merit + 10}，貢獻 ${Math.round(r.sh * 100)}%）${o.exam ? (r.cap ? '——考核通過' : '——要佔領才算通過考核') : ''}`, 'ev'); }
+    else { p.merit += 2; if (!o.exam) p.trust -= 3; L(S, o.exam ? `進攻 ${t.name} 失敗——考核未過，之後會再指派` : `進攻 ${t.name} 失敗（信任 -3）`, 'bad'); }
+  } else if (k === 'hawk') {
+    skipOrder(S); const t = S.sys[p.miss[0].t], r = plAttack(S, t.id, 0.35);
+    if (r.win) { p.merit += r.merit; p.sup[0] += 12; p.sup[1] -= 5; L(S, `為鷹派${winText(r, t.name)}（戰功 +${r.merit}）`, 'ev'); }
+    else { p.sup[0] += 4; p.sup[1] -= 5; L(S, `為鷹派強攻 ${t.name} 失敗`, 'bad'); }
+  } else if (k === 'dove') {
+    skipOrder(S);
+    if (p.miss[1].kind === 'escort') {
+      if (rnd(S) < 0.25) { const pir = 40 * S.diff.str * (0.8 + rnd(S) * 0.4), q = p.fleet * p.skill / pir; p.fleet *= 1 - Math.min(0.7, 0.3 / q) * S.diff.loss; L(S, `護送途中遭海盜伏擊${q > 1 ? '，擊退' : '，損失慘重'}`, q > 1 ? 'ev' : 'bad'); }
+      setRel(S, A, E, S.rel[A][E] + 12); L(S, `和談推進，聯盟—帝國關係 ${S.rel[A][E]}`, 'ev');
+    } else { const s = owned(S, A).sort((a, b) => b.hit - a.hit)[0]; if (s) { s.prosp = Math.min(100, s.prosp + 10); L(S, `賑濟 ${s.name}`); } }
+    p.sup[1] += 12; p.sup[0] -= 6;
+  } else if (k === 'biz') {
+    skipOrder(S); const t = S.sys[p.miss[2].t]; spend(S, 40); t.prosp = Math.min(100, t.prosp + 12); t.pop = r1(Math.min(TIER_CAP[t.tier], t.pop + 0.5)); p.sup[2] += 12; p.sup[0] -= 3; L(S, `為財團投資 ${t.name}`, 'ev');
+  } else if (k === 'govwork') {
+    for (const i of p.gs) S.sys[i].prosp = Math.min(100, S.sys[i].prosp + 4); p.trust += 2; L(S, '巡視轄區，繁榮 +4');
+  } else if (k === 'truce') {
+    S.fac[A].money -= 80; setRel(S, A, E, S.rel[A][E] + 40); L(S, `向帝國提出停戰，關係 ${S.rel[A][E]}`, 'ev');
+  } else if (k === 'war') {
+    setRel(S, A, E, -60); L(S, '對帝國宣戰', 'ev');
+  } else if (k === 'sgguard') {
+    p.sgGuard = ai; L(S, `艦隊留在 ${S.sys[ai].name} 軌道守住圍城`);
+  } else if (k === 'relieve') {
+    const t = S.sys[ai], r = plAttack(S, ai, 0);
+    L(S, r.win ? `擊退 ${t.name} 的圍城艦隊` : `解圍 ${t.name} 失敗`, r.win ? 'ev' : 'bad');
+  } else if (k === 'free' || k === 'xatk') {
+    if (k === 'free') { skipOrder(S); p.trust -= 2; }
+    const t = S.sys[ai], tn = t.name, r = plAttack(S, ai, k === 'free' ? 0.1 : 0);
+    if (r.win) { p.merit += r.merit; L(S, `${winText(r, tn)}（戰功 +${r.merit}）`, 'ev'); } else L(S, `進攻 ${tn} 失敗`, 'bad');
+    if (k === 'xatk' && r.df < N) setRel(S, X, r.df, Math.min(S.rel[X][r.df], -40));
+  } else if (k === 'raid' || k === 'xraid') {
+    if (k === 'raid') { skipOrder(S); p.trust -= 3; p.sup[0] += 2; }
+    const t = S.sys[ai], tow = t.owner, r = raid(S, p.aff, p.fleet * p.skill, ai);
+    p.fleet *= 1 - r.loss * S.diff.loss; if (r.win) { p.money += r.loot; p.raid += r.loot; }
+    if (k === 'xraid' && tow < N) setRel(S, X, tow, S.rel[X][tow] - 10);
+    L(S, r.win ? `劫掠 ${t.name}，得 ${r.loot}` : `劫掠 ${t.name} 失敗`, r.win ? 'ev' : 'bad');
+  } else if (k === 'merc') {
+    const pay = 30 + Math.round(plCap(S) * 0.2); p.money += pay; setRel(S, X, ai, S.rel[X][ai] + 8);
+    if (rnd(S) < 0.3) { const q = p.fleet * p.skill / (plCap(S) * 0.4); p.fleet *= 1 - Math.min(0.6, 0.25 / Math.max(0.2, q)) * S.diff.loss; L(S, '委託中爆發戰鬥'); }
+    L(S, `完成${FN[ai]}的委託，得 ${pay}`, 'ev');
+  } else if (k === 'xwar') {
+    setRel(S, X, ai, -60); for (const f of [A, E, P]) if (f !== ai) setRel(S, X, f, S.rel[X][f] - 10);
+    L(S, `對${FN[ai]}宣戰`, 'ev');
+  } else if (k === 'diplo') {
+    p.money -= 50; setRel(S, X, ai, S.rel[X][ai] + 30); L(S, `與${FN[ai]}談判，關係 ${S.rel[X][ai]}`, 'ev');
+  } else if (k === 'rest') {
+    if (p.order) { p.trust -= 2; }
+    p.rest = true; L(S, '休整');
+  } else if (k === 'togov') {
+    p.gov = 0; p.since = S.turn; p.gs = [govPick(S)]; L(S, `轉任 ${S.sys[p.gs[0]].name} 行星司令`, 'ev'); first(S, '行星司令'); unlock(S, '聯盟行星司令');
+  } else if (k === 'defect') defect(S);
+}
+function defect(S) {
+  const p = S.pl;
+  let take;
+  if (p.gov === 3) take = owned(S, A).map((s) => s.id);
+  else if (p.gov >= 0) take = p.gs.filter((i) => !S.sys[i].cap);
+  else { const n = p.mil >= 4 ? 5 : p.mil >= 3 ? 3 : 0; take = owned(S, A).filter((s) => !s.cap && frontier(S, s)).slice(0, n).map((s) => s.id); }
+  for (const i of take) S.sys[i].owner = X;
+  const coup = p.gov === 3;
+  if (coup) { p.fleet += S.fac[A].field * 0.8; p.money += S.fac[A].money; S.fac[A].field = 0; S.fac[A].money = 0; }
+  p.baseCap = Math.round(p.fleet);   // 帶走的艦隊不會因為上限較低而被解編
+  p.aff = X; p.gov = -1; p.gs = []; p.order = null; p.miss = null;
+  setRel(S, X, A, -60); setRel(S, X, E, coup ? -60 : -20); setRel(S, X, P, -30);
+  L(S, `叛離聯盟，帶走 ${take.length} 個星系`, 'star'); first(S, '自立');
+}
+
+/* ───────── 回合結束 ───────── */
+function endTurn(S) {
+  const p = S.pl;
+  const ord = [A, E, P].sort(() => rnd(S) - 0.5);
+  for (const f of ord) aiTurn(S, f);
+  if (S.rules.flow) siegeTick(S);
+  // 協防結算
+  if (p.acted === 'order' && p.order && p.order.kind === 'defend') {
+    if (S.sys[p.order.t].owner === A) { p.merit += 8; p.trust += 4; L(S, `${S.sys[p.order.t].name} 守住了（戰功 +8，信任 +4）`); }
+  }
+  p.guard = -1; p.sgGuard = -1;
+  // 成長與繁榮
+  for (const s of S.sys) {
+    if (s.unrest > 0) s.unrest--;
+    const cap = TIER_CAP[s.tier];
+    s.pop = r1(Math.max(0.5, s.pop + Math.max(0.05, s.pop * 0.03 * (s.prosp / 100) * (1 - s.pop / cap))));
+    if (s.pop > cap) s.pop = cap;
+    const tgt = 25 + s.tier * 12 + Math.min(s.def, 6) * 2 + (s.mega.elev ? 8 : 0) + (s.cap ? 10 : 0) - (S.turn - s.hit < 3 ? 20 : 0);
+    s.prosp = clamp(Math.round(s.prosp + (tgt - s.prosp) * 0.15), 0, 100);
+  }
+  // 玩家收支與補充
+  if (p.status !== '終結') {
+    const cap = plCap(S);
+    if (p.aff === A) {
+      if (p.gov === 3) p.gs = owned(S, A).map((s) => s.id);
+      p.gs = p.gs.filter((i) => S.sys[i].owner === A);
+      p.money += p.gov >= 0 ? GOV_SAL[p.gov] : MIL_SAL[p.mil];
+      if (p.gov >= 0 && p.gov < 3) p.money += p.gs.reduce((a, i) => a + sysIncome(S.sys[i]), 0) * 0.3;
+      p.crew += (p.gov >= 0 ? GOV_CREW[p.gov] : MIL_CREW[p.mil]) + 0.1 * p.gs.reduce((a, i) => a + S.sys[i].pop, 0);
+      const add = Math.min(cap - p.fleet, cap * 0.15 * (p.rest ? 2 : 1), p.crew / 0.3);
+      if (add > 0) { p.fleet += add; p.crew -= add * 0.3; }
+      if (p.fleet < 1) { p.fleet = MIL_CAP[0]; p.trust -= 10; p.merit = Math.max(0, p.merit - 20); L(S, '旗艦被擊沉，獲救後重新配艦（信任 -10，戰功 -20）', 'bad'); }
+    } else {
+      const my = owned(S, X);
+      p.money += my.reduce((a, s) => a + sysIncome(s), 0);
+      for (const s of my) { if (s.sg) continue; const need = Math.max(0, p.garT - s.gar), pay = Math.min(need, Math.max(0, p.money) * 0.6); s.gar += pay; p.money -= pay; }
+      if (p.money < 0) p.money = 0;
+      const up = 0.03 * my.reduce((a, s) => a + s.gar, 0);   // 守軍維持費；付不出來守軍就減員
+      if (p.money >= up) p.money -= up;
+      else { const k = up > 0 ? Math.max(0, p.money) / up : 1; for (const s of my) s.gar *= 0.9 + 0.1 * k; if (up > 0.5) L(S, '資金不足，守軍減員', 'bad'); p.money = 0; }
+      p.crew += 0.15 * my.reduce((a, s) => a + s.pop, 0) + 0.5;
+      const add = Math.min(cap - p.fleet, cap * 0.2 * (p.rest ? 2 : 1), Math.max(0, p.money), p.crew / 0.5);
+      if (add > 0) { p.fleet += add; p.money -= add; p.crew -= add * 0.5; }
+    }
+    p.rest = false;
+    const cap2 = plCap(S);
+    if (p.fleet > cap2) { L(S, `艦隊超過上限，解編 ${Math.round(p.fleet - cap2)}`); p.fleet = cap2; }
+  }
+  events(S);
+  // 漂移
+  p.sup = p.sup.map((v) => clamp(v + (v > 30 ? -0.5 : v < 30 ? 0.5 : 0), 0, 100));
+  p.trust = clamp(p.trust + (p.trust < 50 ? 0.3 : 0), 0, 100);
+  if (S.rel[A][E] > -60) setRel(S, A, E, S.rel[A][E] - 1);
+  // 叛亂：大勢力的不滿星系可能叛變成海盜；海盜滅亡後會捲土重來
+  for (const f of [A, E, X]) {
+    const my = owned(S, f); if (my.length <= 14) continue;
+    if (rnd(S) < 0.03 * (my.length - 14)) {
+      const c = my.filter((s) => !s.cap && (s.unrest > 0 || s.prosp < 45)).sort((a, b) => a.prosp - b.prosp)[0];
+      if (c) { c.owner = P; c.gar = 30; c.unrest = 0; S.fac[P].field += 60; L(S, `${c.name}（${FN[f]}）爆發叛亂，倒向海盜`, f === p.aff || f === X ? 'bad' : ''); if (p.gs.includes(c.id)) p.gs = p.gs.filter((i) => i !== c.id); }
+    }
+  }
+  if (!owned(S, P).length && rnd(S) < 0.06) {
+    const c = S.sys.filter((s) => !s.cap && s.owner !== X && !p.gs.includes(s.id)).sort((a, b) => a.prosp - b.prosp)[0];
+    if (c) { const was = c.owner; c.owner = P; c.gar = 30; S.fac[P].field = 80; S.fac[P].money = 40; L(S, `海盜在 ${c.name}（原屬${FN[was]}）捲土重來`); }
+  }
+  // 厭戰：雙方都疲憊時自動停戰（玩家是元首時由玩家決定）
+  S.ww = S.ww.map((v) => Math.max(0, v - 0.4));
+  if (atWar(S, A, E) && S.ww[A] + S.ww[E] > 30 && !(p.aff === A && p.gov === 3) && rnd(S) < 0.15) { setRel(S, A, E, 25); L(S, `聯盟與帝國都已厭戰，簽訂停戰協定（厭戰 ${Math.round(S.ww[A])}／${Math.round(S.ww[E])}）`, 'ev'); S.ww[A] = S.ww[E] = 0; }
+  genOrders(S);
+  S.turn++;
+  S.hist.push(counts(S));
+}
+function events(S) {
+  const p = S.pl;
+  const wasWar = S._war == null ? true : S._war, nowWar = atWar(S, A, E);
+  if (wasWar && !nowWar) L(S, '聯盟與帝國停戰', 'ev'); if (!wasWar && nowWar) L(S, '聯盟與帝國重新開戰', 'ev'); S._war = nowWar;
+  if (p.aff === A) {
+    // 軍職晉升：考核通過 → 一定觸發
+    if (p.examPassed) {
+      p.examPassed = false;
+      if (p.decline) L(S, '你婉拒了晉升', 'ev');
+      else { const who = pick(S, NPC), why = pick(S, NPC_EXIT); p.mil++; L(S, `★ ${who}${why}，${MIL[p.mil]}出缺——你獲得晉升`, 'star'); first(S, MIL[p.mil]); if (p.mil === 2) unlock(S, '聯盟艦隊指揮官'); if (p.mil === 4) unlock(S, '聯盟元帥'); }
+    }
+    // 政務晉升：政績＋派系 → 一定觸發
+    if (p.gov >= 0 && p.gov < 3 && !p.decline) {
+      const rq = GOV_REQ[p.gov + 1], perf = govPerf(S), bi = p.sup.indexOf(Math.max(...p.sup));
+      if (perf >= rq.perf && p.sup[bi] >= rq.sup && S.turn - (p.since || 0) >= 10 * S.pace) {
+        p.gov++; p.backer = bi; p.since = S.turn;
+        if (p.gov === 1) p.gs = [...new Set([...p.gs, ...nearest(S, p.gs[0], owned(S, A), 3)])];
+        if (p.gov === 3) p.gs = owned(S, A).map((s) => s.id);
+        L(S, `★ ${SUP[bi]}推舉你為${GOV[p.gov]}${p.gov === 3 ? '（大選勝出）' : ''}`, 'star');
+        if (bi === 1) { setRel(S, A, E, S.rel[A][E] + 20); L(S, '鴿派路線：對帝國釋出善意（關係 +20）'); }
+        if (bi === 0) L(S, '鷹派路線：聯盟攻擊慾望提高');
+        if (bi === 2) L(S, '財團路線：聯盟收入 +15%');
+        first(S, GOV[p.gov]); if (p.gov === 3) { unlock(S, '聯盟元首'); S.policy.aggr = bi === 0 ? 0.5 : bi === 1 ? 0.2 : 0.35; }
+      }
+    }
+    if (p.gov >= 0 && p.gov < 3 && !p.gs.length) { p.gov = -1; p.trust -= 5; L(S, '轄區全部失守，被調回軍職', 'bad'); }
+    // 信任過低
+    if (p.trust <= 10) {
+      if (p.gov > 0) { p.gov--; p.trust = 30; L(S, `信任崩潰，降為${GOV[p.gov]}`, 'bad'); }
+      else if (p.gov === 0) { p.gov = -1; p.gs = []; p.trust = 30; L(S, '信任崩潰，撤去行星司令職務', 'bad'); }
+      else if (p.mil > 0) { p.mil--; p.trust = 30; p.merit = Math.min(p.merit, MIL_MERIT[p.mil + 1] * S.pace * 0.8); L(S, `信任崩潰，降為${MIL[p.mil]}`, 'bad'); }
+      else { L(S, '你被聯盟開除軍籍，帶著座艦流亡', 'bad'); defect(S); }
+    }
+    if (!owned(S, A).length) { L(S, '聯盟滅亡，你帶著殘部流亡', 'bad'); if (!S.ms.includes('亡國之將')) { S.ms.push('亡國之將'); L(S, '★ 里程碑：亡國之將', 'star'); } defect(S); }
+  }
+  if (p.aff === X) {
+    const my = owned(S, X).length;
+    p.status = my && p.fleet >= 1 ? '正常' : my ? '困守' : p.fleet >= 1 ? '流亡' : '終結';
+    if (p.fleet < 1) p.fleet = 0;
+    if (p.status === '終結') L(S, '你失去了所有艦隊與據點——本局終結', 'bad');
+    if (my >= 3) { unlock(S, '獨立領主'); first(S, '獨立領主(3星系)'); }
+    if (my >= 10) first(S, '獨立領主(10星系)');
+    p.peace = !atWar(S, X, A) && !atWar(S, X, E) ? p.peace + 1 : 0;
+  }
+  // 里程碑（不結束遊戲）
+  const c = counts(S), ms = (k) => { if (!S.ms.includes(k)) { S.ms.push(k); first(S, '★' + k); L(S, `★ 里程碑：${k}（可繼續遊玩）`, 'star'); } };
+  if (p.aff === A && !c[E] && !c[P]) ms(p.gov === 3 || p.mil === 4 ? '聯盟統一星系（統一之主）' : '聯盟統一星系（戰爭英雄）');
+  if (p.aff === X && c[X] >= S.sys.length * 0.9) ms('自立統一星系');
+  if (p.aff === X && p.peace >= 20 && c[X] >= 3) { const inc = [A, E, P, X].map((f) => facIncome(S, f)); if (inc[X] >= Math.max(...inc)) ms('最大中立勢力'); }
+  if (p.raid >= 1500) ms('傳奇劫掠者');
+}
+
+/* ───────── 單週推進與比較 ───────── */
+function metrics(S) {
+  const p = S.pl, c = counts(S);
+  return { 戰功: p.merit, 信任: p.trust, 鷹派: p.sup[0], 鴿派: p.sup[1], 財團: p.sup[2], 資金: p.money, 人口: p.crew, 艦隊: p.fleet, 政績: govPerf(S), 聯盟: c[A], 帝國: c[E], 海盜: c[P], 玩家: c[X], rank: rankLabel(S) };
+}
+function diff(a, b) {
+  const o = [];
+  for (const k of Object.keys(a)) { if (k === 'rank') continue; const d = Math.round(b[k] - a[k]); if (d) o.push({ k, d }); }
+  if (a.rank !== b.rank) o.unshift({ k: '身分', d: b.rank });
+  return o;
+}
+function doTurn(S, id) {
+  const pre = metrics(S); S.cur = S.cur || [];
+  const lab = (actions(S).find((a) => a.id === id) || { label: id }).label;
+  applyAction(S, id);
+  endTurn(S);
+  const entry = { t: S.turn - 1, act: lab, lines: S.cur, d: diff(pre, metrics(S)) };
+  S.cur = [];
+  if (S.log) { S.log.unshift(entry); if (S.log.length > 150) S.log.length = 150; }
+  return entry;
+}
+const clone = (S) => JSON.parse(JSON.stringify(S));
+
+/* ───────── 自動策略 ───────── */
+function autoBuild(S, mode) {
+  const p = S.pl;
+  const list = (p.aff === X ? owned(S, X) : p.gs.map((i) => S.sys[i])).filter(Boolean);
+  for (let n = 0; n < 4; n++) {
+    const city = list.filter((s) => s.tier < 4 && s.pop >= TIER_CAP[s.tier] * 0.7 && budget(S) >= 40 * (s.tier + 1) + 20).sort((a, b) => b.pop - a.pop)[0];
+    if (city) { build(S, city.id, 'city'); continue; }
+    const fr = list.filter((s) => frontier(S, s) && s.def < (mode === 'neutral' ? 8 : 5) && budget(S) >= 45)[0];
+    if (fr) { build(S, fr.id, 'def'); continue; }
+    const mg = list.filter((s) => s.tier >= 2)[0];
+    if (mg) { const k = ['elev', 'shield', 'dock', 'radar'].find((k2) => !mg.mega[k2] && budget(S) >= MEGA[k2].c + 30); if (k) { build(S, mg.id, k); continue; } }
+    break;
+  }
+  if (p.aff === X) {
+    const ec = expandCost(S);
+    if (p.money >= ec.money + 150 && p.crew >= ec.crew + 10 && p.fleet >= plCap(S) * 0.8) expand(S);
+    p.garT = clamp(20 + Math.floor(p.money / 100) * 5, 20, 80);   // 有錢就多養守軍
+  }
+}
+const has = (acts, k) => acts.find((a) => a.id === k && !a.dis);
+const STRATS = {
+  loyal: { n: '忠誠軍人', pick(S, a) { const p = S.pl; if (p.aff === A && p.fleet < plCap(S) * 0.35 && has(a, 'rest')) return 'rest'; return has(a, 'order') ? 'order' : xDefault(S, a); } },
+  hawk: { n: '鷹派軍人', pick(S, a) { const p = S.pl; if (p.order && p.order.exam) return 'order'; if (has(a, 'hawk') && p.sup[0] < 60 && p.fleet > plCap(S) * 0.5) return 'hawk'; return has(a, 'order') ? 'order' : xDefault(S, a); } },
+  pol: { n: '財團政客', pick(S, a) { const p = S.pl; if (p.aff === A && p.gov < 0) return has(a, 'togov') ? 'togov' : has(a, 'order') ? 'order' : 'rest'; autoBuild(S); if (has(a, 'biz')) return 'biz'; return has(a, 'govwork') ? 'govwork' : xDefault(S, a); } },
+  rebel: { n: '自立軍閥', pick(S, a) { const p = S.pl; if (p.aff === A) return p.mil >= 3 ? 'defect' : has(a, 'order') ? 'order' : 'rest'; autoBuild(S); return xDefault(S, a); } },
+  // 自立高手：方面軍司令時叛變；只和最弱的大勢力開戰、和另一方保持和平；錢不夠打就雇傭兵補差額
+  warlord: { n: '自立高手', pick(S, a) {
+    const p = S.pl;
+    if (p.aff === A) { if (p.mil >= 3) return 'defect'; if (p.order && p.order.exam) return 'order'; if (has(a, 'hawk') && p.sup[0] < 60 && p.fleet > plCap(S) * 0.5) return 'hawk'; if (p.fleet < plCap(S) * 0.35) return 'rest'; return has(a, 'order') ? 'order' : 'rest'; }
+    autoBuild(S); p.garT = clamp(25 + Math.floor(p.money / 80) * 5, 25, 100);
+    const alive = [A, E].filter((f) => owned(S, f).length), tf = alive.sort((x, y) => totalPow(S, x) - totalPow(S, y))[0];
+    if (tf != null && S.rel[X][tf] >= 0 && p.fleet > plCap(S) * 0.8) return 'xwar:' + tf;
+    for (const f of alive) if (f !== tf && S.rel[X][f] < 0 && p.money >= 50) { const d = a.find((x) => x.id === 'diplo:' + f); if (d) return d.id; }
+    let tg = enemyTargets(S, X).filter((s) => s.owner === tf || s.owner === P || s.owner === N).sort((x, y) => defPow(S, x) - defPow(S, y))[0] || enemyTargets(S, X).sort((x, y) => defPow(S, x) - defPow(S, y))[0];
+    if (!owned(S, X).length) { const at = a.find((x) => x.id.startsWith('xatk')); if (at) { const s = S.sys[+at.id.split(':')[1]], need = Math.ceil(defPow(S, s) * 1.5 - p.fleet * p.skill); if (need > 0) hireMerc(S, Math.min(need, Math.floor(p.money / 2))); return at.id; } const m = a.find((x) => x.id.startsWith('merc')); return m ? m.id : 'rest'; }
+    if (tg) { const need = Math.ceil(defPow(S, tg) * 1.5 - p.fleet * p.skill - (p.merc || 0)); if (need <= 0) return 'xatk:' + tg.id; if (p.money >= need * MERC_PRICE + 60 && p.fleet > plCap(S) * 0.5) { hireMerc(S, need); return 'xatk:' + tg.id; } }
+    if (p.fleet < plCap(S) * 0.8) return 'rest';
+    const m = a.find((x) => x.id.startsWith('merc')); return m ? m.id : 'rest';
+  } },
+  neutral: { n: '中立建設者', pick(S, a) { const p = S.pl; if (p.aff === A) { if (p.gov < 0) return has(a, 'togov') ? 'togov' : has(a, 'order') ? 'order' : 'rest'; if (p.gs.length >= 3 || p.gov >= 1) return 'defect'; return has(a, 'biz') ? 'biz' : 'govwork'; } autoBuild(S, 'neutral'); const d = a.find((x) => x.id.startsWith('diplo') && !x.dis); if (d) return d.id; if (owned(S, X).length < 4) return xDefault(S, a); const m = a.find((x) => x.id.startsWith('merc')); return m ? m.id : 'rest'; } },
+};
+// 自動策略共用：先試特種部隊突襲（不佔行動），自己的星系被圍且打得過就先解圍，再交給策略
+function autoSF(S) {
+  if (!S.rules.flow || !S.rules.raid) return;
+  const p = S.pl, c = S.sys.filter((s) => s.sg && s.sg.f === p.aff);
+  if (p.order && p.order.kind === 'attack') c.push(S.sys[p.order.t]);
+  c.push(...enemyTargets(S, p.aff === X ? X : A).sort((x, y) => defPow(S, x) - defPow(S, y)).slice(0, 3));
+  const t = c.find((s) => canSF(S, s) && groundPow(S, s) > 20);
+  if (t) sfRaid(S, t.id);
+}
+function autoPick(S, key) {
+  autoSF(S);
+  const a = actions(S), p = S.pl;
+  if (p.aff === X && S.rules.support) {   // 自己的圍城可能被解圍、又不打算強攻：艦隊留下護航
+    const sg = S.sys.filter((s) => s.sg && s.sg.f === X).map((s) => ({ s, threat: s.owner < X ? S.fac[s.owner].field * 0.5 : 0 })).find((o) => o.threat > o.s.sg.force && groundPow(S, o.s) * 1.3 > p.fleet * p.skill + o.s.sg.force);
+    if (sg) return 'sgguard:' + sg.s.id;
+  }
+  if (p.aff === X) { const rv = a.filter((x) => x.id.startsWith('relieve')).map((x) => S.sys[+x.id.split(':')[1]]).find((s) => p.fleet * p.skill + (p.merc || 0) > s.sg.force * 0.9); if (rv) return 'relieve:' + rv.id; }
+  return STRATS[key].pick(S, a);
+}
+function xDefault(S, a) {
+  const p = S.pl;
+  if (p.aff !== X) return has(a, 'order') ? 'order' : 'rest';
+  const atk = a.filter((x) => x.id.startsWith('xatk')).map((x) => ({ x, d: defPow(S, S.sys[+x.id.split(':')[1]]) })).sort((u, v) => u.d - v.d)[0];
+  if (atk && p.fleet * p.skill + (p.merc || 0) > atk.d * 1.3) return atk.x.id;
+  // 兵力不夠但錢夠：雇傭兵補足差額再打
+  if (atk && p.fleet >= plCap(S) * 0.6) { const need = Math.ceil(atk.d * 1.3 - p.fleet * p.skill - (p.merc || 0)); if (need > 0 && need <= p.fleet * 2 && p.money >= need * MERC_PRICE + 100) { hireMerc(S, need); return atk.x.id; } }
+  const m = a.find((x) => x.id.startsWith('merc'));
+  if (p.fleet < plCap(S) * 0.6 && (p.money >= 40 || !m)) return 'rest';
+  return m ? m.id : 'rest';
+}
+
+/* ───────── 建設 ───────── */
+function canBuild(S, s) { const p = S.pl; return (p.aff === X && s.owner === X) || (p.aff === A && s.owner === A && p.gs.includes(s.id)); }
+function cityCost(s) { return 40 * (s.tier + 1); }
+function build(S, sid, k) {
+  const s = S.sys[sid];
+  if (k === 'city') { if (s.tier >= 4 || s.pop < TIER_CAP[s.tier] * 0.7 || budget(S) < cityCost(s)) return; spend(S, cityCost(s)); s.tier++; L(S, `建設：${s.name} 升級為${TIER[s.tier]}`); }
+  else if (k === 'def') { if (s.def >= 10 || budget(S) < 25) return; spend(S, 25); s.def++; L(S, `建設：${s.name} 防衛建築 +1`); }
+  else {
+    if (s.mega[k] || s.tier < 2 || budget(S) < MEGA[k].c) return;
+    if (k === 'gate') {
+      const nb = new Set(adj(S, sid)); const t = S.sys.filter((o) => o.id !== sid && !nb.has(o.id) && Math.hypot(o.x - s.x, o.y - s.y) < 40).sort((a, b) => Math.hypot(a.x - s.x, a.y - s.y) - Math.hypot(b.x - s.x, b.y - s.y))[0];
+      if (!t) return; S.edges.push([sid, t.id, 'g']); L(S, `建設：${s.name} 跳躍門開通，連往 ${t.name}`);
+    } else L(S, `建設：${s.name} ${MEGA[k].n}`);
+    spend(S, MEGA[k].c); s.mega[k] = 1;
+  }
+}
+
+/* ───────── 擴編與傭兵（不佔行動） ───────── */
+const expandCost = (S) => ({ money: 80 * ((S.pl.expand || 0) + 1), crew: 20 });
+function expand(S) {
+  const c = expandCost(S), p = S.pl;
+  if (p.aff !== X || p.money < c.money || p.crew < c.crew) return false;
+  p.money -= c.money; p.crew -= c.crew; p.expand = (p.expand || 0) + 1;
+  L(S, `擴編：艦隊上限 +30（第 ${p.expand} 次）`); return true;
+}
+const MERC_PRICE = 2;
+function hireMerc(S, n) {
+  const p = S.pl; n = Math.floor(n); if (!(n > 0) || p.money < n * MERC_PRICE) return false;
+  p.money -= n * MERC_PRICE; p.merc = (p.merc || 0) + n;
+  L(S, `雇用傭兵 ${n}（花費 ${n * MERC_PRICE}，只參加下一場進攻）`); return true;
+}
+const totalPow = (S, f) => (f === X ? S.pl.fleet : f === N ? 0 : S.fac[f].field) + owned(S, f).reduce((a, s) => a + s.gar, 0);
+
+/* ───────── 節奏模擬 ───────── */
+function paceRun(stratKey, runs, turns) {
+  const keys = ['分隊長', '艦隊指揮官', '方面軍司令', '元帥', '行星司令', '星區總督', '議員', '元首', '自立', '獨立領主(3星系)', '獨立領主(10星系)'];
+  const agg = {}; let dead = 0; const msK = new Set();
+  for (let r = 0; r < runs; r++) {
+    const S = newGame({ ...gameOpts(), id: 'cap', seed: 1000 + r });
+    S.log = null;
+    for (let t = 0; t < turns && S.pl.status !== '終結'; t++) { const id = autoPick(S, stratKey); doTurn(S, id); }
+    for (const [k, v] of Object.entries(S.firsts)) { (agg[k] = agg[k] || []).push(v); if (k.startsWith('★')) msK.add(k); }
+    if (S.pl.status === '終結') dead++;
+  }
+  const rows = [...keys, ...msK].filter((k) => agg[k]).map((k) => { const v = agg[k].sort((a, b) => a - b); return `<tr><td>${k}</td><td>${Math.round(v.length / runs * 100)}%</td><td>${v[Math.floor(v.length / 2)]}</td><td>${v[0]}–${v[v.length - 1]}</td></tr>`; });
+  return `<table><tr><th>達成</th><th>達成率</th><th>中位週數</th><th>範圍</th></tr>${rows.join('') || '<tr><td colspan=4>沒有任何達成</td></tr>'}</table><p class="rules">本局終結率 ${Math.round(dead / runs * 100)}%</p>`;
+}
+
+/* ───────── 介面 ───────── */
+const $ = (id) => document.getElementById(id);
+let S = null; const undo = [];
+const DKEYS = [['dStr', 'str'], ['dAggr', 'aggr'], ['dInc', 'inc'], ['dSmart', 'smart'], ['dGang', 'gang'], ['dLoss', 'loss']];
+function fillDiff(k) { const d = DIFF[k]; DKEYS.forEach(([id, key]) => { $(id).value = d[key]; }); }
+function gameOpts() { const diff = {}; DKEYS.forEach(([id, key]) => { diff[key] = +$(id).value; }); return { id: $('optId').value, seed: +$('optSeed').value, diff, pace: +$('optPace').value || 1, skill: +$('optSkill').value || 1 }; }
+function start() { S = newGame(gameOpts()); undo.length = 0; $('cardCmp').hidden = true; render(); }
+function syncLive() { if (!S) return; const o = gameOpts(); S.diff = o.diff; S.pace = o.pace; S.pl.skill = o.skill; S.pl.decline = $('optDecline').checked; }
+
+function bar(v, max, col) { return `<div class="bar"><i style="width:${clamp(v / max * 100, 0, 100)}%;${col ? `background:${col}` : ''}"></i></div>`; }
+function reqBox() {
+  const p = S.pl, ok = (b) => `<span class="${b ? 'ok' : 'no'}">${b ? '✔' : '✘'}</span>`;
+  if (p.aff !== A) return `<div class="req">狀態：<b>${p.status}</b>。只有艦隊和據點全部失去才會終結。${p.status === '流亡' ? '找一個守備薄弱的星系重新立足。' : ''}</div>`;
+  if (p.gov >= 0) {
+    if (p.gov === 3) return '<div class="req">你已是元首。</div>';
+    const rq = GOV_REQ[p.gov + 1], perf = govPerf(S), bi = p.sup.indexOf(Math.max(...p.sup));
+    const ten = S.turn - (p.since || 0), tenReq = Math.round(10 * S.pace);
+    return `<div class="req">下一階：<b>${GOV[p.gov + 1]}</b>（條件達成即觸發推舉）<br>${ok(ten >= tenReq)} 任期 ${ten} / ${tenReq} 週<br>${ok(perf >= rq.perf)} 轄區平均繁榮 ${Math.round(perf)} / ${rq.perf}<br>${ok(p.sup[bi] >= rq.sup)} 任一派系支持 ${Math.round(p.sup[bi])}（${SUP[bi]}）/ ${rq.sup}<br><small>推舉你的派系會決定聯盟路線</small></div>`;
+  }
+  if (p.mil >= 4) return '<div class="req">你已是元帥。轉任政務或自立可以繼續往上。</div>';
+  const nx = p.mil + 1, req = Math.round(MIL_MERIT[nx] * S.pace);
+  return `<div class="req">下一階：<b>${MIL[nx]}</b><br>${ok(p.merit >= req)} 戰功 ${Math.round(p.merit)} / ${req}${nx === 4 ? `<br>${ok(p.sup[0] >= 50)} 鷹派支持 ${Math.round(p.sup[0])} / 50` : ''}<br>→ 條件達成後，上級會指派<b>考核任務</b>，完成即晉升</div>`;
+}
+function milBox() {
+  const p = S.pl, ec = expandCost(S);
+  let h = '<div class="req"><b>軍備（不佔本週行動）</b><br>';
+  h += `傭兵待命：${Math.round(p.merc || 0)}　${[50, 100, 200].map((n) => `<button data-x="merc:${n}" ${p.money < n * MERC_PRICE ? 'disabled' : ''}>雇 ${n}（${n * MERC_PRICE}）</button>`).join(' ')}<br><small>傭兵只參加下一場進攻，打完就離開</small>`;
+  if (p.aff === X) {
+    h += `<br><button data-x="expand" ${p.money < ec.money || p.crew < ec.crew ? 'disabled' : ''}>擴編 +30 上限（資金 ${ec.money}、人口 ${ec.crew}）</button> 已擴編 ${p.expand || 0} 次`;
+    h += `<br><label>每個星系守軍目標 <input id="garT" type="number" step="10" min="0" value="${p.garT}"></label><br><small>守軍每週維持費 0.03／點（目前 ${r1(0.03 * owned(S, X).reduce((a, s) => a + s.gar, 0))}）</small>`;
+  }
+  return h + '</div>';
+}
+function render() {
+  const p = S.pl, cap = plCap(S);
+  $('cardPl').innerHTML = `<h2>第 ${S.turn} 週　${rankLabel(S)}</h2>
+  <dl class="kv">
+    <dt>戰功</dt><dd>${Math.round(p.merit)}</dd>
+    <dt>${p.gov === 3 ? '民意' : '上級信任'}</dt><dd>${Math.round(p.trust)}${p.aff === A ? bar(p.trust, 100) : ''}</dd>
+    ${p.aff === A ? SUP.map((n, i) => `<dt>${n}</dt><dd>${Math.round(p.sup[i])}${p.backer === i ? ' <span class="tag">靠山</span>' : ''}${bar(p.sup[i], 100)}</dd>`).join('') : ''}
+    <dt>資金</dt><dd>${Math.round(p.money)}${p.gov === 3 ? `（國庫 ${Math.round(S.fac[A].money)}）` : ''}</dd>
+    <dt>人口（船員）</dt><dd>${r1(p.crew)}</dd>
+    <dt>直屬艦隊</dt><dd>${Math.round(p.fleet)} / ${cap}${bar(p.fleet, cap)}</dd>
+    ${p.gs.length ? `<dt>轄區</dt><dd>${p.gs.map((i) => S.sys[i].name).join('、')}</dd>` : ''}
+    ${S.ms.length ? `<dt>里程碑</dt><dd>${S.ms.map((m) => `<span class="tag">${m}</span>`).join('')}</dd>` : ''}
+    ${S.unlock.length ? `<dt>週目解鎖</dt><dd>${S.unlock.map((m) => `<span class="tag">${m}</span>`).join('')}</dd>` : ''}
+  </dl>${reqBox()}${p.status === '終結' ? '' : milBox()}`;
+  const acts = actions(S);
+  $('acts').innerHTML = acts.length ? acts.map((a) => `<button class="act" data-act="${a.id}" ${a.dis ? 'disabled' : ''}><b>${a.label}</b><small>${a.desc}</small></button>`).join('') : '<p class="rules">本局已終結。</p>';
+  // 勢力
+  const c = counts(S);
+  $('facTbl').innerHTML = `<table><tr><th>勢力</th><th>星系</th><th>野戰艦隊</th><th title="野戰艦隊（玩家為直屬艦隊）＋所有星系守軍">總戰力</th><th>國庫</th><th>收入/週</th><th>與${p.aff === X ? '你' : '聯盟'}關係</th></tr>${[A, E, P, X, N].filter((f) => c[f] || f < X).map((f) => `<tr><td><span class="dot" style="background:${FC[f]}"></span>${FN[f]}</td><td>${c[f]}</td><td>${f === X ? Math.round(p.fleet) : f === N ? '-' : Math.round(S.fac[f].field)}</td><td>${f === N ? '-' : Math.round(totalPow(S, f))}</td><td>${f === X ? Math.round(p.money) : f === N ? '-' : Math.round(S.fac[f].money)}</td><td>${Math.round(facIncome(S, f))}</td><td>${f === N || f === p.aff ? '-' : S.rel[p.aff][f]}${atWar(S, p.aff, f) ? ' 交戰' : ''}</td></tr>`).join('')}</table>`;
+  drawChart();
+  // 星系
+  const bud = budget(S);
+  $('sysTbl').innerHTML = `<table><tr><th>星系</th><th>勢力</th><th>人口</th><th>都市</th><th>繁榮</th><th>防衛</th><th>守軍</th><th>防禦力</th><th>巨構</th><th title="第一版固定排佈：依都市等階×繁榮生成的建築模型數">模型數</th><th>建設</th></tr>${S.sys.map((s) => {
+    const mine = canBuild(S, s), models = Math.round(TIER_MODELS[s.tier] * (0.4 + s.prosp / 100 * 0.8));
+    let b = '';
+    if (mine) {
+      b = `<span class="bld"><button data-b="${s.id}:city" ${s.tier >= 4 || s.pop < TIER_CAP[s.tier] * 0.7 || bud < cityCost(s) ? 'disabled' : ''} title="需要人口達上限 70%">都市 ${cityCost(s)}</button> <button data-b="${s.id}:def" ${s.def >= 10 || bud < 25 ? 'disabled' : ''}>防衛 25</button> ${Object.keys(MEGA).filter((k) => !s.mega[k]).map((k) => `<button data-b="${s.id}:${k}" ${s.tier < 2 || bud < MEGA[k].c ? 'disabled' : ''} title="需要城鎮以上">${MEGA[k].n} ${MEGA[k].c}</button>`).join(' ')}</span>`;
+    }
+    return `<tr><td>${s.cap ? '◆' : ''}${s.name}${p.gs.includes(s.id) ? ' <span class="tag">轄</span>' : ''}</td><td><span class="dot" style="background:${FC[s.owner]}"></span>${FN[s.owner]}</td><td>${s.pop}/${TIER_CAP[s.tier]}</td><td>${TIER[s.tier]}</td><td>${s.prosp}</td><td>${s.def}</td><td>${Math.round(s.gar)}</td><td>${Math.round(defPow(S, s))}</td><td>${Object.keys(s.mega).map((k) => MEGA[k].n.slice(-2)).join(' ')}</td><td>城${models}／防${s.def}／巨${Object.keys(s.mega).length}</td><td style="text-align:left">${b}</td></tr>`;
+  }).join('')}</table>`;
+  // 紀錄
+  $('log').innerHTML = S.log.map((e) => `<div class="turn"><h3>第 ${e.t} 週：${e.act}</h3>${e.lines.map((l) => `<p class="${l.c}">${l.t}</p>`).join('')}<p class="delta">${deltaHtml(e.d)}</p></div>`).join('');
+  $('btnUndo').disabled = !undo.length;
+}
+function deltaHtml(d) { return d.map((x) => typeof x.d === 'string' ? `<b>${x.k}→${x.d}</b>` : `<span class="${x.d > 0 ? 'up' : 'dn'}">${x.k}${x.d > 0 ? '+' : ''}${x.d}</span>`).join('　') || '<span>無變化</span>'; }
+function drawChart() {
+  const h = S.hist.slice(-200), n = h.length, W = 300, H = 80;
+  if (n < 2) { $('chart').innerHTML = ''; return; }
+  const x = (i) => i / (n - 1) * (W - 20) + 16, y = (v) => H - v / 24 * (H - 6);
+  let out = `<text x="0" y="8">24</text><text x="0" y="${H}">0</text>`;
+  [A, E, P, X, N].forEach((f) => { if (h.some((r) => r[f])) out += `<polyline fill="none" stroke="${FC[f]}" stroke-width="1.5" points="${h.map((r, i) => `${x(i).toFixed(1)},${y(r[f]).toFixed(1)}`).join(' ')}"/>`; });
+  out += `<text x="${W - 60}" y="${H + 9}">星系數／週</text>`;
+  $('chart').innerHTML = out;
+}
+function compareAll() {
+  syncLive();
+  const acts = actions(S).filter((a) => !a.dis);
+  const rows = acts.map((a) => { const C = clone(S); C.log = []; const e = doTurn(C, a.id); return `<tr><td>${a.label}</td><td style="text-align:left;white-space:normal">${deltaHtml(e.d)}</td><td style="text-align:left;white-space:normal;color:var(--mut)">${e.lines.slice(0, 3).map((l) => l.t).join('；')}</td></tr>`; });
+  $('cardCmp').hidden = false;
+  $('cardCmp').innerHTML = `<h2>第 ${S.turn} 週：各選項的結果（同一個亂數，結果就是實際會發生的）</h2><table class="cmp"><tr><th>選項</th><th>變化</th><th>事件</th></tr>${rows.join('')}</table>`;
+}
+function rulesList() {
+  return [
+    '<b>升遷（軍職）</b>：戰功達門檻（分隊長 60／艦隊指揮官 180／方面軍司令 400／元帥 800，乘以「升遷節奏」；元帥另需鷹派 50）→ 上級指派考核任務 → 打贏就一定晉升，事件會說明是哪位 NPC 讓出位置。',
+    '<b>升遷（政務）</b>：任期滿 10 週（乘以升遷節奏）＋轄區平均繁榮＋任一派系支持達標，就一定觸發推舉（星區總督 55/45、議員 62/60、元首 68/75）。推舉你的派系決定聯盟路線：鷹派＝更好戰，鴿派＝對帝國示好，財團＝收入 +15%。',
+    '<b>戰功</b>：打贏 = (10 + 30 × 你的兵力佔比) × (首都 2 倍)，執行命令再 +10。官階越高，你的兵力佔比越大，戰功越多。',
+    '<b>信任</b>：執行命令 +5（考核 +8），放棄命令 -4，擅自行動 -2，劫掠 -3，轄區失守 -12。≤10 會降職，艦長被降到底會被開除並流亡。',
+    '<b>戰鬥</b>：攻方 × 0.85–1.15 對比防方 × 0.85–1.15。防禦力 = 守軍 + 防衛建築 × 8（護盾 ×1.5）+ 所屬勢力野戰艦隊 30%（雷達 ×1.3）。攻下後繁榮 -25、防衛減半、巨構各 30% 機率倒塌（護盾降到 15%）。',
+    '<b>經濟</b>：星系收入 = 人口 × (0.4 + 繁榮/100) × 0.6（軌道電梯 ×1.15）。人口上限由都市等階決定（2/4/8/14/22）。繁榮趨向 25 + 等階×12 + 防衛×2（最多 6）+ 電梯 8 + 首都 10，近 3 週被攻擊則 -20。',
+    '<b>玩家資源</b>：資金＝薪俸 + 轄區收入 30%（自立時為 100%）；人口＝船員，艦隊補充每點消耗 0.3（自立 0.5，並花費資金）。',
+    '<b>難度</b>：AI 強度、攻擊慾望、資源產出只作用於「與玩家敵對」的勢力。另外加了：決策品質（AI 挑最佳目標的機率）、聯手壓制（某勢力佔比超過門檻時，其他勢力優先打它）、玩家損失倍率。',
+    '<b>軍備（自立）</b>：擴編＝資金 80×(次數+1)＋人口 20，艦隊上限 +30。傭兵＝每點 2 資金，只參加下一場進攻（聯盟時期也能雇）。守軍目標可自訂，每點每週維持費 0.03。艦隊超過上限（例如失去星系）會解編多出的部分。',
+    '<b>防止滾雪球</b>：新佔領的星系動盪 8 週（收入 ×0.3）；星系超過 8 個，每多一個艦隊維持成本 +0.3%／週；星系少於 8 個的勢力造艦效率提高（每少一個 +7%）。',
+    '<b>厭戰與停戰</b>：失去星系厭戰 +4，進攻失敗 +1.5，每週 -0.4。聯盟與帝國厭戰合計超過 30 時，每週 15% 機率自動停戰（關係設為 +25，之後每週 -1，約 25 週後重新開戰）。玩家是元首時不會自動停戰。',
+    '<b>叛亂</b>：勢力超過 14 個星系時，每多一個星系，每週有 3% 機率讓一個繁榮低或動盪中的星系叛變成海盜。海盜被消滅後，每週 6% 機率在最貧困的星系捲土重來。',
+    '<b>失敗</b>：只有自立後艦隊與星系都歸零才會終結。聯盟艦長的座艦被擊沉會獲救並重新配艦（信任與戰功受罰）。',
+    '<b>里程碑</b>：聯盟統一、自立統一（90% 星系）、最大中立（與聯盟和帝國和平 20 週、收入第一）、傳奇劫掠者（劫掠 1500）。達成後可以繼續玩。',
+  ].map((t) => `<li>${t}</li>`).join('');
+}
+
+/* ───────── 綁定 ───────── */
+$('optDiff').innerHTML = Object.entries(DIFF).map(([k, d]) => `<option value="${k}" ${k === 'normal' ? 'selected' : ''}>${d.n}</option>`).join('');
+const stratOpts = Object.entries(STRATS).map(([k, s]) => `<option value="${k}">${s.n}</option>`).join('');
+$('optStrat').innerHTML = stratOpts; $('pStrat').innerHTML = stratOpts;
+fillDiff('normal');
+$('optDiff').onchange = () => { fillDiff($('optDiff').value); syncLive(); };
+DKEYS.forEach(([id]) => { $(id).onchange = syncLive; });
+['optPace', 'optSkill', 'optDecline'].forEach((id) => { $(id).onchange = () => { syncLive(); render(); }; });
+$('btnNew').onclick = start;
+$('rules').innerHTML = rulesList();
+document.addEventListener('click', (ev) => {
+  const a = ev.target.closest('[data-act]'), b = ev.target.closest('[data-b]'), au = ev.target.closest('[data-auto]'), xb = ev.target.closest('[data-x]');
+  if (xb && !xb.disabled) { syncLive(); undo.push(JSON.stringify(S)); S.cur = S.cur || []; const [k, n] = xb.dataset.x.split(':'); if (k === 'expand') expand(S); else hireMerc(S, +n); render(); }
+  if (a && !a.disabled) { syncLive(); undo.push(JSON.stringify(S)); if (undo.length > 60) undo.shift(); doTurn(S, a.dataset.act); $('cardCmp').hidden = true; render(); }
+  if (b && !b.disabled) { syncLive(); undo.push(JSON.stringify(S)); const [sid, k] = b.dataset.b.split(':'); S.cur = S.cur || []; build(S, +sid, k); render(); }
+  if (au) { syncLive(); undo.push(JSON.stringify(S)); const sk = $('optStrat').value; for (let i = 0; i < +au.dataset.auto && S.pl.status !== '終結'; i++) { const id = autoPick(S, sk); doTurn(S, id); } $('cardCmp').hidden = true; render(); }
+});
+document.addEventListener('change', (ev) => { if (ev.target.id === 'garT' && S) { S.pl.garT = Math.max(0, +ev.target.value || 0); render(); } });
+$('btnUndo').onclick =() => { if (!undo.length) return; S = JSON.parse(undo.pop()); $('cardCmp').hidden = true; render(); };
+$('btnCmp').onclick = compareAll;
+$('btnPace').onclick = () => { $('paceOut').innerHTML = '計算中…'; setTimeout(() => { const t0 = performance.now(); $('paceOut').innerHTML = paceRun($('pStrat').value, +$('pRuns').value, +$('pTurns').value) + `<p class="rules">耗時 ${Math.round(performance.now() - t0)} ms</p>`; }, 20); };
+start();
+</script>
+</body>
+</html>
