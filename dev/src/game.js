@@ -682,6 +682,7 @@ function gameTick() {
   const t = U.uTime.value;
   if (battleSetup.rescue) rescueTick(t);
   if (battleSetup.doom) doomTick(t);
+  if (SIM.m && SIM.m.career && GAME.sc && GAME.sc.sim && !GAME.replaying) smbTick(t);   // 星海生涯的戰鬥：分波補位、躍遷撤退
   for (const f of fleets) if (f.reserve && f.activateAt != null && t >= f.activateAt) activateReserve(f);
   // 倒戈的觸發（劇情）：敵軍剩下的比例夠低、或快到原本的倒戈秒數，就排定 lead 秒後倒戈（defT＝倒戈的時間，台詞跟著它走）
   const DF = battleSetup.defect;
@@ -1479,6 +1480,7 @@ function awardXP(R, st) {
   return out;
 }
 function showReport() {
+  if (GAME.sc && GAME.sc.sim && SIM.m && SIM.m.career) { smuBattleDone(); return; }   // 星海生涯：結果寫回星圖
   if (GAME.sc && GAME.sc.sim) { showSimReport(); return; }
   if (GAME.sc && GAME.sc.tut) { tutReport(); return; }   // 教學：不給經驗、不上傳紀錄
   if (GAME.sc && GAME.sc.mp) { mpReport(); return; }   // 多人：依自己這一方的角度   // 模擬室：不給經驗、不上傳紀錄

@@ -19,7 +19,7 @@ function simFixSides(m) {
   return m;
 }
 const simSideFac = (m, side) => (side >= 2 ? (m.sides[side - 2] || { fac: 1 }).fac : side ? 1 - m.fac : m.fac);
-const simSideName = (m, side) => (side >= 2 ? ((m.sides && m.sides[side - 2] && m.sides[side - 2].name) || FACTION_NAME[simSideFac(m, side)] + `（第 ${side + 1} 方）`) : FACTION_NAME[side ? 1 - m.fac : m.fac]);
+const simSideName = (m, side) => (m.names && m.names[side] ? m.names[side] : side >= 2 ? ((m.sides && m.sides[side - 2] && m.sides[side - 2].name) || FACTION_NAME[simSideFac(m, side)] + `（第 ${side + 1} 方）`) : FACTION_NAME[side ? 1 - m.fac : m.fac]);
 const simRel = (m, a, b) => { if (a === b) return 2; const e = (m.rel || []).find(([x, y]) => (x === a && y === b) || (x === b && y === a)); return e ? e[2] : 0; };
 const SIM_SPOT = [null, null, [700, 0, -Math.PI / 2], [-700, 0, Math.PI / 2], [560, -560, -Math.PI * 3 / 4], [-560, 560, Math.PI / 4], [560, 560, -Math.PI / 4], [-560, -560, Math.PI * 3 / 4]];   // 第三方以後的預設位置（地圖四周）
 // 戰術面板、艦橋共用：一般作戰＝剩餘時間；模擬室（無時限）＝整場的經過時間
@@ -70,6 +70,7 @@ function simSetup(m, edit) {
       const c = f.cmdr, tal = c.mode === 'tal' ? { ...c.tal } : null;
       return { side: f.side, name: f.name, ax: f.x, az: f.z, ay: f.y || 0, h: f.h, formation: f.formation, orderly: !!f.orderly, layers: f.layers || 1, comp: f.comp.slice(), hangar: f.hangar.slice(),
         commander: f.supply || f.noCmdr ? null : { ...(c.base ? { id: c.base } : {}), name: c.name || '指揮官', title: c.title || '', trait: c.trait, level: Math.max(1, c.level | 0), ...(tal ? { tal } : {}), skills: c.skills.filter((s) => SKILLS[s]) },
+        ...(f.fac != null ? { fac: f.fac } : {}),   // 艦隊自己的陣營（星海生涯的海盜＝傭兵的船）
         ai: f.ai ? { ...f.ai } : null, reserve: !edit && !!f.reserve, activateAt: !edit && f.reserve ? Math.max(1, +f.at || 0) : null,
         supply: !!f.supply, follow: f.supply ? (f.follow != null ? f.follow : -1) : undefined, keep: !edit && f.keep ? f.keep : null, cap: !!f.cap, capRole: f.capRole || null };
     }),

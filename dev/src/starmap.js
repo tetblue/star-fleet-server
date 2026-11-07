@@ -69,6 +69,7 @@ function smShipV() {
   for (const v of _smShipV) v.v = Math.sqrt(v.a * v.d) / ev;   // 戰力值：護衛艦＝1
   return _smShipV;
 }
+const smRep = () => (typeof opts !== 'undefined' && opts.rep) || 5;   // 戰場上一個圖示代表幾艘（星圖存圖示數，顯示時乘上這個）
 const smShips = (c) => c.reduce((a, n) => a + n, 0);
 const smCost = (c) => c.reduce((a, n, t) => a + n * smShipV()[t].cost, 0);
 const smVal = (c) => c.reduce((a, n, t) => a + n * smShipV()[t].v, 0);   // 戰力值（護衛艦＝1）
@@ -289,6 +290,10 @@ function smFight(S, s, fa, fb) {
       }
     }
   }
+  return smFightEnd(S, s, F, sides, gone, fa, fb);
+}
+// 戰鬥結束（計算或真打共用）：撤退的艦隊離開、判定勝負、戰場回收與維修、厭戰、日誌
+function smFightEnd(S, s, F, sides, gone, fa, fb) {
   // 撤退的艦隊：躍遷到相鄰的己方（或不敵對）星系
   for (const side of [0, 1]) for (const f of gone[side]) {
     if (smShips(f.comp) <= 0) continue;
@@ -311,10 +316,31 @@ function smFight(S, s, fa, fb) {
   // 厭戰、日誌
   for (const [fac, k] of [[fa, 0], [fb, 1]]) S.fac[fac].ww += smShips(F.lost[k]) / 200;
   const nm = (k) => SM_FAC[k ? fb : fa].name;
-  if (F.pl || s.owner === S.pl.fac) smLog(S, `${s.name}：${nm(0)} 對 ${nm(1)}，${F.win < 0 ? '雙方都離開了戰場' : `${nm(F.win)}獲勝`}（損失 ${smShips(F.lost[0])}／${smShips(F.lost[1])} 艘）`, F.pl ? (F.win >= 0 && (F.win ? fb : fa) === S.pl.fac ? 'good' : 'bad') : '');
+  if (F.pl || s.owner === S.pl.fac) smLog(S, `${s.name}：${nm(0)} 對 ${nm(1)}，${F.win < 0 ? '雙方都離開了戰場' : `${nm(F.win)}獲勝`}（損失 ${smShips(F.lost[0]) * smRep()}／${smShips(F.lost[1]) * smRep()} 艘）`, F.pl ? (F.win >= 0 && (F.win ? fb : fa) === S.pl.fac ? 'good' : 'bad') : '');
   // 玩家的艦隊全滅：記下
   for (const f of sides.flat()) if (f.pl && smShips(f.comp) <= 0) { S.pl.dead++; smLog(S, `${f.name} 全軍覆沒`, 'bad'); }
   return F;
+}
+
+// 真打的戰鬥（親自指揮、觀戰）結束後寫回星圖：res.fleets＝[{ id, comp: 剩下的各艦種, gone: 躍遷撤退了 }]
+function smApplyReal(S, sid, fa, fb, res, how) {
+  const s = S.sys[sid], sides = [fa, fb].map((fac) => smFleetsAt(S, sid).filter((f) => f.fac === fac));
+  const sum = (L) => L.reduce((c, f) => smAdd(c, f.comp), [0, 0, 0, 0, 0, 0]);
+  const F = { a: fa, b: fb, pl: true, real: how, start: sides.map(sum), fleets: sides.map((L) => L.map((f) => ({ id: f.id, name: f.name, ships: smShips(f.comp) }))), waves: [], retreated: [[], []], lost: [[0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]] };
+  const gone = [new Set(), new Set()], W = { n: F.start.map(smShips), win: -1, lost: [0, 0], retreat: [[], []], real: true };
+  for (const r of res.fleets) {
+    const f = S.fleets.find((o) => o.id === r.id); if (!f) continue;
+    const side = f.fac === fa ? 0 : 1, lost = f.comp.map((x, t) => Math.max(0, x - (r.comp[t] || 0)));
+    F.lost[side] = smAdd(F.lost[side], lost); W.lost[side] += smShips(lost); f.comp = f.comp.map((x, t) => Math.min(x, r.comp[t] || 0));
+    if (r.gone && smShips(f.comp) > 0) { gone[side].add(f); W.retreat[side].push(f.name); }
+  }
+  F.waves.push(W);
+  const out = smFightEnd(S, s, F, sides, gone, fa, fb);
+  W.win = out.win;
+  const rep = { turn: S.turn, sys: sid, name: s.name, how, fights: [F] };
+  S.st.battles++; S.st.plBattles++;
+  S.reports.push(rep); if (S.reports.length > 60) S.reports.splice(0, S.reports.length - 60);
+  return rep;
 }
 
 /* ───── 佔領：圍城與強攻 ───── */
