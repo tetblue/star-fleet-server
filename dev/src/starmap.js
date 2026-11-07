@@ -147,15 +147,16 @@ function smNewGame(o = {}) {
   }
   // 玩家：聯盟艦長（帶特戰小隊）或艦隊指揮官（帶兩支分艦隊），從前線出發
   const front = S.sys.filter((s) => s.owner === SM_A && S.adj[s.id].some((j) => S.sys[j].owner !== SM_A)).sort((a, b) => b.x - a.x)[0] || S.sys[0];
-  const start = o.start === 'cmd' ? 'cmd' : 'cap';
+  const start = SM_STARTS[o.start] ? o.start : 'cap';
   const sq = smNewFleet(S, SM_A, front.id, [0, 0, 0, 1, 2, 0], { pl: true, name: '特戰小隊', cmdr: { name: '你', lv: 2, tac: 'push' } }); sq.cap = true; sq.retreat = 0; S.pl.fleets.push(sq.id);
-  if (start === 'cmd') for (let k = 0; k < 2; k++) {
+  if (start === 'cmd' || start === 'army') for (let k = 0; k < 2; k++) {
     const f = smNewFleet(S, SM_A, front.id, smArchComp(k ? 2 : 0, 400), { arch: k ? 2 : 0, pl: true, name: k ? '第二分艦隊' : '第一分艦隊', cmdr: { name: k ? '副官' : '你', lv: 2, tac: 'push' } });
     S.pl.fleets.push(f.id);
   }
   smCareerInit(S, start);
+  if (start === 'army' || start === 'gov' || start === 'head') smAssignFleets(S);   // 依職位撥艦隊
   smTechInit(S); smIntelTick(S);
-  smLog(S, start === 'cmd' ? `你奉命指揮兩支分艦隊，駐守前線的 ${front.name}` : `你是聯盟的艦長，帶著特戰小隊駐守前線的 ${front.name}，等候上級的命令`, 'ev');
+  smLog(S, start === 'cap' ? `你是聯盟的艦長，帶著特戰小隊駐守前線的 ${front.name}，等候上級的命令` : `你以${SM_STARTS[start].name}的身分開始，前線在 ${front.name}`, 'ev');
   smGenMissions(S);
   return S;
 }

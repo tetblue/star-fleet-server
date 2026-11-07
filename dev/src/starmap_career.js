@@ -22,15 +22,33 @@ const SM_BUILD = {   // 政務：在轄區建設（玩家的資金）
   shield: { name: SM_MEGA.shield, cost: () => 900, ok: (s) => !s.mega.shield && s.tier >= 2 },
 };
 
+// 開局身分（周目解鎖）：艦長是第一周目唯一的選擇；達成對應的職位就解鎖（smMetaUnlock）
+const SM_STARTS = {
+  cap: { name: '聯盟艦長', desc: '帶特戰小隊，執行艦長任務', mil: 0, gov: -1, merit: 0 },
+  cmd: { name: '聯盟艦隊指揮官', desc: '帶兩支分艦隊', mil: 2, gov: -1, merit: 180, need: '聯盟艦隊指揮官' },
+  army: { name: '聯盟方面軍司令', desc: '指揮六支艦隊的前線', mil: 3, gov: -1, merit: 400, need: '聯盟方面軍司令' },
+  gov: { name: '聯盟行星司令', desc: '管理一個星系的建設', mil: 2, gov: 0, merit: 180, need: '聯盟行星司令' },
+  head: { name: '聯盟元首', desc: '整個聯盟的國庫與艦隊', mil: 2, gov: 3, merit: 180, need: '聯盟元首' },
+};
+const SM_META = 'fleet.career.meta';
+function smMetaLoad() { try { return JSON.parse(STORE.getItem(SM_META) || 'null') || { runs: 0, unlock: ['cap'], best: [] }; } catch (e) { return { runs: 0, unlock: ['cap'], best: [] }; } }
+function smMetaSave(M) { try { STORE.setItem(SM_META, JSON.stringify(M)); } catch (e) { /* 只在本次 */ } }
+function smMetaUnlock(t) {   // 里程碑 → 解鎖開局身分（跨周目）
+  const M = smMetaLoad(); if (!M.best.includes(t)) M.best.push(t);
+  for (const [k, X] of Object.entries(SM_STARTS)) if (X.need === t && !M.unlock.includes(k)) M.unlock.push(k);
+  smMetaSave(M);
+}
 function smCareerInit(S, start) {
-  const p = S.pl;
-  Object.assign(p, { mil: start === 'cmd' ? 2 : 0, gov: -1, merit: start === 'cmd' ? 180 : 0, trust: 50, sup: [30, 30, 30], gs: [], missions: [], ms: [], status: '正常', kills: 0, caps: 0, exam: null, boss: smPick(S, SM_NPC), opCd: 0, offerGov: false });
-  smMs(S, `${SM_FAC[p.fac].name}${SM_MIL[p.mil]}`);
+  const p = S.pl, X = SM_STARTS[start] || SM_STARTS.cap;
+  Object.assign(p, { start, mil: X.mil, gov: X.gov, merit: X.merit, trust: 50, sup: [30, 30, 30], gs: [], missions: [], ms: [], status: '正常', kills: 0, caps: 0, exam: null, boss: smPick(S, SM_NPC), opCd: 0, offerGov: false });
+  smMs(S, X.name);
+  if (X.gov >= 0) { const c = smOwned(S, p.fac).filter((s) => !s.cap).sort((a, b) => a.prosp - b.prosp); p.gs = X.gov === 3 ? smOwned(S, p.fac).map((s) => s.id) : [(c[Math.floor(c.length / 2)] || smOwned(S, p.fac)[0]).id]; }
+  const M = smMetaLoad(); M.runs++; smMetaSave(M);
 }
 const smRankName = (S) => { const p = S.pl; return p.status === '終結' ? '已終結' : `${SM_FAC[p.fac].name}${p.gov >= 0 ? SM_GOV[p.gov] : SM_MIL[p.mil]}`; };
 const smFleetCap = (S) => { const p = S.pl; return p.gov === 3 ? 99 : Math.max(SM_MIL_CAP[p.mil], p.gov >= 0 ? 2 + p.gov : 0); };
 const smSquad = (S) => S.fleets.find((f) => f.pl && f.cap);
-function smMs(S, t) { if (!S.pl.ms.some((m) => m.t === t)) { S.pl.ms.push({ t, turn: S.turn }); smLog(S, `★ ${t}`, 'ev'); } }
+function smMs(S, t) { if (!S.pl.ms.some((m) => m.t === t)) { S.pl.ms.push({ t, turn: S.turn }); smLog(S, `★ ${t}`, 'ev'); smMetaUnlock(t); } }
 const smGovPerf = (S) => (S.pl.gs.length ? S.pl.gs.reduce((a, i) => a + S.sys[i].prosp, 0) / S.pl.gs.length : 0);
 
 /* ───── 情報（第 5 階段再細分來源與時效；現在依敵方兵力和這個星系每波上限的比例）───── */
@@ -201,10 +219,11 @@ function smGovTick(S) {
     smAssignFleets(S);
   }
 }
-function smCanBuild(S, s, k) { const p = S.pl, B = SM_BUILD[k]; return p.gs.includes(s.id) && s.owner === p.fac && !s.sg && B.ok(s) && (p.gov === 3 ? S.fac[p.fac].money : p.money) >= B.cost(s); }
+const smBuildCost = (S, s, k) => Math.round(SM_BUILD[k].cost(s) * (smHas(S, 'plan') ? 0.8 : 1));   // 都市規劃：−20%
+function smCanBuild(S, s, k) { const p = S.pl, B = SM_BUILD[k]; return p.gs.includes(s.id) && s.owner === p.fac && !s.sg && B.ok(s) && (p.gov === 3 ? S.fac[p.fac].money : p.money) >= smBuildCost(S, s, k); }
 function smBuild(S, sid, k) {
   const s = S.sys[sid], B = SM_BUILD[k]; if (!smCanBuild(S, s, k)) return false;
-  const c = B.cost(s); if (S.pl.gov === 3) S.fac[S.pl.fac].money -= c; else S.pl.money -= c;
+  const c = smBuildCost(S, s, k); if (S.pl.gov === 3) S.fac[S.pl.fac].money -= c; else S.pl.money -= c;
   if (k === 'city') s.tier++; else if (k === 'def') s.def++; else if (k === 'gar') s.gar += 60; else s.mega[k] = 1;
   if (k !== 'gar') s.prosp = smClamp(s.prosp + 2, 0, 100);
   smLog(S, `${s.name}：${B.name}`);

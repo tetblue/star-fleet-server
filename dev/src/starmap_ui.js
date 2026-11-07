@@ -41,7 +41,7 @@ function showStarmap() {
 function smuNewDialog() {
   overlay(`<style>${SMU_CSS}</style><div class="g-wrap sp-wrap"><div class="g-head"><h2>星海生涯</h2><span class="crumb">開新局</span><span class="g-sp"></span><button class="g-btn" id="sm-back">← 返回</button></div>
     <p class="g-dim">回合制的星圖：每一回合是一週。下令移動艦隊，結束回合後所有勢力同時行動，碰上敵軍就開戰。立下戰功、完成上級與派系交辦的任務來升遷，你的選擇決定局勢與結局。</p>
-    <div class="sm-opt" style="margin:14px 0"><span class="g-dim">開局身分</span><label><input type="radio" name="sm-start" value="cap" checked> 聯盟艦長（帶特戰小隊，執行艦長任務）</label><label><input type="radio" name="sm-start" value="cmd"> 聯盟艦隊指揮官（帶兩支分艦隊；之後改由周目解鎖）</label></div>
+    <div class="sm-opt" style="margin:14px 0"><span class="g-dim">開局身分</span>${Object.entries(SM_STARTS).map(([k, X]) => { const on = smMetaLoad().unlock.includes(k); return `<label class="${on ? '' : 'off'}" title="${on ? '' : `在任何一局當上${X.need}就解鎖`}"><input type="radio" name="sm-start" value="${k}" ${k === 'cap' ? 'checked' : ''} ${on ? '' : 'disabled'}> ${X.name}（${on ? X.desc : `未解鎖：當上${X.need}`}）</label>`; }).join('')}</div><p class="g-dim">已玩 ${smMetaLoad().runs} 局。</p>
     <div class="sm-opt" style="margin:14px 0"><span class="g-dim">難度</span>${['簡單', '普通', '困難', '殘酷'].map((n, i) => `<label><input type="radio" name="sm-diff" value="${i}" ${i === 1 ? 'checked' : ''}> ${n}</label>`).join('')}</div>
     <button class="g-btn primary" id="sm-go">開始</button></div>`);
   gEl('sm-back').onclick = () => { GAME.spMode = null; showSingle(); };
@@ -193,7 +193,7 @@ function smuSysPanel(s) {
   // 政務：轄區的建設
   if (S.pl.gs.includes(s.id) && s.owner === S.pl.fac) {
     const funds = S.pl.gov === 3 ? S.fac[S.pl.fac].money : S.pl.money;
-    h += `<div class="g-dim" style="margin-top:8px">你的轄區・建設（${S.pl.gov === 3 ? '聯盟國庫' : '你的資金'} ${smuN(funds)}）</div><div class="sm-btns">${Object.entries(SM_BUILD).filter(([, B]) => B.ok(s)).map(([k, B]) => `<button class="g-btn" data-bld="${k}" ${smCanBuild(S, s, k) ? '' : 'disabled'}>${B.name}（${smuN(B.cost(s))}）</button>`).join('')}</div>`;
+    h += `<div class="g-dim" style="margin-top:8px">你的轄區・建設（${S.pl.gov === 3 ? '聯盟國庫' : '你的資金'} ${smuN(funds)}）</div><div class="sm-btns">${Object.entries(SM_BUILD).filter(([, B]) => B.ok(s)).map(([k, B]) => `<button class="g-btn" data-bld="${k}" ${smCanBuild(S, s, k) ? '' : 'disabled'}>${B.name}（${smuN(smBuildCost(S, s, k))}）</button>`).join('')}</div>`;
   }
   return h + '</div>';
 }

@@ -11,7 +11,7 @@ try {
   const session = await register(srv.url, 'smui');
   await openGame(b, srv.url, session, '');
   await b.ev(`window.addEventListener('error', (e) => (window.__smErr = (window.__smErr || []).concat(String(e.message))))`);
-  await b.ev(`(() => { STORE.removeItem('fleet.career1'); document.getElementById('m-single').click(); document.querySelector('[data-spm="career"]').click(); return true; })()`);
+  await b.ev(`(() => { STORE.removeItem('fleet.career1'); STORE.setItem('fleet.career.meta', JSON.stringify({ runs: 0, unlock: ['cap', 'cmd', 'army', 'gov', 'head'], best: [] })); document.getElementById('m-single').click(); document.querySelector('[data-spm="career"]').click(); return true; })()`);
   await sleep(300); await b.shot(path.join(out, '0-new.png'));
   await b.ev(`(() => { const r = document.querySelector('input[name="sm-start"][value="' + '${arg('start', 'cmd')}' + '"]'); if (r) r.click(); document.getElementById('sm-go').click(); return true; })()`); await sleep(400);
   await b.shot(path.join(out, '1-map.png'));

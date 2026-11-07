@@ -15,7 +15,7 @@ const RUNS = +arg('runs', 50), TURNS = +arg('turns', 300), DIFF = +arg('diff', 1
 const agg = { rank: {}, msT: {}, mis: { done: 0, fail: 0 }, err: 0, cap: [0, 0, 0, 0], battles: 0, plBattles: 0, churn: 0, unify: [0, 0], dead: [0, 0, 0], ships: [], sys: [], fleets: [], waves: 0, maxWaves: 0, retreats: 0, truce: 0, ms: [] };
 const t0 = Date.now();
 for (let r = 0; r < RUNS; r++) {
-  const S = M.smNewGame({ seed: 1000 + r, diff: DIFF });
+  const S = M.smNewGame({ seed: 1000 + r, diff: DIFF, start: arg('start', 'cap') });
   let prev = S.sys.map((s) => s.owner), uni = null;
   try {
     for (let t = 0; t < TURNS; t++) {

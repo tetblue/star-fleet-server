@@ -12,7 +12,7 @@ try {
   await b.ev(`window.addEventListener('error', (e) => (window.__smErr = (window.__smErr || []).concat(String(e.message))))`);
   // 開一局，把玩家艦隊直接放到一個海盜星系旁邊，然後下令進攻
   if (arg('wave', 0)) await b.ev(`__sm.SM_RULE.wave = [${+arg('wave', 0)}, ${+arg('wave', 0)}, ${+arg('wave', 0)}]`);
-  const setup = await b.ev(`(() => { STORE.removeItem('fleet.career1'); document.getElementById('m-single').click(); document.querySelector('[data-spm="career"]').click(); document.getElementById('sm-go').click();
+  const setup = await b.ev(`(() => { STORE.removeItem('fleet.career1'); STORE.setItem('fleet.career.meta', JSON.stringify({ runs: 0, unlock: ['cap', 'cmd', 'army', 'gov', 'head'], best: [] })); document.getElementById('m-single').click(); document.querySelector('[data-spm="career"]').click(); { const r = document.querySelector('input[name="sm-start"][value="cmd"]'); if (r) r.click(); } document.getElementById('sm-go').click();
     const S = __sm.SMU.S, tg = S.sys.find((s) => s.owner === 2 && S.adj[s.id].length), from = S.adj[tg.id][0], fl = __sm.smPlFleets(S);
     for (const f of fl) f.sys = from;
     for (const f of fl) document.querySelector('[data-sel="' + f.id + '"]').click();

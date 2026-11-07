@@ -10,7 +10,7 @@ try {
   const session = await register(srv.url, 'smas');
   await openGame(b, srv.url, session, '');
   await b.ev(`window.addEventListener('error', (e) => (window.__smErr = (window.__smErr || []).concat(String(e.message))))`);
-  const setup = await b.ev(`(() => { STORE.removeItem('fleet.career1'); document.getElementById('m-single').click(); document.querySelector('[data-spm="career"]').click(); document.getElementById('sm-go').click();
+  const setup = await b.ev(`(() => { STORE.removeItem('fleet.career1'); STORE.setItem('fleet.career.meta', JSON.stringify({ runs: 0, unlock: ['cap', 'cmd', 'army', 'gov', 'head'], best: [] })); document.getElementById('m-single').click(); document.querySelector('[data-spm="career"]').click(); { const r = document.querySelector('input[name="sm-start"][value="cmd"]'); if (r) r.click(); } document.getElementById('sm-go').click();
     const S = __sm.SMU.S, tg = S.sys.find((s) => s.owner === 2), fl = __sm.smPlFleets(S);
     for (const f of S.fleets) if (f.sys === tg.id) f.comp = f.comp.map(() => 0);   // 軌道上的敵艦已經清掉
     for (const f of fl) f.sys = tg.id;
