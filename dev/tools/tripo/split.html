@@ -1,0 +1,99 @@
+<!doctype html><meta charset="utf-8"><title>split</title>
+<body style="margin:0;background:#222;color:#eee;font:12px sans-serif"><pre id="log" style="position:fixed;left:4px;top:4px;margin:0;white-space:pre;text-shadow:0 0 3px #000"></pre>
+<script type="importmap">{"imports":{"three":"/three/build/three.module.js","three/addons/":"/three/examples/jsm/"}}</script>
+<script type="module">
+// TRIPO 分件模型 → 一個元件一個 GLB。
+// 1. 每個分件按幾何連通拆成「島」；2. 島依包圍盒重疊歸成元件（小的大半落在大的裡面才併，避免地板把站在上面的東西全黏在一起）；
+// 3. 每個元件：底面放 y=0、xz 置中、多張小貼圖合成一張圖集，存 GLB；另存 manifest（原位置）方便還原整體擺設。
+import * as THREE from 'three'; import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'; import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+const log = (s) => { document.getElementById('log').textContent += s + '\n'; };
+const W = 1200, H = 800, r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }); r.setSize(W, H); document.body.appendChild(r.domElement);
+const scene = new THREE.Scene(); scene.add(new THREE.HemisphereLight(0xffffff, 0x333344, 2.2)); const dl = new THREE.DirectionalLight(0xffffff, 1.5); dl.position.set(1, 2, 1.5); scene.add(dl);
+
+async function loadParts(file) {
+  const g = await new GLTFLoader().loadAsync('/in/' + file); g.scene.updateMatrixWorld(true);
+  const parts = []; g.scene.traverse((o) => { if (!o.isMesh) return;
+    const geo = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone(); geo.applyMatrix4(o.matrixWorld);
+    const m = o.material; parts.push({ name: o.name, geo, mat: m, img: m.map && m.map.image, color: m.color ? m.color.clone() : new THREE.Color(1, 1, 1) }); });
+  return parts;
+}
+// 一個分件 → 連通的島（頂點位置量化後焊接，三角形共用頂點就算相連）
+function islands(part, q = 1e-4) {
+  const pa = part.geo.attributes.position, nt = pa.count / 3, key = new Map(), par = new Int32Array(nt).map((_, i) => i);
+  const find = (i) => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; };
+  for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { const v = t * 3 + k;
+    const h = Math.round(pa.getX(v) / q) + ',' + Math.round(pa.getY(v) / q) + ',' + Math.round(pa.getZ(v) / q);
+    const o = key.get(h); if (o === undefined) key.set(h, t); else { const a = find(o), b = find(t); if (a !== b) par[a] = b; } }
+  const groups = new Map(); for (let t = 0; t < nt; t++) { const g = find(t); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(t); }
+  return [...groups.values()].map((tris) => { const box = new THREE.Box3(), v = new THREE.Vector3();
+    for (const t of tris) for (let k = 0; k < 3; k++) box.expandByPoint(v.fromBufferAttribute(pa, t * 3 + k));
+    return { part, tris, box }; });
+}
+const vol = (b) => { const s = b.getSize(new THREE.Vector3()); return Math.max(s.x, 1e-4) * Math.max(s.y, 1e-4) * Math.max(s.z, 1e-4); };
+// 小盒子落在大盒子（外擴 e）裡面的體積比例
+function inside(small, big, e) { const bb = big.clone().expandByScalar(e), i = small.clone().intersect(bb); return i.isEmpty() ? 0 : vol(i) / vol(small); }
+// 島 → 元件：反覆合併，直到沒有可併的
+function cluster(isl, opt) {
+  let cl = isl.map((x) => ({ items: [x], box: x.box.clone() }));
+  for (let changed = true; changed;) { changed = false;
+    cl.sort((a, b) => vol(b.box) - vol(a.box));
+    outer: for (let i = 0; i < cl.length; i++) for (let j = i + 1; j < cl.length; j++) {
+      const A = cl[i], B = cl[j];   // A 較大
+      if (inside(B.box, A.box, opt.eps) >= opt.ratio && !(opt.keepApart && opt.keepApart(A, B))) {
+        A.items.push(...B.items); A.box.union(B.box); cl.splice(j, 1); changed = true; break outer; } } }
+  return cl;
+}
+// 元件 → 一個網格（圖集貼圖）
+function atlasOf(imgs, A) {
+  const n = imgs.length, cols = Math.ceil(Math.sqrt(n)), s = Math.floor(A / cols), cv = document.createElement('canvas'); cv.width = cv.height = A;
+  const cx = cv.getContext('2d'); cx.fillStyle = '#808080'; cx.fillRect(0, 0, A, A);
+  const tiles = imgs.map((im, i) => { const tx = (i % cols) * s, ty = Math.floor(i / cols) * s, pad = Math.max(1, Math.min(4, Math.floor(s / 16)));
+    if (im.img) { cx.drawImage(im.img, tx, ty, s, s); cx.drawImage(im.img, tx + pad, ty + pad, s - pad * 2, s - pad * 2); } else { cx.fillStyle = '#' + im.color.getHexString(); cx.fillRect(tx, ty, s, s); }
+    return [tx, ty, s, pad]; });
+  return { cv, tiles };
+}
+function buildMesh(c, name) {
+  const partsUsed = [...new Set(c.items.map((x) => x.part))];
+  const maxPx = Math.max(...partsUsed.map((p) => (p.img ? p.img.width : 32)));
+  const A = Math.min(2048, Math.max(256, 2 ** Math.ceil(Math.log2(Math.ceil(Math.sqrt(partsUsed.length)) * Math.min(maxPx, 512)))));
+  const { cv, tiles } = atlasOf(partsUsed, A);
+  let nt = 0; for (const x of c.items) nt += x.tris.length;
+  const P = new Float32Array(nt * 9), N = new Float32Array(nt * 9), UV = new Float32Array(nt * 6);
+  const ox = (c.box.min.x + c.box.max.x) / 2, oz = (c.box.min.z + c.box.max.z) / 2, oy = c.box.min.y;
+  let o = 0;
+  for (const x of c.items) { const pa = x.part.geo.attributes.position, na = x.part.geo.attributes.normal, ua = x.part.geo.attributes.uv, [tx, ty, s, pad] = tiles[partsUsed.indexOf(x.part)];
+    for (const t of x.tris) for (let k = 0; k < 3; k++) { const v = t * 3 + k;
+      P[o * 3] = pa.getX(v) - ox; P[o * 3 + 1] = pa.getY(v) - oy; P[o * 3 + 2] = pa.getZ(v) - oz;
+      if (na) { N[o * 3] = na.getX(v); N[o * 3 + 1] = na.getY(v); N[o * 3 + 2] = na.getZ(v); }
+      let u = ua ? ua.getX(v) : 0.5, w = ua ? ua.getY(v) : 0.5; u = Math.min(1, Math.max(0, u)); w = Math.min(1, Math.max(0, w));
+      UV[o * 2] = (tx + pad + u * (s - pad * 2)) / A; UV[o * 2 + 1] = (ty + pad + w * (s - pad * 2)) / A; o++; } }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.BufferAttribute(N, 3)); g.setAttribute('uv', new THREE.BufferAttribute(UV, 2));
+  const merged = mergeVertices(g, 1e-6);
+  const tex = new THREE.CanvasTexture(cv); tex.flipY = false; tex.colorSpace = THREE.SRGBColorSpace; tex.userData.mimeType = 'image/jpeg';
+  const mesh = new THREE.Mesh(merged, new THREE.MeshStandardMaterial({ map: tex, metalness: 0, roughness: 0.9, side: THREE.DoubleSide })); mesh.name = name;
+  return { mesh, offset: [ox, oy, oz], A };
+}
+async function save(mesh, out) { const buf = await new GLTFExporter().parseAsync(mesh, { binary: true }); await fetch('/out/' + out, { method: 'POST', body: buf }); return buf.byteLength; }
+
+// ── 畫面：上色看分組 ──
+let shown = null;
+function show(cl, colorize = true) {
+  if (shown) scene.remove(shown); shown = new THREE.Group();
+  cl.forEach((c, ci) => { const col = new THREE.Color().setHSL((ci * 0.618) % 1, 0.7, 0.55);
+    for (const x of c.items) { const pa = x.part.geo.attributes.position, idx = []; for (const t of x.tris) idx.push(t * 3, t * 3 + 1, t * 3 + 2);
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', pa); if (x.part.geo.attributes.normal) g.setAttribute('normal', x.part.geo.attributes.normal); if (x.part.geo.attributes.uv) g.setAttribute('uv', x.part.geo.attributes.uv); g.setIndex(idx);
+      shown.add(new THREE.Mesh(g, colorize ? new THREE.MeshLambertMaterial({ color: col, side: THREE.DoubleSide }) : x.part.mat)); } });
+  scene.add(shown);
+}
+function view(v = 'iso', zoom = 1, cx = 0, cy = 0.1, cz = 0) { const a = W / H, s = 0.6 / zoom, cam = new THREE.OrthographicCamera(-s * a, s * a, s, -s, -10, 10);
+  const P = { top: [0, 5, 0.0001], front: [0, 0, 5], side: [5, 0, 0], iso: [3, 2.5, 3], iso2: [-3, 2.5, -3] }[v]; cam.position.set(cx + P[0], cy + P[1], cz + P[2]); cam.lookAt(cx, cy, cz); r.render(scene, cam); }
+function label(cl, v = 'top', zoom = 1, cx = 0, cy = 0.1, cz = 0) {   // 在畫面上標元件編號
+  document.querySelectorAll('.lb').forEach((e) => e.remove()); const a = W / H, s = 0.6 / zoom;
+  cl.forEach((c, i) => { const p = c.box.getCenter(new THREE.Vector3()); let sx, sy;
+    if (v === 'top') { sx = (p.x - cx) / (s * a); sy = (p.z - cz) / s; } else if (v === 'front') { sx = (p.x - cx) / (s * a); sy = -(p.y - cy) / s; } else return;
+    const d = document.createElement('div'); d.className = 'lb'; d.textContent = i; d.style.cssText = `position:absolute;left:${(sx + 1) / 2 * W}px;top:${(sy + 1) / 2 * H}px;font:bold 13px sans-serif;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000`; document.body.appendChild(d); });
+}
+Object.assign(window, { THREE, loadParts, islands, cluster, buildMesh, save, show, view, label, scene, renderer: r, vol, inside, log });
+window.ready = true;
+</script>

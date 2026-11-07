@@ -115,10 +115,10 @@ function capHubItems(own) {
       { id: 'sp-sand', icon: 'sim', en: 'SIMULATOR', name: '模擬室', desc: '自由布置敵軍與目標', off: true },
       { id: 'sp-train', icon: 'train', en: 'TRAINING', name: '訓練場', desc: '操艦、潛行、火控的教學', off: true },
     ],
-    subs: [{ id: 'sp-capsq', icon: 'hang', name: '小隊編成', desc: p.slots.filter(Boolean).map((k) => CAP_HULLS[k].name).join('、'), tag: own }],
+    subs: [{ id: 'sp-capsq', icon: 'hang', name: '戰艦庫', desc: `小隊的特製戰艦・${p.slots.filter(Boolean).map((k) => CAP_HULLS[k].name).join('、')}`, tag: own }],
   };
 }
-function capHubBind() { gEl('sp-rand').onclick = () => showCaptain(); gEl('sp-capsq').onclick = () => showCaptain(); }
+function capHubBind() { gEl('sp-rand').onclick = () => showCaptain(); gEl('sp-capsq').onclick = () => showCapBay(); }
 
 // ───── 出擊設定 ─────
 function capKeyRows() {

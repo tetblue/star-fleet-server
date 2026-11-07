@@ -1139,9 +1139,64 @@ function capShip(i) { return CAP.on && CAP.byI && i < CAP.byI.length ? CAP.byI[i
 // 7 帝國攝政派＝帝國內戰的另一邊：船型、特效、種族特性都借帝國（FAC_BASE），只有顏色（光束、標籤、船體換色）是自己的
 // 單一艦隊也可以有自己的外觀（fleet.fac，例如友軍傭兵、傭兵支援）；畫船、光束、飛彈、艦載機都用 sqFac／shipFac
 let SIDE_FAC = [0, 1];
+// ───── 多方勢力：一場最多 SIDE_N 方（邊 0..SIDES−1）─────
+// REL[a][b]＝a 與 b 的關係（對稱）：0 敵對、1 中立、2 同盟；自己＝2。沒設定＝傳統兩方（全部互相敵對）
+//   自動開火、AI 只找「敵對」；對中立下攻擊指令＝雙方轉為敵對（relSet，在命令裡執行，回放一致）
+//   流彈（射線）、範圍攻擊打得到敵對與中立；誤傷中立累積超過門檻也會翻臉（battleSetup.relRule.act＝'fail' 改成判失敗）
+const SIDE_N = 8;
+const sideArr = (v) => Array.from({ length: SIDE_N }, () => (typeof v === 'function' ? v() : v));
+let SIDES = 2, REL = relTable(null), relVer = 0;
+const relDmg = sideArr(() => new Array(SIDE_N).fill(0)), relHP0 = new Array(SIDE_N).fill(0);   // relDmg[a][b]＝a 誤傷中立的 b 累積的傷害；relHP0＝b 的總耐久（第一次被誤傷時算）
+const REL_RULE = { thr: 0.05, warn: 0.5 };   // 誤傷超過對方總耐久的 thr＝翻臉；到 warn 倍先警告
+function relTable(spec) {
+  const R = Array.from({ length: SIDE_N }, (_, a) => Array.from({ length: SIDE_N }, (_, b) => (a === b ? 2 : 0)));
+  if (spec) for (const [a, b, r] of spec) if (a !== b) R[a][b] = R[b][a] = r;
+  return R;
+}
+const hostile = (a, b) => a !== b && REL[a][b] === 0;
+const strayOK = (a, b) => a !== b && REL[a][b] !== 2;   // 流彈、範圍傷害打得到（敵對＋中立）
+const friendly = (a, b) => a === b || REL[a][b] === 2;
+function foeSides(s) { const o = []; for (let k = 0; k < SIDES; k++) if (hostile(s, k)) o.push(k); return o; }
+function firstFoe(s) { for (let k = 0; k < SIDES; k++) if (hostile(s, k)) return k; return s ? 0 : 1; }
+function sideMask(s, stray) { let m = 0; for (let k = 0; k < SIDES; k++) if (stray ? strayOK(s, k) : hostile(s, k)) m |= 1 << k; return m; }
+function relSet(a, b, r, why) {
+  if (a === b || REL[a][b] === r) return;
+  REL[a][b] = REL[b][a] = r; relVer++;
+  if (r !== 0) for (const g of groups) if (g.target && !hostile(g.side, g.target.side)) g.target = null;
+  relLabels();
+  if (typeof relNote === 'function') relNote(a, b, why || (r === 0 ? 'war' : 'peace'));
+}
+// 標籤：對玩家中立的分艦隊加虛線框（「・中立」）
+function relLabels() { const me = typeof GAME !== 'undefined' ? GAME.playerSide || 0 : 0; for (const q of squadrons) if (q.label) q.label.classList.toggle('neu', !q.bg && q.side !== me && REL[me][q.side] === 1); }
+function sideHP(s) { let n = 0; for (let i = 0; i < shipCount; i++) if (ships.side[i] === s) n += SHIP_TYPES[ships.type[i]].hp; return n; }
+// a 的攻擊打中了中立的 b：累積；超過門檻＝翻臉（或交給關卡判失敗）
+function relHit(a, b, eff) {
+  if (a >= SIDES || b >= SIDES || REL[a][b] !== 1) return;
+  if (!relHP0[b]) relHP0[b] = Math.max(1, sideHP(b));
+  const RR = (battleSetup && battleSetup.relRule) || {}, thr = (RR.thr != null ? RR.thr : REL_RULE.thr) * relHP0[b], d0 = relDmg[a][b];
+  relDmg[a][b] = d0 + eff;
+  if (d0 < thr * REL_RULE.warn && relDmg[a][b] >= thr * REL_RULE.warn && typeof relNote === 'function') relNote(a, b, 'warn');
+  if (d0 < thr && relDmg[a][b] >= thr) { if (RR.act === 'fail') { if (typeof relNote === 'function') relNote(a, b, 'fail'); } else relSet(a, b, 0, 'stray'); }
+}
+function relOver(a, b) { const RR = (battleSetup && battleSetup.relRule) || {}; return relHP0[b] > 0 && relDmg[a][b] >= (RR.thr != null ? RR.thr : REL_RULE.thr) * relHP0[b]; }
+// 把好幾方的格子索引合成一張（射線、空中目標用）；只有一方＝直接用那一方的。tag＝格子陣列帶 g（第幾輪），舊的跳過
+const EMPTY_MAP = new Map();
+function mapsOf(src, mask, holder, gen, tag) {
+  if (!mask) return EMPTY_MAP;
+  if (!(mask & (mask - 1))) return src[31 - Math.clz32(mask)];
+  const C = holder.mc || (holder.mc = new Map());
+  const e = C.get(mask); if (e && e.gen === gen) return e.m;
+  const m = new Map();
+  for (let s = 0; s < SIDE_N; s++) if ((mask >> s) & 1) for (const [k, a] of src[s]) {
+    if (tag && a.g !== gen) continue;
+    const b = m.get(k); if (b) { for (const x of a) b.push(x); } else { const c = a.slice(); if (tag) c.g = gen; m.set(k, c); }
+  }
+  C.set(mask, { gen, m });
+  return m;
+}
 // 作戰介面跟著玩家的陣營換主題（顏色、紋飾）
 function applyPlayerTheme() {   // 傭兵等不是玩家陣營：對手是這些陣營時，敵方顏色（--ec）改成那個陣營的顏色
-  const sd = typeof cmdSide === 'number' ? cmdSide : 0, f = SIDE_FAC[sd] || 0, ef = SIDE_FAC[1 - sd];
+  const sd = typeof cmdSide === 'number' ? cmdSide : 0, f = SIDE_FAC[sd] || 0, ef = SIDE_FAC[firstFoe(sd)];
   document.body.classList.toggle('pf-0', f !== 1); document.body.classList.toggle('pf-1', f === 1);
   if (ef >= 2 && FACTION[ef]) document.body.style.setProperty('--ec', FACTION[ef].ui); else document.body.style.removeProperty('--ec');
   if (f >= 2 && FACTION[f]) document.body.style.setProperty('--pc', FACTION[f].ui); else document.body.style.removeProperty('--pc');   // 番外篇：玩家是傭兵
@@ -1151,7 +1206,9 @@ const FAC_BASE = [0, 1, 2, 3, 4, 5, 6, 0];   // 船型、貼圖、種族特性�
 const baseKey = (k) => (k && k[0] === 'v' ? 'e' + k.slice(1) : k);   // 模型、掛點鍵 → 真正有檔案的鍵
 const sqFac = (sq) => (sq.fleet && sq.fleet.fac != null ? sq.fleet.fac : SIDE_FAC[sq.side]);
 const shipFac = (i) => sqFac(squadrons[ships.sq[i]]);
-const fxFac = (side) => (SIDE_FAC[side] === 1 ? 1 : 0);   // 爆炸、護盾特效只有帝國、聯盟兩套：傭兵用帝國的
+const fxFac = (side) => (SIDE_FAC[side] === 1 ? 1 : 0);
+const SHF = 100;   // spawnFx 的列：0..SIDE_N−1＝那一方的爆炸；SHF＋邊×8＋方向＝那一方的護盾受擊
+const fxShield = (side, dir = 0) => SHF + side * 8 + dir;   // 爆炸、護盾特效只有帝國、聯盟兩套：傭兵用帝國的
 function applySideNames() {
   document.querySelectorAll('[data-fn]').forEach((el) => { const f = SIDE_FAC[+el.dataset.fn]; el.textContent = el.dataset.short ? FACTION[f].short || FACTION[f].name[0] : FACTION[f].name; });
   document.querySelectorAll('[data-fs]').forEach((el) => { const f = SIDE_FAC[+el.dataset.fs]; FAC_KEY.forEach((k, i) => el.classList.toggle(k, f === i)); });
@@ -1552,7 +1609,7 @@ scene.add(fxMesh);
 let fxHead = 0, fxDirtyFrom = -1, fxDirtyCount = 0;
 
 function spawnFx(x, y, z, row, scale, fps = 20) {
-  if (row < 2) row = fxFac(row); else if (row < 18) row = 2 + fxFac((row - 2) >> 3) * 8 + ((row - 2) & 7);   // 邊 → 陣營（爆炸、護盾的顏色）
+  if (row >= SHF) { const k = row - SHF; row = 2 + fxFac(k >> 3) * 8 + (k & 7); } else row = fxFac(row);   // 邊 → 陣營（爆炸、護盾的顏色）
   const i = fxHead; fxHead = (fxHead + 1) % FX_MAX;
   fxP[i * 3] = x; fxP[i * 3 + 1] = y; fxP[i * 3 + 2] = z;
   fxF[i * 4] = U.uTime.value; fxF[i * 4 + 1] = row; fxF[i * 4 + 2] = scale; fxF[i * 4 + 3] = fps;
@@ -1909,7 +1966,7 @@ let groups = [];          // 部隊：一或多支分艦隊組成，有錨點、
 let squadrons = [];
 let ships = null;
 let shipCount = 0;
-let aliveBySide = [0, 0];
+let aliveBySide = new Array(SIDE_N).fill(0);
 const outlineGroup = new THREE.Group();
 scene.add(outlineGroup);
 const labelLayer = document.getElementById('labels');
@@ -1964,7 +2021,11 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
   outlineGroup.clear();
   labelLayer.innerHTML = '';
   squadrons = []; groups = []; fleets = [];
-  SIDE_FAC = (setup.factions || [0, 1]).slice(); applySideNames(); applyPlayerTheme();
+  SIDE_FAC = (setup.factions || [0, 1]).slice();
+  SIDES = Math.min(SIDE_N, Math.max(2, SIDE_FAC.length, ...setup.fleets.map((f) => (f.side || 0) + 1)));
+  for (let s = SIDE_FAC.length; s < SIDES; s++) { const f = setup.fleets.find((o) => o.side === s && o.fac != null); SIDE_FAC[s] = f ? f.fac : 1; }   // 沒寫陣營的那一方：用它第一支艦隊的外觀
+  REL = relTable(setup.rel); relVer++; for (const a of relDmg) a.fill(0); relHP0.fill(0);   // 勢力關係：setup.rel＝[[a, b, 關係], ...]
+  applySideNames(); applyPlayerTheme();
   const R = rand(12345);
 
   // 先決定每支分艦隊的艦數與落點
@@ -2159,6 +2220,7 @@ function buildFleets(setup = battleSetup || sandboxSetup()) {
     labelLayer.appendChild(el);
     sq.label = el; sq.labelNum = el.querySelector('span'); sq.labelState = el.querySelector('i');
   });
+  relLabels();
   recountAlive();
   pushSquadronUniforms();
   refreshFormationUI && refreshFormationUI();
@@ -2171,7 +2233,7 @@ function measureSquadron(sq) {
 }
 
 function recountAlive() {
-  aliveBySide = [0, 0];
+  aliveBySide = new Array(SIDE_N).fill(0);
   for (const sq of squadrons) if (!sq.bg) aliveBySide[sq.side] += sq.alive;
 }
 
@@ -2250,7 +2312,7 @@ function lerpNum(a, b, e) { return a + (b - a) * e; }
 
 // ───── 通訊干擾接口：受干擾的一方下令變陣後，要延遲才開始 ─────
 // 之後的技能或特殊場地只要呼叫 setJam(side, 秒數, 延遲秒數)
-const jam = [{ until: 0, delay: 0 }, { until: 0, delay: 0 }];
+const jam = sideArr(() => ({ until: 0, delay: 0 }));
 const orderQueue = [];
 function setJam(side, duration, delay) {
   if (!jammed(side)) jamSeen[side] = snapEnemy(side);   // 雷達失效：這一方看到的敵情停在干擾開始那一刻
@@ -2258,7 +2320,7 @@ function setJam(side, duration, delay) {
 }
 function jammed(side) { return jam[side].until > U.uTime.value; }
 // 被干擾時看到的敵軍分艦隊（位置、艘數、陣型都是干擾開始時的）；沒被干擾＝即時的
-const jamSeen = [null, null];
+const jamSeen = sideArr(null);
 function snapEnemy(side) {
   const m = new Map();
   for (const q of squadrons) if (q.side !== side) m.set(q, { x: q.x, y: q.y || 0, z: q.z, h: q.h, W: q.W, D: q.D, alive: q.alive, name: q.name, side: q.side, bg: q.bg, formation: q.group ? q.group.formation : null, to: q.group ? q.group.to : q.h, group: q.group, fleet: q.fleet, t: U.uTime.value, stale: true });
@@ -2279,12 +2341,13 @@ function playerFogged() { return typeof GAME !== 'undefined' && (GAME.phase === 
 //   自己的分艦隊偵測半徑內、視線沒被巨大小行星擋住；攻擊型艦載機周圍；掃描結果、開火暴露（f.fowRev 到期前）
 //   沒被干擾＝全軍共享（每支艦隊都知道全軍知道的）；被干擾＝各艦隊只知道自己偵測到的，掃描也沒有結果
 // 最後已知：f.fowLast（分艦隊 → 最後看到的快照）；看過去那個位置已經沒有人＝刪掉。全部在模擬裡算（回放一致）
-const FOW = { tick: -1, scanReady: [0, 0], pings: [[], []], scans: [], start: [null, null], obs: null, auto: [true, true], rlog: new Map() };   // rlog：偵察機（FT 索引）→ 被干擾時記下、還沒回報的情報
+const FOW = { tick: -1, scanReady: sideArr(0), pings: sideArr(() => []), scans: [], start: sideArr(null), obs: null, auto: sideArr(true), rlog: new Map() };   // rlog：偵察機（FT 索引）→ 被干擾時記下、還沒回報的情報
 function fowOn() { return !!opts.fow && !!battleSetup && !battleSetup.bg; }
 function fowOmni(side) { return !!(battleSetup && battleSetup.omni && battleSetup.omni[side]); }   // 關卡設定：這一方全知
 function sqIdx(q) { return squadrons[q.qi] === q ? q.qi : (q.qi = squadrons.indexOf(q)); }
 function fowReset() {
-  FOW.tick = -1; FOW.scanReady = [U.uTime.value + FOW_RULE.scanFirst, U.uTime.value + FOW_RULE.scanFirst];   // 開戰 scanFirst 秒後才能第一次掃描 FOW.pings = [[], []]; FOW.scans = []; FOW.start = [null, null]; FOW.obs = null; FOW.auto = [true, true]; FOW.rlog = new Map();
+  FOW.tick = -1; FOW.scanReady = sideArr(U.uTime.value + FOW_RULE.scanFirst);   // 開戰 scanFirst 秒後才能第一次掃描
+  FOW.pings = sideArr(() => []); FOW.scans = []; FOW.start = sideArr(null); FOW.obs = null; FOW.auto = sideArr(true); FOW.rlog = new Map();
   squadrons.forEach((q, i) => (q.qi = i));
   for (const f of fleets) { f.fowK = new Uint8Array(MAX_SQ); f.fowRev = new Float32Array(MAX_SQ); f.fowLast = new Map(); }
 }
@@ -2305,7 +2368,7 @@ function fowUpdate() {
   if (FOW.tick < 0) pushSquadronUniforms();   // 第一次：先算出分艦隊位置
   const t = U.uTime.value, nS = squadrons.length;
   FOW.tick = simTick;
-  if (!FOW.start[0]) for (let s = 0; s < 2; s++) { const al = squadrons.filter((q) => q.side === s && fowLive(q)); FOW.start[s] = al.length ? centerOf(al) : { x: 0, y: 0, z: 0 }; }   // 開戰時的位置（部署時看得到）
+  if (!FOW.start[0]) for (let s = 0; s < SIDES; s++) { const al = squadrons.filter((q) => q.side === s && fowLive(q)); FOW.start[s] = al.length ? centerOf(al) : { x: 0, y: 0, z: 0 }; }   // 開戰時的位置（部署時看得到）
   for (const f of fleets) f.fowK.fill(0);
   // 自己的分艦隊偵測到的（3D 距離，量到對方外框）
   for (const q of squadrons) {
@@ -2323,7 +2386,7 @@ function fowUpdate() {
   //   偵察機飛進掃描區域（離目標點 < 半徑 FT.heal）＝區域掃描：以目標點為中心的球體內都看得到，離開後再保留 scanShow 秒
   //   所以就算之後被打下來，進到區域那一刻起掃到的都已經回報；飛行路徑上（去程、回程）自己周圍 recon.eye 看到的也一起回報
   //   被干擾：回報不了 → 記在偵察機上（FOW.rlog），干擾結束或飛回母艦時才回報（fowReconReport）；被打下來＝情報跟著沒了
-  for (let s = 0; s < 2; s++) for (const j of aliveF[s]) {
+  for (let s = 0; s < SIDES; s++) for (const j of aliveF[s]) {
     if (FT.kind[j] === 1 || FT.state[j] !== 2) continue;
     const c = FT.carrier[j]; if (c < 0 || c >= shipCount) continue;
     const f = squadrons[ships.sq[c]].fleet; if (!f) continue;
@@ -2346,7 +2409,7 @@ function fowUpdate() {
   // 掃描結果、開火暴露
   for (const f of fleets) for (let i = 0; i < nS; i++) if (f.fowRev[i] > t && fowLive(squadrons[i])) f.fowK[i] = 1;
   // 共享：沒被干擾＝全軍共用；關卡設定全知的一方＝全部知道
-  for (let s = 0; s < 2; s++) {
+  for (let s = 0; s < SIDES; s++) {
     const fs = fleets.filter((f) => f.side === s);
     if (fowOmni(s)) { for (const f of fs) for (let i = 0; i < nS; i++) f.fowK[i] = squadrons[i].side !== s && fowLive(squadrons[i]) ? 1 : 0; continue; }
     if (jammed(s)) continue;
@@ -2364,7 +2427,7 @@ function fowUpdate() {
       for (const q of eyes) if (Math.hypot(o.x - q.x, o.y - (q.y || 0), o.z - q.z) < fowSensor(q) * 0.8 && !(SOLID && rockBlock(q.x, q.y || 0, q.z, o.x, o.y, o.z) >= 0)) { f.fowLast.delete(e); break; }
     }
   }
-  for (let s = 0; s < 2; s++) FOW.pings[s] = FOW.pings[s].filter((p) => t - p.t < FOW_RULE.ping);
+  for (let s = 0; s < SIDES; s++) FOW.pings[s] = FOW.pings[s].filter((p) => t - p.t < FOW_RULE.ping);
   FOW.scans = FOW.scans.filter((p) => t - p.t < 4);
 }
 // f 這支艦隊知不知道敵方分艦隊 q 的位置（沒有迷霧＝一律知道）；沒有艦隊（艦載機的母艦沉了等）＝這一方有人知道就算
@@ -2400,8 +2463,8 @@ function pSeen(q, maxAge = FOW_RULE.last) {
 }
 function fowHidden(q) { return fowView() && !q.bg && q.side !== GAME.playerSide && !fowKnows(fowObs(GAME.playerSide), q); }   // 3D／戰術圖：不畫這支敵軍
 // 估計的敵方兵力（看得到的照實、最後已知照快照、沒看過的照開戰時）
-function fowEstAlive(side) {
-  const f = fowObs(1 - side); let n = 0;
+function fowEstAlive(side, viewer = side === GAME.playerSide ? firstFoe(side) : GAME.playerSide) {
+  const f = fowObs(viewer); let n = 0;
   for (const g of fleets) if (g.side === side && !g.reserve) for (const q of g.sqs) { if (q.bg) continue; const v = f ? fowSeen(f, q) : q; n += v ? v.alive : q.list.length - (q.nDorm || 0); }   // 看不到：照編制算（預留的空位不算）
   return n;
 }
@@ -2430,10 +2493,10 @@ function fowScanLeft(side) { return Math.max(0, FOW.scanReady[side] - U.uTime.va
 // 自動掃描：每一方還有敵方艦隊看不到、冷卻好了，就從第一支還在的艦隊自動發出脈衝掃描（FOW.auto＝開關，用命令 'autoscan' 改）
 function fowAutoScan() {
   if (!fowOn()) return;
-  for (let s = 0; s < 2; s++) {
+  for (let s = 0; s < SIDES; s++) {
     if (!FOW.auto[s] || fowScanLeft(s) > 0) continue;
     const ob = fleets.filter((o) => o.side === s && !o.reserve && !o.supply && o.sqs.some(fowLive)); if (!ob.length) continue;
-    const en = fleets.filter((o) => o.side !== s && !o.reserve && o.sqs.some(fowLive));
+    const en = fleets.filter((o) => hostile(s, o.side) && !o.reserve && o.sqs.some(fowLive));
     if (!en.length || en.every((o) => o.sqs.some((q) => fowLive(q) && ob.some((f) => fowKnows(f, q))))) continue;   // 全都看得到
     fowScan(ob[0], true);
   }
@@ -2475,7 +2538,7 @@ function fowExpose(fromSq, target) {
 function sqArea(sq) { const a = sq.group && sq.group.area; return a && a.until > U.uTime.value ? a : null; }
 function areaShip(side, A) {
   const r = FOW_RULE.area.r, c = [];
-  for (const e of squadrons) if (e.side !== side && fowLive(e) && Math.hypot(e.x - A.x, (e.y || 0) - A.y, e.z - A.z) < r + Math.max(e.W, e.D) / 2) c.push(e);
+  for (const e of squadrons) if (strayOK(side, e.side) && fowLive(e) && Math.hypot(e.x - A.x, (e.y || 0) - A.y, e.z - A.z) < r + Math.max(e.W, e.D) / 2) c.push(e);   // 範圍攻擊：中立的也會被打到
   if (!c.length) return -1;
   for (let k = 0; k < 8; k++) {
     const e = c[(rnd() * c.length) | 0], i = e.list[(rnd() * e.list.length) | 0];
@@ -3019,7 +3082,7 @@ function updateGroups(dt) {
     } else if (opts.advance) {
       const step = groupSpeed(g, t) * dt;
       let best = 1e9;
-      for (const o of groups) if (o.side !== g.side) best = Math.min(best, Math.hypot(o.ax - g.ax, o.az - g.az));
+      for (const o of groups) if (hostile(g.side, o.side)) best = Math.min(best, Math.hypot(o.ax - g.ax, o.az - g.az));
       if (best > 280) { const H = groupHeading(g, t); g.ax += Math.sin(H) * step * 0.7; g.az += Math.cos(H) * step * 0.7; }
     }
     if (g.target && g.target.alive <= 0) g.target = null;
@@ -3179,7 +3242,7 @@ function rockBlock(ax, ay, az, bx, by, bz) {
 const pending = []; // 命中事件
 function pickTarget(sideAttacker, fromSq) {
   // 打對面同位置附近的分艦隊（對位），有一定機率打鄰近的；戰爭迷霧：只打知道位置的
-  const enemies = squadrons.filter((s) => s.side !== sideAttacker && !s.bg && s.alive > 0 && fowKnowsSq(fromSq, s));
+  const enemies = squadrons.filter((s) => hostile(sideAttacker, s.side) && !s.bg && s.alive > 0 && fowKnowsSq(fromSq, s));
   if (!enemies.length) return -1;
   let best = null, bd = 1e9;
   for (const e of enemies) {
@@ -3206,7 +3269,7 @@ function focusTarget(sq) {
 // ───── 受擊方位：攻擊來自目標船頭前方 ±60°＝正面，船尾 ±60°＝背後，其餘＝側面 ─────
 // 以目標艦「當下船頭朝向」判斷，所以迴轉、轉向途中被打，容易吃到側面與背後傷害
 const ASPECT_NAME = ['正面', '側面', '背後'];
-const dmgStats = [[0, 0, 0], [0, 0, 0]];   // 各陣營被擊沉的方位統計
+const dmgStats = sideArr(() => [0, 0, 0]);   // 各陣營被擊沉的方位統計
 function shipHeadingNow(i) {
   if (ships.snOn[i]) return ships.snH[i];
   return visHeading(squadrons[ships.sq[i]], U.uTime.value, ships.lag[i]);
@@ -3270,9 +3333,9 @@ function inTerrain(type, x, z, y = 0) { for (const t of terrainList()) if (t.typ
 
 // ───── 光束：距離減傷、射角、命中率 ─────
 // 最大射程時的傷害倍率：BEAM_FALLOFF_MIN（data.js）
-const beamPow = [0, 0], beamShots = [0, 0], beamLastT = [-99, -99];   // 最近一段時間的平均威力（給 HUD）
-const gunStats = [0, 1].map(() => ({ main: [0, 0], sec: [0, 0], aa: [0, 0] }));   // 各類砲 [開火, 命中]
-const hitAvg = [0, 0];   // 最近的平均命中率（HUD）
+const beamPow = sideArr(0), beamShots = sideArr(0), beamLastT = sideArr(-99);   // 最近一段時間的平均威力（給 HUD）
+const gunStats = sideArr(() => ({ main: [0, 0], sec: [0, 0], aa: [0, 0] }));   // 各類砲 [開火, 命中]
+const hitAvg = sideArr(0);   // 最近的平均命中率（HUD）
 function beamFalloff(d, bm) {
   const k = opts.rangeMul || 1;
   const n = (bm ? bm.near : opts.beamNear) * k, f = Math.max(n + 1, (bm ? bm.far : opts.beamFar) * k);
@@ -3311,7 +3374,7 @@ function hitChance(gk, gun, dist, target, attackerSq, ax, ay, az, bx, by, bz) {
 }
 const GUN_FX = { main: { inten: 1.0, len: 0.45, fxP: 0.4, spd: 560 }, sec: { inten: 0.75, len: 0.3, fxP: 0.25, spd: 620 }, aa: { inten: 0.45, len: 0.16, fxP: 0.08, spd: 760 } };
 // ───── 空中目標（飛彈、艦載機）：每個 tick 建一次格子索引，防空砲／副砲找最近的 ─────
-const AIR = { tick: -1, cell: 200, map: [new Map(), new Map()] };   // map[s]＝陣營 s 的飛彈與艦載機
+const AIR = { tick: -1, cell: 200, map: sideArr(() => new Map()) };   // map[s]＝陣營 s 的飛彈與艦載機
 function airKey(x, z) { return Math.floor(x / AIR.cell) * 100003 + Math.floor(z / AIR.cell); }
 function airIndex() {
   if (AIR.tick === simTick) return;
@@ -3334,10 +3397,11 @@ function airIndex() {
 }
 // 還能不能再對它開火：每顆飛彈最多被打 missileShots 次；每架艦載機每 fighterGap 秒最多被一門砲瞄準
 function airFree(o, t) { return o.a === 0 ? misShot[o.i] < AIR_RULE.missileShots : FT.engT[o.i] <= t; }
-// 射程內、射角內最近的敵方空中目標
-function nearestAir(enemySide, i, gun, R, x, y, z) {
-  airIndex();
-  const m = AIR.map[enemySide]; if (!m.size) return null;
+// 好幾方的空中目標合成一張：敵對（防空、攔截）或敵對＋中立（擋光束）
+function airOf(s, stray) { airIndex(); return mapsOf(AIR.map, sideMask(s, stray), AIR, AIR.tick, false); }
+// 射程內、射角內最近的敵方空中目標（side＝開火的那一方）
+function nearestAir(side, i, gun, R, x, y, z) {
+  const m = airOf(side); if (!m.size) return null;
   const C = AIR.cell, r = Math.ceil(R / C), cx = Math.floor(x / C), cz = Math.floor(z / C), t = U.uTime.value;
   let best = null, bd = R;
   for (let ax = cx - r; ax <= cx + r; ax++) for (let az = cz - r; az <= cz + r; az++) {
@@ -3348,9 +3412,8 @@ function nearestAir(enemySide, i, gun, R, x, y, z) {
   return best;
 }
 // 防空砲的優先順序：射程內先找飛彈，沒有才找艦載機
-function nearestAirPri(enemySide, i, gun, R) {
-  airIndex();
-  const m = AIR.map[enemySide]; if (!m.size) return null;
+function nearestAirPri(side, i, gun, R) {
+  const m = airOf(side); if (!m.size) return null;
   const C = AIR.cell, r = Math.ceil(R / C), cx = Math.floor(_a.x / C), cz = Math.floor(_a.z / C), t = U.uTime.value;
   let bm = null, dm = R, bf = null, df = R;
   for (let ax = cx - r; ax <= cx + r; ax++) for (let az = cz - r; az <= cz + r; az++) {
@@ -3370,8 +3433,8 @@ function aaMul(sq) {
   const FM = FORMATIONS[(sq.group && sq.group.formation) || 'line'];
   return (AIR_RULE.formBase + FM.aa) * (sqMorphing(sq) ? 0.6 : 1) * (1 + fleetMods(sq.fleet).aa);
 }
-const airStats = [0, 1].map(() => ({ shots: 0, hits: 0 }));
-const ftrStats = [[0, 0], [0, 0]];   // 艦載機開火／命中
+const airStats = sideArr(() => ({ shots: 0, hits: 0 }));
+const ftrStats = sideArr(() => [0, 0]);   // 艦載機開火／命中
 function fireAir(attacker, gk, gun, sq, o, delay) {
   const k = opts.rangeMul || 1, n = gun.near * k, f = Math.max(n + 1, gun.far * k), dist = o.d;
   const rf = dist <= n ? 1 : 1 - (1 - HIT_RULE.farMul) * Math.min(1, (dist - n) / (f - n));
@@ -3446,7 +3509,7 @@ function ffHit(sq, x0, y0, z0, x1, y1, z1) {
 const RAY_RULE = { r: 0.55, cell: 16, every: 3, air: [1.2, 1.6] };
 const _r = new THREE.Vector3();
 let rayT = 0, rayB = 0;   // rayCast 打到的距離；rayB＝擦邊程度（船中心到射線的距離 ÷ 受擊半徑，0＝正中、1＝擦過邊緣）
-const RAYG = { gen: 0, tick: -1, pos: new Float32Array(0), map: [new Map(), new Map()] };   // pos：各艦 x, y, z, 受擊半徑；map[s]＝陣營 s 的格子（陣列帶 g＝哪一輪）
+const RAYG = { gen: 0, tick: -1, pos: new Float32Array(0), map: sideArr(() => new Map()) };   // pos：各艦 x, y, z, 受擊半徑；map[s]＝陣營 s 的格子（陣列帶 g＝哪一輪）
 function rayGrid() {
   if (RAYG.tick >= 0 && simTick >= RAYG.tick && simTick - RAYG.tick < RAY_RULE.every) return;
   RAYG.tick = simTick; const gen = ++RAYG.gen;
@@ -3471,10 +3534,10 @@ function rayGrid() {
     }
   }
 }
-// 射線（起點 x0、單位方向 u）在 tmax 內第一艘碰到的 side 方艦艇；skip 不算。回傳艦艇編號（沒有＝-1），距離放在 rayT
+// 射線（起點 x0、單位方向 u）在 tmax 內第一艘碰到、side 這一方打得到（敵對＋中立）的艦艇；skip 不算。回傳艦艇編號（沒有＝-1），距離放在 rayT
 function rayCast(side, x0, y0, z0, ux, uy, uz, tmax, skip) {
   rayGrid();
-  const m = RAYG.map[side], P = RAYG.pos, C = RAY_RULE.cell;
+  const m = mapsOf(RAYG.map, sideMask(side, true), RAYG, RAYG.gen, true), P = RAYG.pos, C = RAY_RULE.cell;
   let best = tmax, bi = -1, bb = 0;
   // 依序走過射線經過的格子（水平投影）；t 是沿 3D 射線的距離
   let cx = Math.floor(x0 / C), cz = Math.floor(z0 / C);
@@ -3501,8 +3564,7 @@ function rayCast(side, x0, y0, z0, ux, uy, uz, tmax, skip) {
 //   受擊半徑 air＝[飛彈, 艦載機]（世界單位）。回傳被打中的空中目標（沒有＝null），距離放在 rayT
 const _rayAir = [];
 function rayAir(side, x0, y0, z0, ux, uy, uz, tmax) {
-  airIndex();
-  const m = AIR.map[side]; if (!m.size) return null;
+  const m = airOf(side, true); if (!m.size) return null;
   const C = AIR.cell, A = _rayAir; A.length = 0;
   let cx = Math.floor(x0 / C), cz = Math.floor(z0 / C);
   const sx = ux > 0 ? 1 : -1, sz = uz > 0 ? 1 : -1;
@@ -3542,7 +3604,7 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
   shipWorldCPU(attacker, _a);
   const k = opts.rangeMul || 1, far = gun.far * k;
   if (gk !== 'main' && !volleyShot) {
-    const o = gk === 'aa' ? nearestAirPri(1 - sq.side, attacker, gun, far) : nearestAir(1 - sq.side, attacker, gun, gun.near * k, _a.x, _a.y, _a.z);
+    const o = gk === 'aa' ? nearestAirPri(sq.side, attacker, gun, far) : nearestAir(sq.side, attacker, gun, gun.near * k, _a.x, _a.y, _a.z);
     if (o) return fireAir(attacker, gk, gun, sq, o, delay);
   }
   // 區域攻擊（主／副砲）：那一點在射程、射角內就打那裡；範圍內有敵艦＝打它（看不到＝盲射），沒有＝光束打進空處
@@ -3575,7 +3637,7 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
     if (d <= far && inArc(attacker, gun, dx, dy, dz, d)) { target = c; dist = d; break; }
   }
   if (target < 0) {
-    if (gk === 'sec' && !volleyShot) { const o = nearestAir(1 - sq.side, attacker, gun, far, _a.x, _a.y, _a.z); if (o) { shipWorldCPU(attacker, _a); return fireAir(attacker, gk, gun, sq, o, delay); } }
+    if (gk === 'sec' && !volleyShot) { const o = nearestAir(sq.side, attacker, gun, far, _a.x, _a.y, _a.z); if (o) { shipWorldCPU(attacker, _a); return fireAir(attacker, gk, gun, sq, o, delay); } }
     if (GRD && GRD.live && gk !== 'aa') { shipWorldCPU(attacker, _a); const tu = turretFor(sq.side, attacker, gun, far); if (tu) return fireTurret(attacker, gk, gun, sq, tu, delay, dmgMul); }   // 近地：沒有船可打就打砲台
     return false;
   }
@@ -3599,13 +3661,13 @@ function fireGun(attacker, gk, delay = 0, dmgMul = 1, volleyShot = false) {
     }
     const L = Math.max(1, _a.distanceTo(_b)), ux = (_b.x - _a.x) / L, uy = (_b.y - _a.y) / L, uz = (_b.z - _a.z) / L;
     // 準：只看目標前面有沒有別的敵艦擋住；偏：射程內沿路都算（目標本身已經閃過）
-    let i = rayCast(1 - sq.side, _a.x, _a.y, _a.z, ux, uy, uz, ok ? L : far, target), th = rayT;
+    let i = rayCast(sq.side, _a.x, _a.y, _a.z, ux, uy, uz, ok ? L : far, target), th = rayT;
     graze = rayB;
     if (i < 0 && ok) { i = target; th = L; graze = Math.sqrt(rnd()); }   // 打中瞄準的目標：落點在船身截面上均勻分布
     const end = i >= 0 ? th : L;
     blk = SOLID ? rockBlock(_a.x, _a.y, _a.z, _a.x + ux * end, _a.y + uy * end, _a.z + uz * end) : -1;
     // 途中先碰到敵方飛彈／艦載機：由它吃下這一發
-    const o = rayAir(1 - sq.side, _a.x, _a.y, _a.z, ux, uy, uz, end * (blk >= 0 ? blk : 1));
+    const o = rayAir(sq.side, _a.x, _a.y, _a.z, ux, uy, uz, end * (blk >= 0 ? blk : 1));
     if (o) {
       const tA = Math.max(1, rayT), fA = beamFalloff(tA, gun), fxs = GUN_FX[gk];
       _b.set(_a.x + ux * tA, _a.y + uy * tA, _a.z + uz * tA);
@@ -3755,7 +3817,7 @@ function swarmInfectKill(i, t, x, y, z) {
     if (typeof toast === 'function' && typeof GAME !== 'undefined' && GAME.phase === 'battle') toast(side === GAME.playerSide ? '母巢被擊沉，附近的蟲群陷入混亂！' : '擊沉母巢：附近的蟲群陷入混亂', side === GAME.playerSide ? 'bad' : '');
   }
   for (const f of fleets) {
-    if (f.side === side || f.reserve || !f.sqs.length) continue;
+    if (!hostile(f.side, side) || f.reserve || !f.sqs.length) continue;
     const M = fleetMods(f);
     if (M.fac === 5 && (ty === 3 || ty === 4) && f.paraLive < INFECT_RULE.live) {   // 寄生倒戈：附近沉沒的敵方驅逐、護衛
       const R = INFECT_RULE;
@@ -3796,7 +3858,7 @@ function swarmInfectTick(dt, t) {
     if (ships.dotT[i] > t) d += ships.dotR[i] * dt;
     if (ships.para[i]) d += SHIP_TYPES[ships.type[i]].hp * INFECT_RULE.decay * dt;
     if (d > 0) {
-      ships.hp[i] -= d; if (ships.dotT[i] > t) { if (ships.shMax[i] <= 0) ships.shT[i] = Math.max(ships.shT[i], t); /* 腐蝕中的蟲族不會再生（有護盾的船不影響回充） */ facStats[1 - ships.side[i]].dot += d; dmgDealt[1 - ships.side[i]] += d; }
+      ships.hp[i] -= d; if (ships.dotT[i] > t) { if (ships.shMax[i] <= 0) ships.shT[i] = Math.max(ships.shT[i], t); /* 腐蝕中的蟲族不會再生（有護盾的船不影響回充） */ facStats[firstFoe(ships.side[i])].dot += d; dmgDealt[firstFoe(ships.side[i])] += d; }
       if (ships.hp[i] <= 0) { shipWorldCPU(i, _c); killShip(i, t, _c.x, _c.y, _c.z); continue; }
     }
     const q = squadrons[ships.sq[i]], M = q.mods;
@@ -3810,14 +3872,14 @@ function swarmInfectTick(dt, t) {
 // ───────────────────────── 種族特性（規則數值見 data.js 的 VOLLEY_RULE、LINK_RULE、SALVAGE_RULE） ─────────────────────────
 // 統計（除錯、平衡用）：armor＝裝甲擋掉的船體傷害、dot＝持續傷害、para＝寄生倒戈艘數、zones＝腐蝕區域、hive＝母巢陣亡、hatch／hatchShip＝屍體孵化的艦載機／戰艦、regen＝蟲族再生量
 const FAC_STAT_KEYS = ['volley', 'retarget', 'salvHeal', 'built', 'armor', 'dot', 'para', 'zones', 'hive', 'hatch', 'hatchShip', 'regen'];
-const facStats = [0, 1].map(() => Object.fromEntries(FAC_STAT_KEYS.map((k) => [k, 0])));
+const facStats = sideArr(() => Object.fromEntries(FAC_STAT_KEYS.map((k) => [k, 0])));
 function facStatReset() { for (const s of facStats) for (const k of FAC_STAT_KEYS) s[k] = 0; }
 // 聯盟飛彈：目標在命中前沉了 → 在原本的落點附近找最近的敵艦，重新擲命中；轉向成功＝改打它
 function misRetarget(e) {
   const R = LINK_RULE.r * (1 + LINK_RULE.rTal * (e.rt - 1));
   let best = -1, bd = R * R;
   for (const q of squadrons) {
-    if (q.side === e.side || q.bg || q.alive <= 0 || (q.x - e.x) ** 2 + (q.z - e.z) ** 2 > (R + 200) ** 2) continue;
+    if (!hostile(e.side, q.side) || q.bg || q.alive <= 0 || (q.x - e.x) ** 2 + (q.z - e.z) ** 2 > (R + 200) ** 2) continue;
     for (const j of q.list) {
       if (!ships.alive[j]) continue;
       shipWorldCPU(j, _c); const d = (_c.x - e.x) ** 2 + (_c.y - e.y) ** 2 + (_c.z - e.z) ** 2;
@@ -4218,7 +4280,7 @@ ftrSpriteMesh.frustumCulled = ftrTrailMesh.frustumCulled = false;
 ftrSpriteMesh.renderOrder = 1; ftrTrailMesh.renderOrder = 2;
 scene.add(ftrSpriteMesh, ftrTrailMesh);
 let ftrHead = 0;
-const aliveF = [[], []];
+const aliveF = sideArr(() => []);
 
 // 從艦 i 放出 n 架（kind 0＝攻擊型、1＝維修機，tgt＝維修對象）；回傳實際放出的架數（機位滿了就少放）
 // 艦隊的機庫比例（合計＝n）
@@ -4260,13 +4322,13 @@ function launchFighters(side, perCarrier = 8, set = null) {
 }
 function ftrDmgMul(home) { const q = home >= 0 && home < shipCount ? squadrons[ships.sq[home]] : null, m = q && (q.mods || fleetMods(q.fleet)); return m ? m.dmg * m.ftrDmg : 1; }
 // ───── 自動武器：飛彈、艦載機、維修機（各艦各自冷卻；敵人進入射程才用） ─────
-const wStats = [{ mFired: 0, mInt: 0, mMiss: 0, healed: 0, fLaunch: 0, rLaunch: 0, fLand: 0, fLost: 0, fBuilt: 0, rot: 0, fRep: 0, fHeal: 0 }, { mFired: 0, mInt: 0, mMiss: 0, healed: 0, fLaunch: 0, rLaunch: 0, fLand: 0, fLost: 0, fBuilt: 0, rot: 0, fRep: 0, fHeal: 0 }];
+const wStats = sideArr(() => ({ mFired: 0, mInt: 0, mMiss: 0, healed: 0, fLaunch: 0, rLaunch: 0, fLand: 0, fLost: 0, fBuilt: 0, rot: 0, fRep: 0, fHeal: 0 }));
 function maxHp(i) { return SHIP_TYPES[ships.type[i]].hp * (squadrons[ships.sq[i]].flagship === i ? 3 : 1) * ships.hpCap[i]; }   // hpCap：傭兵重新造出來的船只有一半
 function updateEnemyDist() {   // 每支分艦隊離最近敵方分艦隊（邊緣）的距離，每 0.5 秒更新
   for (const q of squadrons) {
     if (q.bg || q.alive <= 0) { q.enemyD = 1e9; continue; }
     let best = 1e9;
-    for (const o of squadrons) { if (o.side === q.side || o.bg || o.alive <= 0 || o.hidden || !fowKnowsSq(q, o)) continue; const d = Math.hypot(o.x - q.x, (o.y || 0) - (q.y || 0), o.z - q.z) - Math.max(o.W, o.D) / 2 - Math.max(q.W, q.D) / 2; if (d < best) best = d; }
+    for (const o of squadrons) { if (!hostile(q.side, o.side) || o.bg || o.alive <= 0 || o.hidden || !fowKnowsSq(q, o)) continue; const d = Math.hypot(o.x - q.x, (o.y || 0) - (q.y || 0), o.z - q.z) - Math.max(o.W, o.D) / 2 - Math.max(q.W, q.D) / 2; if (d < best) best = d; }
     q.enemyD = Math.max(0, best);
   }
   // 突破：紡錘陣／圓錐陣的前端衝進敵方分艦隊 → 對方陣形混亂
@@ -4276,7 +4338,7 @@ function updateEnemyDist() {   // 每支分艦隊離最近敵方分艦隊（邊�
     if (!F || !F.breach || q.bg || q.alive <= 0 || q.enemyD > 5 || sqMorphing(q, t)) continue;
     const fx = q.x + Math.sin(q.h) * q.D / 2, fz = q.z + Math.cos(q.h) * q.D / 2;
     for (const o of squadrons) {
-      if (o.side === q.side || o.bg || o.alive <= 0 || o.hidden) continue;
+      if (!hostile(q.side, o.side) || o.bg || o.alive <= 0 || o.hidden) continue;
       const dx = fx - o.x, dz = fz - o.z, u = dx * Math.cos(o.h) - dz * Math.sin(o.h), v = dx * Math.sin(o.h) + dz * Math.cos(o.h);
       if (Math.abs(u) > o.W / 2 || Math.abs(v) > o.D / 2 || Math.abs((q.y || 0) + Math.sin(q.p || 0) * q.D / 2 - (o.y || 0)) > 40) continue;   // 3D：高度也要對上
       const dm = disorderMul(o); if (dm <= 0) continue;   // 種族：機械改造混亂時間縮短（蟲族之後會是 0＝不會混亂）
@@ -4463,7 +4525,7 @@ function activateFighter(j) {
 // 攔截機找目標：交戰半徑內（以艦隊中心算）離中心最近的敵方飛彈，沒有就找艦載機
 function interceptAcquire(j, s, cx, cy, cz) {
   airIndex();
-  const m = AIR.map[1 - s], R = INTERCEPT_RULE.engage, C = AIR.cell, r = Math.ceil(R / C), gx = Math.floor(cx / C), gz = Math.floor(cz / C);
+  const m = airOf(s), R = INTERCEPT_RULE.engage, C = AIR.cell, r = Math.ceil(R / C), gx = Math.floor(cx / C), gz = Math.floor(cz / C);
   let bm = null, dm = R, bf = null, df = R;
   if (m.size) for (let ax = gx - r; ax <= gx + r; ax++) for (let az = gz - r; az <= gz + r; az++) {
     const arr = m.get(ax * 100003 + az); if (!arr) continue;
@@ -4477,7 +4539,7 @@ function interceptAcquire(j, s, cx, cy, cz) {
 function areaFtrTarget(j, s, hq) {
   let best = null, bd = 350;
   for (const e of squadrons) {
-    if (e.side === s || !fowLive(e) || !fowKnowsSq(hq || { side: s }, e)) continue;
+    if (!strayOK(s, e.side) || !fowLive(e) || !fowKnowsSq(hq || { side: s }, e)) continue;
     const d = Math.hypot(e.x - FT.ax[j], (e.y || 0) - FT.ay[j], e.z - FT.az[j]); if (d < bd) { bd = d; best = e; }
   }
   if (!best) return -1;
@@ -4487,7 +4549,7 @@ function areaFtrTarget(j, s, hq) {
 let aaAcc = 0;
 function updateFighters(dt) {
   const t = U.uTime.value;
-  aliveF[0].length = 0; aliveF[1].length = 0;
+  for (const a of aliveF) a.length = 0;
   for (const q of squadrons) q.drones = 0;
   ships.fout.fill(0); ships.foutR.fill(0);
   for (let i = 0; i < FTR_MAX; i++) {
@@ -4574,7 +4636,7 @@ function updateFighters(dt) {
         if (g2 >= 0 && ships.alive[g2]) { shipWorldCPU(g2, _a); tx = _a.x; ty = _a.y; tz = _a.z; hasT = true; }
         else if (FT.area[i]) { FT.ch[i] = 0; tx = FT.ax[i]; ty = FT.ay[i]; tz = FT.az[i]; }   // 區域攻擊：飛到那一點，在上空盤旋偵察
         else if (fowOn() || CAP.on) { FT.ch[i] = 0; const G = hq && hq.group; tx = G ? G.ax : px; ty = G ? G.ay || 0 : py; tz = G ? G.az : pz; }   // 戰爭迷霧：沒有看得到的目標就回艦隊上空
-        else { FT.ch[i] = 0; const ef = groups.find((o) => o.side === 1 - s); tx = ef ? ef.ax : px; ty = 0; tz = ef ? ef.az : pz; }
+        else { FT.ch[i] = 0; const ef = groups.find((o) => hostile(s, o.side)); tx = ef ? ef.ax : px; ty = 0; tz = ef ? ef.az : pz; }
         if (role === 2) mode = 2; else if (role === 3) mode = 3;
       }
       dx = tx - px; dy = ty - py; dz = tz - pz; d = Math.hypot(dx, dy, dz) || 1;
@@ -4758,35 +4820,35 @@ function processHits() {
       if (e.kill) dmgStats[tSide][e.asp]++;
     }
     if (e.ff) { ffStats[e.side][0]++; ffStats[e.side][1] += eff; }   // 友軍誤射：不算進對敵傷害
-    else { dmgDealt[e.side] += eff; wDmg[e.side][e.src || 0] += eff; cStatHit(e, ti, shD, hullD); }
+    else { dmgDealt[e.side] += eff; wDmg[e.side][e.src || 0] += eff; cStatHit(e, ti, shD, hullD); if (eff > 0 && REL[e.side] && REL[e.side][tSide] === 1) relHit(e.side, tSide, eff); }   // 打到中立的一方：累積誤傷
     if (e.kind === 'mh' || e.kind === 'lb') {
       if (e.kill) { killShip(e.target, t, e.x, e.y, e.z, e.kind === 'mh' ? 1.25 : 1); continue; }
-      if (e.kind === 'lb') { if (e.fx) spawnFx(e.x, e.y, e.z, e.hull ? e.side : 2 + tSide * 8 + e.dirIdx, TYPE_W[ships.type[e.target]] * (e.hull ? 0.4 : 0.9), 24); continue; }
+      if (e.kind === 'lb') { if (e.fx) spawnFx(e.x, e.y, e.z, e.hull ? e.side : fxShield(tSide, e.dirIdx), TYPE_W[ships.type[e.target]] * (e.hull ? 0.4 : 0.9), 24); continue; }
       if (e.kill) killShip(e.target, t, e.x, e.y, e.z, 1.25);
-      else { spawnFx(e.x, e.y, e.z, 2 + tSide * 8 + e.dirIdx, TYPE_W[ships.type[e.target]] * 1.2, 22); spawnFx(e.x, e.y, e.z, e.side, 3, 24); }
+      else { spawnFx(e.x, e.y, e.z, fxShield(tSide, e.dirIdx), TYPE_W[ships.type[e.target]] * 1.2, 22); spawnFx(e.x, e.y, e.z, e.side, 3, 24); }
       continue;
     }
     if (e.kill) killShip(e.target, t, e.x, e.y, e.z);
     else if (e.fx) {
-      if (!e.hull) spawnFx(e.x, e.y, e.z, 2 + tSide * 8 + e.dirIdx, TYPE_W[ships.type[e.target]] * 0.9, 24);   // 護盾擋下
+      if (!e.hull) spawnFx(e.x, e.y, e.z, fxShield(tSide, e.dirIdx), TYPE_W[ships.type[e.target]] * 0.9, 24);   // 護盾擋下
       else spawnFx(e.x, e.y, e.z, e.side, TYPE_W[ships.type[e.target]] * 0.45, 26);   // 打到船體：小爆炸
     }
   }
   if (stateDirty) { shipGeo.getAttribute('aState').needsUpdate = true; recountAlive(); stateDirty = false; }
 }
 
-const dmgDealt = [0, 0];
-const ffStats = [[0, 0], [0, 0]];   // 友軍誤射（擬真難度）：各方誤擊的次數、傷害
-const deflStats = [[0, 0, 0], [0, 0, 0]];  // 護盾偏折：各方受擊時 [無傷次數, 減半次數, 擋掉的傷害]
-const rayStats = [[0, 0, 0], [0, 0, 0]];  // 射線判定：各方光束 [被目標前面的敵艦擋下, 打偏後打中別艘敵艦, 被敵方飛彈／艦載機擋下] 的次數
-const ffHold = [0, 0];   // 擬真難度：同部隊擋住射界而停火的次數
-const wDmg = [[0, 0, 0], [0, 0, 0]];   // 傷害來源：光束、飛彈、艦載機
+const dmgDealt = sideArr(0);
+const ffStats = sideArr(() => [0, 0]);   // 友軍誤射（擬真難度）：各方誤擊的次數、傷害
+const deflStats = sideArr(() => [0, 0, 0]);  // 護盾偏折：各方受擊時 [無傷次數, 減半次數, 擋掉的傷害]
+const rayStats = sideArr(() => [0, 0, 0]);  // 射線判定：各方光束 [被目標前面的敵艦擋下, 打偏後打中別艘敵艦, 被敵方飛彈／艦載機擋下] 的次數
+const ffHold = sideArr(0);   // 擬真難度：同部隊擋住射界而停火的次數
+const wDmg = sideArr(() => [0, 0, 0]);   // 傷害來源：光束、飛彈、艦載機
 // 平衡用的細項統計（不顯示，供除錯／模擬分析）：各方打出的傷害依武器分 [護盾, 船體]、受到的傷害依艦種分、擊沉數、護盾回充量
 const C_SRC = ['main', 'sec', 'aa', 'msl', 'ftr', 'lance'];
-const cStats = [0, 1].map(() => ({ src: C_SRC.map(() => [0, 0]), taken: [0, 1, 2, 3, 4, 5].map(() => [0, 0]), lost: [0, 0, 0, 0, 0, 0], regen: 0 }));   // 艦種 6 種（data.js 比 main.js 晚載入）
+const cStats = sideArr(() => ({ src: C_SRC.map(() => [0, 0]), taken: [0, 1, 2, 3, 4, 5].map(() => [0, 0]), lost: [0, 0, 0, 0, 0, 0], regen: 0 }));   // 艦種 6 種（data.js 比 main.js 晚載入）
 function cStatHit(e, ti, shD, hullD) {
   const k = e.kind === 'mh' ? 3 : e.kind === 'lb' ? 5 : e.src === 2 ? 4 : e.gk === 'sec' ? 1 : e.gk === 'aa' ? 2 : 0;
-  const a = cStats[e.side].src[k], d = cStats[1 - e.side], ty = ships.type[ti];
+  const a = cStats[e.side].src[k], d = cStats[ships.side[ti]], ty = ships.type[ti];
   a[0] += shD; a[1] += hullD; d.taken[ty][0] += shD; d.taken[ty][1] += hullD;
   if (e.kill) d.lost[ty]++;
 }
@@ -4853,7 +4915,7 @@ function resetCombat() {
   pending.length = 0; RAYG.tick = -1;
   for (const k in FT) FT[k].fill(k === 'tgt' ? -1 : 0);
   fP.fill(0); fV.fill(0); fI.fill(0); ftrAttrs.aFI.needsUpdate = true;
-  aliveF[0].length = 0; aliveF[1].length = 0; misHead = 0; ftrHead = 0;
+  for (const a of aliveF) a.length = 0; misHead = 0; ftrHead = 0;
   for (const w of wStats) { w.mFired = w.mInt = w.mMiss = w.healed = w.fLaunch = w.rLaunch = w.fLand = w.fLost = w.fBuilt = w.rot = w.fRep = w.fHeal = 0; } for (const a of wDmg) a.fill(0);
   for (const q of squadrons) { q.enemyD = null; q.drones = 0; q.disorderUntil = 0; q.volleyT = -1e9; q.lkQ = null; q.lkT = -99; q.salvT = -99; q.netN = 0; q.zoneMul = 0; q.hive = false; }
   for (const f of fleets) { f.parts = 0; f.built = 0; f.paraLive = 0; }
@@ -4972,6 +5034,8 @@ function execCommand(c) {
       // 只指定射擊目標：不重新編組、不轉向、不變陣，也不取消隊列（陣型／移動是另一套命令）
       // 選的是整支部隊＝部隊目標；只選了其中幾支分艦隊＝只有它們改打這個目標
       const tq = squadrons[c.target];
+      if (tq && list.length && friendly(c.side, tq.side)) break;   // 不能攻擊自己人、同盟
+      if (tq && list.length && REL[c.side][tq.side] === 1) relSet(c.side, tq.side, 0, 'attack');   // 攻擊中立的一方＝宣戰
       if (tq) for (const gg of new Set(list.map((q) => q.group).filter(Boolean))) {
         const mine = list.filter((q) => q.group === gg), whole = gg.sqs.filter((q) => q.alive > 0 && !q.bg).every((q) => set.has(q));
         if (whole) { gg.target = tq; for (const q of gg.sqs) q.atk = null; } else for (const q of mine) q.atk = tq;
@@ -5081,7 +5145,7 @@ function newBattle(seed = battleSeed, setup = null) {
   beamHead = 0; beamDirtyFrom = 0; beamDirtyCount = BEAM_MAX;
   for (let i = 0; i < FX_MAX; i++) fxF[i * 4] = -999;
   fxHead = 0; fxDirtyFrom = 0; fxDirtyCount = FX_MAX;
-  orderQueue.length = 0; jam[0] = { until: 0, delay: 0 }; jam[1] = { until: 0, delay: 0 }; jamSeen[0] = jamSeen[1] = null;
+  orderQueue.length = 0; for (let s = 0; s < SIDE_N; s++) { jam[s] = { until: 0, delay: 0 }; jamSeen[s] = null; }
   for (const a of dmgStats) a.fill(0);
   dmgDealt.fill(0); cStatReset(); ffStats.forEach((a) => a.fill(0)); rayStats.forEach((a) => a.fill(0)); deflStats.forEach((a) => a.fill(0)); ffHold.fill(0);
   beamPow.fill(0); beamShots.fill(0); beamLastT.fill(-99); hitAvg.fill(0); for (const g of gunStats) for (const k in g) g[k].fill(0); for (const a of airStats) a.shots = a.hits = 0; for (const f of ftrStats) f.fill(0); fireAcc = [0, 0]; aaAcc = 0;
@@ -5551,6 +5615,7 @@ function update3D(cam = camera, vh = VH) {   // cam／vh：子畫面（其他旗
     const cpp = Math.cos(pp);
     const hk = hullKey(i), ms = R3.meshByKey[hk], fx = Math.sin(h) * cpp, fy = Math.sin(pp), fz = Math.cos(h) * cpp;
     if (!ms) continue;
+    if (kb) { const d = kb * HK.amp * L; _a.x -= fx * d; _a.y -= fy * d; _a.z -= fz * d; }
     writeMatrix(ms[lod], _a.x, _a.y, _a.z, fx, fy, fz, L);
     if (lod <= 2 && SETTINGS.weapons3D !== false) writeMounts(typeKey(i), lod, forced >= 0 ? Math.min(3, forced + 1) : pickPx > 1500 ? 0 : lod + 1, _a.x, _a.y, _a.z, fx, fy, fz, L, i);   // 武器細節：很近才用原檔，其餘比船低一級
   }
@@ -5611,7 +5676,6 @@ function fowFxFrame() {
   const use =(arr, k, col) => { let l = arr[k]; if (!l) { l = lineObj(col, 0.8); arr.push(l); fowFx.g.add(l); } l.visible = true; return l; };
   let nr = 0, np = 0;
   if (on) {
-    if (kb) { const d = kb * HK.amp * L; _a.x -= fx * d; _a.y -= fy * d; _a.z -= fz * d; }
     for (const s of FOW.scans) {
       if (s.side !== me) continue;
       const u = Math.min(1, (t - s.t) / 1.5); if (u >= 1) continue;
@@ -5891,14 +5955,14 @@ function armRecon(f) {
 }
 function cmdRecon(f, p) { issue('recon', { fleet: f.id, x: Math.round(p.x), y: Math.round(p.y != null ? p.y : selAlt()), z: Math.round(p.z) }); }
 function cmdAutoScan(on) { issue('autoscan', { on }); SETTINGS.autoScan = on; saveSettings(); }
-function cmdJam() { issue('jam', { target: 1 - cmdSide, dur: SKILLS.jam.dur, delay: 6 }); }   // 測試場：與技能「干擾」相同
+function cmdJam() { issue('jam', { target: firstFoe(cmdSide), dur: SKILLS.jam.dur, delay: 6 }); }   // 測試場：與技能「干擾」相同
 function setRule(key, value) { issue('rule', { key, value }); }
 // 畫陣線：第一步 A→B 決定位置與寬度；第二步指定面向線的哪一側（預設：最近的敵軍那一側）
 function lineNormal(A, B) { const dx = B.x - A.x, dz = B.z - A.z, L = Math.hypot(dx, dz) || 1; return [dz / L, -dx / L]; }
 function defaultLineSide(A, B) {
   const [nx, nz] = lineNormal(A, B), mx = (A.x + B.x) / 2, mz = (A.z + B.z) / 2;
   let best = null, bd = 1e18;
-  for (const q of sideSquadrons(1 - cmdSide)) { const d = (q.x - mx) ** 2 + (q.z - mz) ** 2; if (d < bd) { bd = d; best = q; } }
+  for (const q of squadrons) { if (q.bg || q.alive <= 0 || !hostile(cmdSide, q.side)) continue; const d = (q.x - mx) ** 2 + (q.z - mz) ** 2; if (d < bd) { bd = d; best = q; } }
   if (best) return (best.x - mx) * nx + (best.z - mz) * nz >= 0 ? 1 : -1;
   const c = camGround(); return nx * c.fx + nz * c.fz >= 0 ? 1 : -1;
 }
@@ -6266,7 +6330,7 @@ function boxSelect(x0, y0, x1, y1, add) {
   const [a, b, c, d] = [Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)];
   const inBox = (sd) => sideSquadrons(sd).filter((q) => { const [sx, sy] = screenOf(q.x, q.y || 0, q.z); return sx >= a && sx <= c && sy >= b && sy <= d; });
   let l = inBox(cmdSide);
-  if (!l.length) l = inBox(1 - cmdSide);
+  for (let s = 0; !l.length && s < SIDES; s++) if (s !== cmdSide) l = inBox(s);
   if (l.length) setSelection(l, add && l[0].side === cmdSide);
   else if (!add) clearSelection();
 }
@@ -6332,7 +6396,7 @@ function touchUp(e) {
   ts = null;
   if (!aim) hideHint();
   const far = Math.hypot(e.clientX - m.x0, e.clientY - m.y0) > 24;
-  const moveOrAttack = (p) => { const q = squadronAt(e.clientX, e.clientY); if (q && q.side !== cmdSide) cmdAttack(q); else cmdMoveTo(p); };
+  const moveOrAttack = (p) => { const q = squadronAt(e.clientX, e.clientY); if (q && hostile(cmdSide, q.side)) cmdAttack(q); else cmdMoveTo(p); };   // 右鍵只打敵對的；中立要用攻擊指令
   if (m.mode === 'tpress' && aim) {
     // 畫陣線第二步：點的位置決定面向哪一側
     confirmAim(groundAt(e.clientX, e.clientY), false);
@@ -6679,6 +6743,7 @@ function frame() {
   updateMarkers();
   updateStalks();
   gameFrame(dt);
+  cineFrame(dt);     // 運鏡：開戰時掃過戰場（cinecam.js）
   sndFrame(dt);      // 聲音：播到時間的事件、循環音（audio.js）
   pfxFrame();        // 粒子：時鐘、預算（particles.js）
   const t = U.uTime.value;
@@ -6739,7 +6804,6 @@ function frame() {
     sq.label.style.transform = `translate(${(proj.x * 0.5 + 0.5) * VW}px, ${(-proj.y * 0.5 + 0.5) * VH}px) translate(-50%, 0)`;
   }
   U.uSpriteFade.value = 1.0;
-  cineFrame(dt);     // 運鏡：開戰時掃過戰場（cinecam.js）
 
   // 背景視差
   bgMat.uniforms.uOff.value.set(view.target.x * ppu, -view.target.z * Math.sin(ELEV) * ppu);
@@ -7544,7 +7608,7 @@ function gTower(D, x, z, r, h, col, win = 0, y0 = GROUND_Y, msDef = null) {
   D.pil.push({ x, z, r, top: y0 + h, ms });
 }
 // 巨型結構（可以被摧毀）：名稱、耐久、中心、半徑、頂端高度；組成的零件（圓柱、方塊、穹頂、柱子、球形障礙）帶 ms＝編號
-function gMs(D, o, x, z, r, top) { const id = D.ms.length; D.ms.push({ id, name: o.name, hp: o.hp, x, z, r, top }); return id; }
+function gMs(D, o, x, z, r, top) { const id = D.ms.length; D.ms.push({ id, name: o.name, hp: o.hp, x, z, r, top, fall: o.fall || null }); return id; }
 const GROUND_GEN = {
   // 都市：街區（5.5 單位≈1 公里一格），幾個市中心越高（最高約 1 公里）；4～5 座生態巨塔
   city(D, R, H) {
@@ -7730,6 +7794,11 @@ const GROUND_FOG_GLSL = /* glsl */`
   float gh(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
   float gn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.-2.*f); return mix(mix(gh(i), gh(i+vec2(1,0)), f.x), mix(gh(i+vec2(0,1)), gh(i+vec2(1,1)), f.x), f.y); }
   uniform float uHaze;
+  vec3 gHeat(vec3 w, float h, float t){   // 倒塌後燒紅的餘燼（h＝uHeat，0＝沒有）
+    if (h <= 0.) return vec3(0.);
+    float e = gn(w.xz * .45 + vec2(w.y * .7, t * .15)) * .7 + gn(w.xz * 1.7 - w.y * 1.3) * .3;
+    return vec3(1., .34, .07) * min(h, 3.) * smoothstep(.72 - min(h, 2.) * .1, .95, e) * (.7 + .3 * sin(t * 5. + w.y * 2. + w.x));
+  }
   vec3 fogMix(vec3 col, vec3 w){
     float d = max(0., distance(w, cameraPosition) - uFogNear), f = 1. - exp(-d * uFogD);
     float hz = exp(-max(0., w.y - float(${GROUND_Y})) / 7.) * uHaze * (1. - exp(-(d + 40.) * uFogD * 5.)) * (.75 + .5 * gn(w.xz / 90.));   // 貼地的霧
@@ -7741,10 +7810,10 @@ function gUni(P, extra = {}) {
 // 巨型結構、碼頭等合併幾何用的材質（窗戶：依世界座標畫細格子，一部分亮燈）
 function groundMat(P) {
   const m = new THREE.ShaderMaterial({
-    uniforms: gUni(P, { uWinCol: { value: new THREE.Vector3(...P.win) }, uWinK: { value: P.winK }, uDim: { value: 1 } }),
+    uniforms: gUni(P, { uWinCol: { value: new THREE.Vector3(...P.win) }, uWinK: { value: P.winK }, uDim: { value: 1 }, uHeat: { value: 0 } }),
     vertexShader: GROUND_VS, side: THREE.DoubleSide,
     fragmentShader: GROUND_FOG_GLSL + /* glsl */`
-      uniform vec3 uWinCol; uniform float uWinK; uniform float uDim;
+      uniform vec3 uWinCol; uniform float uWinK; uniform float uDim; uniform float uHeat; uniform float uTime;
       varying vec3 vW; varying vec3 vN; varying vec3 vC; varying float vWin;
       void main(){
         vec3 N = normalize(vN); if (!gl_FrontFacing) N = -N;
@@ -7756,6 +7825,7 @@ function groundMat(P) {
           float lit = step(1. - uWinK, gh(id + floor(vWin) * 7.31));
           col += uWinCol * win * lit * (.25 + .35 * gh(id + 3.1)) * uDim;
         }
+        col += gHeat(vW, uHeat, uTime);
         gl_FragColor = vec4(fogMix(col, vW), 1.);
       }`,
   });
@@ -7995,10 +8065,10 @@ function groundMsHit(e) {
   M.hpNow -= e.dmg;
   if (Math.random() < 0.5) spawnFx(e.x, e.y, e.z, e.side, 2 + Math.random() * 1.5, 22);
   const kill = M.hpNow <= 0;
-  if (kill) groundMsKill(M, e.side);
+  if (kill) groundMsKill(M, e.side, e.x, e.z, e.y);   // 命中點在打過來的那一面：往反方向倒；命中的高度決定從哪裡斷
   if (typeof CAP !== 'undefined' && CAP.on) capCreditMs(M, e.dmg, kill);
 }
-function groundMsKill(M, side) {
+function groundMsKill(M, side, sx = null, sz = null, sy = null) {
   const t = U.uTime.value;
   M.dead = true; M.hpNow = 0; M.deadT = t;
   // 碰撞、遮蔽：柱子、球形障礙拿掉，碰撞箱壓入的高度還原
@@ -8017,7 +8087,9 @@ function groundMsKill(M, side) {
   groundPlume(M.x, M.z, t, 200, Math.max(10, M.r * 1.4), 2);
   groundScar(M.x, GROUND_Y, M.z, M.r * 1.8);
   if (GV.beacons) { const a = GV.beacons.pts.geometry.attributes.position; GV.beacons.list.forEach((b, k) => { if (b.ms === M.id) a.setY(k, -1e4); }); a.needsUpdate = true; }
+  groundMsCollapse(M, side, sx, sz, sy);
 }
+// 巨型結構倒塌的畫面：collapse.js（groundMsCollapse、msCollapseFrame、msCollapseRestore）
 // 照碰撞箱的範圍走過每一格（同 gRaster）
 function gRasterCells(b, f) {
   let ix0 = Math.ceil((b.x - b.w / 2 + GROUND_EXT) / GROUND_CELL - 0.5), ix1 = Math.floor((b.x + b.w / 2 + GROUND_EXT) / GROUND_CELL - 0.5);
@@ -8030,10 +8102,14 @@ function gRasterCells(b, f) {
 function groundMsFrame(t) {
   if (!GRD || !GRD.ms || !GV.ms) return;
   for (const M of GRD.ms) {
-    const g = GV.ms[M.id]; if (!g || !M.dead) continue;
-    const k = Math.min(1, (t - M.deadT) / 10), e = k * k * (3 - 2 * k);
-    g.visible = k < 1; g.position.y = GROUND_Y - e * Math.min(M.top - GROUND_Y, 90) * 0.95; g.rotation.z = e * 0.12 * (M.id % 2 ? 1 : -1); g.rotation.x = e * 0.08;
-    if (k < 1 && Math.random() < 0.15) spawnFx(M.x + (Math.random() - 0.5) * M.r * 2, GROUND_Y + Math.random() * 6, M.z + (Math.random() - 0.5) * M.r * 2, 1, 4, 18);
+    const g = GV.ms[M.id], F = GV.msFx[M.id]; if (!g || !M.dead || !F) continue;
+    if (F.kind === 'sink') {   // 軌道電梯：往下沉、消失
+      const k = Math.min(1, (t - M.deadT) / 10), e = k * k * (3 - 2 * k);
+      g.visible = k < 1; g.position.y = GROUND_Y - e * Math.min(M.top - GROUND_Y, 90) * 0.95; g.rotation.z = e * 0.12 * (M.id % 2 ? 1 : -1); g.rotation.x = e * 0.08;
+      if (k < 1 && Math.random() < 0.15) spawnFx(M.x + (Math.random() - 0.5) * M.r * 2, GROUND_Y + Math.random() * 6, M.z + (Math.random() - 0.5) * M.r * 2, 1, 4, 18);
+      continue;
+    }
+    msCollapseFrame(M, F, t);
   }
   for (const c of GV.climb) if (c.ms != null && GRD.ms[c.ms] && GRD.ms[c.ms].dead) c.m.visible = false;
 }
@@ -8041,6 +8117,7 @@ function groundMsFrame(t) {
 function groundRestore() {
   const B = GV.bld; if (B) { for (let i = 1; i < B.ic.array.length; i += 4) { B.ic.array[i] = -1; B.ic.array[i + 2] = 0; } B.ic.clearUpdateRanges(); B.ic.needsUpdate = true; B.dirty.length = 0; }
   const S = GV.scars; if (S) { S.s.array.fill(0); S.s.clearUpdateRanges(); S.s.needsUpdate = true; S.head = 0; }
+  msCollapseRestore();
   for (const [id, g] of (GV.ms || []).entries()) if (g && GRD && GRD.ms[id]) { g.visible = true; g.position.set(GRD.ms[id].x, GROUND_Y, GRD.ms[id].z); g.rotation.set(0, 0, 0); }
   for (const c of GV.climb) c.m.visible = true;
   if (GV.beacons) { const a = GV.beacons.pts.geometry.attributes.position; GV.beacons.list.forEach((b, k) => a.setY(k, b.y)); a.needsUpdate = true; }
@@ -8200,6 +8277,26 @@ function gbDome(G, x, y0, z, r, col, seg = 14, rings = 5) {
     gbQuad(G, v(p0, a0), v(p0, a1), v(p1, a1), v(p1, a0), [Math.cos(pm) * Math.cos(amid), Math.sin(pm), Math.cos(pm) * Math.sin(amid)], col, 0);
   }
 }
+// 把太長的三角形對半切（巨型結構倒塌時依三角形分塊，太大的面切不開）：最長邊超過 lim 就從中點切，三角形最多 max 個
+function gbSplit(G, lim, max = 40000) {
+  for (let pass = 0; pass < 20; pass++) {
+    const P = G.p, N = G.n, C = G.c, Wn = G.w, nT = P.length / 9; let n = nT, any = false;
+    const p = [], nn = [], c = [], w = [];
+    const put = (k, i) => { const o = k * 9 + i * 3; p.push(P[o], P[o + 1], P[o + 2]); nn.push(N[o], N[o + 1], N[o + 2]); c.push(C[o], C[o + 1], C[o + 2]); w.push(Wn[k * 3 + i]); };
+    const mid = (k, i, j) => { const a = k * 9 + i * 3, b = k * 9 + j * 3; for (const [A, B] of [[P, p], [N, nn], [C, c]]) B.push((A[a] + A[b]) / 2, (A[a + 1] + A[b + 1]) / 2, (A[a + 2] + A[b + 2]) / 2); w.push(Wn[k * 3 + i]); };
+    const len = (k, i, j) => { const a = k * 9 + i * 3, b = k * 9 + j * 3; return Math.hypot(P[a] - P[b], P[a + 1] - P[b + 1], P[a + 2] - P[b + 2]); };
+    for (let k = 0; k < nT; k++) {
+      const l0 = len(k, 0, 1), l1 = len(k, 1, 2), l2 = len(k, 2, 0), e = l0 >= l1 && l0 >= l2 ? 0 : l1 >= l2 ? 1 : 2, le = [l0, l1, l2][e];
+      if (le <= lim || le > 5000 || n >= max) { put(k, 0); put(k, 1); put(k, 2); continue; }
+      const i = e, j = (e + 1) % 3, o = (e + 2) % 3;   // 切 i–j 邊：(i, m, o)、(m, j, o)
+      put(k, i); mid(k, i, j); put(k, o); mid(k, i, j); put(k, j); put(k, o);
+      n++; any = true;
+    }
+    G.p = p; G.n = nn; G.c = c; G.w = w;
+    if (!any) break;
+  }
+  return G;
+}
 function gbMesh(G, mat) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(G.p, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(G.n, 3));
@@ -8352,7 +8449,7 @@ function groundSync() {
   GV.group.visible = true;
   if (GV.key !== GRD.key) {
     for (const o of GV.group.children.slice()) { GV.group.remove(o); o.traverse((c) => { if (c.geometry) c.geometry.dispose(); }); }
-    for (const m of GV.mats) m.dispose(); GV.mats = []; GV.tur = []; GV.climb = []; GV.defKey = ''; GV.tMat = GV.wMat = null; GV.bld = GV.scars = GV.smoke = null;
+    for (const m of GV.mats) m.dispose(); GV.mats = []; GV.tur = []; GV.climb = []; GV.defKey = ''; GV.tMat = GV.wMat = null; GV.bld = GV.scars = GV.smoke = null; GV.msFx = [];
     if (GV.sky) { scene.remove(GV.sky); GV.sky.material.dispose(); GV.sky.geometry.dispose(); }
     GV.key = GRD.key;
     const P = GRD.S.pal, D = GRD, mat = groundMat(P), G = gbNew(), beacons = [], MG = new Map();
@@ -8381,7 +8478,7 @@ function groundSync() {
     }
     GV.group.add(gbMesh(G, mat));
     GV.ms = [];   // 巨型結構：以底部中心為支點的群組（倒塌時往下沉、傾斜）
-    for (const [id, g] of MG) { const M = D.ms[id], grp = new THREE.Group(), m = gbMesh(g, mat); grp.position.set(M.x, GROUND_Y, M.z); m.position.set(-M.x, -GROUND_Y, -M.z); grp.add(m); GV.group.add(grp); GV.ms[id] = grp; }
+    for (const [id, g] of MG) { const M = D.ms[id], top = M.top - GROUND_Y; if (top < 300) { let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9; for (let k = 0; k < g.p.length; k += 3) { x0 = Math.min(x0, g.p[k]); x1 = Math.max(x1, g.p[k]); z0 = Math.min(z0, g.p[k + 2]); z1 = Math.max(z1, g.p[k + 2]); } gbSplit(g, Math.max(2.5, top / 10, (x1 - x0) / 40, (z1 - z0) / 40)); } const grp = new THREE.Group(), m = gbMesh(g, mat); grp.position.set(M.x, GROUND_Y, M.z); m.position.set(-M.x, -GROUND_Y, -M.z); grp.add(m); GV.group.add(grp); GV.ms[id] = grp; }
     if (D.glb.length) bldGroundModels(P, D);   // 自訂地圖的 GLB 建築（非同步載入，building.js）
     const bm = groundBldMesh(P, D); if (bm) GV.group.add(bm);
     GV.group.add(groundScarMesh(P));
@@ -8896,6 +8993,752 @@ function debrisReset() {
   }
 }
 
+// ═══════════════════════ 巨型結構倒塌：切成碎塊、依種類挑倒法（只是畫面）═══════════════════════
+// 被摧毀的巨型結構（含自訂的 GLB 建築）在倒下的那一刻切成好幾塊（依三角形中心分格，共用原本的頂點資料，只新建索引），
+//   每塊各自動：鉸鏈倒下、往下壓垮、被炸飛、側向推倒…… 全部用 Math.random，不碰模擬（回放時細節可能不同）
+// 參考真實的倒塌方式：
+//   高樓 tall    topple   整棟從底部倒下；細長的常在半空中折斷（上段轉得慢、跟下段分開），落地時摔成好幾截
+//                pancake  上層壓垮下層、一層接一層往下（塵土從每一層往外噴、外牆一片片剝落），最後塌進自己的地基、只剩幾片殘牆
+//                tiltdrop 被打的那一層斷掉，上段先往一邊傾斜，再往下壓垮整棟
+//                behead   上段被打斷、傾斜後滑落到旁邊；下半截燒著站著
+//                lean     低樓層被壓垮（軟弱層），整棟往下坐、歪一邊；有時撐一陣子後整棟倒下
+//                implode  底部撐不住，整棟往下沉進自己的塵土裡（像爆破拆除）
+//   鋼架 steel   rack     柱子往同一方向歪倒，一排排像骨牌一樣壓平（平行四邊形）
+//                sag      火燒軟化：屋頂中間往下凹、牆被拉向內，撐不住時整個塌下
+//                gutted   外殼一塊塊燒落、掉下來，只剩焦黑發紅的骨架站著
+//   武器 weapon  cookoff  彈藥殉爆：一陣內部爆炸、砲塔頭被炸飛翻滾落地，底座像火炬一樣噴火
+//                shatter  連環爆炸往上竄，整座炸成碎塊四散
+//                meltdown 能源核心過載：整座燒紅、慢慢軟塌，閃光之後熔成一攤發紅的殘骸
+//                behead   砲管／上段被打斷，先垂下再掉落
+//   穹頂 dome    cavein   頂部先塌進去，四周的殼往內倒，剩一圈破邊
+//                burst    能量外洩，殼板往外炸飛
+//   長牆 wall    breach   打中的那一段崩開倒下，兩旁的歪斜
+//   一般 low     partial  被打的那一側塌掉，另一半還站著（露出斷面）
+//                crumble  由上往下一塊塊塌成一堆
+//   軌道電梯：照舊往下沉
+// 建築種類（建築編輯器）可以指定 fall＝種類或倒法的名字；沒有就依名稱與形狀判斷
+const CL_G = 9;   // 碎塊的重力（單位／秒²；1 單位＝200 公尺，比真實的快很多，不然要倒好幾分鐘）
+const CL_MODES = {
+  tall: { topple: 3, pancake: 3, tiltdrop: 2, behead: 2, lean: 2, implode: 1.5 },
+  steel: { rack: 3, sag: 3, gutted: 2 },
+  weapon: { cookoff: 3, shatter: 2.5, meltdown: 2, behead: 1.5 },
+  dome: { cavein: 3, burst: 2 },
+  wall: { breach: 1 },
+  low: { partial: 3, crumble: 3, pancake: 1.2, gutted: 1 },
+};
+const CL_KIND_NAME = { auto: '自動', tall: '高樓', steel: '鋼架', weapon: '武器', dome: '穹頂', wall: '長牆', low: '矮胖' };
+const CL = { force: null };   // 除錯：指定下一次的倒法
+const _clV = new THREE.Vector3(), _clV2 = new THREE.Vector3(), _clQ = new THREE.Quaternion(), _clM = new THREE.Matrix4();
+const clR = (a, b) => a + Math.random() * (b - a);
+const clSS = (a, b, x) => { const k = Math.max(0, Math.min(1, (x - a) / (b - a))); return k * k * (3 - 2 * k); };
+function clPick(w) { let s = 0; for (const k in w) s += w[k]; let r = Math.random() * s; for (const k in w) if ((r -= w[k]) <= 0) return k; return Object.keys(w)[0]; }
+GV.msFx = [];
+
+// ───── 種類、倒法 ─────
+function clKind(M, bb) {
+  const n = M.name || '', h = bb.max.y, ex = bb.max.x - bb.min.x, ez = bb.max.z - bb.min.z, w = Math.max(ex, ez), d = Math.min(ex, ez);
+  if (/砲|炮/.test(n)) return 'weapon';
+  if (/護盾|穹頂/.test(n)) return 'dome';
+  if (/堤|城牆|圍牆/.test(n) || (w > d * 4 && h < w * 0.5)) return 'wall';
+  if (/船塢|龍門|機庫|廠房|倉庫|鋼架/.test(n)) return 'steel';
+  return h > w * 1.5 ? 'tall' : 'low';
+}
+function clMode(M, bb, fh) {
+  const f = CL.force || M.fall;
+  if (f && !CL_MODES[f] && Object.values(CL_MODES).some((m) => m[f])) return f;
+  const kind = CL_MODES[f] ? f : clKind(M, bb), w = { ...CL_MODES[kind] };
+  if (kind === 'tall') {   // 打在高處：上段斷掉的多；打在低處：整棟倒、歪斜、往下沉的多
+    if (fh > 0.55) { w.behead *= 2; w.tiltdrop *= 2; w.topple *= 0.5; w.lean *= 0.3; w.implode *= 0.5; }
+    else if (fh < 0.3) { w.topple *= 1.5; w.lean *= 1.6; w.implode *= 1.5; w.behead *= 0.3; w.tiltdrop *= 0.5; }
+  }
+  return clPick(w);
+}
+
+// ───── 燒焦：材質換成這棟自己的副本，幾秒內慢慢變黑、燈熄掉；uHeat＝燒紅的餘燼 ─────
+function clBurnMats(o, F) {
+  const done = new Map(), ok = (m) => m && m.uniforms;
+  const swap = (m) => {
+    let n = done.get(m); if (n) return n;
+    n = m.clone(); n.uniforms = { ...m.uniforms };
+    const e = { n, dim: m.uniforms.uDim ? m.uniforms.uDim.value : null, lum: m.uniforms.uLum ? m.uniforms.uLum.value : null, em: m.uniforms.uEmC ? m.uniforms.uEmC.value.clone() : null };
+    for (const k of ['uDim', 'uLum', 'uChar', 'uHeat']) if (m.uniforms[k]) n.uniforms[k] = { value: m.uniforms[k].value };
+    if (e.em) n.uniforms.uEmC = { value: e.em.clone() };
+    done.set(m, n); GV.mats.push(n); F.mats.push(e); return n;
+  };
+  o.traverse((c) => {
+    if (!c.isMesh || !c.material) return;
+    if (Array.isArray(c.material)) { if (!c.material.some(ok)) return; F.keep.push([c, c.material]); c.material = c.material.map((m) => (ok(m) ? swap(m) : m)); }
+    else if (ok(c.material)) { F.keep.push([c, c.material]); c.material = swap(c.material); }
+  });
+}
+function clBurnFrame(F, t) {
+  const age = t - F.t0, b = clSS(0, F.burnT || 4, age), heat = Math.max(F.heat, 0.45 * clSS(0.3, 2, age) * Math.max(0, 1 - (age - 3) / 25));
+  for (const e of F.mats) {
+    const u = e.n.uniforms;
+    if (e.dim != null) u.uDim.value = e.dim * (1 - 0.68 * b);
+    if (e.lum != null) u.uLum.value = e.lum * (1 - 0.68 * b);
+    if (u.uChar) u.uChar.value = b;
+    if (e.em) u.uEmC.value.copy(e.em).multiplyScalar(Math.max(0, 1 - age * 1.5) * (Math.random() < 0.3 ? 0.2 : 1));   // 燈閃幾下熄掉
+    if (u.uHeat) u.uHeat.value = heat;
+  }
+}
+
+// ───── 切塊：cell(x, y, z)（W 座標的三角形中心）→ 格子編號；base＝支點在塊的底部（否則在中心）─────
+// W＝取代原本群組的新群組（原點＝底部中心，地面 y＝0）；每塊＝W 底下的一個群組
+function clFracture(F, cell, base = false) {
+  const g = F.g, W = F.W; g.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(g.matrixWorld).invert(), C = new Map(), a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  g.traverse((o) => {
+    if (!o.isMesh || !o.geometry || !o.geometry.attributes.position) return;
+    const rel = new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld), geo = o.geometry, P = geo.attributes.position, I = geo.index;
+    const nT = Math.floor((I ? I.count : P.count) / 3), mats = Array.isArray(o.material) ? o.material : null, grs = mats && geo.groups.length ? geo.groups : null;
+    const parts = new Map();
+    for (let k = 0; k < nT; k++) {
+      const i0 = I ? I.getX(k * 3) : k * 3, i1 = I ? I.getX(k * 3 + 1) : k * 3 + 1, i2 = I ? I.getX(k * 3 + 2) : k * 3 + 2;
+      a.fromBufferAttribute(P, i0).applyMatrix4(rel); b.fromBufferAttribute(P, i1).applyMatrix4(rel); c.fromBufferAttribute(P, i2).applyMatrix4(rel);
+      const id = cell((a.x + b.x + c.x) / 3, (a.y + b.y + c.y) / 3, (a.z + b.z + c.z) / 3);
+      let mi = 0; if (grs) { for (let q = 0; q < grs.length; q++) if (k * 3 >= grs[q].start && k * 3 < grs[q].start + grs[q].count) { mi = grs[q].materialIndex; break; } }
+      let ch = C.get(id); if (!ch) C.set(id, (ch = { id, lo: new THREE.Vector3(1e9, 1e9, 1e9), hi: new THREE.Vector3(-1e9, -1e9, -1e9), parts: [] }));
+      ch.lo.min(a).min(b).min(c); ch.hi.max(a).max(b).max(c);
+      const pk = id * 64 + mi; let p = parts.get(pk); if (!p) { parts.set(pk, (p = { ch, mi, idx: [] })); ch.parts.push({ o, rel, mat: mats ? mats[mi] : o.material, p }); }
+      p.idx.push(i0, i1, i2);
+    }
+    if (!geo.boundingSphere) geo.computeBoundingSphere();
+  });
+  const out = [];
+  for (const ch of C.values()) {
+    const cx = (ch.lo.x + ch.hi.x) / 2, cz = (ch.lo.z + ch.hi.z) / 2, cy = base ? ch.lo.y : (ch.lo.y + ch.hi.y) / 2;
+    const grp = new THREE.Group(); grp.position.set(cx, cy, cz); W.add(grp);
+    const off = new THREE.Matrix4().makeTranslation(-cx, -cy, -cz);
+    for (const { o, rel, mat, p } of ch.parts) {
+      const sg = new THREE.BufferGeometry();
+      for (const k in o.geometry.attributes) sg.setAttribute(k, o.geometry.attributes[k]);
+      sg.setIndex(p.idx); sg.boundingSphere = o.geometry.boundingSphere; sg.boundingBox = o.geometry.boundingBox;
+      const m = new THREE.Mesh(sg, mat); m.matrixAutoUpdate = false; m.matrix.multiplyMatrices(off, rel); grp.add(m);
+    }
+    const cn = []; for (let k = 0; k < 8; k++) cn.push(new THREE.Vector3(k & 1 ? ch.hi.x : ch.lo.x, k & 2 ? ch.hi.y : ch.lo.y, k & 4 ? ch.hi.z : ch.lo.z).sub(grp.position));
+    out.push({ id: ch.id, grp, lo: ch.lo, hi: ch.hi, c: grp.position.clone(), cn, size: ch.hi.clone().sub(ch.lo).length() / 2, m: null, body: null });
+  }
+  g.visible = false;
+  F.chunks = out;
+  return out;
+}
+// 塊（或剛體）最低的一角（W 座標）
+function clLow(list, out) {
+  let lo = 1e9;
+  for (const c of list) { c.grp.updateMatrixWorld(true); for (const k of c.cn) { _clV.copy(k).applyMatrix4(c.grp.matrixWorld); if (_clV.y < lo) { lo = _clV.y; out && out.copy(_clV); } } }
+  return lo - GROUND_Y;
+}
+
+// ───── 單塊的動作：m＝{ at 開始時間, K 轉軸, th 角度, om 角速度, kap 角加速度（倒下）, end 最大角度,
+//        fall 有沒有往下掉, v 下落速度, floor 落到多高, sq 壓扁到多少, sp 攤開多少, out 水平漂移, fx 落地要不要揚塵 } ─────
+function clMove(c, t, o) {
+  c.m = { at: t, K: new THREE.Vector3(1, 0, 0), th: 0, om: 0, kap: 0, end: 9, fall: false, v: 0, floor: 0, sq: 1, sp: 1, out: null, fx: true, ...o, q0: null, land: -1 };
+  return c.m;
+}
+function clTipK(c, F, dir = 1) {   // 往外（dir＝1）或往中心（-1）倒的轉軸
+  let x = c.c.x - F.cx, z = c.c.z - F.cz; const l = Math.hypot(x, z) || 1; if (l < 1e-3) { const a = Math.random() * TAU; x = Math.cos(a); z = Math.sin(a); }
+  x = x / l * dir; z = z / l * dir;
+  return new THREE.Vector3(z, 0, -x);
+}
+function clChunkStep(F, c, t, dt) {
+  const m = c.m; if (!m || c.body || t < m.at) return;
+  if (!m.q0) m.q0 = c.grp.quaternion.clone();
+  if (m.om || m.kap) {
+    m.om += m.kap * Math.sin(m.th + 0.04) * dt; m.th += m.om * dt;
+    if (m.th >= m.end) { if (m.fx && m.kap && !m.fall) clChunkFx(F, c, t); m.th = m.end; m.om = 0; m.kap = 0; }   // 倒到底（只有倒、不掉的才在這裡揚塵）
+    c.grp.quaternion.setFromAxisAngle(m.K, m.th).multiply(m.q0);
+  }
+  if (m.fall) {
+    m.v += CL_G * dt; c.grp.position.y -= m.v * dt;
+    if (m.out) c.grp.position.addScaledVector(m.out, dt);
+    const low = clLow([c]);
+    if (low <= m.floor) { c.grp.position.y += m.floor - low; m.fall = false; m.v = 0; m.out = null; if (m.land < 0) { m.land = t; if (m.fx) clChunkFx(F, c, t); } }
+  }
+  if (m.land >= 0 && !m.fall && (m.sq !== 1 || m.sp !== 1)) {   // 落地後壓扁、攤開，底部貼著落點
+    const k = clSS(0, 0.4, t - m.land);
+    c.grp.scale.set(1 + (m.sp - 1) * k, 1 + (m.sq - 1) * k, 1 + (m.sp - 1) * k);
+    if (k < 1) { const low = clLow([c]); c.grp.position.y += m.floor - low; }
+  }
+}
+function clChunkFx(F, c, t) {
+  if (F.fxN-- <= 0) return;
+  const s = Math.max(0.8, c.size), x = c.grp.position.x, z = c.grp.position.z;
+  clDust(F, x, 0.3, z, s * 1.1, 0, 0, 10);
+  if (Math.random() < 0.5) clDeb(F, x, 0.6, z, 3, Math.max(0.5, s * 0.15), 0, 0);
+}
+
+// ───── 剛體（一群塊一起飛、轉，落地彈一下停住） ─────
+function clBody(F, list, px, py, pz, v, w) {
+  const B = new THREE.Group(); B.position.set(px, py, pz); F.W.add(B); B.updateMatrixWorld(true);
+  let size = 0;
+  for (const c of list) { B.attach(c.grp); c.body = B; c.m = null; size = Math.max(size, c.size, c.grp.position.length() + c.size * 0.5); }
+  const o = { grp: B, list, v: v || new THREE.Vector3(), w: w || new THREE.Vector3(), on: true, hits: 0, size, hinge: null };
+  F.bodies.push(o); return o;
+}
+// 剛體掛在鉸鏈上：繞 K 轉，角加速度 kap·sin(θ)，轉到 end 落地
+function clHinge(o, K, kap, end, om = 0.05, th = 0) { o.hinge = { K, kap, end, om, th, land: -1 }; o.grp.quaternion.setFromAxisAngle(K, th); return o.hinge; }
+function clBodyStep(F, o, t, dt) {
+  if (!o.on) return;
+  const H = o.hinge;
+  if (H) {
+    if (H.land >= 0) return;
+    H.om += H.kap * Math.sin(H.th + 0.03) * dt; H.th += H.om * dt;
+    if (H.th >= H.end) { H.th = H.end; H.land = t; }
+    o.grp.quaternion.setFromAxisAngle(H.K, H.th);
+    return;
+  }
+  o.v.y -= CL_G * dt; o.grp.position.addScaledVector(o.v, dt);
+  const wl = o.w.length(); if (wl > 1e-5) { _clQ.setFromAxisAngle(_clV2.copy(o.w).divideScalar(wl), wl * dt); o.grp.quaternion.premultiply(_clQ); }
+  const P = new THREE.Vector3(), low = clLow(o.list, P), emb = -o.size * 0.06;
+  if (low < emb) {
+    o.grp.position.y += emb - low;
+    const vy = -o.v.y;
+    if (vy > 2.5 && o.hits++ < 3) clImpact(F, P.x - F.W.position.x, P.z - F.W.position.z, o.size, vy, t);
+    o.v.y = vy * 0.2; o.v.x *= 0.45; o.v.z *= 0.45; o.w.multiplyScalar(0.35);
+    if (o.v.lengthSq() < 2) o.on = false;
+  }
+}
+// 剛體砸到地上：爆炸、塵土、碎塊、焦痕，壓垮落點附近的建築
+function clImpact(F, x, z, size, vy, t) {
+  const s = Math.max(1, size), k = Math.min(1, vy / 12);
+  clBoom(F, x, s * 0.3, z, 3 + s * 0.35 * k);
+  for (let p = 0; p < 4; p++) { const a = Math.random() * TAU; clDust(F, x + Math.cos(a) * s * 0.4, 0.3, z + Math.sin(a) * s * 0.4, s * 0.9, Math.cos(a) * 2.5, Math.sin(a) * 2.5, 12); }
+  clDeb(F, x, 1, z, 6, Math.max(0.6, s * 0.12), 0, 0);
+  groundScar(F.ox + x, GROUND_Y, F.oz + z, s * 0.8);
+  clCrushAt(F, x, z, s * 0.9 + 2, t, 0.3);
+}
+
+// ───── 畫面效果（座標都是 W 座標）─────
+function clBoom(F, x, y, z, s) { spawnFx(F.ox + x, GROUND_Y + y, F.oz + z, F.side, s, 16 + Math.random() * 8); }
+function clDust(F, x, y, z, s, vx, vz, life = 12) { smokePuff(F.ox + x, GROUND_Y + y, F.oz + z, U.uTime.value, life + Math.random() * 6, s * 0.35, s * (1.4 + Math.random() * 0.6), 0.6, WIND[0] * 0.4 + vx, WIND[1] * 0.4 + vz, 1.15); }
+function clFire(F, x, y, z, s, rise = 1.5) { smokePuff(F.ox + x, GROUND_Y + y, F.oz + z, U.uTime.value, 1.6 + Math.random() * 1.6, s * 0.4, s * (0.9 + Math.random() * 0.5), rise, WIND[0] * 0.3, WIND[1] * 0.3, 2); }
+function clSmoke(F, x, y, z, s) { smokePuff(F.ox + x, GROUND_Y + y, F.oz + z, U.uTime.value, 14 + Math.random() * 8, s * 0.5, s * 2.2, 1.6, WIND[0] * 0.8, WIND[1] * 0.8, 0.7); }
+function clDeb(F, x, y, z, n, size, dx, dz) { msDebris(F.ox + x, GROUND_Y + y, F.oz + z, n, size, dx, dz, U.uTime.value); }
+// 持續的火、煙（被打斷的塔頂、噴火的砲座）：{ x, y, z, s, t1 結束時間, fire 火的比例 }
+function clEmit(F, x, y, z, s, dur, fire = 0.6) { F.em.push({ x, y, z, s, t1: U.uTime.value + dur, fire, next: 0 }); }
+function clEmitStep(F, t) {
+  for (const e of F.em) {
+    if (t > e.t1 || t < e.next) continue;
+    e.next = t + 0.12 + Math.random() * 0.12;
+    const j = () => (Math.random() - 0.5) * e.s;
+    if (Math.random() < e.fire) clFire(F, e.x + j(), e.y, e.z + j(), e.s, 1.5 + e.s * 0.2); else clSmoke(F, e.x + j(), e.y, e.z + j(), e.s);
+  }
+}
+// 壓垮一般建築：(x, z) 半徑 R 內，t0 起 spread 秒內陸續倒（往外倒）
+function clCrushAt(F, x, z, R, t0, spread) {
+  if (typeof groundBldEach !== 'function') return;
+  const wx = F.ox + x, wz = F.oz + z, B = GV.bld, Q = GV.bldQ || (GV.bldQ = []);
+  if (!B || Q.length > 1500) return;
+  groundBldEach(wx, wz, R, -1e9, 1e9, (j) => Q.push({ i: j, t: t0 + Math.random() * spread, a: Math.atan2(B.iA[j * 4 + 1] - wz, B.iA[j * 4] - wx) + (Math.random() - 0.5) * 0.6, depth: BLD_CHAIN_MAX, x: wx, z: wz }));
+}
+// 底部一圈塵土往外湧（像火山碎屑流）
+function clSurge(F, R, n, s, sp) {
+  for (let k = 0; k < n; k++) { const a = Math.random() * TAU, rr = R * (0.7 + Math.random() * 0.5); clDust(F, F.cx + Math.cos(a) * rr, 0.4, F.cz + Math.sin(a) * rr, s, Math.cos(a) * sp, Math.sin(a) * sp, 16); }
+}
+
+// ═════ 入口：groundMsKill 呼叫 ═════
+function groundMsCollapse(M, side, sx, sz, sy = null) {
+  const g = GV.ms && GV.ms[M.id]; if (!g) return;
+  const t = U.uTime.value, top = M.top - GROUND_Y;
+  if (top > 300) { GV.msFx[M.id] = { kind: 'sink', t0: t, g }; return; }   // 軌道電梯：照舊
+  const bb = new THREE.Box3().setFromObject(g); bb.min.sub(g.position); bb.max.sub(g.position);
+  if (bb.isEmpty() || bb.max.y < 0.5) bb.set(new THREE.Vector3(-M.r, 0, -M.r), new THREE.Vector3(M.r, Math.max(1, top), M.r));   // 模型還沒載入
+  bb.min.y = Math.max(0, bb.min.y);
+  const h = Math.max(1, bb.max.y), cx = (bb.min.x + bb.max.x) / 2, cz = (bb.min.z + bb.max.z) / 2, ex = (bb.max.x - bb.min.x) / 2, ez = (bb.max.z - bb.min.z) / 2;
+  // 倒向：離開打擊點（加一點亂數）；沒有打擊點就隨機
+  let a = sx != null && Math.hypot(M.x - sx, M.z - sz) > 1 ? Math.atan2(M.z - sz, M.x - sx) : Math.random() * TAU;
+  a += (Math.random() - 0.5) * 0.7;
+  const fh = sy != null ? Math.max(0, Math.min(1, (sy - GROUND_Y) / h)) : Math.random();
+  const W = new THREE.Group(); W.position.copy(g.position); g.parent.add(W);
+  const F = { t0: t, last: t, g, W, M, side, bb, h, cx, cz, ex, ez, rr: Math.max(ex, ez), r: Math.max(1, M.r), a, dx: Math.cos(a), dz: Math.sin(a), fh,
+    ox: g.position.x, oz: g.position.z, hit: sx != null ? { x: sx - g.position.x, z: sz - g.position.z } : null, keep: [], mats: [], chunks: [], bodies: [], em: [], heat: 0, fxN: 40, ev: [], done: false };
+  F.mode = clMode(M, bb, fh); F.kind = 'cl';
+  clBurnMats(g, F);
+  (CL_INIT[F.mode] || CL_INIT.crumble)(F, t);
+  GV.msFx[M.id] = F;
+}
+// 排程：t 秒時做 f（倒塌過程的分段）
+function clAt(F, t, f) { F.ev.push({ t, f }); }
+// 每幀
+function msCollapseFrame(M, F, t) {
+  if (F.kind !== 'cl') return;
+  const dt = Math.max(0, Math.min(0.1, t - F.last)); F.last = t;
+  if (dt <= 0) return;
+  for (let k = F.ev.length - 1; k >= 0; k--) if (t >= F.ev[k].t) { const e = F.ev[k]; F.ev.splice(k, 1); e.f(t); }
+  if (F.step) F.step(F, t, dt);
+  for (const o of F.bodies) clBodyStep(F, o, t, dt);
+  for (const c of F.chunks) clChunkStep(F, c, t, dt);
+  clEmitStep(F, t);
+  clBurnFrame(F, t);
+}
+// 新的一場：倒下的巨型結構恢復原狀
+function msCollapseRestore() {
+  for (const [id, F] of (GV.msFx || []).entries()) {
+    if (!F) continue;
+    for (const [c, m] of F.keep || []) c.material = m;
+    if (F.W) {
+      F.W.traverse((o) => { if (o.isMesh) { for (const k of Object.keys(o.geometry.attributes)) o.geometry.deleteAttribute(k); o.geometry.dispose(); } });   // 頂點資料是共用的，只丟索引
+      if (F.W.parent) F.W.parent.remove(F.W);
+    }
+    F.g.visible = true; F.g.scale.set(1, 1, 1);
+    GV.msFx[id] = null;
+  }
+  GV.msFx = [];
+}
+// 碎塊：從 (x, y, z)（世界座標）往外噴（dx, dz＝主要方向，0＝四散）
+function msDebris(x, y, z, n, size, dx, dz, t) {
+  if (typeof debOn !== 'function' || !debOn()) return;
+  n = Math.max(1, Math.round(n * debMul()));
+  for (let k = 0; k < n; k++) {
+    const a = Math.random() * TAU, s = 2 + Math.random() * 6, v = 0.5 + Math.random() * 0.4;
+    debPiece(x + (Math.random() - 0.5) * size * 3, y, z + (Math.random() - 0.5) * size * 3, Math.cos(a) * s + dx * 4, 3 + Math.random() * 7, Math.sin(a) * s + dz * 4, t,
+      size * (0.4 + Math.random() * 0.9), [0.3 * v, 0.29 * v, 0.28 * v], 400, true, Math.random() < 0.3 ? 1 : 0, Math.random() < 0.5);
+  }
+}
+
+// ═════ 各種倒法 ═════
+// 分層：n 層（第 0 層最底），q＝每層再切成四等分
+const clBand = (F, y, n) => Math.max(0, Math.min(n - 1, Math.floor(y / F.h * n)));
+const clQuad = (F, x, z) => (x > F.cx ? 1 : 0) + (z > F.cz ? 2 : 0);
+// 沿著倒向那一側底邊的支點；e＝外框在倒向上的半寬
+function clEdge(F, dx, dz) { return Math.abs(dx) * F.ex + Math.abs(dz) * F.ez; }
+// 倒下時掃過的一般建築：在塔身碰到它頂端的角度壓垮；兩側的被落地的衝擊波推倒
+function clPathPlan(F, px, pz, py, L, body, dx, dz) {
+  const B = GV.bld, out = []; if (!B || GV.key !== GRD.key) return out;
+  const wx = F.ox + px, wz = F.oz + pz, seen = new Set(), shock = body * 1.8 + 4;
+  for (let s = -F.rr; s <= L + F.rr * 0.5; s += 5) for (let o = -shock - 3; o <= shock + 3; o += 5) {
+    const L2 = B.idx.get(Math.floor((wx + dx * s - dz * o) / 10) * 4099 + Math.floor((wz + dz * s + dx * o) / 10)); if (!L2) continue;
+    for (const j of L2) {
+      if (seen.has(j) || B.ic.array[j * 4 + 1] >= 0 || B.iB[j * 4] <= 0) continue; seen.add(j);
+      const qx = B.iA[j * 4] - wx, qz = B.iA[j * 4 + 1] - wz, al = qx * dx + qz * dz, cr = qx * dz - qz * dx, pe = Math.abs(cr);
+      if (al > L + F.rr * 0.5 || al < -F.rr) continue;
+      if (pe <= body * (0.85 + 0.3 * Math.random())) out.push({ j, th: Math.min(1.45, Math.atan2(Math.max(0.5, al), B.ic.array[j * 4 + 2] + B.iB[j * 4] - GROUND_Y - py + 0.5)), a: Math.atan2(dz, dx) + (Math.random() - 0.5) * 0.8, al });
+      else if (pe <= shock && Math.random() < 1.15 - (pe - body) / (shock - body)) out.push({ j, th: 9, a: Math.atan2(cr > 0 ? -dx : dx, cr > 0 ? dz : -dz) + (Math.random() - 0.5) * 0.6, al, pe: pe - body });
+    }
+  }
+  return out.sort((p, q) => p.th - q.th);
+}
+function clPathStep(F, list, th, t, landed, maxAl = 1e9) {
+  const B = GV.bld, Q = GV.bldQ || (GV.bldQ = []);
+  while (list.length && (list[0].th <= th || (landed && list[0].th < 9))) {
+    const p = list.shift(); if (p.al > maxAl) continue;
+    Q.push({ i: p.j, t, a: p.a, depth: BLD_CHAIN_MAX, x: B.iA[p.j * 4] - Math.cos(p.a) * 3, z: B.iA[p.j * 4 + 1] - Math.sin(p.a) * 3 });
+  }
+  if (landed) for (const p of list.splice(0)) if (p.th >= 9) Q.push({ i: p.j, t: t + p.pe / 25 + Math.random() * 0.3, a: p.a, depth: BLD_CHAIN_MAX, x: B.iA[p.j * 4] - Math.cos(p.a) * 5, z: B.iA[p.j * 4 + 1] - Math.sin(p.a) * 5 });
+}
+// 鉸鏈倒下的塔身落地：沿著長度爆炸、一長排塵土，摔成好幾截
+function clLogLand(F, o, t) {
+  const L = o.len, P = o.grp.position, n = Math.max(5, Math.round(L / 6));
+  for (let m = 0; m < n; m++) {
+    const s = L * (m + 0.5) / n, x = P.x + o.dx * s, z = P.z + o.dz * s, side = (Math.random() - 0.5) * F.rr * 1.6, ox = x - o.dz * side, oz = z + o.dx * side;
+    if (m % 2 === 0) clBoom(F, ox, Math.random() * F.rr * 0.6, oz, 4 + Math.random() * 6);
+    for (let p = 0; p < 2; p++) clDust(F, ox, 0.5, oz, F.rr * 1.1, -o.dz * (p ? 1 : -1) * 1.8, o.dx * (p ? 1 : -1) * 1.8, 14);
+    clDeb(F, ox, 1, oz, 4, Math.max(0.7, F.rr * 0.1), -o.dz * (Math.random() < 0.5 ? 1 : -1), o.dx * (Math.random() < 0.5 ? 1 : -1));
+    groundScar(F.ox + ox, GROUND_Y, F.oz + oz, F.rr * 0.5);
+  }
+  for (const s of [0.25, 0.6, 0.9]) groundPlume(F.ox + P.x + o.dx * L * s, F.oz + P.z + o.dz * L * s, t, 200, Math.max(10, F.rr * 1.1), 1.1);
+  // 摔斷：每一截各自往下垮一點、扭一下
+  for (const c of o.list.slice()) {
+    F.W.attach(c.grp); c.body = null;
+    const K = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
+    clMove(c, t + Math.random() * 0.25, { fall: true, floor: -c.size * 0.12, K, om: clR(-0.25, 0.25), end: 0.12, fx: false });
+  }
+  o.on = false;
+}
+
+const CL_INIT = {
+  // ── 整棟倒下（細長的在半空中折斷）──
+  topple(F, t, o0 = {}) {
+    const n = Math.max(5, Math.min(9, Math.round(F.h / (F.rr * 0.9)))), yS = F.h * clR(0.06, 0.12);
+    const ch = clFracture(F, (x, y) => (y < yS ? 0 : 1 + clBand(F, y - yS, n) ));
+    const stump = ch.filter((c) => c.id === 0), body = ch.filter((c) => c.id > 0);
+    for (const c of stump) clMove(c, t + 0.3, { K: clTipK(c, F), om: 0.04, end: clR(0.02, 0.08), fx: false });
+    const e = clEdge(F, F.dx, F.dz), px = F.cx + F.dx * e, pz = F.cz + F.dz * e, L = F.h - yS;
+    const o = clBody(F, body, px, yS, pz); o.dx = F.dx; o.dz = F.dz; o.len = L;
+    const T = 2.4 + Math.sqrt(F.h) * 0.42, kap = 22 / (T * T), K = new THREE.Vector3(F.dz, 0, -F.dx);
+    const end = Math.PI / 2 + Math.atan2(yS, L) * 0.9;
+    clHinge(o, K, kap, end, o0.om || 0.06 * Math.sqrt(kap), o0.th || 0);
+    F.path = clPathPlan(F, px, pz, yS, L * Math.sin(1.45), F.rr * 1.3 + 1.5, F.dx, F.dz);
+    clBoom(F, px, yS, pz, 6); clDeb(F, px, yS, pz, 10, Math.max(0.7, F.rr * 0.1), F.dx, F.dz);
+    for (let k = 0; k < 6; k++) clBoom(F, F.cx + clR(-1, 1) * F.ex, yS + Math.random() * 3, F.cz + clR(-1, 1) * F.ez, 3 + Math.random() * 3);
+    // 細長的：轉到一半折斷（上段轉得慢，跟下段分開飛出去）
+    const brk = o0.brk != null ? o0.brk : F.h > F.rr * 3 && Math.random() < 0.6;
+    if (brk) {
+      const kb = Math.round(n * clR(0.35, 0.65)), thb = clR(0.3, 0.75);
+      F.brk = { kb, thb };
+    }
+    F.top = o; F.topT = t;
+    clEmit(F, F.cx, yS, F.cz, F.rr * 0.8, 25, 0.5);
+    F.step = (F, t, dt) => {
+      const H = o.hinge; if (!H) return;
+      if (F.brk && H.land < 0 && H.th >= F.brk.thb) {   // 折斷
+        const up = o.list.filter((c) => c.id - 1 >= F.brk.kb);
+        if (up.length && up.length < o.list.length) {
+          o.list = o.list.filter((c) => c.id - 1 < F.brk.kb); o.len = L * F.brk.kb / n;
+          H.kap *= n / F.brk.kb;
+          const bp = new THREE.Vector3(); o.grp.updateMatrixWorld(true);
+          bp.set(0, L * F.brk.kb / n, 0).applyMatrix4(o.grp.matrixWorld).sub(F.W.position);
+          const wv = H.K.clone().multiplyScalar(H.om), r = bp.clone().sub(o.grp.position);
+          const ub = clBody(F, up, bp.x, bp.y, bp.z, new THREE.Vector3().crossVectors(wv, r).add(new THREE.Vector3(F.dx, 0.2, F.dz).multiplyScalar(clR(0, 2))), wv.clone().multiplyScalar(clR(0.35, 1.3)));
+          clBoom(F, bp.x, bp.y, bp.z, 6 + F.rr * 0.3); clDeb(F, bp.x, bp.y, bp.z, 12, Math.max(0.7, F.rr * 0.1), 0, 0);
+          for (let k = 0; k < 4; k++) clDust(F, bp.x, bp.y, bp.z, F.rr * 0.8, clR(-2, 2), clR(-2, 2), 9);
+          F.maxAl = o.len + F.rr; ub.len = 0;
+        }
+        F.brk = null;
+      }
+      clPathStep(F, F.path, H.th, t, H.land >= 0, F.maxAl);
+      if (H.land >= 0 && o.on) clLogLand(F, o, t);
+      if (H.land < 0 && t >= (F.nfx || 0)) {   // 倒下途中：折斷處、塔身零星爆炸、掉碎塊
+        F.nfx = t + 0.15 + Math.random() * 0.2;
+        const s = Math.random() * o.len, th = H.th, x = o.grp.position.x + F.dx * s * Math.sin(th), z = o.grp.position.z + F.dz * s * Math.sin(th), y = yS + s * Math.cos(th);
+        clBoom(F, x, y, z, 2.5 + Math.random() * 3);
+        if (Math.random() < 0.6) clDeb(F, x, y, z, 3, Math.max(0.6, F.rr * 0.08), F.dx, F.dz);
+      }
+    };
+  },
+  // ── 由上往下逐層壓垮（yF＝斷掉的那一層，tilt＝上段先傾斜）──
+  pancake(F, t, o0 = {}) {
+    const n = Math.max(7, Math.min(16, Math.round(F.h / Math.max(1, F.rr * 0.45)))), bh = F.h / n;
+    const yF = o0.yF != null ? o0.yF : F.h * clR(0.55, 0.85), kF = clBand(F, yF, n);
+    const ch = clFracture(F, (x, y, z) => clBand(F, y, n) * 4 + clQuad(F, x, z));
+    const upper = ch.filter((c) => (c.id >> 2) >= kF), lower = ch.filter((c) => (c.id >> 2) < kF);
+    const yb = kF * bh;
+    // 上段：鉸鏈在斷掉那一層、倒向那一側的邊上（只先傾斜一點），之後整塊往下壓
+    const e = clEdge(F, F.dx, F.dz), P = new THREE.Vector3(F.cx + F.dx * e, yb, F.cz + F.dz * e);
+    const U = clBody(F, upper, P.x, P.y, P.z);
+    const tilt = o0.tilt || 0, T1 = tilt ? clR(1.2, 2) : 0.5;
+    U.on = false;   // 自己控制
+    const S = { v: 0, drop: 0, pile: 0, tilt, T1, P, e, done: false, acc: CL_G * (o0.acc || clR(0.35, 0.55)) };
+    for (const c of lower) if ((c.id >> 2) === 0 && Math.random() < 0.55) c.keep = true;   // 最底層留幾片殘牆
+    for (let k = 0; k < 8; k++) clBoom(F, F.cx + clR(-1, 1) * F.ex, yb + Math.random() * bh, F.cz + clR(-1, 1) * F.ez, 3 + Math.random() * 4);
+    clEmit(F, F.cx, yb, F.cz, F.rr * 0.7, T1 + 1, 0.8);
+    const R0 = F.rr * 1.1 + 2;
+    clCrushAt(F, F.cx, F.cz, R0 + F.rr * 0.6, t + T1 + 0.5, 4);
+    const eat = (c, t, v) => {   // 被壓到的那一塊：碎成瓦礫落進堆裡；外牆有時往外剝落
+      if (c.m) return;
+      const out = new THREE.Vector3(c.c.x - F.cx, 0, c.c.z - F.cz); out.setLength(1);
+      if (Math.random() < 0.28) {
+        clMove(c, t, { fall: true, v, out: out.multiplyScalar(clR(3, 7)), K: clTipK(c, F), om: clR(0.5, 1.4), end: clR(1, 1.6), floor: 0, fx: true });
+      } else {
+        clMove(c, t, { fall: true, v, out: out.multiplyScalar(clR(0, 1.5)), K: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize(), om: clR(-0.5, 0.5), end: 0.4,
+          floor: Math.random() * S.pile, sq: clR(0.12, 0.3), sp: clR(1.1, 1.5), fx: Math.random() < 0.3 });
+      }
+      S.pile = Math.min(F.h * 0.14, S.pile + bh * 0.04);
+    };
+    F.step = (F, t, dt) => {
+      if (S.done) return;
+      const age = t - F.t0;
+      if (age < T1) {   // 上段傾斜
+        if (tilt) U.grp.quaternion.setFromAxisAngle(new THREE.Vector3(F.dz, 0, -F.dx), tilt * clSS(0, T1, age));
+        return;
+      }
+      S.v += S.acc * dt; S.drop += S.v * dt; U.grp.position.y = P.y - S.drop;
+      if (tilt) U.grp.quaternion.setFromAxisAngle(new THREE.Vector3(F.dz, 0, -F.dx), tilt * (1 + S.drop / F.h * 0.6));
+      const front = yb - S.drop;
+      for (const c of lower) if (!c.keep && !c.m && c.hi.y > front + bh * 0.3) eat(c, t, S.v * 0.5);
+      // 上段碰到瓦礫堆：從底部開始一層層壓碎
+      for (const c of U.list.slice()) {
+        const low = clLow([c]);
+        if (low <= S.pile + bh * 0.2) { F.W.attach(c.grp); c.body = null; U.list.splice(U.list.indexOf(c), 1); eat(c, t, S.v * 0.6); }
+      }
+      if (t >= (S.nfx || 0)) {   // 壓垮的那一層：一圈塵土往外噴、碎塊
+        S.nfx = t + 0.1;
+        const y = Math.max(0.5, front), m = 5;
+        for (let k = 0; k < m; k++) { const a = Math.random() * TAU; clDust(F, F.cx + Math.cos(a) * F.rr, y, F.cz + Math.sin(a) * F.rr, F.rr * 1.2, Math.cos(a) * 4, Math.sin(a) * 4, 12); }
+        if (Math.random() < 0.5) clDeb(F, F.cx, y, F.cz, 4, Math.max(0.6, F.rr * 0.09), 0, 0);
+        if (Math.random() < 0.35) clBoom(F, F.cx + clR(-1, 1) * F.ex, y, F.cz + clR(-1, 1) * F.ez, 2.5 + Math.random() * 3);
+        clSurge(F, R0 + Math.min(F.rr * 2, S.drop * 0.4), 3, F.rr * 1.5, 3);
+      }
+      if (!U.list.length) {
+        S.done = true;
+        clSurge(F, R0, 18, F.rr * 2, 5);
+        groundPlume(F.ox + F.cx, F.oz + F.cz, t, 260, Math.max(10, F.rr * 1.4), 1.4);
+        groundScar(F.ox + F.cx, GROUND_Y, F.oz + F.cz, F.rr * 1.6);
+        clEmit(F, F.cx, 1, F.cz, F.rr * 0.8, 30, 0.5);
+      }
+    };
+  },
+  tiltdrop(F, t) { CL_INIT.pancake(F, t, { yF: F.h * (F.fh > 0.35 ? Math.min(0.85, Math.max(0.45, F.fh)) : clR(0.5, 0.8)), tilt: clR(0.18, 0.4) }); },
+  implode(F, t) { CL_INIT.pancake(F, t, { yF: F.h * clR(0.08, 0.2), acc: clR(0.6, 0.8) }); },
+  // ── 上段被打斷：傾斜後滑落，下半截燒著站著 ──
+  behead(F, t) {
+    const n = 8, bh = F.h / n, yF = F.h * (F.fh > 0.3 ? Math.min(0.8, Math.max(0.4, F.fh)) : clR(0.45, 0.75)), kF = Math.max(2, clBand(F, yF, n)), yb = kF * bh;
+    const ch = clFracture(F, (x, y, z) => clBand(F, y, n) * 4 + clQuad(F, x, z));
+    const up = ch.filter((c) => (c.id >> 2) >= kF);
+    const e = clEdge(F, F.dx, F.dz), P = new THREE.Vector3(F.cx + F.dx * e, yb, F.cz + F.dz * e);
+    const U = clBody(F, up, P.x, P.y, P.z), K = new THREE.Vector3(F.dz, 0, -F.dx), L = F.h - yb;
+    clHinge(U, K, 26 / (L + 8), clR(0.45, 0.8), 0.12);
+    for (const c of ch) if ((c.id >> 2) === kF - 1 && Math.random() < 0.5) clMove(c, t + clR(0.2, 1.5), { fall: true, out: new THREE.Vector3(c.c.x - F.cx, 0, c.c.z - F.cz).setLength(clR(1, 4)), K: clTipK(c, F), om: clR(0.4, 1.2), end: 1.4, floor: 0 });   // 斷口的牆塊掉下去
+    for (let k = 0; k < 8; k++) clBoom(F, F.cx + clR(-1, 1) * F.ex, yb + Math.random() * bh, F.cz + clR(-1, 1) * F.ez, 3 + Math.random() * 4);
+    clDeb(F, P.x, yb, P.z, 12, Math.max(0.7, F.rr * 0.1), F.dx, F.dz);
+    clEmit(F, F.cx, yb, F.cz, F.rr * 0.9, 40, 0.55);   // 斷口一直燒
+    F.step = (F, t, dt) => {
+      const H = U.hinge;
+      if (H && H.land >= 0) {   // 傾斜到底：滑出去、往下掉
+        U.grp.updateMatrixWorld(true);
+        const wv = K.clone().multiplyScalar(H.om), c = new THREE.Vector3(0, L * 0.5, 0).applyQuaternion(U.grp.quaternion);
+        U.v.crossVectors(wv, c).add(new THREE.Vector3(F.dx * clR(1.5, 3.5), 0, F.dz * clR(1.5, 3.5)));
+        U.w.copy(wv).multiplyScalar(clR(0.6, 1.2)); U.hinge = null;
+        clBoom(F, P.x, yb, P.z, 5);
+      }
+    };
+  },
+  // ── 低樓層壓垮：往下坐、歪一邊（之後可能整棟倒下）──
+  lean(F, t) {
+    const n = 8, bh = F.h / n, kf = Math.random() < 0.5 ? 1 : 2, yb = kf * bh;
+    const ch = clFracture(F, (x, y, z) => clBand(F, y, n) * 4 + clQuad(F, x, z));
+    const up = ch.filter((c) => (c.id >> 2) > kf), weak = ch.filter((c) => (c.id >> 2) === kf);
+    const e = clEdge(F, F.dx, F.dz), P = new THREE.Vector3(F.cx + F.dx * e, yb + bh, F.cz + F.dz * e);
+    const U = clBody(F, up, P.x, P.y, P.z), K = new THREE.Vector3(F.dz, 0, -F.dx), th1 = clR(0.06, 0.16), sit = bh * clR(0.55, 0.75), T1 = clR(1.2, 2);
+    U.on = false;
+    for (const c of weak) clMove(c, t + Math.random() * 0.4, { fall: true, floor: yb - bh * 0.05, sq: clR(0.2, 0.4), sp: clR(1.05, 1.25), fx: false });
+    for (let k = 0; k < 10; k++) clBoom(F, F.cx + clR(-1, 1) * F.ex, yb + Math.random() * bh, F.cz + clR(-1, 1) * F.ez, 3 + Math.random() * 3);
+    clEmit(F, F.cx, yb + bh * 0.5, F.cz, F.rr * 0.9, 35, 0.6);
+    const later = Math.random() < 0.4 ? t + T1 + clR(2, 6) : 0;
+    F.step = (F, t, dt) => {
+      const k = clSS(0, T1, t - F.t0);
+      U.grp.position.y = P.y - sit * k; U.grp.quaternion.setFromAxisAngle(K, th1 * k);
+      if (t - F.t0 < T1 && t >= (F.nfx || 0)) { F.nfx = t + 0.12; for (let q = 0; q < 3; q++) { const a = Math.random() * TAU; clDust(F, F.cx + Math.cos(a) * F.rr, yb + bh * 0.3, F.cz + Math.sin(a) * F.rr, F.rr * 0.8, Math.cos(a) * 3.5, Math.sin(a) * 3.5, 10); } }
+      if (later && t >= later && !U.hinge) {   // 撐不住了：整棟倒下
+        U.on = true; clHinge(U, K, 22 / Math.pow(2.4 + Math.sqrt(F.h) * 0.42, 2) * 1.4, Math.PI / 2 + Math.atan2(U.grp.position.y, F.h - yb) * 0.9, 0.08, th1);
+        U.dx = F.dx; U.dz = F.dz; U.len = F.h - yb - bh;
+        F.path = clPathPlan(F, P.x, P.z, U.grp.position.y, U.len * Math.sin(1.45), F.rr * 1.3 + 1.5, F.dx, F.dz);
+        clBoom(F, P.x, U.grp.position.y, P.z, 6);
+      }
+      if (U.hinge) { clPathStep(F, F.path, U.hinge.th, t, U.hinge.land >= 0); if (U.hinge.land >= 0 && U.on) clLogLand(F, U, t); }
+    };
+  },
+  // ── 鋼架：柱子同向歪倒、一排排壓平（骨牌）──
+  rack(F, t) {
+    const ax = Math.abs(F.dx) > Math.abs(F.dz), sx = ax ? Math.sign(F.dx) : 0, sz = ax ? 0 : Math.sign(F.dz);   // 歪倒的方向（貼齊外框）
+    const span = ax ? F.ez : F.ex, n = Math.max(3, Math.min(8, Math.round(span * 2 / 6)));
+    const ch = clFracture(F, (x, y, z) => { const p = ax ? (z - F.bb.min.z) / (2 * F.ez) : (x - F.bb.min.x) / (2 * F.ex); return Math.max(0, Math.min(n - 1, Math.floor(p * n))); }, true);
+    const first = Math.random() < 0.5 ? 0 : n - 1, end = clR(1.2, 1.42);
+    for (const c of ch) {
+      c.grp.matrixAutoUpdate = false; c.grp.updateMatrix();
+      c.rk = { at: t + 0.4 + Math.abs(c.id - first) * clR(0.15, 0.35), ph: 0, om: 0.05, kap: 11 / Math.max(2, F.h), land: -1, tw: (Math.random() - 0.5) * 0.12 };
+    }
+    for (let k = 0; k < 8; k++) clBoom(F, F.cx + clR(-1, 1) * F.ex, Math.random() * F.h * 0.6, F.cz + clR(-1, 1) * F.ez, 2.5 + Math.random() * 3);
+    clEmit(F, F.cx, 0.5, F.cz, F.rr * 0.6, 20, 0.6);
+    F.step = (F, t, dt) => {
+      for (const c of ch) {
+        const r = c.rk; if (t < r.at || r.land >= 0) continue;
+        r.om += r.kap * Math.sin(r.ph + 0.08) * dt; r.ph = Math.min(end, r.ph + r.om * dt);
+        const s = Math.sin(r.ph), co = Math.cos(r.ph), tw = r.tw * r.ph;
+        _clM.set(1, sx * s, 0, c.c.x, 0, co, 0, c.c.y, 0, sz * s, 1, c.c.z, 0, 0, 0, 1);
+        c.grp.matrix.copy(_clM).multiply(new THREE.Matrix4().makeRotationY(tw)); c.grp.matrixWorldNeedsUpdate = true;
+        if (r.ph >= end) {   // 壓平：沿著倒下的方向一排塵土、壓垮建築
+          r.land = t;
+          for (let q = 0; q < 4; q++) { const u = Math.random() * F.h * 0.9; clDust(F, c.c.x + sx * u + clR(-1, 1) * (ax ? 2 : 0), 0.4, c.c.z + sz * u + clR(-1, 1) * (ax ? 0 : 2), Math.max(2, F.h * 0.35), sx * 2, sz * 2, 12); }
+          clDeb(F, c.c.x + sx * F.h * 0.5, 0.5, c.c.z + sz * F.h * 0.5, 4, Math.max(0.5, F.h * 0.04), sx, sz);
+          clCrushAt(F, c.c.x + sx * (F.h * 0.5 + F.rr * 0.3), c.c.z + sz * (F.h * 0.5 + F.rr * 0.3), F.h * 0.6 + 2, t, 0.5);
+        }
+      }
+    };
+  },
+  // ── 鋼架：屋頂火燒下凹、牆被拉向內，最後整個塌下 ──
+  sag(F, t) {
+    const nx = 4, ys = F.h * 0.55;
+    const ch = clFracture(F, (x, y, z) => { const i = Math.max(0, Math.min(nx - 1, Math.floor((x - F.bb.min.x) / (2 * F.ex) * nx))), j = Math.max(0, Math.min(nx - 1, Math.floor((z - F.bb.min.z) / (2 * F.ez) * nx))); return (y > ys ? 100 : 0) + i * nx + j; }, true);
+    const Ts = clR(3.5, 6), dm = F.h * clR(0.25, 0.4);
+    for (const c of ch) { const rx = (c.c.x - F.cx) / Math.max(1, F.ex), rz = (c.c.z - F.cz) / Math.max(1, F.ez); c.rho = Math.min(1, Math.hypot(rx, rz) / 1.2); c.p0 = c.c.clone(); }
+    F.heat = 0.4;
+    clEmit(F, F.cx, F.h * 0.4, F.cz, F.rr * 0.7, Ts + 15, 0.85);
+    for (let k = 0; k < 4; k++) clEmit(F, F.cx + clR(-0.7, 0.7) * F.ex, F.h * 0.3, F.cz + clR(-0.7, 0.7) * F.ez, F.rr * 0.35, Ts + 8, 0.9);
+    clAt(F, t + Ts, (t) => {   // 撐不住：屋頂塌下、牆往內倒
+      F.sagDone = true;
+      for (const c of ch) {
+        if (c.id >= 100) clMove(c, t + Math.random() * 0.5, { fall: true, floor: Math.random() * F.h * 0.06, K: clTipK(c, F, -1), om: clR(0.2, 0.6), end: 0.5, sq: clR(0.3, 0.6), sp: 1.1 });
+        else if (c.rho > 0.55) clMove(c, t + 0.2 + Math.random() * 0.8, { K: clTipK(c, F, Math.random() < 0.7 ? -1 : 1), om: 0.05, kap: 6 / Math.max(2, F.h), end: clR(1.1, 1.45), fx: true });
+        else clMove(c, t + Math.random() * 0.6, { fall: true, floor: 0, sq: clR(0.3, 0.5), sp: 1.15 });
+      }
+      for (let k = 0; k < 6; k++) clBoom(F, F.cx + clR(-1, 1) * F.ex, F.h * 0.3, F.cz + clR(-1, 1) * F.ez, 3 + Math.random() * 4);
+      clSurge(F, F.rr * 1.1, 12, F.rr * 0.8, 4);
+      clCrushAt(F, F.cx, F.cz, F.rr * 1.3 + 3, t, 2);
+      groundPlume(F.ox + F.cx, F.oz + F.cz, t, 200, Math.max(8, F.rr * 1.2), 1.2);
+      F.heat = 0.9;
+    });
+    F.step = (F, t, dt) => {
+      if (F.sagDone) { F.heat = Math.max(0.3, F.heat - 0.05 * dt); return; }
+      const k = clSS(0, Ts, t - F.t0), kk = k * k;
+      F.heat = 0.4 + 0.8 * k;
+      for (const c of ch) {
+        if (c.id >= 100) { c.grp.position.y = c.p0.y - dm * (1 - c.rho * c.rho) * kk; c.grp.quaternion.setFromAxisAngle(clTipK(c, F, -1), 0.3 * c.rho * kk); }
+        else if (c.rho > 0.55) c.grp.quaternion.setFromAxisAngle(clTipK(c, F, -1), 0.14 * kk);
+      }
+      if (t >= (F.nfx || 0)) { F.nfx = t + 0.4 + Math.random() * 0.4; clBoom(F, F.cx + clR(-0.8, 0.8) * F.ex, F.h * Math.random() * 0.8, F.cz + clR(-0.8, 0.8) * F.ez, 1.5 + Math.random() * 2); }
+    };
+  },
+  // ── 外殼一塊塊燒落，只剩骨架 ──
+  gutted(F, t) {
+    const ny = Math.max(2, Math.min(5, Math.round(F.h / Math.max(2, F.rr * 0.5))));
+    const ch = clFracture(F, (x, y, z) => { const i = Math.max(0, Math.min(3, Math.floor((x - F.bb.min.x) / (2 * F.ex) * 4))), j = Math.max(0, Math.min(3, Math.floor((z - F.bb.min.z) / (2 * F.ez) * 4))); return clBand(F, y, ny) * 16 + i * 4 + j; });
+    const T = clR(5, 9);
+    for (const c of ch) {
+      const band = c.id >> 4, outer = Math.hypot((c.c.x - F.cx) / Math.max(1, F.ex), (c.c.z - F.cz) / Math.max(1, F.ez)) > 0.6;
+      if (Math.random() < (outer ? 0.55 : 0.3) + band / ny * 0.2) {
+        const out = new THREE.Vector3(c.c.x - F.cx, 0, c.c.z - F.cz).setLength(clR(0.5, 3));
+        clMove(c, t + 0.3 + Math.random() * T, { fall: true, out, K: clTipK(c, F), om: clR(0.3, 1.5), end: clR(0.6, 1.6), floor: Math.random() * F.h * 0.05, sq: clR(0.4, 0.8), sp: 1.1 });
+      } else if (Math.random() < 0.4) clMove(c, t + Math.random() * T, { K: clTipK(c, F, Math.random() < 0.5 ? 1 : -1), om: 0.05, kap: 0, end: 0.1 });
+    }
+    F.heat = 1; F.burnT = T * 0.6;
+    for (let k = 0; k < 6; k++) clEmit(F, F.cx + clR(-0.8, 0.8) * F.ex, F.h * Math.random() * 0.7, F.cz + clR(-0.8, 0.8) * F.ez, Math.max(1, F.rr * 0.35), T + 10, 0.8);
+    F.step = (F, t, dt) => { F.heat = Math.max(0.35, 1.2 - (t - F.t0) / (T * 2.5)); if (t >= (F.nfx || 0) && t - F.t0 < T) { F.nfx = t + 0.5 + Math.random() * 0.6; clBoom(F, F.cx + clR(-1, 1) * F.ex, F.h * Math.random(), F.cz + clR(-1, 1) * F.ez, 1.5 + Math.random() * 2.5); } };
+  },
+  // ── 武器：彈藥殉爆、砲塔頭被炸飛 ──
+  cookoff(F, t) {
+    const yh = F.h * (F.M.name === '行星防禦砲塔' ? 0.87 : clR(0.55, 0.7));
+    const ch = clFracture(F, (x, y, z) => (y >= yh ? 99 : clBand(F, y, 3) * 4 + clQuad(F, x, z)));
+    const head = ch.filter((c) => c.id === 99), base = ch.filter((c) => c.id !== 99), T1 = clR(1.2, 2.4);
+    F.heat = 0.3;
+    F.step = (F, t, dt) => {
+      const age = t - F.t0;
+      if (age < T1) {   // 內部一連串爆炸、頂上冒火
+        F.heat = 0.3 + age / T1 * 1.2;
+        if (t >= (F.nfx || 0)) { F.nfx = t + 0.08 + Math.random() * 0.18; clBoom(F, F.cx + clR(-0.7, 0.7) * F.ex, yh * clR(0.6, 1.05), F.cz + clR(-0.7, 0.7) * F.ez, 2 + Math.random() * 3.5); clFire(F, F.cx + clR(-0.5, 0.5) * F.ex, yh, F.cz + clR(-0.5, 0.5) * F.ez, F.rr * 0.5, 4); }
+      } else F.heat = Math.max(0.5, F.heat - 0.25 * dt);
+    };
+    clAt(F, t + T1, (t) => {   // 殉爆：頭被炸飛
+      const a = F.a + clR(-1, 1), hs = clR(2, 6);
+      const b = clBody(F, head, F.cx, yh, F.cz, new THREE.Vector3(Math.cos(a) * hs, clR(13, 21), Math.sin(a) * hs), new THREE.Vector3(clR(-2.5, 2.5), clR(-1.5, 1.5), clR(-2.5, 2.5)));
+      for (let k = 0; k < 10; k++) clBoom(F, F.cx + clR(-1, 1) * F.ex, yh + clR(-0.15, 0.2) * F.h, F.cz + clR(-1, 1) * F.ez, 6 + Math.random() * 7);
+      for (let k = 0; k < 10; k++) clFire(F, F.cx + clR(-0.6, 0.6) * F.ex, yh, F.cz + clR(-0.6, 0.6) * F.ez, F.rr * 0.9, 8);
+      clDeb(F, F.cx, yh, F.cz, 20, Math.max(0.6, F.rr * 0.08), 0, 0);
+      clEmit(F, F.cx, yh, F.cz, F.rr * 0.55, 10, 0.95); clEmit(F, F.cx, yh, F.cz, F.rr * 0.7, 40, 0.3);   // 底座像火炬一樣噴火，之後冒煙
+      for (const c of base) if ((c.id >> 2) === 2 && Math.random() < 0.5) clMove(c, t + Math.random() * 2, { fall: true, out: new THREE.Vector3(c.c.x - F.cx, 0, c.c.z - F.cz).setLength(clR(2, 5)), K: clTipK(c, F), om: clR(0.5, 1.5), end: 1.3, floor: 0 });
+      F.heat = 1.6; b.size = Math.max(b.size, F.rr * 0.6);
+    });
+  },
+  // ── 武器：連環爆炸、整座炸成碎塊 ──
+  shatter(F, t) {
+    const ny = 4, ch = clFracture(F, (x, y, z) => { const i = Math.max(0, Math.min(2, Math.floor((x - F.bb.min.x) / (2 * F.ex) * 3))), j = Math.max(0, Math.min(2, Math.floor((z - F.bb.min.z) / (2 * F.ez) * 3))); return clBand(F, y, ny) * 9 + i * 3 + j; });
+    const T1 = clR(0.8, 1.6);
+    F.step = (F, t, dt) => {
+      const age = t - F.t0; if (age >= T1) { F.heat = Math.max(0.6, F.heat - 0.3 * dt); return; }
+      F.heat = age / T1 * 2;
+      if (t >= (F.nfx || 0)) { F.nfx = t + 0.06 + Math.random() * 0.1; clBoom(F, F.cx + clR(-0.8, 0.8) * F.ex, F.h * Math.min(1, age / T1 + Math.random() * 0.3), F.cz + clR(-0.8, 0.8) * F.ez, 2.5 + Math.random() * 4); }
+    };
+    clAt(F, t + T1, (t) => {
+      const mid = F.h * 0.45;
+      for (const c of ch) {
+        if ((c.id / 9 | 0) === 0 && Math.random() < 0.7) { clMove(c, t, { K: clTipK(c, F), om: 0.3, end: clR(0.05, 0.3), fx: false }); continue; }   // 底座殘留
+        const d = new THREE.Vector3(c.c.x - F.cx, c.c.y - mid, c.c.z - F.cz); if (d.lengthSq() < 1e-4) d.set(Math.random() - 0.5, 1, Math.random() - 0.5);
+        d.normalize().multiplyScalar(clR(5, 13)); d.y = Math.abs(d.y) + clR(3, 9);
+        clBody(F, [c], c.c.x, c.c.y, c.c.z, d, new THREE.Vector3(clR(-3, 3), clR(-3, 3), clR(-3, 3)));
+      }
+      for (let k = 0; k < 14; k++) clBoom(F, F.cx + clR(-1, 1) * F.ex, F.h * Math.random(), F.cz + clR(-1, 1) * F.ez, 6 + Math.random() * 8);
+      clSurge(F, F.rr * 1.2, 14, F.rr, 6);
+      clDeb(F, F.cx, mid, F.cz, 30, Math.max(0.6, F.rr * 0.08), 0, 0);
+      groundScar(F.ox + F.cx, GROUND_Y, F.oz + F.cz, F.rr * 2);
+      clCrushAt(F, F.cx, F.cz, F.rr * 2 + 4, t + 0.2, 1);
+      clEmit(F, F.cx, 1, F.cz, F.rr * 0.8, 30, 0.6);
+      F.heat = 1.5;
+    });
+  },
+  // ── 武器：能源核心過載、燒紅熔塌 ──
+  meltdown(F, t) {
+    const ny = 5, ch = clFracture(F, (x, y, z) => { const i = Math.max(0, Math.min(2, Math.floor((x - F.bb.min.x) / (2 * F.ex) * 3))), j = Math.max(0, Math.min(2, Math.floor((z - F.bb.min.z) / (2 * F.ez) * 3))); return clBand(F, y, ny) * 9 + i * 3 + j; });
+    for (const c of ch) c.p0 = c.c.clone();
+    const T1 = clR(3, 4.5), lean = new THREE.Vector3(F.dz, 0, -F.dx), la = clR(0.02, 0.07);
+    F.step = (F, t, dt) => {
+      const age = t - F.t0;
+      if (age < T1) {   // 越來越紅、脈動越來越快，慢慢軟塌
+        const k = age / T1;
+        F.heat = k * 2.6 * (0.75 + 0.25 * Math.sin(age * (4 + k * 18)));
+        for (const c of ch) { c.grp.position.y = c.p0.y * (1 - 0.12 * k * k); c.grp.position.x = c.p0.x + F.dx * c.p0.y * la * k; c.grp.position.z = c.p0.z + F.dz * c.p0.y * la * k; }
+        if (t >= (F.nfx || 0)) { F.nfx = t + 0.1 + Math.random() * 0.15; clFire(F, F.cx + clR(-1, 1) * F.ex, F.h * Math.random() * 0.9, F.cz + clR(-1, 1) * F.ez, F.rr * 0.4, 3); if (Math.random() < 0.3) clBoom(F, F.cx + clR(-0.8, 0.8) * F.ex, F.h * Math.random(), F.cz + clR(-0.8, 0.8) * F.ez, 1.5 + Math.random() * 2); }
+      } else F.heat = Math.max(0.5, 2.6 - (age - T1) * 0.08);
+    };
+    clAt(F, t + T1, (t) => {   // 閃光、熔成一攤
+      for (let k = 0; k < 16; k++) { const a = Math.random() * TAU, rr = Math.random() * F.rr; clBoom(F, F.cx + Math.cos(a) * rr, F.h * Math.random() * 0.7, F.cz + Math.sin(a) * rr, 8 + Math.random() * 10); }
+      for (const c of ch) clMove(c, t + (c.id / 9 | 0) * 0.15 * Math.random(), { fall: true, floor: Math.random() * F.h * 0.06, sq: clR(0.08, 0.2), sp: clR(1.3, 1.8), K: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize(), om: clR(-0.4, 0.4), end: 0.4, fx: false });
+      clSurge(F, F.rr * 1.4, 18, F.rr * 1.2, 7);
+      groundScar(F.ox + F.cx, GROUND_Y, F.oz + F.cz, F.rr * 2.6);
+      clCrushAt(F, F.cx, F.cz, F.rr * 2.8 + 6, t, 0.8);
+      groundPlume(F.ox + F.cx, F.oz + F.cz, t, 300, Math.max(12, F.rr * 1.5), 1.6);
+      clEmit(F, F.cx, 0.5, F.cz, F.rr * 0.9, 40, 0.5);
+    });
+  },
+  // ── 穹頂：頂部塌進去、四周往內倒 ──
+  cavein(F, t, burst = false) {
+    const ch = clFracture(F, (x, y, z) => { const s = Math.floor(((Math.atan2(z - F.cz, x - F.cx) / TAU) + 1) % 1 * 8), r = y < F.h * 0.35 ? 0 : y < F.h * 0.7 ? 1 : 2; return r * 8 + s; }, true);
+    const T1 = burst ? clR(1, 1.8) : 0.3;
+    if (burst) F.step = (F, t, dt) => { const age = t - F.t0; if (age < T1) { F.heat = age / T1 * 2.4 * (0.7 + 0.3 * Math.sin(age * 25)); if (t >= (F.nfx || 0)) { F.nfx = t + 0.1; clBoom(F, F.cx + clR(-0.6, 0.6) * F.ex, F.h * Math.random(), F.cz + clR(-0.6, 0.6) * F.ez, 2 + Math.random() * 3); } } else F.heat = Math.max(0.4, F.heat - 0.35 * dt); };
+    clAt(F, t + T1, (t) => {
+      for (const c of ch) {
+        const ring = c.id >> 3;
+        if (burst) {
+          if (ring === 0) { clMove(c, t, { K: clTipK(c, F), om: 0.4, end: clR(0.1, 0.4), fx: false }); continue; }
+          const d = new THREE.Vector3(c.c.x - F.cx, 0, c.c.z - F.cz).setLength(clR(5, 12)); d.y = clR(4, 10) * ring;
+          clBody(F, [c], c.c.x, c.c.y, c.c.z, d, new THREE.Vector3(clR(-2, 2), clR(-2, 2), clR(-2, 2)));
+        } else if (ring === 2) clMove(c, t + Math.random() * 0.5, { fall: true, floor: Math.random() * F.h * 0.1, K: clTipK(c, F, -1), om: clR(0.3, 1), end: 1.2, sq: 0.6 });
+        else if (ring === 1) clMove(c, t + 0.4 + Math.random() * 0.8, { K: clTipK(c, F, -1), om: 0.05, kap: 8 / Math.max(2, F.h), end: clR(1, 1.5) });
+        else clMove(c, t + 0.8 + Math.random(), { K: clTipK(c, F, -1), om: 0.05, kap: 3 / Math.max(2, F.h), end: clR(0.08, 0.35), fx: false });
+      }
+      for (let k = 0; k < (burst ? 14 : 6); k++) clBoom(F, F.cx + clR(-0.8, 0.8) * F.ex, F.h * Math.random() * 0.8, F.cz + clR(-0.8, 0.8) * F.ez, burst ? 7 + Math.random() * 8 : 3 + Math.random() * 3);
+      clSurge(F, F.rr * (burst ? 1.3 : 0.9), 14, F.rr * 0.7, burst ? 6 : 3);
+      clCrushAt(F, F.cx, F.cz, F.rr * (burst ? 1.8 : 1.2) + 3, t + 0.3, 2);
+      groundPlume(F.ox + F.cx, F.oz + F.cz, t, 220, Math.max(10, F.rr * 1.1), 1.2);
+      clEmit(F, F.cx, F.h * 0.2, F.cz, F.rr * 0.5, 30, 0.6);
+    });
+  },
+  burst(F, t) { CL_INIT.cavein(F, t, true); },
+  // ── 長牆：打中的那一段崩開，兩旁歪斜 ──
+  breach(F, t) {
+    const ax = F.ex > F.ez, L = (ax ? F.ex : F.ez) * 2, n = Math.max(4, Math.min(40, Math.round(L / Math.max(4, (ax ? F.ez : F.ex) * 3))));
+    const ch = clFracture(F, (x, y, z) => Math.max(0, Math.min(n - 1, Math.floor((ax ? (x - F.bb.min.x) : (z - F.bb.min.z)) / L * n))), true);
+    const hu = F.hit ? Math.max(0, Math.min(n - 1, Math.floor(((ax ? F.hit.x - F.bb.min.x : F.hit.z - F.bb.min.z)) / L * n))) : Math.max(0, Math.min(n - 1, Math.round(n * (0.3 + Math.random() * 0.4)))), Rb = Math.min(n * 0.25, clR(1.2, 2.6));
+    for (const c of ch) {
+      const d = Math.abs(c.id - hu), sd = Math.random() < 0.5 ? 1 : -1, K = ax ? new THREE.Vector3(sd, 0, 0) : new THREE.Vector3(0, 0, sd);
+      if (d <= Rb) clMove(c, t + d * 0.15 + Math.random() * 0.3, { K, om: 0.1, kap: 8 / Math.max(2, F.h), end: clR(1, 1.5), fall: true, floor: -F.h * clR(0.2, 0.5) });
+      else if (d <= Rb * 2.5) clMove(c, t + d * 0.15, { K, om: 0.05, kap: 2 / Math.max(2, F.h), end: clR(0.05, 0.3), fx: false });
+    }
+    const hx = ax ? F.bb.min.x + (hu + 0.5) / n * L : F.cx, hz = ax ? F.cz : F.bb.min.z + (hu + 0.5) / n * L;
+    for (let k = 0; k < 8; k++) clBoom(F, hx + clR(-1, 1) * Rb * L / n, F.h * Math.random(), hz + clR(-1, 1) * Rb * L / n, 3 + Math.random() * 4);
+    clCrushAt(F, hx, hz, Rb * L / n + 6, t + 0.3, 1.5);
+    clEmit(F, hx, 0.5, hz, 4, 20, 0.4);
+  },
+  // ── 一般：被打的那一側塌掉 ──
+  partial(F, t) {
+    const ny = 3, ch = clFracture(F, (x, y, z) => { const i = Math.max(0, Math.min(2, Math.floor((x - F.bb.min.x) / (2 * F.ex) * 3))), j = Math.max(0, Math.min(2, Math.floor((z - F.bb.min.z) / (2 * F.ez) * 3))); return clBand(F, y, ny) * 9 + i * 3 + j; });
+    const hx = -F.dx, hz = -F.dz;   // 朝向打擊點
+    let any = false;
+    for (const c of ch) {
+      const u = ((c.c.x - F.cx) * hx + (c.c.z - F.cz) * hz) / Math.max(1, F.rr);
+      if (u > -0.15 + Math.random() * 0.2) {
+        any = true;
+        const out = new THREE.Vector3(hx, 0, hz).multiplyScalar(clR(0.5, 3));
+        clMove(c, t + 0.2 + (1 - c.c.y / F.h) * 0.6 + Math.random() * 0.6, { fall: true, out, K: new THREE.Vector3(hz, 0, -hx), om: clR(0.3, 1.2), end: clR(0.4, 1.2), floor: Math.random() * F.h * 0.12, sq: clR(0.3, 0.6), sp: 1.15 });
+      } else if (u > -0.6 && Math.random() < 0.5) clMove(c, t + 0.6, { K: new THREE.Vector3(hz, 0, -hx), om: 0.05, end: clR(0.03, 0.15), fx: false });
+    }
+    if (!any) return CL_INIT.crumble(F, t);
+    for (let k = 0; k < 8; k++) clBoom(F, F.cx + hx * F.rr * 0.5 + clR(-0.6, 0.6) * F.ex, F.h * Math.random(), F.cz + hz * F.rr * 0.5 + clR(-0.6, 0.6) * F.ez, 3 + Math.random() * 4);
+    clCrushAt(F, F.cx + hx * F.rr, F.cz + hz * F.rr, F.rr + 4, t + 0.5, 2);
+    clEmit(F, F.cx + hx * F.rr * 0.3, F.h * 0.4, F.cz + hz * F.rr * 0.3, F.rr * 0.6, 35, 0.6);
+    clAt(F, t + 1.5, () => { clSurge(F, F.rr, 8, F.rr * 0.7, 3); groundPlume(F.ox + F.cx, F.oz + F.cz, U.uTime.value, 200, Math.max(8, F.rr), 1.1); });
+  },
+  // ── 一般：由上往下一塊塊塌成一堆 ──
+  crumble(F, t) {
+    const ny = 3, ch = clFracture(F, (x, y, z) => { const i = Math.max(0, Math.min(2, Math.floor((x - F.bb.min.x) / (2 * F.ex) * 3))), j = Math.max(0, Math.min(2, Math.floor((z - F.bb.min.z) / (2 * F.ez) * 3))); return clBand(F, y, ny) * 9 + i * 3 + j; });
+    for (const c of ch) {
+      const band = c.id / 9 | 0, rho = Math.min(1, Math.hypot((c.c.x - F.cx) / Math.max(1, F.ex), (c.c.z - F.cz) / Math.max(1, F.ez)));
+      const outer = rho > 0.5 && Math.random() < 0.5;
+      clMove(c, t + 0.3 + (band === 0 ? 1.2 : (ny - band) * 0.4) + Math.random() * 1, outer
+        ? { fall: true, out: new THREE.Vector3(c.c.x - F.cx, 0, c.c.z - F.cz).setLength(clR(1, 4)), K: clTipK(c, F), om: clR(0.4, 1.2), end: clR(0.8, 1.5), floor: 0 }
+        : { fall: true, floor: (1 - rho) * F.h * 0.22 * Math.random(), sq: clR(0.25, 0.5), sp: clR(1.1, 1.4), K: new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize(), om: clR(-0.4, 0.4), end: 0.35 });
+    }
+    for (let k = 0; k < 10; k++) clBoom(F, F.cx + clR(-1, 1) * F.ex, F.h * Math.random(), F.cz + clR(-1, 1) * F.ez, 3 + Math.random() * 4);
+    clCrushAt(F, F.cx, F.cz, F.rr * 1.4 + 4, t + 0.3, 2.5);
+    clAt(F, t + 2, () => { clSurge(F, F.rr, 12, F.rr * 0.8, 3.5); groundPlume(F.ox + F.cx, F.oz + F.cz, U.uTime.value, 220, Math.max(10, F.rr * 1.2), 1.3); });
+    clEmit(F, F.cx, F.h * 0.2, F.cz, F.rr * 0.7, 30, 0.5);
+  },
+};
+// 除錯：開一場近地戰（g＝battleSetup.ground）、用指定的倒法摧毀第 id 個巨型結構
+window.__cl = { CL, CL_MODES, F: () => GV.msFx,
+  setup(g) { const s = sandboxSetup(); s.ground = g; return s; },
+  kill(id, mode = null, sx = null, sz = null, sy = null) { CL.force = mode; const M = GRD.ms[id], t0 = performance.now(); groundMsKill(M, 0, sx, sz, sy); CL.force = null; const F = GV.msFx[id]; return F ? { ms: Math.round(performance.now() - t0), mode: F.mode, chunks: (F.chunks || []).length, h: F.h, rr: F.rr } : null; } };
+
 // 預設武器掛點（船體模型座標：船長＝1，船頭＋z、上＋y）；w＝武器編號，r＝轉向（度），t＝側傾（度），s＝尺寸
 // 太空站（es0～bs2）：依模型自動找圓形砲座與平台放的預設，可在武器配置裡改
 const MOUNTS_DEFAULT = {"e0":[{"w":3,"p":[-0.2228,0.0067,0.4183],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0537,0.0061,0.4124],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.2754,0.0084,-0.399],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0413,0.0077,-0.3914],"r":0,"t":0,"s":0.06},{"w":1,"p":[0.2806,-0.0199,0.026],"r":90,"t":0,"s":0.1},{"w":1,"p":[-0.2735,0.0042,0.1191],"r":0,"t":0,"s":0.09},{"w":2,"p":[0.0267,0.008,-0.1556],"r":90,"t":0,"s":0.08},{"w":2,"p":[-0.0268,0.0058,0.2526],"r":90,"t":0,"s":0.08}],"e1":[{"w":0,"p":[0.0011,-0.034,0.1198],"r":0,"t":0,"s":0.21},{"w":0,"p":[0,0.0026,-0.0498],"r":0,"t":0,"s":0.23},{"w":0,"p":[0.0024,-0.0168,-0.425],"r":180,"t":0,"s":0.22},{"w":1,"p":[0,-0.0325,0.3484],"r":0,"t":0,"s":0.11},{"w":1,"p":[-0.0908,-0.0359,-0.1025],"r":-90,"t":0,"s":0.12},{"w":1,"p":[0.0908,-0.0372,-0.1025],"r":90,"t":0,"s":0.12},{"w":3,"p":[-0.0803,-0.0331,-0.0325],"r":0,"t":0,"s":0.07},{"w":3,"p":[0.0803,-0.033,-0.0325],"r":0,"t":0,"s":0.07},{"w":3,"p":[-0.0731,-0.0169,-0.2987],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0731,-0.0184,-0.2987],"r":0,"t":0,"s":0.06},{"w":2,"p":[-0.1066,-0.0725,-0.0272],"r":0,"t":90,"s":0.09},{"w":2,"p":[0.1074,-0.0725,-0.0272],"r":0,"t":-90,"s":0.09}],"e2":[{"w":1,"p":[0.0021,0.0383,0.1152],"r":0,"t":0,"s":0.2},{"w":1,"p":[0,0.0508,-0.2987],"r":180,"t":0,"s":0.2},{"w":5,"p":[0,0.0251,0.3484],"r":0,"t":0,"s":0.14},{"w":4,"p":[-0.0732,-0.023,0.1998],"r":0,"t":90,"s":0.1},{"w":4,"p":[0.0732,-0.023,0.1998],"r":0,"t":-90,"s":0.1},{"w":3,"p":[-0.0763,0.024,-0.112],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0763,0.024,-0.112],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0951,-0.0202,-0.2966],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0951,-0.0202,-0.2966],"r":0,"t":0,"s":0.06}],"e3":[{"w":1,"p":[0,0.0065,0.0373],"r":0,"t":0,"s":0.17},{"w":5,"p":[0,-0.0145,0.2738],"r":0,"t":0,"s":0.16},{"w":3,"p":[-0.0498,-0.0163,0.1182],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0498,-0.0162,0.1182],"r":0,"t":0,"s":0.06},{"w":4,"p":[-0.0918,-0.0663,0.0552],"r":0,"t":90,"s":0.1},{"w":4,"p":[0.0918,-0.0663,0.0552],"r":0,"t":-90,"s":0.1}],"e4":[{"w":3,"p":[0,0.1175,-0.1493],"r":0,"t":0,"s":0.1},{"w":3,"p":[-0.0062,0.0507,0],"r":0,"t":0,"s":0.09},{"w":3,"p":[-0.1536,-0.0602,-0.1293],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.1536,-0.0602,-0.1293],"r":0,"t":0,"s":0.06},{"w":1,"p":[0,0.0479,0.1867],"r":0,"t":0,"s":0.1},{"w":3,"p":[0.0013,0.0424,-0.2941],"r":0,"t":0,"s":0.0775}],"a0":[{"w":3,"p":[-0.1099,-0.0025,0.2318],"r":0,"t":0,"s":0.04},{"w":3,"p":[0.1099,-0.0025,0.2318],"r":0,"t":0,"s":0.04},{"w":3,"p":[0.1207,0.0258,-0.1493],"r":0,"t":0,"s":0.06},{"w":1,"p":[-0.1019,0.0246,-0.0185],"r":0,"t":0,"s":0.09},{"w":2,"p":[0.1167,0.0212,-0.3088],"r":0,"t":0,"s":0.06},{"w":2,"p":[0.1453,0.0202,0.0053],"r":0,"t":0,"s":0.06}],"a1":[{"w":0,"p":[0,0,0.1717],"r":0,"t":0,"s":0.125},{"w":0,"p":[0,0.0059,0.0436],"r":0,"t":0,"s":0.16},{"w":0,"p":[0,0.0191,-0.0871],"r":0,"t":0,"s":0.24},{"w":5,"p":[-0.0021,-0.0021,0.3843],"r":0,"t":0,"s":0.14},{"w":3,"p":[-0.0799,-0.0108,-0.3858],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0799,-0.0105,-0.3858],"r":0,"t":0,"s":0.06},{"w":2,"p":[-0.0907,-0.0202,-0.0809],"r":0,"t":0,"s":0.06},{"w":2,"p":[-0.0907,-0.0209,-0.1556],"r":0,"t":0,"s":0.06},{"w":2,"p":[0.0874,-0.0204,-0.0809],"r":0,"t":0,"s":0.06},{"w":2,"p":[0.0874,-0.0208,-0.1556],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0586,-0.003,0.0249],"r":0,"t":0,"s":0.05},{"w":3,"p":[0.0586,-0.0041,0.0249],"r":0,"t":0,"s":0.05}],"a2":[{"w":1,"p":[-0.0015,-0.0002,-0.3467],"r":180,"t":0,"s":0.125},{"w":1,"p":[0,-0.0045,0.1618],"r":0,"t":0,"s":0.15},{"w":2,"p":[0,0.0059,0.0498],"r":0,"t":0,"s":0.06},{"w":2,"p":[0,0.0113,-0.0187],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.056,-0.0085,0.0249],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.056,-0.0085,-0.056],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0498,-0.0025,0.0249],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0498,-0.0037,-0.056],"r":0,"t":0,"s":0.06},{"w":4,"p":[-0.0964,-0.0434,-0.0384],"r":0,"t":90,"s":0.08},{"w":4,"p":[0.0964,-0.0434,-0.0384],"r":0,"t":-90,"s":0.08}],"a3":[{"w":5,"p":[-0.0037,0.0668,-0.3181],"r":0,"t":0,"s":0.28},{"w":1,"p":[0.0003,0.0501,0.0171],"r":0,"t":0,"s":0.12},{"w":3,"p":[-0.0732,0.0566,-0.1825],"r":0,"t":0,"s":0.055},{"w":3,"p":[0.0732,0.0566,-0.1825],"r":0,"t":0,"s":0.055},{"w":2,"p":[-0.0871,0.0375,0],"r":0,"t":0,"s":0.06},{"w":2,"p":[0.0871,0.038,0],"r":0,"t":0,"s":0.06},{"w":4,"p":[-0.1556,0.023,-0.1742],"r":0,"t":0,"s":0.09},{"w":4,"p":[0.1556,0.023,-0.1742],"r":0,"t":0,"s":0.09}],"a4":[{"w":3,"p":[0,0.134,-0.1333],"r":0,"t":0,"s":0.1},{"w":3,"p":[0.3149,0.0227,-0.1327],"r":0,"t":0,"s":0.07},{"w":3,"p":[-0.3149,0.0227,-0.1327],"r":0,"t":0,"s":0.07},{"w":1,"p":[0,0.1264,0.3333],"r":0,"t":0,"s":0.1},{"w":2,"p":[0.0035,0.1214,-0.2862],"r":0,"t":0,"s":0.08}],"m0":[{"w":3,"p":[-0.1049,0.021,-0.4217],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.1067,0.0216,-0.4165],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.1024,0.0352,-0.3182],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0965,0.021,0.1577],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.082,0.0316,0.1698],"r":0,"t":0,"s":0.06},{"w":5,"p":[-0.1206,0.0382,-0.0535],"r":-275,"t":0,"s":0.18}],"m1":[{"w":0,"p":[0.0034,0,0.1781],"r":0,"t":0,"s":0.2},{"w":2,"p":[0.0427,0.0316,-0.346],"r":0,"t":0,"s":0.08},{"w":2,"p":[-0.0427,0.0316,-0.346],"r":0,"t":0,"s":0.08},{"w":5,"p":[-0.0062,0.031,-0.255],"r":0,"t":0,"s":0.18},{"w":3,"p":[-0.1066,0.0148,-0.0612],"r":0,"t":0,"s":0.06},{"w":0,"p":[0.0057,0.0349,0.0185],"r":0,"t":0,"s":0.2}],"m2":[{"w":0,"p":[-0.017,0.0309,0.2219],"r":0,"t":0,"s":0.2},{"w":1,"p":[-0.0052,0.0204,0.3871],"r":0,"t":0,"s":0.12},{"w":4,"p":[-0.0968,-0.0613,0.1992],"r":0,"t":90,"s":0.09},{"w":4,"p":[0.0983,-0.0623,0.2003],"r":0,"t":-90,"s":0.09},{"w":2,"p":[0.0254,0.0974,-0.0315],"r":0,"t":0,"s":0.08},{"w":2,"p":[-0.0254,0.0974,-0.0315],"r":0,"t":0,"s":0.08},{"w":0,"p":[0.0064,0.0295,-0.3086],"r":185,"t":0,"s":0.2},{"w":3,"p":[0.1253,-0.03,-0.129],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.1253,-0.03,-0.129],"r":0,"t":0,"s":0.06}],"m3":[{"w":3,"p":[0.0299,0.1161,-0.0697],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0331,0.1158,-0.0636],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.0363,0.1143,0.0196],"r":0,"t":0,"s":0.06},{"w":3,"p":[-0.0423,0.1172,0.0157],"r":0,"t":0,"s":0.06},{"w":5,"p":[-0.0024,0.0674,0.4236],"r":0,"t":0,"s":0.18},{"w":2,"p":[0.1616,0.0886,-0.0341],"r":0,"t":0,"s":0.08},{"w":2,"p":[-0.1663,0.0836,-0.0368],"r":0,"t":0,"s":0.08},{"w":1,"p":[0.0024,0.1113,0.1617],"r":0,"t":0,"s":0.12}],"m4":[{"w":1,"p":[0.0006,0.1228,0.3613],"r":0,"t":0,"s":0.12},{"w":5,"p":[-0.0029,0.1375,0.0774],"r":0,"t":0,"s":0.18},{"w":2,"p":[-0.0044,0.1343,-0.1106],"r":0,"t":0,"s":0.08},{"w":2,"p":[0.0051,0.1147,-0.2566],"r":0,"t":0,"s":0.08},{"w":3,"p":[-0.3829,0.0012,-0.1212],"r":0,"t":0,"s":0.06},{"w":3,"p":[0.3878,0.0009,-0.1302],"r":0,"t":0,"s":0.06},{"w":4,"p":[0.3658,-0.0688,-0.1092],"r":0,"t":-180,"s":0.09},{"w":4,"p":[0.267,-0.0686,-0.0987],"r":0,"t":165,"s":0.09},{"w":4,"p":[-0.2676,-0.0683,-0.1066],"r":0,"t":-180,"s":0.09},{"w":4,"p":[-0.3664,-0.068,-0.1096],"r":0,"t":-165,"s":0.09}],"c0":[{"w":5,"p":[0.099,0.0355,-0.066],"r":0,"t":0,"s":0.09},{"w":5,"p":[0.099,0.0358,-0.23],"r":0,"t":0,"s":0.09},{"w":5,"p":[0.099,0.0343,-0.3],"r":0,"t":0,"s":0.09}],"c1":[{"w":0,"p":[0,0.0334,0.12],"r":0,"t":0,"s":0.14},{"w":0,"p":[0,0.0455,0],"r":0,"t":0,"s":0.14}],"c2":[{"w":1,"p":[0,0.0349,0.198],"r":0,"t":0,"s":0.13},{"w":1,"p":[0,0.0243,-0.32],"r":0,"t":0,"s":0.12},{"w":2,"p":[0.18,0.0031,-0.06],"r":0,"t":0,"s":0.13},{"w":2,"p":[-0.18,0.0023,-0.06],"r":0,"t":0,"s":0.13}],"c3":[{"w":3,"p":[0,0.0515,0.289],"r":0,"t":0,"s":0.26},{"w":4,"p":[0.08,0.0634,-0.07],"r":0,"t":0,"s":0.15},{"w":4,"p":[-0.08,0.0614,-0.07],"r":0,"t":0,"s":0.15}],"c4":[{"w":1,"p":[0,0.1659,-0.1],"r":0,"t":0,"s":0.11},{"w":2,"p":[0.2,0.0502,-0.08],"r":0,"t":0,"s":0.1},{"w":2,"p":[-0.2,0.0467,-0.08],"r":0,"t":0,"s":0.1}],"r0":[{"w":4,"p":[-0.135,0.0069,-0.008],"r":0,"t":0,"s":0.06},{"w":4,"p":[0.135,0.0069,-0.008],"r":0,"t":0,"s":0.06},{"w":4,"p":[-0.135,0.007,-0.231],"r":0,"t":0,"s":0.06},{"w":4,"p":[0.135,0.0071,-0.231],"r":0,"t":0,"s":0.06}],"r1":[{"w":0,"p":[0,0.0819,-0.008],"r":0,"t":0,"s":0.14},{"w":0,"p":[0,0.0822,-0.165],"r":0,"t":0,"s":0.14},{"w":0,"p":[0,0.0825,-0.293],"r":0,"t":0,"s":0.14}],"r2":[{"w":0,"p":[0,0.0879,0.099],"r":0,"t":0,"s":0.12},{"w":0,"p":[0,0.1013,-0.289],"r":0,"t":0,"s":0.12}],"r3":[{"w":2,"p":[0,0.0073,0.3],"r":0,"t":0,"s":0.4},{"w":3,"p":[-0.2,0.0043,0],"r":0,"t":0,"s":0.16},{"w":3,"p":[0.2,0.0042,0],"r":0,"t":0,"s":0.16}],"r4":[{"w":0,"p":[0,0.1539,-0.107],"r":0,"t":0,"s":0.11},{"w":3,"p":[-0.21,0.0973,-0.08],"r":0,"t":0,"s":0.17},{"w":3,"p":[0.21,0.0994,-0.08],"r":0,"t":0,"s":0.17}],"i0":[{"w":1,"p":[-0.083,-0.0038,0.046],"r":0,"t":0,"s":0.07},{"w":1,"p":[-0.073,0.0038,-0.223],"r":0,"t":0,"s":0.07},{"w":1,"p":[-0.094,0.0045,-0.28],"r":0,"t":0,"s":0.07},{"w":1,"p":[0.063,0.0034,-0.223],"r":0,"t":0,"s":0.07},{"w":1,"p":[0.088,0.0045,-0.28],"r":0,"t":0,"s":0.07}],"i1":[{"w":0,"p":[0,0.024,0.157],"r":0,"t":0,"s":0.13},{"w":0,"p":[0,0.0486,0.025],"r":0,"t":0,"s":0.13},{"w":1,"p":[-0.078,0.0253,-0.066],"r":0,"t":0,"s":0.07},{"w":1,"p":[-0.078,0.0241,-0.149],"r":0,"t":0,"s":0.07},{"w":1,"p":[0.079,0.0247,-0.066],"r":0,"t":0,"s":0.07},{"w":1,"p":[0.079,0.0234,-0.149],"r":0,"t":0,"s":0.07},{"w":0,"p":[0,0.0404,-0.256],"r":180,"t":0,"s":0.13}],"i2":[{"w":1,"p":[0,0.0718,0.284],"r":0,"t":0,"s":0.09}],"i3":[{"w":2,"p":[0,0.0216,0.355],"r":0,"t":0,"s":0.22},{"w":1,"p":[0,0.038,0.1],"r":0,"t":0,"s":0.08},{"w":4,"p":[0.12,0.0329,-0.05],"r":0,"t":0,"s":0.13},{"w":4,"p":[-0.12,0.0308,-0.05],"r":0,"t":0,"s":0.13}],"i4":[{"w":1,"p":[0,0.1045,-0.098],"r":0,"t":0,"s":0.09},{"w":5,"p":[-0.15,0.0181,0.11],"r":0,"t":0,"s":0.15},{"w":5,"p":[0.15,0.0163,0.11],"r":0,"t":0,"s":0.15}],"b0":[],"b1":[{"w":0,"p":[0,0.1582,-0.074],"r":0,"t":0,"s":0.18},{"w":0,"p":[0,0.1577,-0.245],"r":0,"t":0,"s":0.18}],"b2":[{"w":0,"p":[-0.078,0.0704,-0.017],"r":0,"t":0,"s":0.13},{"w":0,"p":[0.078,0.0691,-0.017],"r":0,"t":0,"s":0.13}],"b3":[{"w":2,"p":[0,0.0007,0.34],"r":0,"t":0,"s":0.3}],"b4":[{"w":3,"p":[0,0.1569,-0.066],"r":0,"t":0,"s":0.14}],"as0":[{"w":0,"p":[0,-0.0396,0.3065],"r":0,"t":0,"s":0.208},{"w":0,"p":[0,-0.0389,-0.3246],"r":180,"t":0,"s":0.196},{"w":0,"p":[-0.3205,-0.0396,-0.009],"r":-90,"t":0,"s":0.184},{"w":0,"p":[0.3205,-0.0394,-0.018],"r":90,"t":0,"s":0.184},{"w":1,"p":[0,0.1538,-0.0451],"r":180,"t":0,"s":0.11},{"w":1,"p":[0.1958,-0.0241,0.0721],"r":75,"t":0,"s":0.11},{"w":2,"p":[-0.0534,-0.0303,-0.4508],"r":180,"t":0,"s":0.085},{"w":3,"p":[-0.0623,-0.0337,0.4598],"r":-15,"t":0,"s":0.065},{"w":3,"p":[0.0623,-0.0339,-0.4598],"r":165,"t":0,"s":0.065},{"w":3,"p":[-0.454,-0.0328,-0.0631],"r":-105,"t":0,"s":0.065}],"as1":[{"w":0,"p":[0,0.0714,0.0364],"r":0,"t":0,"s":0.245},{"w":1,"p":[-0.179,0.0361,-0.1364],"r":-120,"t":0,"s":0.108},{"w":0,"p":[0.0948,0.0941,-0.3],"r":165,"t":0,"s":0.155},{"w":1,"p":[0.4107,0.0854,0.0273],"r":90,"t":0,"s":0.11},{"w":2,"p":[-0.4423,0.0875,0.0545],"r":-90,"t":0,"s":0.085},{"w":2,"p":[0.516,0.0691,0.0455],"r":90,"t":0,"s":0.085},{"w":3,"p":[0.0105,0.0436,0.4455],"r":0,"t":0,"s":0.065},{"w":3,"p":[-0.0737,0.0938,-0.3273],"r":-165,"t":0,"s":0.065},{"w":3,"p":[-0.3686,0.086,0.0545],"r":-75,"t":0,"s":0.065},{"w":3,"p":[0.4001,-0.0077,0.1545],"r":75,"t":0,"s":0.065}],"as2":[{"w":1,"p":[0.0878,0.0924,0.19],"r":30,"t":0,"s":0.121},{"w":1,"p":[-0.0933,0.0918,-0.19],"r":-150,"t":0,"s":0.121},{"w":1,"p":[0.0878,0.0918,-0.181],"r":150,"t":0,"s":0.121},{"w":1,"p":[-0.0878,0.0924,0.19],"r":-30,"t":0,"s":0.121},{"w":0,"p":[0.0165,0.1146,-0.3258],"r":180,"t":0,"s":0.155},{"w":0,"p":[0,0.0994,0.3077],"r":0,"t":0,"s":0.155},{"w":2,"p":[-0.1043,0.0857,-0.3801],"r":-165,"t":0,"s":0.085},{"w":2,"p":[0.1866,0.0712,0.1629],"r":45,"t":0,"s":0.085},{"w":3,"p":[0.0878,0.0965,0.4615],"r":15,"t":0,"s":0.065},{"w":3,"p":[0.1152,0.0894,-0.4163],"r":165,"t":0,"s":0.065},{"w":3,"p":[-0.2744,-0.0427,-0.1719],"r":-120,"t":0,"s":0.065},{"w":3,"p":[-0.0823,0.0965,0.4615],"r":-15,"t":0,"s":0.065},{"w":3,"p":[0.2689,-0.0427,0.1357],"r":60,"t":0,"s":0.065}],"bs0":[{"w":0,"p":[0,0.1264,0],"r":0,"t":0,"s":0.3},{"w":0,"p":[0.242,0.0725,-0.2455],"r":135,"t":0,"s":0.151},{"w":0,"p":[0.233,0.0746,0.2455],"r":45,"t":0,"s":0.151},{"w":0,"p":[-0.251,0.0755,0.2455],"r":-45,"t":0,"s":0.151},{"w":3,"p":[-0.251,0.0617,-0.2364],"r":-135,"t":0,"s":0.073},{"w":2,"p":[-0.3047,0.0947,-0.3],"r":-135,"t":0,"s":0.085},{"w":3,"p":[0.0627,0.0514,0.3818],"r":15,"t":0,"s":0.065},{"w":3,"p":[0.3675,0.052,-0.0818],"r":105,"t":0,"s":0.065}],"bs1":[{"w":0,"p":[0,0.1895,0],"r":-90,"t":0,"s":0.155},{"w":0,"p":[0.2066,0.015,0.2347],"r":45,"t":0,"s":0.155},{"w":1,"p":[0.2515,0.0095,-0.009],"r":90,"t":0,"s":0.11},{"w":2,"p":[-0.2515,0.0095,0.0181],"r":-90,"t":0,"s":0.085},{"w":3,"p":[-0.3952,0.0129,0.316],"r":-45,"t":0,"s":0.065},{"w":3,"p":[0.3952,0.0128,-0.316],"r":135,"t":0,"s":0.065},{"w":3,"p":[0.3952,0.0114,0.316],"r":45,"t":0,"s":0.065},{"w":3,"p":[-0.2425,0.0108,-0.3611],"r":-150,"t":0,"s":0.065}],"bs2":[{"w":0,"p":[-0.289,0.0698,-0.1636],"r":-120,"t":0,"s":0.3},{"w":0,"p":[-0.289,0.0688,0.1545],"r":-60,"t":0,"s":0.3},{"w":0,"p":[-0.01,0.0754,0.3273],"r":0,"t":0,"s":0.278},{"w":0,"p":[-0.1894,0.0905,-0.3364],"r":-150,"t":0,"s":0.151},{"w":1,"p":[-0.4684,0.0961,0],"r":-90,"t":0,"s":0.11},{"w":1,"p":[0.309,0.0767,-0.3273],"r":135,"t":0,"s":0.11},{"w":1,"p":[0.3887,0.0634,0.2636],"r":60,"t":0,"s":0.11},{"w":2,"p":[-0.2292,0.0921,0.4091],"r":-30,"t":0,"s":0.085},{"w":2,"p":[0.3987,0.0649,-0.2545],"r":120,"t":0,"s":0.085},{"w":3,"p":[0.2193,0.0854,-0.4273],"r":150,"t":0,"s":0.065},{"w":3,"p":[-0.3289,0.068,0.3455],"r":-45,"t":0,"s":0.065},{"w":3,"p":[0.3289,0.0658,0.3364],"r":45,"t":0,"s":0.065},{"w":3,"p":[-0.309,0.067,-0.3636],"r":-135,"t":0,"s":0.065},{"w":3,"p":[0.4385,0.0649,-0.1364],"r":105,"t":0,"s":0.065}],"cs0":[{"w":0,"p":[0.0089,0.1029,-0.339],"r":180,"t":0,"s":0.241},{"w":0,"p":[-0.3394,0.1028,0.0089],"r":-90,"t":0,"s":0.241},{"w":0,"p":[0,0.1071,0.339],"r":0,"t":0,"s":0.241},{"w":0,"p":[0.3394,0.1066,0],"r":90,"t":0,"s":0.241},{"w":0,"p":[0.0089,0.1804,0],"r":90,"t":0,"s":0.133},{"w":1,"p":[-0.259,0.0763,-0.2587],"r":-135,"t":0,"s":0.11},{"w":5,"p":[-0.1965,0.1154,-0.3568],"r":-150,"t":0,"s":0.065},{"w":5,"p":[0.1786,0.121,0.3568],"r":30,"t":0,"s":0.065},{"w":5,"p":[0.3573,0.1279,-0.1695],"r":120,"t":0,"s":0.065}],"cs1":[{"w":0,"p":[-0.1484,0.0232,-0.1089],"r":-120,"t":0,"s":0.133},{"w":0,"p":[0.1484,0.0231,-0.1089],"r":120,"t":0,"s":0.133},{"w":1,"p":[-0.1425,0.009,0.2179],"r":-30,"t":0,"s":0.127},{"w":1,"p":[0.1543,0.0222,0.0091],"r":90,"t":0,"s":0.127},{"w":1,"p":[0.1484,0.0086,0.2179],"r":30,"t":0,"s":0.114},{"w":2,"p":[-0.0119,0.061,0.2088],"r":0,"t":0,"s":0.085},{"w":5,"p":[0.0237,0.0602,0.463],"r":0,"t":0,"s":0.065},{"w":5,"p":[0.0534,0.0312,-0.4358],"r":180,"t":0,"s":0.065},{"w":5,"p":[-0.2909,-0.1075,0.0182],"r":-90,"t":0,"s":0.065},{"w":5,"p":[0.2909,-0.1075,0.0182],"r":90,"t":0,"s":0.065}],"cs2":[{"w":0,"p":[-0.0057,0.1531,-0.1266],"r":180,"t":0,"s":0.155},{"w":0,"p":[0.1077,0.0964,0.0633],"r":60,"t":0,"s":0.155},{"w":0,"p":[-0.102,0.0948,0.0633],"r":-60,"t":0,"s":0.155},{"w":0,"p":[0.2096,0.0953,-0.1809],"r":135,"t":0,"s":0.155},{"w":1,"p":[-0.1473,0.0792,-0.2984],"r":-150,"t":0,"s":0.11},{"w":1,"p":[-0.2493,0.0705,-0.1899],"r":-120,"t":0,"s":0.11},{"w":5,"p":[0.2323,0.0313,-0.3889],"r":150,"t":0,"s":0.065},{"w":5,"p":[0.085,0.0726,0.3527],"r":15,"t":0,"s":0.065},{"w":5,"p":[-0.2323,0.0642,0],"r":-90,"t":0,"s":0.065},{"w":5,"p":[0.2323,0.0634,0],"r":90,"t":0,"s":0.065},{"w":5,"p":[-0.085,0.079,0.3437],"r":-15,"t":0,"s":0.065}],"es0":[{"w":0,"p":[0.1698,-0.0654,-0.2636],"r":150,"t":0,"s":0.258},{"w":0,"p":[-0.4032,-0.066,0.2545],"r":-60,"t":0,"s":0.258},{"w":0,"p":[-0.4032,-0.0633,-0.2636],"r":-120,"t":0,"s":0.246},{"w":0,"p":[0.1592,-0.0612,0.2636],"r":30,"t":0,"s":0.233},{"w":1,"p":[-0.4987,-0.0253,-0.0182],"r":-90,"t":0,"s":0.11},{"w":1,"p":[0.3608,-0.031,-0.0182],"r":90,"t":0,"s":0.11},{"w":2,"p":[-0.2016,0.0736,0.0727],"r":-75,"t":0,"s":0.085},{"w":3,"p":[-0.1592,-0.0513,0.4091],"r":-15,"t":0,"s":0.065},{"w":3,"p":[-0.1486,-0.0251,-0.4],"r":-165,"t":0,"s":0.065},{"w":3,"p":[-0.3926,-0.0269,0],"r":-90,"t":0,"s":0.065}],"es1":[{"w":0,"p":[-0.252,-0.0654,0.2806],"r":-45,"t":0,"s":0.16},{"w":0,"p":[0.2457,-0.0614,-0.2625],"r":135,"t":0,"s":0.16},{"w":0,"p":[-0.252,-0.0653,-0.2625],"r":-135,"t":0,"s":0.147},{"w":0,"p":[0.2583,-0.0661,0.2897],"r":45,"t":0,"s":0.147},{"w":1,"p":[0.126,0.0315,0.1086],"r":45,"t":0,"s":0.106},{"w":1,"p":[-0.0504,0.0234,-0.4074],"r":180,"t":0,"s":0.11},{"w":2,"p":[0.0693,0.0258,-0.4164],"r":165,"t":0,"s":0.085},{"w":2,"p":[-0.1512,0.039,0.1901],"r":-45,"t":0,"s":0.085},{"w":3,"p":[-0.0756,-0.0112,0.3531],"r":-15,"t":0,"s":0.065},{"w":3,"p":[0.1197,0.0345,-0.0905],"r":120,"t":0,"s":0.065},{"w":3,"p":[0.0693,-0.0112,0.344],"r":15,"t":0,"s":0.065},{"w":3,"p":[-0.1449,0.0399,0.0634],"r":-60,"t":0,"s":0.065}],"es2":[{"w":0,"p":[0.2617,-0.0545,-0.2087],"r":135,"t":0,"s":0.221},{"w":0,"p":[-0.2617,-0.0545,-0.1905],"r":-120,"t":0,"s":0.209},{"w":1,"p":[0.1584,0.0169,0.1633],"r":45,"t":0,"s":0.082},{"w":0,"p":[0.0069,0.0144,0.3538],"r":0,"t":0,"s":0.155},{"w":0,"p":[-0.0069,0.0471,-0.3175],"r":180,"t":0,"s":0.155},{"w":1,"p":[-0.0758,0.0198,0.1905],"r":-15,"t":0,"s":0.11},{"w":2,"p":[0.0069,0.0818,-0.1633],"r":180,"t":0,"s":0.085},{"w":2,"p":[0.0826,0.02,0.2087],"r":15,"t":0,"s":0.085},{"w":3,"p":[-0.3306,-0.0551,-0.0635],"r":-105,"t":0,"s":0.065},{"w":3,"p":[-0.0895,0.0144,0.0816],"r":-45,"t":0,"s":0.065}],"is0":[{"w":2,"p":[0.2659,-0.026,-0.3],"r":135,"t":0,"s":0.094},{"w":0,"p":[0.2469,-0.0117,0.2818],"r":45,"t":0,"s":0.155},{"w":0,"p":[-0.2754,-0.0131,-0.3],"r":-135,"t":0,"s":0.155},{"w":2,"p":[-0.3229,-0.0109,0.2909],"r":-45,"t":0,"s":0.11},{"w":3,"p":[0,0.0259,0.4273],"r":0,"t":0,"s":0.085},{"w":1,"p":[0.0095,0.0402,0.3455],"r":0,"t":0,"s":0.065},{"w":1,"p":[-0.2849,-0.0702,-0.1636],"r":-120,"t":0,"s":0.065},{"w":1,"p":[0.2659,-0.0711,-0.1636],"r":120,"t":0,"s":0.065}],"is1":[{"w":2,"p":[-0.3921,0.0971,0.0091],"r":-90,"t":0,"s":0.094},{"w":2,"p":[-0.3454,0.0961,-0.3545],"r":-135,"t":0,"s":0.094},{"w":2,"p":[0.3454,0.0966,-0.3545],"r":135,"t":0,"s":0.084},{"w":0,"p":[-0.028,0.1344,0.1091],"r":-15,"t":0,"s":0.155},{"w":0,"p":[0.028,-0.0378,0.4182],"r":0,"t":0,"s":0.155},{"w":3,"p":[0.0093,0.1826,-0.2182],"r":180,"t":0,"s":0.085},{"w":3,"p":[-0.1494,0.0761,0.3818],"r":-15,"t":0,"s":0.085},{"w":1,"p":[0.252,0.0894,-0.3455],"r":150,"t":0,"s":0.065},{"w":1,"p":[-0.252,0.0876,-0.3455],"r":-150,"t":0,"s":0.065},{"w":1,"p":[0.028,0.1213,0.2273],"r":0,"t":0,"s":0.065},{"w":1,"p":[0.308,0.0937,0.0091],"r":90,"t":0,"s":0.065}],"is2":[{"w":2,"p":[-0.4099,0.0285,-0.1364],"r":-105,"t":0,"s":0.094},{"w":2,"p":[0.4099,0.0314,-0.1364],"r":105,"t":0,"s":0.094},{"w":2,"p":[0.4195,0.0326,0.2273],"r":60,"t":0,"s":0.084},{"w":2,"p":[-0.4195,0.0333,0.2273],"r":-60,"t":0,"s":0.084},{"w":0,"p":[0,0.0766,0.2182],"r":0,"t":0,"s":0.155},{"w":3,"p":[0,0.1374,-0.2182],"r":180,"t":0,"s":0.085},{"w":3,"p":[0.4385,0.0333,0.3909],"r":45,"t":0,"s":0.085},{"w":1,"p":[-0.429,0.0282,0.4273],"r":-45,"t":0,"s":0.065},{"w":1,"p":[0.4099,0.0445,0.3182],"r":45,"t":0,"s":0.065},{"w":1,"p":[-0.1144,0.0757,-0.2273],"r":-150,"t":0,"s":0.065},{"w":1,"p":[-0.0572,0.0452,0.4],"r":-15,"t":0,"s":0.065},{"w":1,"p":[0.286,0.0139,-0.1],"r":105,"t":0,"s":0.065}],"ms0":[{"w":1,"p":[0.437,0.0014,0],"r":90,"t":0,"s":0.086},{"w":1,"p":[0,0.0032,-0.4369],"r":180,"t":0,"s":0.086},{"w":3,"p":[-0.437,0.0115,0],"r":-90,"t":0,"s":0.06},{"w":3,"p":[0,0.0113,0.4369],"r":0,"t":0,"s":0.06},{"w":0,"p":[-0.0091,0.0702,0],"r":-90,"t":0,"s":0.155},{"w":2,"p":[-0.2367,0.0384,0],"r":-90,"t":0,"s":0.085},{"w":3,"p":[0.0091,0.0383,-0.2367],"r":180,"t":0,"s":0.065}],"ms1":[{"w":0,"p":[0.3541,0.0265,0.3727],"r":45,"t":0,"s":0.213},{"w":0,"p":[-0.3305,0.0155,-0.3727],"r":-135,"t":0,"s":0.188},{"w":0,"p":[0.3659,0.0158,-0.3727],"r":135,"t":0,"s":0.188},{"w":0,"p":[-0.3423,0.017,0.3818],"r":-45,"t":0,"s":0.188},{"w":1,"p":[-0.5548,0.177,0],"r":-90,"t":0,"s":0.11},{"w":1,"p":[0.5784,0.1349,0.0273],"r":90,"t":0,"s":0.11},{"w":2,"p":[-0.4603,0.172,0.0455],"r":-90,"t":0,"s":0.085},{"w":2,"p":[0.5194,0.1326,-0.0636],"r":90,"t":0,"s":0.085},{"w":3,"p":[-0.4603,0.1667,-0.0455],"r":-90,"t":0,"s":0.065},{"w":3,"p":[0.4013,0.0062,-0.2182],"r":120,"t":0,"s":0.065},{"w":3,"p":[0.4013,0.006,0.2182],"r":60,"t":0,"s":0.065},{"w":3,"p":[-0.3659,0.0222,0.2182],"r":-60,"t":0,"s":0.065}],"ms2":[{"w":0,"p":[0.2106,0.0233,-0.2818],"r":150,"t":0,"s":0.163},{"w":0,"p":[-0.2808,0.0067,0.2091],"r":-60,"t":0,"s":0.138},{"w":1,"p":[0.2106,0.0281,0.2364],"r":45,"t":0,"s":0.122},{"w":1,"p":[-0.1604,0.0265,-0.2818],"r":-150,"t":0,"s":0.122},{"w":0,"p":[0.01,0.1304,0],"r":90,"t":0,"s":0.155},{"w":0,"p":[0,0.0754,0.3091],"r":0,"t":0,"s":0.155},{"w":1,"p":[-0.371,0.0804,0],"r":-90,"t":0,"s":0.11},{"w":2,"p":[0.2106,0.1591,-0.0091],"r":90,"t":0,"s":0.085},{"w":2,"p":[-0.4913,0.0302,-0.1273],"r":-105,"t":0,"s":0.085},{"w":3,"p":[0.5114,0.0407,-0.1091],"r":105,"t":0,"s":0.065},{"w":3,"p":[-0.4813,0.0351,0.1],"r":-75,"t":0,"s":0.065},{"w":3,"p":[-0.1604,0.0315,-0.4091],"r":-165,"t":0,"s":0.065},{"w":3,"p":[0.0201,-0.0702,0.4545],"r":0,"t":0,"s":0.065},{"w":3,"p":[0.4913,0.0401,0.1091],"r":75,"t":0,"s":0.065}],"rs0":[{"w":0,"p":[0.273,-0.0133,-0.2542],"r":135,"t":0,"s":0.224},{"w":0,"p":[0.2639,-0.012,0.2724],"r":45,"t":0,"s":0.224},{"w":0,"p":[-0.2639,-0.0117,-0.2633],"r":-135,"t":0,"s":0.224},{"w":0,"p":[-0.2821,-0.01,0.2542],"r":-45,"t":0,"s":0.213},{"w":1,"p":[0,0.2061,-0.2361],"r":180,"t":0,"s":0.11},{"w":1,"p":[-0.0091,0.0393,0.4267],"r":0,"t":0,"s":0.11},{"w":3,"p":[-0.0273,0.2058,-0.118],"r":-165,"t":0,"s":0.085},{"w":4,"p":[0.4186,-0.0021,-0.3269],"r":135,"t":0,"s":0.065},{"w":4,"p":[-0.4186,-0.0022,0.3269],"r":-45,"t":0,"s":0.065},{"w":4,"p":[-0.3458,-0.0022,-0.3904],"r":-135,"t":0,"s":0.065}],"rs1":[{"w":0,"p":[-0.4416,0.0976,-0.0182],"r":-90,"t":0,"s":0.168},{"w":0,"p":[0.2551,0.0818,0.2182],"r":45,"t":0,"s":0.157},{"w":0,"p":[0.4318,0.0976,-0.0182],"r":90,"t":0,"s":0.146},{"w":1,"p":[0.4023,0.168,-0.3091],"r":135,"t":0,"s":0.11},{"w":1,"p":[-0.3925,0.1459,0.3455],"r":-45,"t":0,"s":0.11},{"w":3,"p":[0.3631,0.1709,-0.2],"r":120,"t":0,"s":0.085},{"w":3,"p":[-0.3729,0.1174,-0.3545],"r":-135,"t":0,"s":0.085},{"w":4,"p":[0.3729,0.1164,0.3182],"r":45,"t":0,"s":0.065},{"w":4,"p":[0.0589,0.1005,-0.4636],"r":180,"t":0,"s":0.065},{"w":4,"p":[-0.3631,0.1181,0.2455],"r":-60,"t":0,"s":0.065},{"w":4,"p":[-0.3337,0.1369,-0.2818],"r":-135,"t":0,"s":0.065}],"rs2":[{"w":0,"p":[0.0807,0.0835,0.0817],"r":45,"t":0,"s":0.123},{"w":1,"p":[-0.0986,0.0832,-0.0999],"r":-135,"t":0,"s":0.085},{"w":1,"p":[-0.0986,0.083,0.0908],"r":-45,"t":0,"s":0.085},{"w":0,"p":[-0.0359,0.1086,-0.3451],"r":180,"t":0,"s":0.155},{"w":0,"p":[-0.3766,0.1058,0],"r":-90,"t":0,"s":0.155},{"w":0,"p":[0.0628,0.1139,-0.1362],"r":150,"t":0,"s":0.155},{"w":1,"p":[0.3766,0.1076,-0.0091],"r":90,"t":0,"s":0.11},{"w":3,"p":[-0.009,0.107,0.3542],"r":0,"t":0,"s":0.085},{"w":3,"p":[0.1255,0.0793,-0.3088],"r":165,"t":0,"s":0.085},{"w":4,"p":[-0.1435,0.0898,-0.4359],"r":-165,"t":0,"s":0.065},{"w":4,"p":[-0.1166,0.0209,0.3996],"r":-15,"t":0,"s":0.065},{"w":4,"p":[0.2601,0.108,0],"r":90,"t":0,"s":0.065},{"w":4,"p":[0.1255,0.0899,0.327],"r":15,"t":0,"s":0.065},{"w":4,"p":[-0.2152,0.1087,0.0454],"r":-75,"t":0,"s":0.065}]};
@@ -9392,7 +10235,7 @@ function weDraw2D() {
 
 const GAME = {
   phase: 'menu', playerSide: 0, sc: null, intel: null, loadout: null, attempt: 0,
-  init: [0, 0], result: null, skillArm: null, deploySel: 0, drag: null, replaying: false, reportShown: false,
+  init: new Array(8).fill(0), result: null, skillArm: null, deploySel: 0, drag: null, replaying: false, reportShown: false,
 };
 const PHASE_ON = ['deploy', 'battle', 'report', 'simedit', 'bldedit'];
 const gEl = (id) => document.getElementById(id);
@@ -9582,6 +10425,12 @@ function makeSetup(sc, lo, attempt) {
     fleetsS.push({ side: 0, fac: a.fac, name: a.name, ax: a.arrive ? sx * 800 : a.x, az: a.arrive ? -60 : a.z, ay: 0, h: a.arrive ? (sx < 0 ? Math.PI / 2 : -Math.PI / 2) : a.h, formation: a.formation, comp: a.comp.slice(),
       commander: { ...a.commander }, ai: { tactic: a.tactic, level: sc.level }, ally: true, defectAt: a.defectAt, ...(a.arrive ? { reserve: true, activateAt: a.arrive[0] } : {}) });
   }
+  // 多方勢力（第三方以後，邊 2、3…）：AI 自己打；rel＝對玩家、對敵軍的關係，其餘第三方之間互相敵對
+  const rel = [], facs = [];
+  (sc.sides || []).forEach((S, k) => {
+    const s = 2 + k; facs[k] = S.fac; rel.push([0, s, S.rel[0]], [1, s, S.rel[1]]);
+    for (const F of S.fleets) fleetsS.push({ side: s, fac: S.fac, name: F.name, ax: F.x, az: F.z, ay: 0, h: F.h, formation: F.formation, comp: F.comp.slice(), commander: { ...F.commander }, ai: { tactic: F.tactic, level: sc.level } });
+  });
   // 救援（〈星海之外〉第 7 關）：撤離船團先放在場外，時間到了才從地表起飛（rescueTick）
   if (sc.rescue) sc.rescue.at.forEach((_, k) => fleetsS.push({ ...supplySetup(0, { comp: sc.rescue.comp, formation: 'ring', x: 0, z: MAP_BOUNDS.z0 - 900, h: Math.PI }, -1, `${sc.rescue.name} ${k + 1}`), ally: true, reserve: true, activateAt: null }));
   const e0 = fleetsS.length;
@@ -9596,7 +10445,7 @@ function makeSetup(sc, lo, attempt) {
     fleetsS.push({ side: 1, ...(ev.fac != null ? { fac: ev.fac } : {}), name: ev.name, ax: sx * 800, az: -140 + R() * 200, ay: Math.round((R() - 0.5) * 240), h: sx < 0 ? Math.PI / 2 : -Math.PI / 2, formation: ev.formation, comp: ev.comp.slice(),
       commander: ev.commander ? { ...ev.commander } : reinforceCmdr(sc), reserve: true, activateAt: at, ai: { tactic: 'push', level: sc.level } });
   }
-  return { bg: false, terrain: sc.terrain, ...(sc.ground ? { ground: { ...sc.ground } } : {}), fleets: fleetsS, scenario: sc.id, timeLimit: sc.timeLimit, level: sc.level, factions: sc.enemyFac != null ? [lo.faction || 0, sc.enemyFac] : (lo.faction || 0) === 1 ? [1, 0] : [0, 1], ...(sc.goal ? { goal: sc.goal } : {}), ...(sc.lines ? { lines: sc.lines } : {}), ...(sc.dlines ? { dlines: sc.dlines } : {}), ...(sc.defect ? { defect: sc.defect } : {}), ...(sc.aiOmni ? { omni: [false, true] } : {}), ...(sc.untimed ? { untimed: true } : {}), ...(sc.doom ? { doom: sc.doom } : {}), ...(sc.rescue ? { rescue: sc.rescue } : {}) };   // doom：劇情強制擊沉（m8 杜蘭的旗艦）；rescue：救援任務；untimed：沒有時限（timeLimit 只當目標時間）；aiOmni：這一關的 AI 不受戰爭迷霧限制
+  return { bg: false, terrain: sc.terrain, ...(sc.ground ? { ground: { ...sc.ground } } : {}), fleets: fleetsS, scenario: sc.id, timeLimit: sc.timeLimit, level: sc.level, factions: [...(sc.enemyFac != null ? [lo.faction || 0, sc.enemyFac] : (lo.faction || 0) === 1 ? [1, 0] : [0, 1]), ...facs], ...(rel.length ? { rel, sideNames: [null, null, ...(sc.sides || []).map((S) => S.name)] } : {}), ...(sc.relRule ? { relRule: sc.relRule } : {}), ...(sc.goal ? { goal: sc.goal } : {}), ...(sc.lines ? { lines: sc.lines } : {}), ...(sc.dlines ? { dlines: sc.dlines } : {}), ...(sc.defect ? { defect: sc.defect } : {}), ...(sc.aiOmni ? { omni: [false, true] } : {}), ...(sc.untimed ? { untimed: true } : {}), ...(sc.doom ? { doom: sc.doom } : {}), ...(sc.rescue ? { rescue: sc.rescue } : {}) };   // doom：劇情強制擊沉（m8 杜蘭的旗艦）；rescue：救援任務；untimed：沒有時限（timeLimit 只當目標時間）；aiOmni：這一關的 AI 不受戰爭迷霧限制
 }
 
 // ───── 技能（命令 'skill'） ─────
@@ -9609,12 +10458,12 @@ function gameExec(c) {
 function useSkill(f, id, target, pt) {
   const s = f.skills[id], t = U.uTime.value, def = SKILLS[id];
   if (!s || s.left <= 0 || t < s.ready || f.sqs.every((q) => q.alive <= 0)) return false;
-  if (def.targetMode === 'enemy' && (!target || target.side === f.side || target.alive <= 0)) return false;
+  if (def.targetMode === 'enemy' && (!target || !hostile(f.side, target.side) || target.alive <= 0)) return false;
   if (def.targetMode === 'point' && !pt) return false;
   if (id === 'reinforce' && !callReinforce(f, pt)) return false;
   if (id === 'merc' && !callMercs(f, pt)) return false;
   s.left--; s.until = t + def.dur; s.ready = t + def.cd * (1 - 0.15 * talentRank(f.commander, 'tempo')); s.target = target; s.used = (s.used || 0) + 1;   // 指揮效率：冷卻縮短
-  if (id === 'jam') setJam(1 - f.side, def.dur, 6);   // 干擾：敵方變陣延遲 6 秒
+  if (id === 'jam') for (const s of foeSides(f.side)) setJam(s, def.dur, 6);   // 干擾：敵對各方變陣延遲 6 秒
   const who = GAME.watch ? `${FACTION_NAME[SIDE_FAC[f.side]]}・${f.name}　` : f.side === GAME.playerSide ? '' : '敵方';   // 觀摩：兩邊都是 AI，用陣營名稱
   toast(`${who}${f.commander ? f.commander.name : f.name}：${def.name}${target ? ` → ${target.fleet ? target.fleet.name + ' ' : ''}${target.name}` : ''}`, f.side === GAME.playerSide ? '' : 'enemy');
   if (id === 'focus') for (const g of groups) if (g.side === f.side && !g.inactive) g.target = target;
@@ -9654,7 +10503,7 @@ function callMercs(f, pt) {
 }
 // 友軍倒戈：整支艦隊換到對面（船、分艦隊、艦隊群組、艦載機），之後算敵軍兵力
 function defectFleet(f) {
-  f.ally = false; f.side = 1 - f.side; f.aiS = {};
+  f.ally = false; f.side = f.defectTo != null ? f.defectTo : 1 - f.side; f.aiS = {};   // defectTo：多方勢力時倒向哪一方
   const sqSet = new Set(f.sqs);
   for (const q of f.sqs) { q.side = f.side; q.target = null; if (q.group) { q.group.side = f.side; q.group.target = null; q.group.goal = null; } selected.delete(q); }
   for (let i = 0; i < shipCount; i++) if (sqSet.has(squadrons[ships.sq[i]])) ships.side[i] = f.side;
@@ -9761,7 +10610,7 @@ function aiTarget(f, S, C, far, lv) {
   let best = null, bs = -1e9;
   for (const q of squadrons) {
     const v = seenSq(f.side, q);   // 被干擾：位置與兵力是干擾開始時的
-    if (q.side === f.side || !v || v.bg || v.alive <= 0 || q.alive <= 0 || Math.hypot(v.x - C.x, v.z - C.z) > far || (fowOn() && v.stale)) continue;   // 戰爭迷霧：只選看得到的
+    if (!hostile(f.side, q.side) || !v || v.bg || v.alive <= 0 || q.alive <= 0 || Math.hypot(v.x - C.x, v.z - C.z) > far || (fowOn() && v.stale)) continue;   // 戰爭迷霧：只選看得到的
     let s = q.typeAlive[0] * 4 + (1 - v.alive / Math.max(1, q.list.length - (q.nDorm || 0))) * 30 - v.alive * 0.05;   // 預留的空位（寄生、孵化）不算損失
     for (const [A, r] of allies) if (Math.hypot(v.x - A.x, v.z - A.z) < r) s += 12;
     if (s > bs) { bs = s; best = q; }
@@ -9775,7 +10624,7 @@ function aiThink(f) { FOW.obs = f; try { aiThink0(f); } finally { FOW.obs = null
 //   派去哪：掃描訊號的方向 → 最近的最後已知位置 → 敵軍開戰時的位置
 function aiScan(f, lv, t) {
   if (!fowOn() || lv < 2 || f.supply || fowReconLeft(f) > 0 || !fowHasCarrier(f)) return;
-  const en = fleets.filter((o) => o.side !== f.side && !o.reserve && o.sqs.some((q) => fowLive(q)));
+  const en = fleets.filter((o) => hostile(f.side, o.side) && !o.reserve && o.sqs.some((q) => fowLive(q)));
   const seen = (o) => o.sqs.some((q) => fowLive(q) && fowKnows(f, q));
   const none = !en.some(seen);
   if (!((none && (lv >= 3 || t > 30)) || (lv >= 4 && t > 15 && en.some((o) => !seen(o))))) return;
@@ -9785,7 +10634,7 @@ function aiScan(f, lv, t) {
   if (p) { const d = FOW_RULE.scanR * 0.65; P = { x: C.x + Math.sin(p.a) * d, y: C.y, z: C.z + Math.cos(p.a) * d }; }   // 掃描來自 scanR 以內：取 0.65 倍，偵察半徑 350 涵蓋大半範圍
   else {
     let best = null; for (const [e, o] of f.fowLast) if (e.alive > 0 && !fowKnows(f, e) && (!best || o.t > best.t)) best = o;
-    const st = FOW.start[1 - f.side];
+    const st = FOW.start[firstFoe(f.side)];
     P = best ? { x: best.x, y: best.y, z: best.z } : st ? { x: st.x, y: st.y || 0, z: st.z } : null;
   }
   if (P) { clampMap(P); launchRecon(f, P); }
@@ -9796,7 +10645,7 @@ function aiSearch(f, S, C) {
   let P;
   if (p) { P = { x: C.x + Math.sin(p.a) * 450, z: C.z + Math.cos(p.a) * 450 }; S.note = '搜索：往掃描訊號的方向'; }
   else {
-    const st = FOW.start[1 - f.side] || { x: 0, z: 0 }, A = S.searchMid ? { x: 0, z: 0 } : st;
+    const st = FOW.start[firstFoe(f.side)] || { x: 0, z: 0 }, A = S.searchMid ? { x: 0, z: 0 } : st;
     if (Math.hypot(A.x - C.x, A.z - C.z) < 220) S.searchMid = !S.searchMid;
     P = { x: A.x, z: A.z }; S.note = S.searchMid ? '搜索：往地圖中央' : '搜索：往敵軍開戰時的位置';
   }
@@ -9808,7 +10657,7 @@ function aiThink0(f) {
   aiScan(f, lv, t);
   // 最近的玩家艦隊
   let E = null, Ef = null, bd = 1e18;
-  for (const o of fleets) if (o.side !== f.side && !o.reserve) { const c = seenCenter(f.side, o); if (c && (c.x - C.x) ** 2 + (c.z - C.z) ** 2 < bd) { bd = (c.x - C.x) ** 2 + (c.z - C.z) ** 2; E = c; Ef = o; } }   // 被干擾：用干擾開始時的敵情；戰爭迷霧：看得到的或最後已知
+  for (const o of fleets) if (hostile(f.side, o.side) && !o.reserve) { const c = seenCenter(f.side, o); if (c && (c.x - C.x) ** 2 + (c.z - C.z) ** 2 < bd) { bd = (c.x - C.x) ** 2 + (c.z - C.z) ** 2; E = c; Ef = o; } }   // 被干擾：用干擾開始時的敵情；戰爭迷霧：看得到的或最後已知
   if (!E) { if (fowOn()) aiSearch(f, S, C); return; }
   S.ey = E.y;
   const d = Math.sqrt(bd), ux = (E.x - C.x) / (d || 1), uz = (E.z - C.z) / (d || 1), H = Math.atan2(ux, uz);
@@ -9843,7 +10692,7 @@ function aiThink0(f) {
     if (d < far * 0.95) aiSkill(f, 'rapid');
     const w = f.skills.wall;
     if ((lossRate > 0.1 || flanked) && d < far && !(w && t < w.until)) aiSkill(f, 'evade');
-    if (lv >= 3 && d < far * 1.3 && jam[1 - f.side].until <= t) aiSkill(f, 'jam');
+    if (lv >= 3 && d < far * 1.3 && jam[Ef.side].until <= t) aiSkill(f, 'jam');
   }
   // ── 難度 4 以上：被包抄時改圓陣、脫離後換回；射程內優先打航母與快被打垮的分艦隊 ──
   if (lv >= 4) {
@@ -9857,7 +10706,7 @@ function aiThink0(f) {
   }
   // ── 難度 5：看時間與戰損調整打法（領先就拉開距離拖到時間到，落後就推進衝鋒）──
   if (lv >= 5 && battleSetup.timeLimit < SIM_INF && !battleSetup.untimed && t > battleSetup.timeLimit * 0.65 && t > (S.tmT || 0)) {
-    const me = sideAlive(f.side) / Math.max(1, GAME.init[f.side]), op = sideAlive(1 - f.side) / Math.max(1, GAME.init[1 - f.side]);
+    const me = sideAlive(f.side) / Math.max(1, GAME.init[f.side]), op = foeAlive(f.side) / Math.max(1, foeInit(f.side));
     if (me - op > 0.12 && f.ai.tactic !== 'kite') { S.tmT = t + 20; S.base = S.base || f.ai.tactic; f.ai.tactic = 'kite'; S.goal = null; S.phase = null; if (GAME.watch) toast(`${f.name}：戰損領先，拉開距離拖時間`); }
     else if (op - me > 0.02 && f.ai.tactic === 'kite') { S.tmT = t + 20; f.ai.tactic = S.base && S.base !== 'kite' ? S.base : 'push'; S.goal = null; aiSkill(f, 'charge'); if (GAME.watch) toast(`${f.name}：時間不多又落後，全力進攻`); }
   }
@@ -9945,19 +10794,47 @@ function aiResupply(f, S, H) {
 }
 
 // ───── 勝負 ─────
+// 多方勢力：s 的所有敵對方加總（兩方時＝對面那一方）
+function foeAlive(s) { let n = 0; for (const k of foeSides(s)) n += sideAlive(k); return n; }
+function foeInit(s) { let n = 0; for (const k of foeSides(s)) n += GAME.init[k] || 0; return n; }
+function sideInits() { return Array.from({ length: SIDE_N }, (_, s) => sideAlive(s)); }   // 開戰時各方的兵力（GAME.init）
+// 那一方的名稱（提示用）：關卡可以用 battleSetup.sideNames 指定，否則用陣營名
+function sideName(s) { const N = battleSetup && battleSetup.sideNames; return (N && N[s]) || (FACTION[SIDE_FAC[s]] || FACTION[0]).name; }
+// 勢力關係改變、誤傷中立的提示（main.js 的 relSet／relHit 呼叫；模擬裡的狀態已經改好了，這裡只管提示）
+function relNote(a, b, why) {
+  if (typeof GAME === 'undefined' || GAME.phase !== 'battle' && GAME.phase !== 'replay') return;
+  const me = GAME.playerSide, o = a === me ? b : b === me ? a : -1, fail = battleSetup.relRule && battleSetup.relRule.act === 'fail';
+  if (why === 'warn') { if (a === me) toast(`注意：流彈正在打到中立的${sideName(b)}，再打下去${fail ? '任務就會失敗' : '對方會翻臉'}！`, 'bad'); return; }
+  if (why === 'fail') { if (a === me) toast(`誤傷${sideName(b)}太多了！`, 'bad'); return; }
+  if (o >= 0) toast(why === 'attack' && a === me ? `向${sideName(o)}開戰：雙方轉為敵對` : why === 'stray' && a === me ? `誤傷太多：${sideName(o)}轉為敵對！` : `${sideName(o)}與我軍轉為${REL[a][b] === 0 ? '敵對' : REL[a][b] === 2 ? '同盟' : '中立'}`, REL[a][b] === 0 ? 'bad' : '');
+  else toast(`${sideName(a)}與${sideName(b)}轉為${REL[a][b] === 0 ? '敵對' : REL[a][b] === 2 ? '同盟' : '中立'}`);
+}
 function sideAlive(side) { let n = 0; for (const f of fleets) if (f.side === side && !f.reserve && !f.ally) for (const q of f.sqs) n += q.alive; return n; }   // 友軍（還沒倒戈的傭兵）不算進勝負
 // 蟲族・群體意志：還活著的艦隊全是蟲族的一方不會潰走（要全滅才算輸）
 function noRout(side) { let any = false; for (const f of fleets) if (f.side === side && !f.reserve && !f.ally && f.sqs.some((q) => q.alive > 0)) { if (fleetMods(f).fac !== 6) return false; any = true; } return any; }
 // 劇情戰役的護送目標：剩不到 VIP_KEEP 就算護送失敗
 const VIP_KEEP = 0.4;
 function vipLost() { const f = fleets.find((o) => o.vip); if (!f) return false; let n = 0; for (const q of f.sqs) n += q.alive; return n < f.initial * VIP_KEEP; }
+// 模擬室（三方以上）：還沒潰走的各方之間沒有敵對了就結束；邊 0 在裡面＝勝利
+function simMultiVictory() {
+  const live = [];
+  for (let s = 0; s < SIDES; s++) {
+    const n = sideAlive(s), wait = fleets.some((f) => f.side === s && f.reserve && f.activateAt != null);
+    if (wait || (n > 0 && (n / Math.max(1, GAME.init[s]) >= ROUT_AT || noRout(s)))) live.push(s);
+  }
+  if (live.some((a) => live.some((b) => hostile(a, b)))) return;
+  GAME.result = battleResult(live.includes(0) ? 'win' : live.length ? 'lose' : 'draw', live.length ? `${live.map(sideName).join('、')} 勝利` : '各方都潰走了');
+}
 function checkVictory() {
+  if (SIDES > 2 && battleSetup.scenario === 'sim') { simMultiVictory(); return; }
   const t = U.uTime.value, tl = battleSetup.timeLimit, G = battleSetup.goal;
-  const a0 = sideAlive(0), a1 = sideAlive(1), p = a0 / Math.max(1, GAME.init[0]), e = a1 / Math.max(1, GAME.init[1]);
+  const a0 = sideAlive(0), a1 = foeAlive(0), p = a0 / Math.max(1, GAME.init[0]), e = a1 / Math.max(1, foeInit(0));
+  const RR = battleSetup.relRule, relBad = RR && RR.act === 'fail' ? (battleSetup.rel || []).find(([x, y, v]) => v === 1 && (x === 0 || y === 0) && (relOver(0, x || y) || hostile(0, x || y))) : null;   // 關卡：誤傷或攻擊中立的一方＝失敗
   let r = null;
   const pend = fleets.some((f) => f.ally && f.defectAt != null && !f.reserve) || (battleSetup.doom && t < battleSetup.doom.at + 4);   // 劇情演出（倒戈、強制擊沉）還沒發生：先不判勝利   // 還有友軍沒倒戈（劇情的倒戈）：先不判勝利，等倒戈發生
-  if (a1 === 0 && !pend) r = ['win', '殲滅敵軍'];
-  else if (e < ROUT_AT && !noRout(1) && !pend) r = ['win', '敵軍潰走'];
+  if (relBad) { const b = relBad[0] || relBad[1]; r = ['lose', hostile(0, b) ? `與${sideName(b)}開戰` : `誤傷${sideName(b)}太多`]; }
+  else if (a1 === 0 && !pend) r = ['win', '殲滅敵軍'];
+  else if (e < ROUT_AT && !foeSides(0).some((s) => sideAlive(s) > 0 && noRout(s)) && !pend) r = ['win', '敵軍潰走'];
   else if (a0 === 0) r = ['lose', '我軍全滅'];
   else if (p < ROUT_AT && !noRout(0)) r = ['lose', '我軍潰走'];
   else if (G && G.type === 'escort' && vipLost()) r = ['lose', `${G.name}損失過重`];
@@ -10012,8 +10889,8 @@ function doomTick(t) {
   for (const i of q.list) if (ships.alive[i]) { shipWorldCPU(i, _doomV); killShip(i, t, _doomV.x, _doomV.y, _doomV.z, 1.4); }
 }
 function battleResult(kind, why, extra) {
-  const a0 = sideAlive(0), a1 = sideAlive(1);
-  return { kind, why, t: U.uTime.value, alive: [a0, a1], ratio: [a0 / Math.max(1, GAME.init[0]), a1 / Math.max(1, GAME.init[1])], tick: simTick, hash: fullHash(), ...extra };   // hash：結束那一刻的戰局指紋（回放比對用）
+  const a0 = sideAlive(0), a1 = foeAlive(0);
+  return { kind, why, t: U.uTime.value, alive: [a0, a1], ratio: [a0 / Math.max(1, GAME.init[0]), a1 / Math.max(1, foeInit(0))], tick: simTick, hash: fullHash(), ...extra };   // hash：結束那一刻的戰局指紋（回放比對用）
 }
 // 撤退／手動結束：記下結束的 tick，回放才會停在同一刻（不靠勝負判定）
 const RETREAT_MIN_T = 60;   // 開戰不到這麼久就撤退：不給經驗與功勳
@@ -10136,7 +11013,7 @@ function setPhase(ph) {
   document.body.classList.toggle('game-battle', ph === 'battle' || ph === 'replay');
   document.body.classList.toggle('game-deploy', ph === 'deploy');
   document.body.classList.toggle('ld-on', ph === 'loadout');   // 編成：背景是 3D 太空港（dock.js）
-  document.body.classList.remove('hg-on');   // 王牌飛行員的機庫（hangar.js）：進機庫畫面時再加回來
+  document.body.classList.remove('hg-on', 'cb-on');   // 王牌飛行員的機庫（hangar.js）：進機庫畫面時再加回來
   document.body.classList.toggle('game-sand', ph === 'sandbox');
   document.body.classList.toggle('game-simedit', ph === 'simedit');
   document.body.classList.toggle('game-bldedit', ph === 'bldedit');
@@ -10576,7 +11453,7 @@ function gamePointer(type, e) {
   }
   if (GAME.skillArm && type === 'down' && (e.pointerType === 'touch' || e.button === 0)) {
     const q = squadronAt(e.clientX, e.clientY);
-    if (q && q.side !== cmdSide && !q.bg) {
+    if (q && !friendly(cmdSide, q.side) && !q.bg && (GAME.skillArm.attack || hostile(cmdSide, q.side))) {   // 攻擊指令可以點中立的（＝宣戰）；技能只能對敵對的
       if (GAME.skillArm.attack) cmdAttack(q); else skillCmd(GAME.skillArm.f, GAME.skillArm.id, q);
       GAME.skillArm = null; hideHint();
     }
@@ -10630,7 +11507,7 @@ function startBattle() {
   applyOp(); setup.op = GAME.op;
   newBattle(GAME.sc.seed + GAME.attempt, setup);
   setRule('fire', true); setRule('advance', false);
-  GAME.init = [sideAlive(0), sideAlive(1)];
+  GAME.init = sideInits();
   GAME.result = null; GAME.reportShown = false; GAME.replaying = false; GAME.replayEnd = null; GAME.skillArm = null; GAME.xp = null; GAME.log = []; GAME.simCtl = null; GAME.lineK = 0; GAME.dlineK = 0;
   gEl('battlehud').innerHTML = '';
   drawField(false);
@@ -10683,12 +11560,27 @@ function bhRepFrame() {
     <tr title="飛行中的飛彈（全場）"><th>${BH_IC.missile}</th><td colspan="2" class="c">${tx('h-mis')}</td></tr></table>`;
   if (el.innerHTML !== html) el.innerHTML = html;
 }
+// 三方以上：列出玩家以外的每一方（關係、兵力）；兩方時不顯示
+const REL_TXT = ['敵對', '中立', '同盟'];
+function bhRelDraw() {
+  const el = gEl('bh-rel'); if (!el) return;
+  el.hidden = SIDES <= 2; if (SIDES <= 2) return;
+  const me = GAME.playerSide, fv = fowView();
+  let h = '';
+  for (let s = 0; s < SIDES; s++) {
+    if (s === me || !GAME.init[s]) continue;
+    const r = REL[me][s], n = fv ? fowEstAlive(s, me) : sideAlive(s), pc = Math.round(n / Math.max(1, GAME.init[s]) * 100);
+    h += `<span class="rl r${r}" title="${sideName(s)}：${REL_TXT[r]}${r === 1 ? '（不會自動開火；用攻擊指令點它＝宣戰，流彈也會打到它）' : ''}"><i style="background:${(FACTION[SIDE_FAC[s]] || FACTION[0]).ui}"></i>${escH(sideName(s))} <b>${REL_TXT[r]}</b> ${fv ? '≈' : ''}${pc}%</span>`;
+  }
+  if (el.innerHTML !== h) el.innerHTML = h;
+}
 // 戰鬥 HUD 與技能列：結構只建一次，之後只更新文字（避免重畫吃掉點擊）
 // 右上角：雙方兵力＋時間，指令都是圖示按鈕（滑鼠移上去看說明）
 function buildBattleHud() {
   gEl('battlehud').innerHTML = `<div class="side"><div class="lbl" id="bh-t0"></div><div class="bar s0"><i id="bh-b0"></i></div></div>
     <div class="timer"><span id="bh-tm"></span><div class="lbl" id="bh-tl"></div></div>
     <div class="side"><div class="lbl" style="text-align:right" id="bh-t1"></div><div class="bar s1"><i id="bh-b1"></i></div></div>
+    <div class="bh-rel" id="bh-rel" hidden></div>
     <span class="bh-sep"></span>
     <button class="g-btn sm ic" id="bh-pause"></button><button class="g-btn sm" id="bh-speed"></button><button class="g-btn sm ic" id="bh-tac">${BH_IC.tac}</button><button class="g-btn sm" id="bh-3d" title="切換 2D／3D 畫面（${keyText('render')}）"></button><button class="g-btn sm ic" id="bh-br">${BH_IC.bridge}</button>${uiOn('stats') ? `<button class="g-btn sm ic" id="bh-rep-b" title="戰況簡報：命中率、被擊沉方向、艦載機與飛彈">${BH_IC.report}</button>` : ''}<button class="g-btn sm ic" id="bh-help" title="操作說明（${keyText('help')}）">?</button><button class="g-btn sm ic" id="bh-set" title="設定（${keyText('settings')}）">⚙</button>${GAME.sc && GAME.sc.sim && !GAME.replaying && !GAME.watch ? '<button class="g-btn sm" id="bh-ctl" title="模擬室：接管另一方（該方 AI 暫停）"></button><button class="g-btn sm" id="bh-edit" title="模擬室：暫停並調整配置與設定">✎ 編輯</button>' : ''}<button class="g-btn sm" id="bh-quit"></button>`;
   if (gEl('bh-rep-b')) gEl('bh-rep-b').onclick = bhRepToggle;
@@ -10730,18 +11622,21 @@ function gameFrame(dt) {
   if (_hudAcc < 0.15) return;
   _hudAcc = 0;
   const t = U.uTime.value, tl = battleSetup.timeLimit;
-  const a0 = sideAlive(0), a1 = sideAlive(1), p = a0 / Math.max(1, GAME.init[0]), e = a1 / Math.max(1, GAME.init[1]);
+  const ps = SIDES > 2 ? GAME.playerSide : 0;   // 三方以上：左邊＝玩家這一方、右邊＝所有敵對方加總（兩方：左右固定是邊 0、邊 1）
+  const a0 = sideAlive(ps), a1 = foeAlive(ps), p = a0 / Math.max(1, GAME.init[ps]), e = a1 / Math.max(1, foeInit(ps));
   if (!gEl('bh-tm')) buildBattleHud();
-  const sim = GAME.sc && GAME.sc.sim, nm = (s) => (NET.on ? mpSideName(s) : sim ? simSideName(SIM.m, s) + (s === GAME.playerSide && !GAME.watch ? (GAME.pilot || GAME.captain ? '（我軍）' : '（指揮中）') : '') : s === GAME.playerSide ? '我軍' : '敵軍');
+  bhRelDraw();
+  const sim = GAME.sc && GAME.sc.sim, nm1 = (s) => (NET.on ? mpSideName(s) : sim ? simSideName(SIM.m, s) + (s === GAME.playerSide && !GAME.watch ? (GAME.pilot || GAME.captain ? '（我軍）' : '（指揮中）') : '') : s === GAME.playerSide ? '我軍' : '敵軍');
+  const nm = SIDES > 2 ? (s) => (s ? '敵對各方' : nm1(ps)) : nm1;
   if (GAME.watch) watchFrame();
   // 兵力只顯示百分比，艘數放在滑鼠提示裡
   const setT = (s, txt, tip) => { const el = gEl('bh-t' + s); el.textContent = txt; el.parentElement.title = tip; };
   setT(0, `${nm(0)} ${Math.round(p * 100)}%`, `${nm(0)}：剩 ${ships5(a0)} 艘`); gEl('bh-b0').style.width = p * 100 + '%';
-  const fogE = playerFogged() ? 1 - GAME.playerSide : -1;   // 雷達受干擾：敵方兵力不明（長條停在原處）
+  const fogE = playerFogged() ? (SIDES > 2 ? 1 : 1 - GAME.playerSide) : -1;   // 雷達受干擾：敵方兵力不明（長條停在原處）
   if (fogE === 0) setT(0, `${nm(0)} ？？？`, '雷達受干擾：兵力不明');
   if (fogE === 1) setT(1, `${nm(1)} ？？？`, '雷達受干擾：兵力不明'); else { setT(1, `${nm(1)} ${Math.round(e * 100)}%`, `${nm(1)}：剩 ${ships5(a1)} 艘`); gEl('bh-b1').style.width = e * 100 + '%'; }
   if (fowView()) {   // 戰爭迷霧：對方兵力只能估計（看得到的照實、最後已知照當時、沒看過的照開戰時）
-    const os = 1 - GAME.playerSide, est = fowEstAlive(os), r = est / Math.max(1, GAME.init[os]);
+    const os = SIDES > 2 ? 1 : 1 - GAME.playerSide, est = SIDES > 2 ? sumA(foeSides(GAME.playerSide).map((s) => fowEstAlive(s))) : fowEstAlive(os), r = est / Math.max(1, SIDES > 2 ? foeInit(GAME.playerSide) : GAME.init[os]);
     setT(os, `${nm(os)} ≈${Math.round(r * 100)}%`, `${nm(os)}：估計約 ${ships5(est)} 艘${jammed(GAME.playerSide) ? '（通訊受干擾）' : ''}`); gEl('bh-b' + os).style.width = r * 100 + '%';
   }
   const unt = battleSetup.untimed;   // 沒有時限的主線關卡：顯示經過時間與目標時間
@@ -10756,7 +11651,7 @@ function gameFrame(dt) {
   gEl('bh-speed').textContent = NET.on ? `×${NET.speed}${NET.lag ? ' …' : ''}` : cmdSlowOn ? `×${effSpeed()}` : '×' + SPEEDS[speedIdx]; gEl('bh-speed').classList.toggle('slow', cmdSlowOn);
   gEl('bh-speed').title = NET.on ? (NET.lag ? '等待連線…' : '遊戲速度（房主決定）') : cmdSlowOn ? '下令中：自動放慢' : `遊戲速度（${keyText('speed_up')}／${keyText('speed_down')}）`;
   if (!gEl('bh-quit').dataset.sure) gEl('bh-quit').textContent = GAME.replaying ? '結束回放' : NET.on ? (NET.spec ? '離開觀戰' : '投降') : GAME.watch ? '結束觀摩' : GAME.pilot ? '結束出擊' : GAME.captain ? '結束任務' : sim ? '結束模擬' : GAME.sc && GAME.sc.tut ? '結束教學' : '撤退';
-  if (gEl('bh-ctl')) gEl('bh-ctl').textContent = `切換 → ${simSideName(SIM.m, 1 - GAME.playerSide)}`;
+  if (gEl('bh-ctl')) gEl('bh-ctl').textContent = `切換 → ${simSideName(SIM.m, simNextSide())}`;
   gEl('bh-3d').textContent = mode3D ? '2D' : '3D';
   gEl('bh-br').title = `${BR.on ? '離開艦橋' : '艦橋視角'}（${keyText('bridge')}）`; gEl('bh-br').classList.toggle('on', BR.on);
   gEl('bh-tac').title = `${BR.on ? (bridgeConsoleK() > 0.5 ? '抬頭' : '戰術台') : '戰術面板'}（${keyText('tactical')}）`;
@@ -10774,7 +11669,7 @@ function gameFrame(dt) {
 
 // ───── 戰後報告 ─────
 function battleStats() {
-  const init = [0, 1].map(() => new Array(NT).fill(0)), left = [0, 1].map(() => new Array(NT).fill(0));
+  const init = Array.from({ length: SIDE_N }, () => new Array(NT).fill(0)), left = Array.from({ length: SIDE_N }, () => new Array(NT).fill(0));
   for (const f of fleets) {
     if (f.reserve) continue;   // 沒出場的增援不算
     for (const q of f.sqs) for (const i of q.list) { init[f.side][ships.type[i]]++; if (ships.alive[i]) left[f.side][ships.type[i]]++; }
@@ -10864,7 +11759,7 @@ function startReplay(rec) {
   else if (rec && ref && ref.ver !== (window.__BUILD || '')) toast(`這筆紀錄來自版本 ${ref.ver}（目前 ${window.__BUILD || '-'}）：結束時會比對結果是否一致`, 'hint');
   if (rec && rec.replay) replayBattle(rec.replay.log, rec.replay.rules, rec.replay.seed, rec.replay.setup);
   else replayBattle(cmdLog.slice(), battleRules, battleSeed, battleSetup);
-  GAME.init = [sideAlive(0), sideAlive(1)];
+  GAME.init = sideInits();
   drawField(false);
   setPhase('replay');
   paused = false; updateTimeUI();
@@ -11814,6 +12709,8 @@ function showStoryDiff(change) {
 // goal：省略＝殲滅或潰走；survive＝撐到時限；escort＝護送目標（vip）撐到時限；cut＝擊沉敵方所有補給艦（要有 supply）
 // ev：增援 [名稱, 指揮官 [名, 特性, 等級, 技能] 或 null, 兵力, 艦隊類型, 陣型, 進場邊 left/right, 進場時間 [a, b], 機率（省略＝1）, 外觀的陣營（省略＝enemyFac）]
 // intel：[準確度, 看不到的項目]；decoy：假情報（簡報只顯示第一支艦隊，兵力 × decoy，也看不到增援）；enemyFac：敵軍外觀的陣營（2＝灰鴉傭兵團、7＝帝國攝政派：帝國的船換成銀白色，帝國內戰用；不要設成跟玩家同陣營：標籤顏色和船型會分不出來）
+// sides：第三方以後的勢力（多方勢力，邊 2、3…）[{ name, fac, rel: [對玩家, 對敵軍], fleets: [同 allies 的格式（不用倒戈、外觀欄）] }]
+//   rel：0 敵對、1 中立、2 同盟。relRule：{ act: 'fail'（誤傷或攻擊中立的一方＝失敗）／'hostile'（翻臉，預設）, thr: 誤傷門檻（對方總耐久的比例）}
 // allies：AI 友軍 [艦隊名, 指揮官, 特性, 等級, 技能, 艦隊類型, 兵力, 陣型, 打法, x, 倒戈秒數（省略／null＝不倒戈）, 外觀的陣營（省略＝2 傭兵）, 中途進場 [秒, 'left'／'right']（省略＝開戰就在場）]
 // lines：戰鬥中的通訊 [秒, 誰, 台詞]；after：打贏後的結語；supply：敵方補給艦隊（預算的倍數，跟著第一支艦隊）
 // defect：倒戈的觸發 { left: 敵軍剩下的比例, lead: 觸發後幾秒才倒戈 }：敵軍剩到 left 以下、或到了友軍的倒戈秒數減 lead，就排定 lead 秒後倒戈（取先到的）
@@ -12171,15 +13068,18 @@ const STORY_WAR = {
     ev: [['感染艦群', null, 0.25, 'raider', 'wedge', 'left', [120, 170]]],
     lines: [[3, '「老錨」歐文', '（通訊）這艘船三十年沒飛過了。你們說要護送，就護送到底。'], [8, '米拉・哈特', '老錨，你只管飛。剩下的交給我們。'], [180, '「老錨」歐文', '（通訊）引擎……撐住了！'], [290, '米拉・哈特', '封鎖線過了！']],
     after: '倖存者船團突破了封鎖。殖民船團的老船長「老錨」歐文，把他的船隊交給了灰鴉調度。' },
-  // 第 7 關：靜默節點（中立的機械智慧族，AI 友軍）要淨化行星；撤離船從地表起飛，掩護到後方。擊沉越多感染艦，淨化延得越久
+  // 第 7 關：靜默節點（中立的第三方勢力，邊 2）要淨化行星；撤離船從地表起飛，掩護到後方。擊沉越多感染艦，淨化延得越久
+  //   靜默節點與感染艦隊敵對、對灰鴉中立：攻擊它或流彈誤傷太多＝任務失敗
   'x7': { budget: 6000, time: 300, fleets: 3, lv: 5, enemyFac: 5, goal: 'rescue', intel: [0.7, ['events']],
     terrain: [stT('rock', -420, -40, 70, 30), stT('rock', 420, -60, 65, -40)],
     rescue: { name: '撤離船', at: [15, 40, 65, 90, 115, 140, 170, 200], from: [[-300, -380], [0, -440], [300, -380]], need: 4, comp: [0, 0, 0, 0, 20, 30], ext: 30, per: 0.2, max: 3 },
     foes: [['感染艦群', '？？？', 'dmg', 9, ['charge'], 'balanced', 0.4, 'line', 'push', -260],
       ['感染艦群', '？？？', 'speed', 8, ['charge'], 'raider', 0.35, 'wedge', 'flank', 260]],
     ev: [['感染艦群', null, 0.25, 'raider', 'wedge', 'left', [100, 150]], ['感染艦群', null, 0.25, 'balanced', 'line', 'right', [160, 210]]],
-    allies: [['靜默節點艦隊', '靜默節點', 'shield', 9, ['wall'], 'heavy', 0.35, 'line', 'kite', 0, null, 4]],
-    lines: [[3, '靜默節點', '（通訊）行星淨化程序已排定。剩餘時間：300 秒。'], [8, '米拉・哈特', '淨化？地表上還有人！'], [13, '靜默節點', '（通訊）已計算。救援的成本高於淨化。'], [19, '賽弗', '（通訊）賽隆，我會跟它談。你們要證明，救人也可以有效率。'], [25, '賽隆', '聽到了。清出航道，讓撤離船上來！']],
+    sides: [{ name: '靜默節點', fac: 4, rel: [1, 0], fleets: [['靜默節點艦隊', '靜默節點', 'shield', 9, ['wall'], 'heavy', 0.35, 'line', 'kite', 640, -260]] }],
+    relRule: { act: 'fail', thr: 0.08 },
+    lines: [[3, '靜默節點', '（通訊）行星淨化程序已排定。剩餘時間：300 秒。'], [8, '米拉・哈特', '淨化？地表上還有人！'], [13, '靜默節點', '（通訊）已計算。救援的成本高於淨化。'], [19, '賽弗', '（通訊）賽隆，我會跟它談。你們要證明，救人也可以有效率。'], [25, '賽隆', '聽到了。清出航道，讓撤離船上來！'],
+      [32, '賽弗', '（通訊）注意射線。靜默節點不是我們的盟友——流彈打到它，它會記下來。'], [38, '「老錨」歐文', '（通訊）所以我們得一邊救人、一邊別打到那些機器？'], [42, '賽隆', '對。開火前看清楚後面是誰。']],
     after: '淨化照計畫進行了。被救出來的人看著行星在身後燒起來。靜默節點沒有道歉，只留下一句：「效率修正，已記錄。」賽弗說，這是它們表達敬意的方式。' },
   'x8': { budget: 6000, time: 420, fleets: 3, lv: 5, enemyFac: 6, intel: [0.5, ['comp', 'events']],
     terrain: [stT('asteroid', -300, -100, 200), stT('asteroid', 300, -80, 190), stT('rock', 0, 100, 70, 20)],
@@ -12283,6 +13183,9 @@ function storyScenario(id) {
   if (W.enemyFac != null) sc.enemyFac = facX(W.enemyFac);
   if (W.allies) sc.allies = W.allies.map(([name, cn, trait, level, skills, arch, pow, formation, tactic, x, defect, fac, arrive]) => ({ name, commander: { name: cn, trait, level: Math.max(1, level + D.lv), skills: skills.slice() },
     comp: comp(arch, pow), formation, tactic, x, z: 300 + ZONE_SHIFT - 40, h: Math.PI, fac: fac != null ? facX(fac) : 2, defectAt: defect != null ? defect : null, ...(arrive ? { arrive: arrive.slice() } : {}) }));
+  if (W.sides) sc.sides = W.sides.map((S) => ({ name: S.name, fac: facX(S.fac), rel: S.rel.slice(), fleets: S.fleets.map(([name, cn, trait, level, skills, arch, pow, formation, tactic, x, z]) => ({ name, commander: { name: cn, trait, level: Math.max(1, level + D.lv), skills: skills.slice() },
+    comp: comp(arch, pow), formation, tactic, x, z: z != null ? z : 300 + ZONE_SHIFT - 40, h: Math.PI })) }));
+  if (W.relRule) sc.relRule = { ...W.relRule };
   if (W.ground) { sc.terrain = []; sc.ground = { scene: W.ground, seed: 7000 + k * 13, def: 1 }; }
   if (W.doom) sc.doom = { name: W.allies[W.doom.ally][0], at: W.doom.at };
   if (W.goal === 'target') sc.goal = { type: 'target', name: W.foes[W.target][0] };
@@ -12322,7 +13225,9 @@ function storyGoalRows(sc) {
     : G.type === 'rescue' ? [`淨化開始前至少救出 ${G.need} 批${G.name}（共 ${G.waves} 批，把它們掩護到後方的撤離點），或殲滅敵軍`, `淨化開始時救出的不到 ${G.need} 批，或${rout}`, `${min} 分鐘後開始淨化：每擊沉約 ${Math.round(sc.rescue.per * 100)}% 的敵軍延後 ${sc.rescue.ext} 秒（最多 ${sc.rescue.max} 次）`]
     : G.type === 'escort' ? [`保護${G.name}撐過 ${min} 分鐘，或${er}`, `${G.name}損失超過 ${Math.round((1 - VIP_KEEP) * 100)}%，或${rout}`, `${min} 分鐘（${G.name}撐到時間就是勝利）`]
     : [`擊沉敵方所有補給艦，或${er}`, rout, par];
-  return `<dt>勝利條件</dt><dd>${T[0]}</dd><dt>敗北條件</dt><dd>${T[1]}</dd><dt>${sc.untimed ? '目標時間' : '時間限制'}</dt><dd>${T[2]}</dd>`;
+  if (sc.sides) for (const S of sc.sides) if (S.rel[0] === 1) T[1] += sc.relRule && sc.relRule.act === 'fail' ? `，或攻擊、誤傷中立的${S.name}太多` : '';
+  const neu = sc.sides ? sc.sides.map((S) => `<dt>${S.name}</dt><dd>${['敵對', '中立', '同盟'][S.rel[0]]}${S.rel[0] === 1 ? '：不會自動開火，但流彈、範圍攻擊會打到它' : ''}${S.rel[1] === 0 ? '；與敵軍敵對' : ''}</dd>`).join('') : '';
+  return `${neu}<dt>勝利條件</dt><dd>${T[0]}</dd><dt>敗北條件</dt><dd>${T[1]}</dd><dt>${sc.untimed ? '目標時間' : '時間限制'}</dt><dd>${T[2]}</dd>`;
 }
 // 作戰簡報
 function storyBriefing(id) {
@@ -12995,7 +13900,13 @@ const SIM_LAST = 'fleet.simlast', SIM_KEY = 'fleet.simlayouts';
 const SIM_INF = 359999;   // 模擬室沒有時限
 const SIM_CN = '一二三四五六七八九十';
 const SIM_TERR_MAX_SOLID = 8;   // 實體障礙最多 8 個（著色器與碰撞的上限）
-const simSideName = (m, side) => FACTION_NAME[side ? 1 - m.fac : m.fac];
+// 多方勢力：邊 0、1＝原本的我方、敵方（帝國／聯盟，m.fac 決定哪邊是誰）；邊 2 以後＝m.sides[邊−2]＝{ fac, name }
+//   m.rel＝[[a, b, 關係], ...]（0 敵對、1 中立、2 同盟；沒寫的＝敵對）
+const simSideN = (m) => 2 + ((m.sides && m.sides.length) || 0);
+const simSideFac = (m, side) => (side >= 2 ? (m.sides[side - 2] || { fac: 1 }).fac : side ? 1 - m.fac : m.fac);
+const simSideName = (m, side) => (side >= 2 ? ((m.sides && m.sides[side - 2] && m.sides[side - 2].name) || FACTION_NAME[simSideFac(m, side)] + `（第 ${side + 1} 方）`) : FACTION_NAME[side ? 1 - m.fac : m.fac]);
+const simRel = (m, a, b) => { if (a === b) return 2; const e = (m.rel || []).find(([x, y]) => (x === a && y === b) || (x === b && y === a)); return e ? e[2] : 0; };
+const SIM_SPOT = [null, null, [700, 0, -Math.PI / 2], [-700, 0, Math.PI / 2], [560, -560, -Math.PI * 3 / 4], [-560, 560, Math.PI / 4], [560, 560, -Math.PI / 4], [-560, -560, Math.PI * 3 / 4]];   // 第三方以後的預設位置（地圖四周）
 // 戰術面板、艦橋共用：一般作戰＝剩餘時間；模擬室（無時限）＝整場的經過時間
 function timeLeftText(t) { const tl = battleSetup.timeLimit; return battleSetup.untimed ? _fmtT(t) : tl >= SIM_INF ? `經過 ${_fmtT(t + SIM.t0)}` : _fmtT(Math.max(0, tl - t)); }
 
@@ -13004,10 +13915,11 @@ function simCmdrFrom(c, mode = 'lv') {
   return { base: c.id, name: c.name, title: c.title || '', trait: c.trait, level: mode === 'tal' ? cmdrLevel(c.id) : 3, mode, tal: mode === 'tal' ? { ...cmdrTal(c.id) } : {}, skills: c.skills.slice() };
 }
 function simNewFleet(m, side) {
-  const fac = side ? 1 - m.fac : m.fac, pool = COMMANDERS.filter((c) => (c.faction || 0) === fac), n = m.fleets.filter((f) => f.side === side).length;
-  const c = pool[n % Math.max(1, pool.length)] || COMMANDERS[0];
-  return { side, name: `${side ? '敵方' : '我方'}第${SIM_CN[n] || n + 1}艦隊`, cmdr: simCmdrFrom(c), comp: defaultComp(2000), hangar: HANGAR_DEFAULT.slice(),
-    formation: 'line', orderly: false, layers: 1, x: -300 + (n % 4) * 200, z: side ? -330 : 330, y: 0, h: side ? 0 : Math.PI,
+  const fac = simSideFac(m, side), pool = COMMANDERS.filter((c) => (c.faction || 0) === fac), n = m.fleets.filter((f) => f.side === side).length;
+  const c = pool[n % Math.max(1, pool.length)] || COMMANDERS[0], P = SIM_SPOT[side];
+  const pos = P ? { x: P[0] + Math.cos(P[2]) * (n % 3 - 1) * 200, z: P[1] - Math.sin(P[2]) * (n % 3 - 1) * 200, h: P[2] } : { x: -300 + (n % 4) * 200, z: side ? -330 : 330, h: side ? 0 : Math.PI };
+  return { side, name: side >= 2 ? `${simSideName(m, side).replace(/（.*）/, '')}第${SIM_CN[n] || n + 1}艦隊` : `${side ? '敵方' : '我方'}第${SIM_CN[n] || n + 1}艦隊`, cmdr: simCmdrFrom(c), comp: defaultComp(2000), hangar: HANGAR_DEFAULT.slice(),
+    formation: 'line', orderly: false, layers: 1, x: Math.round(pos.x), z: Math.round(pos.z), y: 0, h: pos.h,
     ai: side ? { tactic: 'push', level: 2 } : null, reserve: false, at: 60 };
 }
 function simDefault() {
@@ -13037,7 +13949,7 @@ function simFromScenario(sc) {
 // 布局 → 戰鬥設定（與正式作戰相同的格式）；edit＝編輯中（增援也先顯示出來，方便擺放）
 function simSetup(m, edit) {
   const S = {
-    bg: false, scenario: 'sim', level: 1, factions: m.fac ? [1, 0] : [0, 1], timeLimit: m.timeLimit || SIM_INF, noVictory: !m.victory,
+    bg: false, scenario: 'sim', level: 1, factions: [...(m.fac ? [1, 0] : [0, 1]), ...(m.sides || []).map((s) => s.fac)], ...(m.sides && m.sides.length ? { rel: (m.rel || []).map((r) => r.slice()), sideNames: Array.from({ length: simSideN(m) }, (_, s) => simSideName(m, s)) } : {}), timeLimit: m.timeLimit || SIM_INF, noVictory: !m.victory,
     terrain: m.ground ? [] : m.terrain.map((t) => ({ ...t })), ...(m.ground && GROUND_SCENES[m.ground.scene] ? { ground: { ...m.ground } } : {}),   // 近地作戰：不用太空地形
     fleets: m.fleets.map((f) => {
       const c = f.cmdr, tal = c.mode === 'tal' ? { ...c.tal } : null;
@@ -13111,8 +14023,8 @@ function simRender() {
       <div class="sim-btns" style="margin-top:6px">${SIM.dirty && SIM.live ? '<button class="g-btn sm" id="sim-discard" title="回到暫停時的戰局">放棄修改</button>' : ''}<button class="g-btn sm" id="sim-reset" title="布局與狀態恢復成開戰時的樣子">↺ 重置戰場</button></div></div>` : ''}
     <div class="wed-seg sim-tabs" id="sim-tabs"><button data-tab="unit" class="${SIM.tab === 'unit' ? 'on' : ''}">單位與地形</button><button data-tab="field" class="${SIM.tab === 'field' ? 'on' : ''}">戰場設定</button><button data-tab="file" class="${SIM.tab === 'file' ? 'on' : ''}">布局存檔</button></div>
     ${SIM.tab === 'field' ? simFieldHtml(m) : SIM.tab === 'file' ? simFileHtml(m) : `
-    <div class="sim-sec"><div class="sim-h"><span class="g-pc">${simSideName(m, 0)}（我方）</span><span class="g-dim">${tot(0)} 艘</span><span class="g-sp"></span><button class="g-btn sm" data-add="0">＋ 艦隊</button></div>${sideList(0)}</div>
-    <div class="sim-sec"><div class="sim-h"><span class="g-ec">${simSideName(m, 1)}（敵方）</span><span class="g-dim">${tot(1)} 艘</span><span class="g-sp"></span><button class="g-btn sm" data-add="1">＋ 艦隊</button></div>${sideList(1)}</div>
+    ${Array.from({ length: simSideN(m) }, (_, s) => `<div class="sim-sec"><div class="sim-h"><span class="${s === 0 ? 'g-pc' : s === 1 ? 'g-ec' : ''}" style="${s >= 2 ? `color:${FACTION[simSideFac(m, s)].ui}` : ''}">${escH(simSideName(m, s))}${s === 0 ? '（我方）' : s === 1 ? '（敵方）' : ''}</span><span class="g-dim">${tot(s)} 艘${simSideN(m) > 2 && s ? `・對我方${['敵對', '中立', '同盟'][simRel(m, 0, s)]}` : ''}</span><span class="g-sp"></span>${s >= 2 ? `<button class="g-btn sm" data-delside="${s}" title="刪除這一方（連同它的艦隊）">✕</button>` : ''}<button class="g-btn sm" data-add="${s}">＋ 艦隊</button></div>${sideList(s)}</div>`).join('')}
+    ${simSideN(m) < SIDE_N ? `<div class="sim-sec"><button class="g-btn sm" id="sim-addside" title="多方勢力：最多 ${SIDE_N} 方；每兩方的關係（敵對／中立／同盟）在「戰場設定」改">＋ 新增勢力（第 ${simSideN(m) + 1} 方）</button></div>` : ''}
     <div class="sim-sec"><div class="sim-h"><span>地形</span><span class="g-dim">實體障礙 ${solid}／${SIM_TERR_MAX_SOLID}</span><span class="g-sp"></span>${Object.keys(TERRAIN_TYPES).map((k) => `<button class="g-btn sm" data-addt="${k}" title="${TERRAIN_TYPES[k].desc}">＋ ${TERRAIN_TYPES[k].name}</button>`).join('')}</div>
       ${m.terrain.map((t, i) => `<button class="sim-it ${SIM.sel && SIM.sel.kind === 'terr' && SIM.sel.i === i ? 'on' : ''}" data-st="${i}"><b>${TERRAIN_TYPES[t.type].name}</b><small>(${Math.round(t.x)}, ${Math.round(t.z)})・高度 ${Math.round(t.y || 0)}・半徑 ${Math.round(t.r)}</small></button>`).join('') || '<span class="g-dim">（沒有地形）</span>'}</div>
     ${it ? (SIM.sel.kind === 'fleet' ? simFleetHtml(it) : simTerrHtml(it)) : '<div class="sim-sec g-dim">點清單或地圖上的艦隊／地形來編輯。</div>'}`}
@@ -13130,11 +14042,21 @@ function simFieldHtml(m) {
     <div class="sim-row"><span>地形種子</span><input class="g-in" type="number" id="sim-gseed" value="${m.ground.seed}" style="width:110px"><button class="g-btn sm" id="sim-gre">換一個</button></div>` : ''}
     <div class="sim-row"><span>戰爭迷霧</span><div class="wed-seg" id="sim-fow"><button data-v="1" class="${m.fow !== false ? 'on' : ''}">開</button><button data-v="0" class="${m.fow === false ? 'on' : ''}">關</button></div></div>
     <div class="g-dim sim-note">開＝只看得到偵測範圍內（或掃描到）的敵軍，自動攻擊也只打看得到的；關＝雙方都看得到全部</div>
-    <div class="sim-row"><span>${SIM.mid ? '繼續時指揮' : '開戰時指揮'}</span><div class="wed-seg" id="sim-ctl"><button data-v="0" class="${m.ctl === 0 ? 'on' : ''}">我方</button><button data-v="1" class="${m.ctl === 1 ? 'on' : ''}">敵方</button></div></div>
+    <div class="sim-row"><span>${SIM.mid ? '繼續時指揮' : '開戰時指揮'}</span><div class="wed-seg" id="sim-ctl">${Array.from({ length: simSideN(m) }, (_, s) => `<button data-v="${s}" class="${m.ctl === s ? 'on' : ''}">${s === 0 ? '我方' : s === 1 ? '敵方' : escH(simSideName(m, s))}</button>`).join('')}</div></div>
+    ${simSideN(m) > 2 ? simRelHtml(m) : ''}
     <div class="sim-row"><span>勝負判定</span><label><input type="checkbox" id="sim-vic" ${m.victory ? 'checked' : ''}> 一方全滅或潰走（剩 ${Math.round(ROUT_AT * 100)}% 以下）就結束</label></div>
     <div class="sim-row"><span>時限</span><span class="g-dim">模擬室沒有時間限制</span></div>
     <div class="sim-row"><span>隨機種子</span><input class="g-in" type="number" id="sim-seed" value="${m.seed}" style="width:110px"><button class="g-btn sm" id="sim-reseed">換一個</button></div>
     <div class="g-dim" style="font-size:calc(11.5px * var(--ui));margin-top:6px">同一個布局＋同一個種子＋同樣的指令＝同樣的結果；換種子會改變陣型細節與命中的隨機性。<br>規則與正式作戰相同（持續交火、不自動前進、主砲只打前方）。</div></div>`;
+}
+// 多方勢力：第三方以後的陣營、名稱；每兩方的關係
+function simRelHtml(m) {
+  const N = simSideN(m), opt = (v, n, cur) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${n}</option>`;
+  let h = '<div class="sim-sub">多方勢力</div>';
+  for (let s = 2; s < N; s++) h += `<div class="sim-row"><span>第 ${s + 1} 方</span><input class="g-in" data-sname="${s}" value="${escH(m.sides[s - 2].name || '')}" placeholder="${FACTION_NAME[m.sides[s - 2].fac]}" maxlength="12" style="width:110px"><select class="g-sel" data-sfac="${s}">${FACTION_NAME.map((n, f) => opt(f, n, m.sides[s - 2].fac)).join('')}</select></div>`;
+  h += '<div class="sim-sub">勢力關係</div>';
+  for (let a = 0; a < N; a++) for (let b = a + 1; b < N; b++) h += `<div class="sim-row"><span style="min-width:0;flex:1">${escH(simSideName(m, a))} ↔ ${escH(simSideName(m, b))}</span><select class="g-sel" data-rel="${a},${b}">${['敵對', '中立', '同盟'].map((n, r) => opt(r, n, simRel(m, a, b))).join('')}</select></div>`;
+  return h + '<div class="g-dim sim-note">敵對＝自動互相開火；中立＝不會自動開火，但流彈、範圍攻擊會打到，被下令攻擊或誤傷太多就轉為敵對；同盟＝不互打（流彈也不會）。打到只剩互不敵對的勢力時結束。</div>';
 }
 function simFileHtml(m) {
   const L = simLayouts();
@@ -13149,7 +14071,7 @@ function simFleetHtml(f) {
   const cost = compCost(f.comp);
   return `<div class="sim-sec sim-ed"><div class="sim-h"><b>編輯艦隊</b><span class="g-sp"></span><button class="g-btn sm" id="sim-dup">複製</button><button class="g-btn sm" id="sim-del">刪除</button></div>
     <div class="sim-row"><span>名稱</span><input class="g-in" data-fk="name" value="${escH(f.name)}" maxlength="20"></div>
-    <div class="sim-row"><span>陣營</span><div class="wed-seg" id="sim-fside"><button data-v="0" class="${f.side === 0 ? 'on' : ''}">我方</button><button data-v="1" class="${f.side === 1 ? 'on' : ''}">敵方</button></div></div>
+    <div class="sim-row"><span>陣營</span><div class="wed-seg" id="sim-fside">${Array.from({ length: simSideN(SIM.m) }, (_, s) => `<button data-v="${s}" class="${f.side === s ? 'on' : ''}">${s === 0 ? '我方' : s === 1 ? '敵方' : escH(simSideName(SIM.m, s))}</button>`).join('')}</div></div>
     <div class="sim-row"><span>補給艦隊</span><label><input type="checkbox" data-fk="supply" ${f.supply ? 'checked' : ''}> 沒有指揮官，範圍內的友艦自動補飛彈</label></div>
     ${f.supply ? `<div class="sim-row"><span>跟隨</span><select class="g-sel" data-fk="follow">${opt(-1, '不跟隨', f.follow != null ? f.follow : -1)}${SIM.m.fleets.map((o, i) => (o !== f && o.side === f.side && !o.supply ? opt(i, o.name, f.follow) : '')).join('')}</select></div>` : `
     <div class="sim-row"><span>控制</span><select class="g-sel" data-fk="ai">${opt('', '無 AI（玩家指揮／不動）', f.ai ? f.ai.tactic : '')}${Object.keys(TACTICS).map((k) => opt(k, 'AI：' + TACTICS[k].name, f.ai ? f.ai.tactic : '')).join('')}</select>
@@ -13192,6 +14114,27 @@ function simBind(el) {
   q('[data-sf]').forEach((b) => (b.onclick = () => simSelect({ kind: 'fleet', i: +b.dataset.sf })));
   q('[data-st]').forEach((b) => (b.onclick = () => simSelect({ kind: 'terr', i: +b.dataset.st })));
   q('[data-add]').forEach((b) => (b.onclick = () => { m.fleets.push(simNewFleet(m, +b.dataset.add)); SIM.sel = { kind: 'fleet', i: m.fleets.length - 1 }; simChanged(); }));
+  on('sim-addside', 'onclick', () => {   // 新增勢力：先挑還沒用過的陣營
+    m.sides = m.sides || []; if (simSideN(m) >= SIDE_N) return;
+    const used = Array.from({ length: simSideN(m) }, (_, s) => simSideFac(m, s)), fac = [4, 5, 6, 3, 2, 7, 0, 1].find((f) => !used.includes(f)) ?? 4;
+    m.sides.push({ fac, name: '' }); const s = simSideN(m) - 1;
+    m.fleets.push(simNewFleet(m, s)); SIM.sel = { kind: 'fleet', i: m.fleets.length - 1 }; simChanged();
+  });
+  q('[data-delside]').forEach((b) => (b.onclick = () => {
+    const s = +b.dataset.delside; if (m.fleets.some((f) => f.side === s) && !confirm(`刪除「${simSideName(m, s)}」和它的艦隊？`)) return;
+    m.fleets = m.fleets.filter((f) => f.side !== s); for (const f of m.fleets) if (f.side > s) f.side--;
+    m.rel = (m.rel || []).filter(([x, y]) => x !== s && y !== s).map(([x, y, r]) => [x > s ? x - 1 : x, y > s ? y - 1 : y, r]);
+    m.sides.splice(s - 2, 1); if (m.ctl === s) m.ctl = 0; else if (m.ctl > s) m.ctl--;
+    SIM.sel = null; simChanged();
+  }));
+  q('[data-sname]').forEach((e) => (e.onchange = () => { m.sides[+e.dataset.sname - 2].name = e.value.trim(); simChanged(false); }));
+  q('[data-sfac]').forEach((e) => (e.onchange = () => { m.sides[+e.dataset.sfac - 2].fac = +e.value; simChanged(); }));
+  q('[data-rel]').forEach((e) => (e.onchange = () => {
+    const [a, b] = e.dataset.rel.split(',').map(Number), r = +e.value;
+    m.rel = (m.rel || []).filter(([x, y]) => !((x === a && y === b) || (x === b && y === a)));
+    if (r) m.rel.push([a, b, r]);   // 敵對＝預設，不用記
+    simChanged();
+  }));
   q('[data-addt]').forEach((b) => (b.onclick = () => {
     const type = b.dataset.addt;
     if (TERRAIN_TYPES[type].solid && m.terrain.filter((t) => TERRAIN_TYPES[t.type].solid).length >= SIM_TERR_MAX_SOLID) { toast(`實體障礙最多 ${SIM_TERR_MAX_SOLID} 個`); return; }
@@ -13334,7 +14277,8 @@ function simGo() { if (SIM.mid && SIM.live && !SIM.dirty) simResumeLive(); else 
 // 開戰（SIM.mid＝戰鬥中編輯完，從暫停時的戰況接著打）
 function simStart() {
   const m = SIM.m, cont = SIM.mid;
-  if (![0, 1].every((s) => m.fleets.some((f) => f.side === s && !f.reserve && simComp(f) > 0))) { toast('雙方都至少要有一支（非增援的）艦隊'); return; }
+  const has = Array.from({ length: simSideN(m) }, (_, s) => s).filter((s) => m.fleets.some((f) => f.side === s && !f.reserve && simComp(f) > 0));
+  if (simSideN(m) <= 2 ? has.length < 2 : !has.some((a) => has.some((b) => simRel(m, a, b) === 0))) { toast(simSideN(m) <= 2 ? '雙方都至少要有一支（非增援的）艦隊' : '至少要有兩方互相敵對、而且都有（非增援的）艦隊'); return; }
   if (cont) SIM.t0 += SIM.snapT; else { SIM.base = JSON.parse(JSON.stringify(m)); SIM.t0 = 0; if (!m.watch && !m.pilot && !m.captain) simSave(); }   // 觀摩不覆蓋模擬室「上次的布局」
   SIM.mid = SIM.live = SIM.dirty = false;
   GAME.attempt = (GAME.attempt || 0) + 1;
@@ -13347,7 +14291,7 @@ function simStart() {
   if (GAME.watch) GAME.op = Math.min(GAME.op, 1);   // 觀摩：規則照操作難度（含擬真的誤射），但畫面不鎖在艦橋
   newBattle(m.seed >>> 0, setup);
   setRule('fire', true); setRule('advance', false);
-  GAME.init = [sideAlive(0), sideAlive(1)];
+  GAME.init = sideInits();
   if (cont) {
     // 接續：潰走的比例仍以整場的兵力為準（加進來的新艦隊另外算進去）；各艦隊的百分比也照原本的兵力
     GAME.init = GAME.init.map((n, s) => SIM.snapInit[s] + Math.max(0, n - SIM.snapAlive[s]));
@@ -13397,7 +14341,8 @@ function simSnapshot() {
       formation: g ? g.formation : 'line', orderly: !!(g && g.orderly), layers: (g && g.layers) || 1, x: Math.round(C.x), z: Math.round(C.z), y: Math.round(C.y), h: g ? groupHeading(g, t) : 0,
       ai: null, reserve: false, at: 60, init0: f.initial, keep: simKeepOf(f, g, t) });
   }
-  m.jam = [0, 1].map((s) => (jammed(s) ? [Math.round((jam[s].until - t) * 10) / 10, jam[s].delay] : null));   // 干擾剩下的時間
+  m.jam = Array.from({ length: SIDES }, (_, s) => (jammed(s) ? [Math.round((jam[s].until - t) * 10) / 10, jam[s].delay] : null));   // 干擾剩下的時間
+  if (m.sides && m.sides.length) { m.rel = []; for (let a = 0; a < SIDES; a++) for (let b = a + 1; b < SIDES; b++) if (REL[a][b]) m.rel.push([a, b, REL[a][b]]); }   // 戰鬥中改變的關係（宣戰、翻臉）
   return m;
 }
 // 接續時要保留的狀態（重建後套回去）：平均耐久與護盾比例、飛彈與補給存量比例、技能剩餘次數與冷卻、命令隊列（指定目標的項目除外）
@@ -13424,7 +14369,7 @@ function simEditMid() {
   if (TAC.open) closeTac();
   GAME.skillArm = null; hideHint(); closeRadial();
   paused = true; updateTimeUI();
-  SIM.snapT = U.uTime.value; SIM.snapInit = GAME.init.slice(); SIM.snapAlive = [sideAlive(0), sideAlive(1)];
+  SIM.snapT = U.uTime.value; SIM.snapInit = GAME.init.slice(); SIM.snapAlive = sideInits();
   SIM.keep = SIM.m;   // 放棄修改時還原
   SIM.m = simSnapshot(); SIM.mid = true; SIM.live = true; SIM.dirty = false; SIM.sel = null; SIM.tab = 'unit';
   setPhase('simedit');
@@ -13448,11 +14393,16 @@ function simReset() {
   simBuild(); toast('已重置：回到開戰時的布局');
 }
 function simEndMid() { SIM.mid = SIM.live = SIM.dirty = false; SIM.keep = null; SIM.t0 = 0; }
+// 下一個還有艦隊的一方（兩方＝對面）
+function simNextSide() {
+  for (let k = 1; k < SIDES; k++) { const s = (GAME.playerSide + k) % SIDES; if (fleets.some((f) => f.side === s && !f.reserve && fleetAlive(f).length)) return s; }
+  return 1 - GAME.playerSide;
+}
 // 戰鬥中切換指揮的陣營
 function simSwitch() {
   if (!GAME.sc || !GAME.sc.sim || GAME.phase !== 'battle' || GAME.replaying) return;
   if (BR.on) exitBridge();
-  const side = 1 - GAME.playerSide;
+  const side = simNextSide();
   GAME.skillArm = null; hideHint(); closeRadial();
   if (typeof closeNodePop === 'function') closeNodePop();
   issue('simctl', { ctl: side });
@@ -13468,7 +14418,8 @@ function showSimReport() {
   const R = GAME.result, m = SIM.m, st = battleStats();
   setPhase('report');
   const n0 = simSideName(m, 0), n1 = simSideName(m, 1);
-  const label = { win: `${n0} 勝利`, lose: `${n1} 勝利`, draw: '平手', end: '模擬結束' }[R.kind] || '模擬結束';
+  const label = SIDES > 2 && R.kind !== 'end' ? R.why : { win: `${n0} 勝利`, lose: `${n1} 勝利`, draw: '平手', end: '模擬結束' }[R.kind] || '模擬結束';
+  const multi = SIDES > 2 ? `<div class="g-card" style="margin-bottom:12px"><h3>各方勢力</h3><table class="stat-tbl"><tr><th>勢力</th><th>對${escH(n0)}</th><th>出擊</th><th>損失</th><th>剩下</th></tr>${Array.from({ length: SIDES }, (_, s) => `<tr><td style="color:${FACTION[SIDE_FAC[s]].ui}">${escH(simSideName(m, s))}</td><td>${s ? ['敵對', '中立', '同盟'][REL[0][s]] : '—'}</td><td>${ships5(sumA(st.init[s]))}</td><td>${ships5(sumA(st.init[s]) - sumA(st.left[s]))}</td><td>${Math.round(sideAlive(s) / Math.max(1, GAME.init[s]) * 100)}%</td></tr>`).join('')}</table></div>` : '';
   const row = (t) => `<tr><td>${SHIP_TYPES[t].name}</td><td>${ships5(st.init[0][t])}</td><td>${ships5(st.init[0][t] - st.left[0][t])}</td><td>${ships5(st.init[1][t])}</td><td>${ships5(st.init[1][t] - st.left[1][t])}</td></tr>`;
   const asp = (sd) => dmgStats[sd].map((v) => ships5(v)).join(' ／ ');
   const used = (side) => fleets.filter((f) => f.side === side).flatMap((f) => Object.entries(f.skills).filter(([, s]) => s.used).map(([id, s]) => `${f.name}：${SKILLS[id].name} ×${s.used}`));
@@ -13477,7 +14428,8 @@ function showSimReport() {
     <div class="g-head"><h2>${m.watch ? '觀摩結果' : '模擬結果'}</h2><span class="crumb">${escH(m.name)}　·　${OP_LEVELS[(battleSetup && battleSetup.op) || 0].name}難度　·　戰鬥時間 ${_fmtT(R.t + SIM.t0)}</span></div>
     ${SIM.t0 > 0 ? `<div class="g-dim" style="margin:-4px 0 10px">戰鬥中調整過配置：下面的損失統計與回放從最後一次調整（${_fmtT(SIM.t0)}）開始。</div>` : ''}
     <div class="g-card" style="margin-bottom:12px;text-align:center"><p class="result ${R.kind === 'end' ? 'draw' : R.kind}">${label}</p><div class="g-dim">${escH(m.watch ? R.why.replaceAll('我軍', n0).replaceAll('敵軍', n1).replace('我方', n0).replace('敵方', n1) : R.why)}</div>
-      <div style="margin-top:6px">${n0} 剩 ${Math.round(R.ratio[0] * 100)}%　·　${n1} 剩 ${Math.round(R.ratio[1] * 100)}%</div></div>
+      ${SIDES > 2 ? '' : `<div style="margin-top:6px">${n0} 剩 ${Math.round(R.ratio[0] * 100)}%　·　${n1} 剩 ${Math.round(R.ratio[1] * 100)}%</div>`}</div>
+    ${multi}
     <div class="intel-grid">
       <div class="g-card"><h3>兵力損失（艘）</h3><table class="stat-tbl"><tr><th>艦種</th><th>${n0}出擊</th><th>${n0}損失</th><th>${n1}出擊</th><th>${n1}損失</th></tr>
         ${SHIP_TYPES.map((_, t) => t).filter((t) => t < N_COMBAT || st.init[0][t] + st.init[1][t] > 0).map(row).join('')}
@@ -13488,7 +14440,8 @@ function showSimReport() {
         ${battleRules && battleRules.ray ? `<dt>光束擋下／流彈／空中擋下</dt><dd>${n0} ${rayStats[0].map(fmtN).join('／')} 發<br>${n1} ${rayStats[1].map(fmtN).join('／')} 發</dd>` : ''}
         ${battleRules && battleRules.ff ? `<dt>友軍誤射</dt><dd>${n0} ${fmtN(ffStats[0][0])} 發（${fmtN(Math.round(ffStats[0][1]))} 傷害）<br>${n1} ${fmtN(ffStats[1][0])} 發（${fmtN(Math.round(ffStats[1][1]))} 傷害）</dd>${battleRules.ff === 2 ? `<dt>射界受阻停火</dt><dd>${n0} ${fmtN(ffHold[0])} 次<br>${n1} ${fmtN(ffHold[1])} 次</dd>` : ''}` : ''}</dl></div>
       <div class="g-card"><h3>各艦隊</h3><div class="g-pc" style="margin-bottom:4px">${n0}</div>${fl(0)}<div class="g-ec" style="margin:8px 0 4px">${n1}</div>${fl(1)}
-        <dl class="kv" style="margin-top:10px"><dt>使用技能</dt><dd>${[...used(0), ...used(1)].join('<br>') || '無'}</dd></dl>
+        ${Array.from({ length: Math.max(0, SIDES - 2) }, (_, k) => `<div style="margin:8px 0 4px;color:${FACTION[SIDE_FAC[k + 2]].ui}">${escH(simSideName(m, k + 2))}</div>${fl(k + 2)}`).join('')}
+        <dl class="kv" style="margin-top:10px"><dt>使用技能</dt><dd>${Array.from({ length: SIDES }, (_, s) => used(s)).flat().join('<br>') || '無'}</dd></dl>
         <div class="g-dim" style="font-size:calc(12px * var(--ui));margin-top:8px">${m.watch ? 'AI 對戰觀摩' : '模擬室'}不計戰績、不給經驗，也不會上傳戰鬥紀錄。</div></div>
     </div>
     ${m.watch ? watchReportHtml(m, R) : ''}
@@ -13547,7 +14500,7 @@ function bldFileV(file) { const f = BLD.files.find((o) => o.file === file); retu
 function bldSnapshot(M) {
   return { id: M.id, name: M.name, keep: !!M.keep, items: (M.items || []).map((it) => {
     const T = BLD.data.types[it.t]; if (!T || !T.file) return null;
-    return { name: T.name, file: T.file, v: bldFileV(T.file), h: T.h, rot: (T.rot || 0) + (it.rot || 0), oy: T.oy || 0, lum: T.lum || 1, hp: T.hp || 1000, coll: T.coll || 'pil',
+    return { name: T.name, file: T.file, v: bldFileV(T.file), h: T.h, rot: (T.rot || 0) + (it.rot || 0), oy: T.oy || 0, lum: T.lum || 1, hp: T.hp || 1000, coll: T.coll || 'pil', fall: T.fall || null,
       r: T.r, top: T.top, fw: T.fw, fd: T.fd, x: it.x, z: it.z, s: it.s || 1 };
   }).filter(Boolean) };
 }
@@ -13572,7 +14525,7 @@ function bldApplyMap(D, C) {
     const F = bldFoot(it), y0 = GROUND_Y + (it.oy || 0) * (it.s || 1);
     let ms = null;
     if (it.coll !== 'none') {
-      ms = gMs(D, { name: it.name, hp: Math.max(1, it.hp || 1000) }, it.x, it.z, F.r, GROUND_Y + F.top);
+      ms = gMs(D, { name: it.name, hp: Math.max(1, it.hp || 1000), fall: it.fall }, it.x, it.z, F.r, GROUND_Y + F.top);
       if (it.coll === 'box') D.boxes.push({ x: it.x, z: it.z, w: F.w, d: F.d, h: F.top, y0: GROUND_Y, col: [0, 0, 0], coll: true, hide: true, ms });
       else D.pil.push({ x: it.x, z: it.z, r: F.r, top: GROUND_Y + F.top, ms });
       cnt[it.name] = (cnt[it.name] || 0) + 1;
@@ -13620,17 +14573,19 @@ function bldMat(P, m, lum, cache) {
   const c = m.color || new THREE.Color(1, 1, 1), e = m.emissive || new THREE.Color(0, 0, 0), ei = m.emissiveIntensity != null ? m.emissiveIntensity : 1;
   o = new THREE.ShaderMaterial({
     uniforms: gUni(P, { uMap: { value: m.map || null }, uHas: { value: m.map ? 1 : 0 }, uCol: { value: new THREE.Vector3(c.r, c.g, c.b) }, uEm: { value: m.emissiveMap || null }, uHasEm: { value: m.emissiveMap ? 1 : 0 },
-      uEmC: { value: new THREE.Vector3(e.r * ei, e.g * ei, e.b * ei) }, uLum: { value: lum } }),
+      uEmC: { value: new THREE.Vector3(e.r * ei, e.g * ei, e.b * ei) }, uLum: { value: lum }, uChar: { value: 0 }, uHeat: { value: 0 } }),
     side: THREE.DoubleSide,
     vertexShader: `varying vec3 vW; varying vec3 vN; varying vec2 vUv;
       void main(){ vec4 w = modelMatrix * vec4(position, 1.); vW = w.xyz; vN = normalize(mat3(modelMatrix) * normal); vUv = uv; gl_Position = projectionMatrix * viewMatrix * w; }`,
     fragmentShader: GROUND_FOG_GLSL + /* glsl */`
-      uniform sampler2D uMap, uEm; uniform float uHas, uHasEm, uLum; uniform vec3 uCol, uEmC; varying vec3 vW; varying vec3 vN; varying vec2 vUv;
+      uniform sampler2D uMap, uEm; uniform float uHas, uHasEm, uLum, uChar, uHeat, uTime; uniform vec3 uCol, uEmC; varying vec3 vW; varying vec3 vN; varying vec2 vUv;
       void main(){
         vec3 N = normalize(vN); if (!gl_FrontFacing) N = -N;
         vec3 base = uCol * (uHas > .5 ? texture2D(uMap, vUv).rgb : vec3(1.));
+        if (uChar > 0.) base = mix(base, vec3(dot(base, vec3(.3, .59, .11))) * vec3(.85, .72, .6) * (.55 + .45 * gn(vW.xz * .7 + vW.y)), uChar);   // 燒焦：褪色成焦黑
         vec3 col = base * (uAmb * (1.1 + .4 * N.y) + uLSun * max(dot(N, uSun), 0.) * 1.2) * uLum;
         if (uHasEm > .5) col += texture2D(uEm, vUv).rgb * uEmC; else col += uEmC * base;
+        col += gHeat(vW, uHeat, uTime);
         gl_FragColor = vec4(fogMix(col, vW), 1.);
       }`,
   });
@@ -13848,6 +14803,8 @@ function bldTypeHtml() {
       <div class="sim-sub">碰撞與耐久</div>
       <div class="sim-row"><span>碰撞</span><div class="wed-seg" id="be-tcoll">${[['pil', '柱體'], ['box', '方塊'], ['none', '沒有（裝飾）']].map(([k, n]) => `<button data-v="${k}" class="${(T.coll || 'pil') === k ? 'on' : ''}">${n}</button>`).join('')}</div></div>
       <div class="g-dim sim-note">柱體＝直立圓柱（細高的塔）；方塊＝底面外框壓進地形高度（矮胖的堡壘、船塢）；裝飾＝只是畫面。</div>
+      ${(T.coll || 'pil') !== 'none' ? `<div class="sim-row"><span>倒塌方式</span><div class="wed-seg" id="be-tfall">${Object.entries(CL_KIND_NAME).map(([k, n]) => `<button data-v="${k}" class="${(T.fall || 'auto') === k ? 'on' : ''}">${n}</button>`).join('')}</div></div>
+      <div class="g-dim sim-note">被摧毀時怎麼倒：高樓＝整棟倒下／逐層壓垮／上段斷落／歪斜；鋼架＝骨牌式壓平／屋頂凹陷／燒成骨架；武器＝砲塔頭炸飛／炸成碎塊／熔毀；穹頂＝塌陷／炸開；長牆＝崩開缺口；矮胖＝半邊塌掉／塌成一堆。每次從該種類的幾種倒法裡隨機挑。自動＝依名稱與形狀判斷。</div>` : ''}
       ${(T.coll || 'pil') !== 'none' ? `<div class="sim-comp">${(T.coll || 'pil') === 'pil' ? `<label>柱體半徑（公里）<input class="g-in" type="number" step="0.1" min="0.1" data-tk="r" value="${bldKm(T.r || 5)}"></label>` : ''}
         <label>碰撞高度（公里）<input class="g-in" type="number" step="0.5" min="0.1" data-tk="top" value="${bldKm(T.top || T.h)}"></label>
         <label>耐久<input class="g-in" type="number" step="100" min="1" data-tk="hp" value="${T.hp}"></label></div>
@@ -13918,6 +14875,7 @@ function bldBindType(el, q, on) {
     delete BLD.data.types[BE.typeId]; BE.typeId = Object.keys(BLD.data.types)[0] || null; BE.dirty = true; bldSyncObjs(); bldRender();
   });
   q('#be-tcoll [data-v]').forEach((b) => (b.onclick = () => { T.coll = b.dataset.v; bldChanged(); }));
+  q('#be-tfall [data-v]').forEach((b) => (b.onclick = () => { if (b.dataset.v === 'auto') delete T.fall; else T.fall = b.dataset.v; bldChanged(); }));
   on('be-fit', 'onclick', () => { bldMeasure(T, true); BE.dirty = true; });
   q('[data-tk]').forEach((e) => (e.onchange = () => {
     const k = e.dataset.tk, U = 1 / GROUND_KM;
@@ -14008,7 +14966,7 @@ addEventListener('keydown', (e) => {
   if (used) { e.preventDefault(); e.stopImmediatePropagation(); }
 }, true);
 if (window.API) bldLoad();   // 開場就讀：各模式的「戰場」選項要列出自訂地圖
-window.__bld = { BLD, BE, bldSnapshot, bldSyncObjs, bldBase, bldModel, grd: () => GRD, gv: () => GV, msKill: (id) => groundMsKill(GRD.ms[id], 0) };   // 除錯
+window.__bld = { BLD, BE, bldSnapshot, bldSyncObjs, bldBase, bldModel, grd: () => GRD, gv: () => GV, msKill: (id, sx, sz) => groundMsKill(GRD.ms[id], 0, sx, sz) };   // 除錯
 
 // ═══════════════════════ 訓練作戰：教學課程與戰術手冊 ═══════════════════════
 // 教學課程：一課＝一個固定的小戰場＋一串步驟。步驟有「目標」（check）時，偵測到玩家真的做了（看命令紀錄、選取、鏡頭、戰況）才前進；
@@ -14380,7 +15338,7 @@ function tutStart(L) {
   applyOp(sc.op); const setup = tutSetup(L); setup.op = GAME.op;
   newBattle(sc.seed, setup);
   setRule('fire', true); setRule('advance', false);
-  GAME.init = [sideAlive(0), sideAlive(1)];
+  GAME.init = sideInits();
   GAME.result = null; GAME.reportShown = false; GAME.replaying = false; GAME.replayEnd = null; GAME.skillArm = null; GAME.xp = null; GAME.log = []; GAME.simCtl = null;
   gEl('battlehud').innerHTML = '';
   drawField(false);
@@ -15155,7 +16113,7 @@ function netBegin(st, cmds, turn) {
   overlay(null); fieldGroup.clear();
   GAME.op = st.opts.op; Object.assign(opts, st.rules);   // 規則：用第一方送來的（雙方一樣）
   newBattle(st.seed, mpComposeSetup(st));
-  GAME.init = [sideAlive(0), sideAlive(1)];
+  GAME.init = sideInits();
   GAME.result = null; GAME.reportShown = false; GAME.replaying = false; GAME.replayEnd = null; GAME.skillArm = null; GAME.xp = null; GAME.mpR = null; GAME.merit = 0; GAME.log = []; GAME.simCtl = null;
   for (const c of cmds) cmdQueue.push({ ...c });
   NET.bound = (turn + 1) * NET.K;
@@ -16115,7 +17073,7 @@ function drawTac() {
   const fog = pFiltered(), me = GAME.playerSide, hid = (side) => fog && side !== me;   // 被干擾／戰爭迷霧：敵軍只畫看得到的，其他畫最後已知位置
   // 戰爭迷霧：我方的偵測範圍（淡色圈）、掃描波紋、被掃描的方向
   if (fowView()) drawFowTac(c, k, me);
-  for (let sd = 0; sd < 2; sd++) {
+  for (let sd = 0; sd < SIDES; sd++) {
     if (hid(sd) && !fowView()) continue;
     c.fillStyle = col[SIDE_FAC[sd]];
     for (let i = 0; i < shipCount; i += 3) {
@@ -16309,11 +17267,11 @@ function tacFrame(dt) {
 }
 
 // ── 面板上的滑鼠／觸控 ──
-function tacHit(w, side) {
+function tacHit(w, side, ok) {
   let best = null, bd = 1e9;
   const pad = 10 / TAC.k;
   for (const q of squadrons) {
-    if (q.bg || q.alive <= 0 || (side != null && q.side !== side) || fowHidden(q)) continue;   // 戰爭迷霧：看不到的點不到
+    if (q.bg || q.alive <= 0 || (side != null && side >= 0 && q.side !== side) || (ok && !ok(q)) || fowHidden(q)) continue;   // 戰爭迷霧：看不到的點不到
     const dx = w.x - q.x, dz = w.z - q.z;
     const u = dx * Math.cos(q.h) - dz * Math.sin(q.h), v = dx * Math.sin(q.h) + dz * Math.cos(q.h);
     if (Math.abs(u) <= q.W / 2 + pad && Math.abs(v) <= q.D / 2 + pad) { const d = Math.hypot(dx, dz); if (d < bd) { bd = d; best = q; } }
@@ -16329,7 +17287,7 @@ function tacDown(e) {
     GAME.skillArm = null; hideHint(); drawTac(); return;
   }
   if (GAME.skillArm) {
-    const q = tacHit(w, 1 - cmdSide);
+    const q = tacHit(w, -1, (o) => !friendly(cmdSide, o.side) && (GAME.skillArm.attack || hostile(cmdSide, o.side)));
     if (q) { if (GAME.skillArm.attack) cmdAttack(q); else skillCmd(GAME.skillArm.f, GAME.skillArm.id, q); GAME.skillArm = null; hideHint(); }
     return;
   }
@@ -16488,7 +17446,7 @@ function drawSideView() {
   // 艦艇：每 3 艘一點；同時算出每支分艦隊在側視圖上的範圍
   const col = FACTION.map((f) => f.ui);
   SV.ext = squadrons.map(() => [1e9, -1e9, 1e9, -1e9]);
-  for (let sd = 0; sd < 2; sd++) {
+  for (let sd = 0; sd < SIDES; sd++) {
     c.fillStyle = col[SIDE_FAC[sd]];
     for (let i = 0; i < shipCount; i += 3) {
       if (!ships.alive[i] || ships.side[i] !== sd) continue;
@@ -17020,9 +17978,9 @@ function bridgeHudSlow(cw, span, pxA) {
   }
   BR.marks.innerHTML = mh;
   // 戰況視窗
-  const a0 = sideAlive(GAME.playerSide), a1 = sideAlive(1 - GAME.playerSide), p0 = a0 / Math.max(1, GAME.init[GAME.playerSide]), p1 = a1 / Math.max(1, GAME.init[1 - GAME.playerSide]);
+  const a0 = sideAlive(GAME.playerSide), a1 = foeAlive(GAME.playerSide), p0 = a0 / Math.max(1, GAME.init[GAME.playerSide]), p1 = a1 / Math.max(1, foeInit(GAME.playerSide));   // 多方勢力：敵方＝所有敵對方加總
   const fog = playerFogged(), fv = fowView();   // 雷達受干擾：敵方兵力、狀態、距離不明；戰爭迷霧：敵方兵力是估計值、看不到的艦隊位置不明
-  const p1e = fv ? fowEstAlive(1 - GAME.playerSide) / Math.max(1, GAME.init[1 - GAME.playerSide]) : p1;
+  const p1e = fv ? sumA(foeSides(GAME.playerSide).map((s) => fowEstAlive(s))) / Math.max(1, foeInit(GAME.playerSide)) : p1;
   const al = fleetAlive(fl), n = sumA(al.map((q) => q.alive)), g = al[0] && al[0].group, st = fleetStatus(fl);
   const fs = fl.sqs.find((q) => q.flagship >= 0), isOrig = fs && BR.ship === fs.flagship;
   const fhp = BR.ship >= 0 ? ships.hp[BR.ship] / (SHIP_TYPES[ships.type[BR.ship]].hp * (isOrig ? 3 : 1)) : 0;
@@ -17610,12 +18568,12 @@ function pilotJumpCharge(j, dt, t) {
   const nx = C.x + dx * R, nz = C.z + dz * R;
   const F = v3.norm([C.x - nx, (C.y || 0) - ty, C.z - nz]);
   spawnBeam(x0, y0, z0, x0 + F[0] * 30, y0 + F[1] * 30, z0 + F[2] * 30, t, 0.25, PL.side, 2.2, 1.0, shipFac(PL.home >= 0 ? PL.home : 0));   // 出發：往前一道光
-  spawnFx(x0, y0, z0, 2 + fxFac(PL.side) * 8, 1.2, 30);
+  spawnFx(x0, y0, z0, fxShield(PL.side), 1.2, 30);
   fP[j3] = nx; fP[j3 + 1] = ty; fP[j3 + 2] = nz;
   PL.F = F; PL.U = Math.abs(F[1]) < 0.96 ? v3.norm([-F[0] * F[1], 1 - F[1] * F[1], -F[2] * F[1]]) : PL.U; PL.yaw = Math.atan2(F[0], F[2]); PL.pitch = Math.asin(Math.max(-1, Math.min(1, F[1])));
   fV[j3] = F[0] * PL.speed; fV[j3 + 1] = F[1] * PL.speed; fV[j3 + 2] = F[2] * PL.speed;
   spawnBeam(nx - F[0] * 30, ty - F[1] * 30, nz - F[2] * 30, nx, ty, nz, t, 0.25, PL.side, 2.2, 1.0, shipFac(PL.home >= 0 ? PL.home : 0));   // 抵達：從後方拉進來
-  spawnFx(nx, ty, nz, 2 + fxFac(PL.side) * 8, PILOT_FTR_LEN * 5, 30);   // 抵達的閃光在機體上：照機體大小
+  spawnFx(nx, ty, nz, fxShield(PL.side), PILOT_FTR_LEN * 5, 30);   // 抵達的閃光在機體上：照機體大小
   PL.msl.length = 0; PL.travel = false; PL.inv = Math.max(PL.inv, t + 0.8); PL.jumpCd = t + PILOT_JUMP.cd; PL.jumpFx = performance.now(); PL.jump = null;
   pilotFeed(`躍傳完成：${J.it.enemy ? '敵' : '我'}・${J.it.f.name}`, J.it.enemy ? 'kill' : 'ok');
 }
@@ -17876,7 +18834,7 @@ function pilotEcmOn(S, W, t) {
     FT.tgt[f] = -1; FT.rt[f] = 0; n++;
   }
   if (n && PL.stats) PL.stats.wxp.ecm = (PL.stats.wxp.ecm || 0) + n * PILOT_PROF_XP.ecm;
-  spawnFx(px, py, pz, 2 + fxFac(PL.side) * 8, PILOT_FTR_LEN * 10, 22);
+  spawnFx(px, py, pz, fxShield(PL.side), PILOT_FTR_LEN * 10, 22);
   pilotFeed(`電磁干擾啟動！${n ? `甩掉 ${n} 架咬尾的敵機` : '周圍的敵人無法鎖定你'}`, 'ok');
 }
 function pilotEcmLeft() { return PL.on && PL.ecm && !PL.dead ? Math.max(0, PL.ecm.until - U.uTime.value) : 0; }
@@ -19264,10 +20222,10 @@ function capHubItems(own) {
       { id: 'sp-sand', icon: 'sim', en: 'SIMULATOR', name: '模擬室', desc: '自由布置敵軍與目標', off: true },
       { id: 'sp-train', icon: 'train', en: 'TRAINING', name: '訓練場', desc: '操艦、潛行、火控的教學', off: true },
     ],
-    subs: [{ id: 'sp-capsq', icon: 'hang', name: '小隊編成', desc: p.slots.filter(Boolean).map((k) => CAP_HULLS[k].name).join('、'), tag: own }],
+    subs: [{ id: 'sp-capsq', icon: 'hang', name: '戰艦庫', desc: `小隊的特製戰艦・${p.slots.filter(Boolean).map((k) => CAP_HULLS[k].name).join('、')}`, tag: own }],
   };
 }
-function capHubBind() { gEl('sp-rand').onclick = () => showCaptain(); gEl('sp-capsq').onclick = () => showCaptain(); }
+function capHubBind() { gEl('sp-rand').onclick = () => showCaptain(); gEl('sp-capsq').onclick = () => showCapBay(); }
 
 // ───── 出擊設定 ─────
 function capKeyRows() {
@@ -19941,7 +20899,7 @@ function capSkill(s, t) {
   if (s.skillCd > 0) { if (ctl) capFeed(`${K.name}冷卻中（${Math.ceil(s.skillCd)} 秒）`, 'hint'); return; }
   s.skillCd = K.cd;
   if (K.key === 'burst') { s.burstT = t + K.dur; s.boostE = 1; if (ctl) capFeed(`${K.name}！${K.dur} 秒內速度、轉向提升`, 'ok'); }
-  if (K.key === 'shield') { s.shieldT = t + K.dur; ships.sh[s.i] = ships.shMax[s.i]; ships.shT[s.i] = -99; spawnFx(s.x, s.y, s.z, 2 + fxFac(CAP.side) * 8, s.L * 0.8, 22); if (ctl) capFeed(`${K.name}！護盾充滿，${K.dur} 秒內傷害減半`, 'ok'); }
+  if (K.key === 'shield') { s.shieldT = t + K.dur; ships.sh[s.i] = ships.shMax[s.i]; ships.shT[s.i] = -99; spawnFx(s.x, s.y, s.z, fxShield(CAP.side), s.L * 0.8, 22); if (ctl) capFeed(`${K.name}！護盾充滿，${K.dur} 秒內傷害減半`, 'ok'); }
 }
 // 支援艦的維修光束：按住 Q，修準心方向附近的友艦（沒有就修自己，比較慢）
 function capRepair(s, dt, t, on) {
@@ -19971,7 +20929,7 @@ function capHeal(s, o, amt, t) {
   const i = o.i, a = Math.min(amt, maxHp(i) - ships.hp[i]); if (a > 0) ships.hp[i] += a;
   const b = Math.min(amt * 0.6, ships.shMax[i] - ships.sh[i]); if (b > 0) ships.sh[i] += b;
   if (o !== s && simTick % 4 === 0) spawnBeam(s.x, s.y + s.L * 0.1, s.z, o.x, o.y, o.z, t, 0.08, CAP.side, 0.7, 1, SIDE_FAC[CAP.side]);
-  if (simTick % 12 === 0) spawnFx(o.x, o.y, o.z, 2 + fxFac(CAP.side) * 8, o.L * 0.4, 30);
+  if (simTick % 12 === 0) spawnFx(o.x, o.y, o.z, fxShield(CAP.side), o.L * 0.4, 30);
 }
 // 支援艦的護航機（攔截機：在支援艦附近巡邏，攔飛彈、打戰機）；火控「禁止開火」＝全部收回
 function capEscorts(t) {
@@ -20728,16 +21686,20 @@ function hgInit() {
   const r = HG.r = new THREE.WebGLRenderer({ canvas: HG.cv, antialias: true });
   r.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5)); r.outputColorSpace = THREE.SRGBColorSpace;
   r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.25;
-  const S = HG.scene = new THREE.Scene(); S.background = new THREE.Color(0x05070c); S.fog = new THREE.Fog(0x05070c, 70, 190);
+  const S = HG.scene = new THREE.Scene(); S.background = new THREE.Color(0x0b0e14); S.fog = new THREE.Fog(0x0b0e14, 110, 260);
   HG.cam = new THREE.PerspectiveCamera(40, 2, 0.5, 600);
   HG.glowTex = typeof dockGlowTex === 'function' ? dockGlowTex() : null;
   // 燈光：天花板的探照燈打在機體上，兩側偏冷、偏暖的補光
-  S.add(new THREE.HemisphereLight(0x9db4e0, 0x1a1612, 0.75), new THREE.AmbientLight(0x30343c, 0.6));
+  S.add(new THREE.HemisphereLight(0xc8d6f0, 0x2a2622, 1.25), new THREE.AmbientLight(0x404650, 0.9));   // 參考圖：明亮的白色機庫
   const key = new THREE.SpotLight(0xfff0d8, 900, 120, 0.55, 0.5, 1.6); key.position.set(6, 42, 14); key.target.position.set(0, 0, 0); S.add(key, key.target);
   const fill = new THREE.PointLight(0x6fa8ff, 160, 90, 1.6); fill.position.set(-30, 18, 18); S.add(fill);
   const rim = new THREE.PointLight(0xffb070, 140, 90, 1.6); rim.position.set(28, 14, -26); S.add(rim);
   hgMats();
   hgBuildRoom(); hgBuildRacks(); hgBuildArms();
+  hgPlaceProps(S, HG_PROP_LAYOUT, HG_PROP_K);
+  // 兩側工作區：天花板探照燈；照明塔的燈頭真的會亮
+  for (const sd of [-1, 1]) { const sp = new THREE.SpotLight(sd < 0 ? 0xdfe8ff : 0xffe2c0, 2600, 140, 0.8, 0.6, 1.5); sp.position.set(sd * 46, 40, 0); sp.target.position.set(sd * 48, 0, -2); S.add(sp, sp.target); }
+  for (const [name, x, z] of HG_PROP_LAYOUT) if (/^1[34]_/.test(name)) hgLamp(S, x, 0.17 * HG_PROP_K, z, 0xffe6b8);
   // 選中的掛架：底下一圈光
   HG.ring = new THREE.Mesh(new THREE.RingGeometry(0.75, 1, 40), new THREE.MeshBasicMaterial({ color: 0xf2b35a, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
   HG.ring.rotation.x = -Math.PI / 2; S.add(HG.ring);
@@ -20760,7 +21722,7 @@ function hgSize() {
 function hgBuildRoom() {
   const S = HG.scene, M = HG.mats, h = HG_HOLE / 2;
   const floorTex = hgTex(256, 256, (g, w) => {
-    g.fillStyle = '#1b2029'; g.fillRect(0, 0, w, w);
+    g.fillStyle = '#3a414c'; g.fillRect(0, 0, w, w);
     g.strokeStyle = 'rgba(150,170,200,.16)'; g.lineWidth = 2; g.strokeRect(1, 1, w - 2, w - 2);
     g.strokeStyle = 'rgba(150,170,200,.07)'; g.lineWidth = 1; g.beginPath(); g.moveTo(w / 2, 0); g.lineTo(w / 2, w); g.moveTo(0, w / 2); g.lineTo(w, w / 2); g.stroke();
     for (let i = 0; i < 40; i++) { g.fillStyle = `rgba(255,255,255,${Math.random() * 0.03})`; g.fillRect(Math.random() * w, Math.random() * w, 2 + Math.random() * 18, 1 + Math.random() * 3); }
@@ -20803,21 +21765,13 @@ function hgBuildRoom() {
     if (s) { s.scale.setScalar(6); s.position.set(x, 1.3, z); S.add(s); }
     HG.beacons.push({ b, s });
   }
-  // 牆面：後牆與兩側，嵌燈條；天花板燈條
-  const wallTex = hgTex(512, 256, (g, w, hh) => {
-    g.fillStyle = '#161b23'; g.fillRect(0, 0, w, hh);
-    for (let x = 0; x < w; x += 64) for (let y = 0; y < hh; y += 64) { g.fillStyle = `rgba(255,255,255,${0.02 + Math.random() * 0.03})`; g.fillRect(x + 3, y + 3, 58, 58); }
-    g.fillStyle = 'rgba(140,190,255,.9)'; g.fillRect(0, hh * 0.62, w, 4);
-    g.fillStyle = 'rgba(255,170,80,.7)'; for (let x = 24; x < w; x += 128) g.fillRect(x, hh * 0.3, 30, 6);
-  }, [4, 1]);
-  const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, metalness: 0.4, roughness: 0.7, emissive: 0xffffff, emissiveMap: wallTex, emissiveIntensity: 0.35 });
-  const wall = (w, hh, x, z, ry) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, hh), wallMat); m.position.set(x, hh / 2, z); m.rotation.y = ry; S.add(m); };
+  // 牆面（參考圖：白色牆板、深色骨架、深藍腰帶、V 形標誌、藍色燈條）：後牆與兩側；兩側牆在 x ±HG_WALL
+  const W = HG_WALL, wall = (w, hh, x, z, ry) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, hh), hgWallMat(w, hh)); m.position.set(x, hh / 2, z); m.rotation.y = ry; S.add(m); };
   // 後牆中間留出彈射艙門的開口（寬 HG_DOOR.w、高 HG_DOOR.h）
-  const DW = HG_DOOR.w / 2, DH = HG_DOOR.h, wallP = (x0, x1, y0, y1) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, y1 - y0), wallMat); m.position.set((x0 + x1) / 2, (y0 + y1) / 2, -48); S.add(m); };
-  wallP(-110, -DW, 0, 44); wallP(DW, 110, 0, 44); wallP(-DW, DW, DH, 44);
-  wall(150, 44, -82, 20, Math.PI / 2); wall(150, 44, 82, 20, -Math.PI / 2);
-  const strip = M.glow(0xdfe8ff, 1.6);
-  for (let k = -2; k <= 2; k++) { const m = new THREE.Mesh(new THREE.BoxGeometry(2, 0.4, 90), strip); m.position.set(k * 16, 40, 0); S.add(m); }
+  const DW = HG_DOOR.w / 2, DH = HG_DOOR.h, wallP = (x0, x1, y0, y1) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, y1 - y0), hgWallMat(x1 - x0, y1 - y0, y0 / 44)); m.position.set((x0 + x1) / 2, (y0 + y1) / 2, -48); S.add(m); };
+  wallP(-W, -DW, 0, 44); wallP(DW, W, 0, 44); wallP(-DW, DW, DH, 44);
+  wall(130, 44, -W, 17, Math.PI / 2); wall(130, 44, W, 17, -Math.PI / 2);
+  hgBuildDecor(S, W);
   // 彈射艙門：左右兩扇，出擊時往兩邊滑開，外面是太空
   const doorTex = hgTex(256, 256, (g, w) => { g.fillStyle = '#20262f'; g.fillRect(0, 0, w, w); g.strokeStyle = 'rgba(160,180,210,.25)'; g.lineWidth = 3; for (let y = 32; y < w; y += 48) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); } g.fillStyle = '#d6a21e'; for (let y = 8; y < w; y += 64) g.fillRect(w - 18, y, 10, 28); });
   const doorMat = new THREE.MeshStandardMaterial({ map: doorTex, metalness: 0.6, roughness: 0.5 });
@@ -20842,6 +21796,122 @@ function hgBuildRoom() {
   const plate = new THREE.Mesh(new THREE.BoxGeometry(12, 4, 0.4), new THREE.MeshStandardMaterial({ map: hazard.clone(), metalness: 0.4, roughness: 0.6 })); plate.position.y = 2; plate.material.map.repeat.set(3, 4); plate.material.map.needsUpdate = true; defl.add(plate);
   defl.rotation.x = Math.PI / 2; defl.visible = false; S.add(defl);
 }
+
+// ── 參考圖風格的牆板：白色牆板＋深色骨架、深藍腰帶、V 形標誌；只有藍色燈條發光（另一張發光貼圖）。一張貼圖＝牆寬 64、高 44 ──
+const HG_WALL = 64;   // 機庫兩側牆的位置（x ±）
+let HG_PANEL = null;
+function hgChevron(g, cx, cy, s, col) {
+  g.fillStyle = col;
+  for (const dy of [0, s * 0.55]) { g.beginPath(); g.moveTo(cx - s, cy + dy - s * 0.35); g.lineTo(cx, cy + dy + s * 0.25); g.lineTo(cx + s, cy + dy - s * 0.35); g.lineTo(cx + s, cy + dy - s * 0.05); g.lineTo(cx, cy + dy + s * 0.55); g.lineTo(cx - s, cy + dy - s * 0.05); g.closePath(); g.fill(); }
+}
+function hgPanelTex() {
+  if (HG_PANEL) return HG_PANEL;
+  const w = 1024, h = 704, strips = (g, col) => { g.fillStyle = col; for (let x = 0; x < w; x += 256) g.fillRect(x + 44, h * 0.13, 180, 10); };
+  const map = hgTex(w, h, (g) => {
+    g.fillStyle = '#c4ccd6'; g.fillRect(0, 0, w, h);
+    for (let x = 0; x < w; x += 128) for (let y = 0; y < h * 0.78; y += 140) { g.fillStyle = `rgba(255,255,255,${0.12 + Math.random() * 0.1})`; g.fillRect(x + 32, y + 8, 90, 124); g.strokeStyle = 'rgba(70,80,100,.35)'; g.lineWidth = 2; g.strokeRect(x + 32, y + 8, 90, 124); }
+    g.fillStyle = '#1f3158'; g.fillRect(0, h * 0.74, w, h * 0.06);   // 深藍腰帶
+    g.fillStyle = '#9aa4b2'; g.fillRect(0, h * 0.8, w, h * 0.13); g.fillStyle = '#4a5262'; g.fillRect(0, h * 0.93, w, h * 0.07);   // 下方踢腳板
+    for (let x = 0; x < w; x += 256) { g.fillStyle = '#58616f'; g.fillRect(x, 0, 28, h); g.fillStyle = '#3a414e'; g.fillRect(x + 6, 0, 7, h); g.fillStyle = '#6c7584'; g.fillRect(x + 22, 0, 4, h); }   // 骨架
+    hgChevron(g, 640, h * 0.42, 46, '#1f3158');
+    g.fillStyle = 'rgba(40,50,70,.5)'; g.fillRect(150, h * 0.5, 60, 8); g.fillRect(150, h * 0.53, 40, 6);   // 牆上的小標示
+    strips(g, '#d8f0ff');
+  });
+  const em = hgTex(w, h, (g) => { g.fillStyle = '#000'; g.fillRect(0, 0, w, h); strips(g, '#7cc8ff'); });
+  return (HG_PANEL = { map, em });
+}
+function hgWallMat(width, height, v0 = 0) {
+  const P = hgPanelTex(), rep = (t) => { const c = t.clone(); c.needsUpdate = true; c.wrapS = c.wrapT = THREE.RepeatWrapping; c.repeat.set(width / 64, height / 44); c.offset.set(0, v0); return c; };
+  return new THREE.MeshStandardMaterial({ map: rep(P.map), emissive: 0xffffff, emissiveMap: rep(P.em), emissiveIntensity: 1.6, metalness: 0.25, roughness: 0.6 });
+}
+// 機庫的細節：天花板桁架、管線、地上的導引線與標誌、側門、小東西（梯子、工具箱、油桶、消防栓、貨架、飛彈推車）
+function hgBuildDecor(S, W) {
+  const M = HG.mats, steel = new THREE.MeshStandardMaterial({ color: 0x4a515c, metalness: 0.6, roughness: 0.45 }), pipeM = new THREE.MeshStandardMaterial({ color: 0x5b626d, metalness: 0.55, roughness: 0.4 });
+  const box = (w, h, d, x, y, z, m, ry = 0) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.position.set(x, y, z); o.rotation.y = ry; S.add(o); return o; };
+  const cyl = (r, h, x, y, z, m, rx = 0, rz = 0) => { const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 14), m); o.position.set(x, y, z); o.rotation.set(rx, 0, rz); S.add(o); return o; };
+  // 天花板桁架（主樑＋次樑＋斜撐），燈條掛在主樑下
+  const TY = 44, Z0 = -48, Z1 = 82;
+  for (let x = -W; x <= W + 0.1; x += 16) { box(1.4, 2.6, Z1 - Z0, x, TY, (Z0 + Z1) / 2, steel); box(1.4, 0.5, Z1 - Z0, x, TY - 4, (Z0 + Z1) / 2, steel);
+    for (let z = Z0; z < Z1; z += 5) { const d = new THREE.Mesh(new THREE.BoxGeometry(0.35, 4.6, 0.35), steel); d.position.set(x, TY - 2, z + 2.5); d.rotation.x = 0.6 * ((Math.round((z - Z0) / 5) % 2) ? 1 : -1); S.add(d); } }
+  for (let z = Z0 + 10; z < Z1; z += 18) box(W * 2, 1.6, 1, 0, TY, z, steel);
+  const strip = M.glow(0xdfe8ff, 1.6);
+  for (let x = -W + 8; x < W; x += 16) box(1.6, 0.35, 90, x, TY - 4.6, 2, strip);
+  // 管線：後牆兩條橫管、兩側牆的橫管與往下的直管
+  for (const y of [33, 35.4]) cyl(0.55, W * 2, 0, y, -47.2, pipeM, 0, Math.PI / 2);
+  for (const sd of [-1, 1]) {
+    for (const y of [31, 33.2]) cyl(0.5, 120, sd * (W - 0.8), y, 17, pipeM, Math.PI / 2);
+    for (const z of [-30, 8, 46]) { cyl(0.45, 31, sd * (W - 0.8), 15.5, z, pipeM); cyl(0.6, 1.2, sd * (W - 0.8), 3, z, M.dark); }
+  }
+  // 左牆的側門（門框、警示燈、V 標誌）
+  const door = hgTex(256, 256, (g, w) => { g.fillStyle = '#8e97a4'; g.fillRect(0, 0, w, w); g.strokeStyle = '#4b5361'; g.lineWidth = 8; g.strokeRect(10, 10, w - 20, w - 20); g.strokeRect(40, 40, w / 2 - 50, w - 80); g.strokeRect(w / 2 + 10, 40, w / 2 - 50, w - 80); hgChevron(g, w / 2, w * 0.45, 26, '#1f3158'); g.fillStyle = '#d6a21e'; g.fillRect(10, w - 26, w - 20, 14); });
+  const dm = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), new THREE.MeshStandardMaterial({ map: door, metalness: 0.4, roughness: 0.5 })); dm.position.set(-W + 0.15, 6, -6); dm.rotation.y = Math.PI / 2; S.add(dm);
+  box(0.6, 13.6, 1, -W + 0.3, 6.8, -12.5, M.dark); box(0.6, 13.6, 1, -W + 0.3, 6.8, 0.5, M.dark); box(0.6, 1, 14, -W + 0.3, 12.8, -6, M.dark);
+  for (const z of [-11, -1]) box(0.5, 0.5, 0.8, -W + 0.4, 13.8, z, M.glow(0xff4030, 1.4));
+  // 地上：導引線、停機框、V 標誌（貼在地面上的透明貼圖）
+  const decal = (w, d, x, z, draw, ry = 0) => { const t = hgTex(256, Math.round(256 * d / w), draw); const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ map: t, transparent: true, depthWrite: false, metalness: 0.2, roughness: 0.7 })); m.rotation.x = -Math.PI / 2; m.rotation.z = ry; m.position.set(x, 0.03, z); S.add(m); };
+  const yl = (g, w, h) => { g.fillStyle = '#d6a21e'; g.fillRect(0, h / 2 - 3, w, 6); };
+  decal(2, 40, -14, 34, (g, w, h) => { g.fillStyle = '#d6a21e'; g.fillRect(w / 2 - 20, 0, 40, h); });
+  decal(2, 40, 14, 34, (g, w, h) => { g.fillStyle = '#d6a21e'; g.fillRect(w / 2 - 20, 0, 40, h); });
+  decal(70, 1.2, -36, 18, yl); decal(70, 1.2, 36, 18, yl);
+  for (const [x, z] of [[-38, 30], [-38, 42], [36, 42]]) decal(10, 6, x, z, (g, w, h) => { g.strokeStyle = '#e8ecf2'; g.lineWidth = 8; g.strokeRect(6, 6, w - 12, h - 12); g.beginPath(); g.moveTo(w / 2, 6); g.lineTo(w / 2, h - 6); g.stroke(); });
+  for (const [x, z] of [[0, 34], [-30, 6], [30, 6]]) decal(5, 4, x, z, (g, w, h) => hgChevron(g, w / 2, h * 0.32, w * 0.36, '#e8ecf2'), Math.PI);
+  // 小東西
+  const ladder = (x, z, ry) => { const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = ry; S.add(g);
+    for (const sx of [-0.6, 0.6]) for (const sz of [-0.9, 0.9]) { const r = new THREE.Mesh(new THREE.BoxGeometry(0.15, 4.4, 0.18), M.metal); r.position.set(sx, 2.1, sz * 0.55); r.rotation.x = sz * 0.22; g.add(r); }
+    for (let k = 0; k < 5; k++) { const s = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.12, 0.36), M.metal); s.position.set(0, 0.6 + k * 0.85, -0.5 + k * 0.1); g.add(s); }
+    const top = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.18, 0.9), M.dark); top.position.y = 4.3; g.add(top); };
+  ladder(14.5, 7, 0.4); ladder(-26, 34, -0.3);
+  const tb = (w, h, d, x, z, col, ry) => { const b = box(w, h, d, x, h / 2, z, new THREE.MeshStandardMaterial({ color: col, metalness: 0.4, roughness: 0.5 }), ry); box(w * 1.02, 0.18, d * 1.02, x, h + 0.09, z, M.dark, ry); return b; };
+  tb(2.6, 1.6, 1.6, -18, 32, 0x1f4a6e, 0.2); tb(2.2, 1.3, 1.4, -14.6, 33, 0xb8bec8, -0.1); tb(2.4, 1.0, 1.4, -21, 35, 0xa08a5a, 0.4); tb(1.6, 0.8, 1.1, -44, 30, 0x9e2b25, 0.3);
+  for (const [x, z] of [[-60, 30], [-57.6, 30.6], [-59, 33]]) { cyl(0.9, 2.4, x, 1.2, z, new THREE.MeshStandardMaterial({ color: 0x9aa2ae, metalness: 0.5, roughness: 0.45 })); cyl(0.93, 0.18, x, 0.7, z, M.dark); cyl(0.93, 0.18, x, 1.8, z, M.dark); }
+  cyl(0.55, 2.2, -W + 2.5, 1.1, -38, M.red); cyl(0.7, 0.4, -W + 2.5, 2.3, -38, M.red); cyl(0.25, 1.4, -W + 2.5, 1.5, -38, M.red, 0, Math.PI / 2);   // 消防栓
+  for (const sx of [-1, 1]) {   // 後牆兩邊的貨架（放彈藥箱）
+    const x = sx * (W - 12); for (const y of [0.2, 2.2, 4.2, 6.2]) box(8, 0.2, 2.4, x, y, -46.4, M.dark); for (const dx of [-3.9, 3.9]) box(0.25, 6.6, 2.4, x + dx, 3.3, -46.4, M.dark);
+    for (let k = 0; k < 9; k++) box(1.4, 1.2, 1.6, x - 3 + (k % 3) * 2.6 + (Math.random() - 0.5) * 0.4, 0.95 + Math.floor(k / 3) * 2, -46.4, new THREE.MeshStandardMaterial({ color: [0x6b5b3a, 0x3d4d3a, 0x5c626e][k % 3], roughness: 0.7 }));
+  }
+  // 飛彈推車：車架＋輪子，上面放整備庫的飛彈架（hgPlaceProps 另外擺）
+  box(7, 0.6, 3.4, 46, 1.1, 6, M.metal, -0.3); for (const [dx, dz] of [[-2.6, -1.5], [2.6, -1.5], [-2.6, 1.5], [2.6, 1.5]]) { const wv = cyl(0.55, 0.4, 46 + dx * Math.cos(0.3) + dz * Math.sin(0.3), 0.55, 6 - dx * Math.sin(0.3) + dz * Math.cos(0.3), M.dark, 0, Math.PI / 2); wv.rotation.y = -0.3; }
+}
+
+// ── 整備庫元件：models/機庫/整備庫_XX_名稱.glb（TRIPO 戰艦整備庫拆成的 23 件；底面 y＝0、xz 置中，原始單位＝整個整備庫寬 1）──
+// 機庫與艦長的戰艦庫共用；同一件只下載一次，擺的時候複製（幾何、材質共用）
+const HG_PROPS = {};
+function hgProp(name) {
+  return HG_PROPS[name] || (HG_PROPS[name] = (async () => {
+    const r = await fetch(`models/${encodeURIComponent('機庫')}/${encodeURIComponent(`整備庫_${name}.glb`)}`);
+    if (!r.ok) throw new Error(`${name}：HTTP ${r.status}`);
+    if (!MODEL_LOAD.loader) MODEL_LOAD.loader = new GLTFLoader();
+    const g = await MODEL_LOAD.loader.parseAsync(await r.arrayBuffer(), '');
+    g.scene.traverse((o) => { if (!o.isMesh) return; const m = o.material; if (m.map) { m.map.colorSpace = THREE.SRGBColorSpace; m.map.anisotropy = 4; } m.metalness = 0.45; m.roughness = 0.55; });
+    return g.scene;
+  })().catch((e) => { delete HG_PROPS[name]; throw e; }));
+}
+// list：[名稱, x, z, 轉向（弧度）, 縮放倍率, 離地高度]；k＝原始單位 → 世界單位
+function hgPlaceProps(S, list, k) {
+  const out = [];
+  for (const [name, x, z, ry = 0, s = 1, y = 0] of list) {
+    const hold = new THREE.Group(); hold.position.set(x, y, z); hold.rotation.y = ry; hold.scale.setScalar(k * s); S.add(hold); out.push(hold);
+    hgProp(name).then((src) => hold.add(src.clone(true))).catch((e) => console.warn('整備庫元件載入失敗', e.message));
+  }
+  return out;
+}
+// 燈：點光源＋發光圓點（照明塔的燈頭、船塢的工作燈）
+function hgLamp(S, x, y, z, col, k = 90, d = 40) {
+  const l = new THREE.PointLight(col, k, d, 1.6); l.position.set(x, y, z); S.add(l);
+  const tex = HG.glowTex || CB.glowTex;
+  if (tex) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color: col, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false })); s.scale.setScalar(4); s.position.set(x, y, z); S.add(s); }
+}
+// 王牌飛行員機庫的擺設（機體長 10；升降梯 ±11、手臂底座 x ±18、武器吊架 z −22、牆 x ±82、後牆 z −48）
+const HG_PROP_K = 46;
+const HG_PROP_LAYOUT = [
+  ['22_登艦梯', -16.5, 5, Math.PI / 2],                                   // 升降梯旁的登機梯
+  ['13_照明塔A', -32, 15, 0.6], ['14_照明塔B', 32, 15, -0.6],
+  ['10_升降工作台', -42, 6, 0.2], ['17_剪式升降車', -44, -10, 0.5], ['15_氣瓶組', -58, 0, Math.PI / 2], ['19_雙聯儲槽', -58, -9], ['21_圓頂儲槽', -57, 11],
+  ['05_運輸卡車', -46, 44, 0.45], ['01_管制塔', -55, -38, Math.PI / 2], ['07_機械臂B', -43, -30, 0.3],
+  ['04_飛彈架', 46, 6, -0.3, 1, 1.4], ['16_雙管砲塔', 50, -8, -0.7], ['12_雙推進器艙', 40, 22, 0.4], ['20_小型機械爪', 57, -16, -Math.PI / 2],
+  ['23_履帶車', 44, 40, -0.5], ['18_物料艙', 57, 22, -Math.PI / 2], ['11_加工站', 56, -30, -Math.PI / 2], ['03_輸送架', 47, -41, 0], ['06_機械臂A', 44, -28, -0.3],
+  ['02_天車', -40, -6, 0, 1.3, 30], ['02_天車', 40, -6, 0, 1.3, 30],      // 天花板的吊車
+];
 
 // ── 武器模型（程式產生，前方 +Z；userData.r＝中心到頂部的高度，掛架從頂部接上）──
 function hgCylZ(r1, r2, L, mat, z = 0, seg = 18) { const m = new THREE.Mesh(new THREE.CylinderGeometry(r2, r1, L, seg), mat); m.rotation.x = Math.PI / 2; m.position.z = z; return m; }
@@ -21237,6 +22307,276 @@ function hgCineStep(now, dt) {
   if (q >= R.end) hgCineEnd();
 }
 
+// ───── 艦長：戰艦庫（小隊的特製戰艦各停在一座整備機庫裡；畫面背景是全螢幕 3D，介面疊在上面）─────
+// 參考圖：白色／深藍的開口式機庫（屋頂艙蓋掀起），船停在托架上、兩側機械臂；機庫右邊管制塔，左邊物料艙與儲槽，前方停機坪放砲塔、推進器艙、機械爪。
+// 五座機庫沿 x 排開（1～5 號艦）；整備庫元件用 hangar.js 的 hgProp（models/機庫/）。
+// 點機庫＝鏡頭移過去；換艦種＝機庫裡的船換掉（存檔與「隨機任務」的小隊編成同一份）
+const CB = {
+  wrap: null, cv: null, r: null, scene: null, cam: null, raf: 0, W: 0, H: 0, tPrev: 0, live: false, glowTex: null,
+  ships: [null, null, null, null, null], keys: ['', '', '', '', ''], fac: -1, sel: 0, mark: null, tx: 0,
+  orb: { yaw: -0.55, pitch: 0.5, base: -0.55, user: -99, fit: 1, dist: 100 }, drag: null,
+  // 單艦視角：鏡頭進機庫、貼近地面往上看一艘船（yaw 繞船的方向、h 眼睛離地、d 離船殼的距離）
+  focus: false, fo: { base: 0.8, h: 0.75, d: 3.5, user: -99 }, cp: null, cl: null, ox: 0, oy: 0,
+};
+const CB_GAP = 76;                                          // 機庫間距
+const CB_LEN = { assault: 30, gunship: 40, support: 37 };   // 船長（世界單位）
+const CB_CRADLE = 1.4;                                      // 托架高度（船的最低點離地）
+const CB_HALL = { hw: 19, z0: -30, z1: 16, h: 22 };         // 機庫內部：半寬、後牆、前緣、高度
+const CB_SHIP_Z = -7;                                       // 船停的位置（機庫中間偏後）
+const cbX = (k) => (k - 2) * CB_GAP;
+const cbNow = () => performance.now() / 1000;
+
+function cbInit() {
+  if (CB.wrap) return;
+  const w = CB.wrap = document.createElement('div'); w.className = 'dock-bg cb-bg'; w.innerHTML = '<canvas></canvas>'; CB.cv = w.querySelector('canvas');
+  document.body.appendChild(w);
+  const r = CB.r = new THREE.WebGLRenderer({ canvas: CB.cv, antialias: true });
+  r.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5)); r.outputColorSpace = THREE.SRGBColorSpace;
+  r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.1;
+  const S = CB.scene = new THREE.Scene(); S.background = new THREE.Color(0x8e9db0); S.fog = new THREE.Fog(0x8e9db0, 180, 480);   // 白天的基地（參考圖是明亮的）
+  CB.cam = new THREE.PerspectiveCamera(36, 2, 0.5, 900);
+  CB.glowTex = typeof dockGlowTex === 'function' ? dockGlowTex() : null;
+  S.add(new THREE.HemisphereLight(0xdfe8f6, 0x4a4640, 1.5), new THREE.AmbientLight(0x505868, 0.8));
+  const sun = new THREE.DirectionalLight(0xfff4e4, 2.6); sun.position.set(60, 120, 90); S.add(sun);
+  hgMats(); cbBuildSite(); for (let k = 0; k < 5; k++) cbBuildHangar(k); cbBuildProps();
+  // 選中的機庫：停機坪外圍一圈橘色框
+  const fr = CB.mark = new THREE.Group(), gm = new THREE.MeshBasicMaterial({ color: 0xf2b35a, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false });
+  for (const [w2, d2, x, z] of [[52, 0.6, 0, -34], [52, 0.6, 0, 36], [0.6, 70, -26, 1], [0.6, 70, 26, 1]]) { const b = new THREE.Mesh(new THREE.BoxGeometry(w2, 0.1, d2), gm); b.position.set(x, 0.7, z); fr.add(b); }
+  S.add(fr);
+  CB.cv.addEventListener('pointerdown', (e) => { CB.drag = { x: e.clientX, y: e.clientY }; CB.cv.setPointerCapture(e.pointerId); });
+  CB.cv.addEventListener('pointermove', (e) => {
+    const d = CB.drag; if (!d) return;
+    if (CB.focus) { const F = CB.fo; F.base -= (e.clientX - d.x) * 0.005; F.h = Math.max(0.5, Math.min(CB_HALL.h - 3, F.h - (e.clientY - d.y) * 0.03)); F.user = cbNow(); }
+    else { const O = CB.orb; O.base -= (e.clientX - d.x) * 0.006; O.yaw = O.base; O.pitch = Math.max(0.05, Math.min(1.2, O.pitch + (e.clientY - d.y) * 0.005)); O.user = cbNow(); }
+    d.x = e.clientX; d.y = e.clientY;
+  });
+  CB.cv.addEventListener('wheel', (e) => { e.preventDefault(); if (CB.focus) { CB.fo.d = Math.max(2.5, Math.min(30, CB.fo.d * (e.deltaY > 0 ? 1.12 : 0.89))); CB.fo.user = cbNow(); return; } CB.orb.dist = Math.max(36, Math.min(220, CB.orb.dist * (e.deltaY > 0 ? 1.1 : 0.9))); CB.orb.user = cbNow(); }, { passive: false });
+  const up = () => { CB.drag = null; }; CB.cv.addEventListener('pointerup', up); CB.cv.addEventListener('pointercancel', up);
+  new ResizeObserver(() => cbSize()).observe(CB.cv);
+}
+function cbSize() {
+  const b = CB.cv.getBoundingClientRect(); if (!b.width || !b.height) return;
+  CB.W = b.width; CB.H = b.height; CB.r.setSize(b.width, b.height, false); CB.cam.aspect = b.width / b.height; CB.cam.updateProjectionMatrix();
+}
+
+// ── 基地地面：大片水泥停機坪 ──
+function cbBuildSite() {
+  const S = CB.scene;
+  const tex = hgTex(256, 256, (g, w) => {
+    g.fillStyle = '#6a717c'; g.fillRect(0, 0, w, w);
+    g.strokeStyle = 'rgba(40,46,56,.45)'; g.lineWidth = 3; g.strokeRect(1, 1, w - 2, w - 2);
+    for (let i = 0; i < 70; i++) { g.fillStyle = `rgba(${Math.random() < 0.5 ? '255,255,255' : '0,0,0'},${Math.random() * 0.05})`; g.fillRect(Math.random() * w, Math.random() * w, 4 + Math.random() * 30, 2 + Math.random() * 6); }
+  }, [60, 30]);
+  const g = new THREE.Mesh(new THREE.PlaneGeometry(900, 450), new THREE.MeshStandardMaterial({ map: tex, metalness: 0.15, roughness: 0.85 }));
+  g.rotation.x = -Math.PI / 2; g.position.z = 40; S.add(g);
+}
+// ── 一座機庫 ──
+function cbBuildHangar(k) {
+  const S = CB.scene, M = HG.mats, H = CB_HALL, G = new THREE.Group(); G.position.x = cbX(k); S.add(G);
+  const white = new THREE.MeshStandardMaterial({ color: 0xdfe4ea, metalness: 0.25, roughness: 0.55 }), navy = new THREE.MeshStandardMaterial({ color: 0x24375e, metalness: 0.3, roughness: 0.5 });
+  const frameM = new THREE.MeshStandardMaterial({ color: 0x5d6675, metalness: 0.45, roughness: 0.45 }), floorM = new THREE.MeshStandardMaterial({ color: 0x4a515c, metalness: 0.3, roughness: 0.7 });
+  const box = (w, h, d, x, y, z, m) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.position.set(x, y, z); G.add(o); return o; };
+  const plane = (w, h, x, y, z, ry, mat) => { const o = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat); o.position.set(x, y, z); o.rotation.y = ry; G.add(o); return o; };
+  const L = H.z1 - H.z0, zc = (H.z0 + H.z1) / 2, T = 3, Y0 = 0.6;
+  // 底座：比機庫大一圈的平台，前方是停機坪（黃框、警示條、V 標誌、編號）
+  const pad = hgTex(512, 704, (g, w, h) => {
+    g.fillStyle = '#4b525d'; g.fillRect(0, 0, w, h); g.strokeStyle = '#2c323b'; g.lineWidth = 10; g.strokeRect(5, 5, w - 10, h - 10);
+    g.strokeStyle = 'rgba(30,34,42,.5)'; g.lineWidth = 2; for (let y = 0; y < h; y += 64) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); } for (let x = 0; x < w; x += 64) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); }
+    g.strokeStyle = '#d6a21e'; g.lineWidth = 6; g.strokeRect(70, 470, w - 140, 190);
+    g.fillStyle = '#d6a21e'; for (let i = 0; i < 6; i++) { g.save(); g.translate(30 + i * 22, 640); g.rotate(-0.6); g.fillRect(0, 0, 10, 40); g.restore(); }
+    hgChevron(g, w / 2, 545, 40, '#e8ecf2');
+    g.fillStyle = 'rgba(232,236,242,.85)'; g.font = 'bold 54px sans-serif'; g.textAlign = 'center'; g.fillText(`0${k + 1}`, w - 70, 455);
+  });
+  const base = new THREE.Mesh(new THREE.BoxGeometry(50, Y0, 70), [floorM, floorM, new THREE.MeshStandardMaterial({ map: pad, metalness: 0.25, roughness: 0.7 }), floorM, floorM, floorM]); base.position.set(0, Y0 / 2, 1); G.add(base);
+  // 機庫內地板：深一點的鋼板＋托架區的白框
+  const inner = hgTex(256, 512, (g, w, h) => { g.fillStyle = '#3c434d'; g.fillRect(0, 0, w, h); g.strokeStyle = 'rgba(232,236,242,.7)'; g.lineWidth = 4; g.strokeRect(40, 70, w - 80, h - 120); g.strokeStyle = '#d6a21e'; g.lineWidth = 3; g.beginPath(); g.moveTo(20, h - 24); g.lineTo(w - 20, h - 24); g.stroke(); });
+  const fl = new THREE.Mesh(new THREE.PlaneGeometry(H.hw * 2, L), new THREE.MeshStandardMaterial({ map: inner, metalness: 0.3, roughness: 0.6 })); fl.rotation.x = -Math.PI / 2; fl.position.set(0, Y0 + 0.02, zc); G.add(fl);
+  // 牆：兩側與後牆（實心白牆，外側與內側貼牆板）
+  for (const sd of [-1, 1]) {
+    box(T, H.h, L, sd * (H.hw + T / 2), H.h / 2 + Y0, zc, white);
+    plane(L, H.h, sd * (H.hw + T + 0.03), H.h / 2 + Y0, zc, sd * Math.PI / 2, hgWallMat(L, H.h));
+    plane(L, H.h, sd * (H.hw - 0.03), H.h / 2 + Y0, zc, -sd * Math.PI / 2, hgWallMat(L, H.h));
+    for (let z = H.z0 + 6; z < H.z1; z += 8) box(1.2, H.h, 1.2, sd * (H.hw - 0.7), H.h / 2 + Y0, z, frameM);   // 內側骨架
+    box(T + 0.4, 2.2, L, sd * (H.hw + T / 2), H.h * 0.3, zc, navy);                                           // 外側深藍腰帶
+  }
+  box(H.hw * 2 + T * 2, H.h, T, 0, H.h / 2 + Y0, H.z0 - T / 2, white);
+  plane(H.hw * 2, H.h, 0, H.h / 2 + Y0, H.z0 + 0.03, 0, hgWallMat(H.hw * 2, H.h));
+  for (let y = 5; y < H.h; y += 5) box(H.hw * 2, 0.8, 0.8, 0, y, H.z0 + 0.6, frameM);                        // 後牆的管線
+  // 正面門框：厚的框（白＋深藍）
+  for (const sd of [-1, 1]) { box(4, H.h + 3, 4, sd * (H.hw + 1.5), (H.h + 3) / 2 + Y0, H.z1, white); box(1.2, H.h + 3, 4.2, sd * (H.hw + 3.2), (H.h + 3) / 2 + Y0, H.z1, navy); }
+  box(H.hw * 2 + 8, 4, 4.2, 0, H.h + 2.6, H.z1, white); box(H.hw * 2 + 8, 1.2, 4.4, 0, H.h + 0.9, H.z1, navy);
+  // 屋頂：後段與前段固定，中間的大艙蓋往上掀開（鉸鏈在後）
+  box(H.hw * 2 + T * 2, 2, 10, 0, H.h + 1.6, H.z0 + 5, white); box(H.hw * 2 + T * 2, 2, 6, 0, H.h + 1.6, H.z1 - 3, white);
+  const hatch = hgTex(512, 512, (g, w) => { g.fillStyle = '#dfe4ea'; g.fillRect(0, 0, w, w); g.fillStyle = '#24375e'; g.fillRect(w * 0.36, 0, w * 0.28, w); hgChevron(g, w / 2, w * 0.42, 50, '#e8ecf2'); g.strokeStyle = 'rgba(60,70,90,.4)'; g.lineWidth = 4; for (let y = 128; y < w; y += 128) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); } });
+  const hg = new THREE.Group(); hg.position.set(0, H.h + 2.6, H.z0 + 10); hg.rotation.x = -0.42; G.add(hg);
+  const hm = new THREE.Mesh(new THREE.BoxGeometry(H.hw * 2 + 6, 1.6, L - 15), [white, white, new THREE.MeshStandardMaterial({ map: hatch, metalness: 0.25, roughness: 0.55 }), white, white, white]); hm.position.z = (L - 15) / 2; hg.add(hm);
+  for (const sd of [-1, 1]) { const p = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 10, 10), frameM); p.position.set(sd * (H.hw - 1), -3, 9); p.rotation.x = 0.55; hg.add(p); }   // 液壓桿
+  // 機庫內的燈：屋頂下的燈條＋後方的藍光
+  for (const z of [H.z0 + 6, zc + 4]) box(H.hw * 1.6, 0.4, 1, 0, H.h - 0.5, z, M.glow(0xdfe8ff, 1.4));
+  const li = new THREE.PointLight(0xe8f0ff, 900, 70, 1.6); li.position.set(0, H.h - 3, zc); G.add(li);
+  const blue = new THREE.PointLight(0x5aa8ff, 500, 40, 1.6); blue.position.set(0, 8, H.z0 + 6); G.add(blue);
+  if (CB.glowTex) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: CB.glowTex, color: 0x5aa8ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false })); s.scale.setScalar(16); s.position.set(0, 8, H.z0 + 4); G.add(s); }
+  for (const sd of [-1, 1]) hgLamp(G, sd * (H.hw + 4), H.h + 5, H.z1 + 2, 0xff5a3a, 30, 20);   // 門口兩側的警示燈
+  // 地勤人員：船旁邊站幾個人當比例尺（單艦視角時才看得出船有多大）
+  for (const [x, z, ry, c] of [[2.6, -3, 2.6, 0], [3.4, -3.8, -2.2, 1], [-5, -14, 1.2, 0], [4, -19, -0.4, 2], [-2, 3, 0.3, 1], [-13, 7, 1.6, 2], [9, -24, 3.0, 0], [-9, 26, -2.4, 1]]) cbCrew(G, x, Y0, z, ry, c);
+}
+// 一個人（約 CB_MAN 高）：連身工作服＋安全帽
+const CB_MAN = 0.9;
+function cbCrew(G, x, y, z, ry, c) {
+  const M = CB.crewM || (CB.crewM = { suit: [0xe8833a, 0xdfe4ea, 0x3d5a8c].map((col) => new THREE.MeshStandardMaterial({ color: col, roughness: 0.7 })), hat: new THREE.MeshStandardMaterial({ color: 0xf2c12e, roughness: 0.5 }), skin: new THREE.MeshStandardMaterial({ color: 0xc89878, roughness: 0.8 }) });
+  const h = CB_MAN, p = new THREE.Group(); p.position.set(x, y, z); p.rotation.y = ry; G.add(p);
+  const add = (geo, m, px, py, pz) => { const o = new THREE.Mesh(geo, m); o.position.set(px, py, pz); p.add(o); };
+  for (const sd of [-1, 1]) add(new THREE.BoxGeometry(h * 0.11, h * 0.46, h * 0.12), M.suit[c], sd * h * 0.07, h * 0.23, 0);   // 腿
+  add(new THREE.BoxGeometry(h * 0.28, h * 0.34, h * 0.16), M.suit[c], 0, h * 0.62, 0);                                      // 身體
+  for (const sd of [-1, 1]) add(new THREE.BoxGeometry(h * 0.08, h * 0.32, h * 0.09), M.suit[c], sd * h * 0.19, h * 0.6, 0);  // 手
+  add(new THREE.SphereGeometry(h * 0.075, 10, 8), M.skin, 0, h * 0.86, 0);
+  add(new THREE.SphereGeometry(h * 0.085, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), M.hat, 0, h * 0.885, 0);
+}
+// ── 整備庫元件：機庫內（機械臂、氣瓶、工作台）、機庫外（管制塔、物料艙、儲槽）、停機坪（砲塔、推進器艙、機械爪）──
+// [名稱, 相對機庫中心的 x, z, 轉向, 縮放, 離地]
+const CB_PROP_SET = [
+  ['06_機械臂A', -12.5, -16, Math.PI / 2, 95, 0.6], ['07_機械臂B', 12.5, -16, -Math.PI / 2, 95, 0.6], ['07_機械臂B', -12.5, 2, Math.PI / 2, 95, 0.6], ['06_機械臂A', 12.5, 2, -Math.PI / 2, 95, 0.6],
+  ['15_氣瓶組', -16, 11, 0, 70, 0.6], ['11_加工站', -14.5, -25, 0, 60, 0.6],
+  ['01_管制塔', 33, -14, -Math.PI / 2, 95], ['19_雙聯儲槽', 31, 9, 0, 85], ['18_物料艙', -32, -2, Math.PI / 2, 70], ['21_圓頂儲槽', -31, -20, 0, 85],
+  ['16_雙管砲塔', 6, 26, 0.5, 65, 0.6], ['12_雙推進器艙', 15, 27, -0.4, 65, 0.6], ['20_小型機械爪', -6, 29, 0.3, 55, 0.6], ['08_軌道機械臂', -16, 25, 0.6, 55, 0.6], ['06_機械臂A', 21, 20, -1.2, 55, 0.6],
+];
+function cbBuildProps() {
+  const S = CB.scene;
+  for (let k = 0; k < 5; k++) for (const [name, x, z, ry, s, y = 0] of CB_PROP_SET) hgPlaceProps(S, [[name, cbX(k) + x, z, ry, 1, y]], s);
+}
+
+// ── 船：跟編成畫面同一套船體＋武器掛點；船頭朝鏡頭（+z）──
+function cbMakeShip(hull, fac) {
+  const H = CAP_HULLS[hull]; if (!H) return null;
+  const fk = FAC_KEY[fac] || 'e', key = fk + H.look, M = getModel(key) || getModel('e' + H.look); if (!M) return null;
+  const L = CB_LEN[hull] || 30, g = new THREE.Group(), body = new THREE.Group();
+  body.add(new THREE.Mesh(M.lods[0], M.mat));
+  for (const m of mountsOf(key)) { const W = getModel(fk + 'w' + m.w); if (!W) continue; const o = new THREE.Mesh(W.lods[Math.min(1, W.lods.length - 1)], W.mat); setMountObj(o, m); body.add(o); }
+  const geo = M.lods[0]; geo.computeBoundingBox(); const bb = geo.boundingBox;
+  const cx = (bb.min.x + bb.max.x) / 2, cz = (bb.min.z + bb.max.z) / 2, y0 = 0.3 + CB_CRADLE;
+  body.scale.setScalar(L); g.add(body);
+  body.position.set(-cx * L, y0 - bb.min.y * L, -cz * L);   // 船體置中，最低點離船塢 CB_CRADLE
+  // 托架：前、中、後三座，各自往上頂到正上方的船底（船底不平，龍骨以外的地方比較高）
+  const pos = geo.attributes.position, hw = (bb.max.x - bb.min.x) / 2;
+  for (const f of [-0.28, 0, 0.28]) {
+    const zc = cz + f * (bb.max.z - bb.min.z); let lo = Infinity;
+    for (let i = 0; i < pos.count; i++) { const x = pos.getX(i) - cx, z = pos.getZ(i); if (Math.abs(z - zc) < 0.04 && Math.abs(x) < hw * 0.25) lo = Math.min(lo, pos.getY(i)); }
+    if (!isFinite(lo)) continue;
+    const top = y0 + (lo - bb.min.y) * L, h = top - 0.3, w = Math.min(7, hw * L * 0.7);
+    const c = new THREE.Mesh(new THREE.BoxGeometry(w, h, 2.2), HG.mats.metal); c.position.set(0, 0.3 + h / 2, (zc - cz) * L); g.add(c);
+    const pad = new THREE.Mesh(new THREE.BoxGeometry(w + 1.2, 0.5, 3), HG.mats.dark); pad.position.set(0, 0.55, (zc - cz) * L); g.add(pad);
+  }
+  g.userData = { hl: (bb.max.z - bb.min.z) / 2 * L, hw: hw * L, bot: y0, top: y0 + (bb.max.y - bb.min.y) * L };   // 單艦視角用：半長、半寬、船底、船頂
+  return g;
+}
+function cbSync(p) {
+  const fac = p.fac === 1 ? 1 : 0;
+  for (let k = 0; k < 5; k++) {
+    const key = p.slots[k] || '';
+    if (CB.keys[k] === key && CB.fac === fac && (CB.ships[k] || !key)) continue;
+    if (CB.ships[k]) { CB.scene.remove(CB.ships[k]); CB.ships[k] = null; }
+    CB.keys[k] = key;
+    if (key) { const g = cbMakeShip(key, fac); if (g) { g.position.set(cbX(k), 0.6, CB_SHIP_Z); CB.scene.add(g); CB.ships[k] = g; } }
+  }
+  CB.fac = fac;
+}
+const _cbP = new THREE.Vector3(), _cbL = new THREE.Vector3();
+function cbStep() {
+  const now = cbNow(), dt = Math.min(0.1, now - (CB.tPrev || now)); CB.tPrev = now;
+  if (!CB.W) cbSize();
+  const tx = cbX(CB.sel); CB.tx += (tx - CB.tx) * (1 - Math.exp(-dt * 3.5));
+  CB.mark.visible = !CB.focus;
+  CB.mark.position.x = tx; CB.mark.children.forEach((b) => (b.material.opacity = 0.6 + 0.3 * Math.sin(now * 3)));
+  const C = CB.cam, P = _cbP, Lk = _cbL; let fov = 36, ox = 0, oy = 0;
+  if (CB.focus) {
+    // 單艦視角：站在機庫地上（人的高度）往上看船；鏡頭不出機庫（兩側牆、後牆、屋頂），前面可以退到停機坪
+    const F = CB.fo, H = CB_HALL, sh = CB.ships[CB.sel], u = sh ? sh.userData : { hl: 15, hw: 6, bot: 2, top: 12 };
+    const idle = now - F.user > 4, yaw = idle ? F.base + 0.5 * Math.sin((now - F.user - 4) * 0.05) : F.base;
+    const sn = Math.sin(yaw), cs = Math.cos(yaw), r = Math.hypot(u.hw * sn, u.hl * cs) + F.d;
+    P.set(Math.max(tx - H.hw + 1.4, Math.min(tx + H.hw - 1.4, CB.tx + sn * r)), 0.6 + F.h, Math.max(H.z0 + 2, Math.min(H.z1 + 34, CB_SHIP_Z + cs * r)));
+    const mid = (u.bot + u.top) / 2;
+    Lk.set(tx + sn * u.hw * 0.25, mid + (u.top - mid) * 0.4 + F.h * 0.25, CB_SHIP_Z + cs * u.hl * 0.25);
+    fov = 70;
+  } else {
+    const O = CB.orb, idle = now - O.user > 5;
+    O.yaw = idle ? O.base + 0.22 * Math.sin((now - O.user) * 0.07) : O.base;
+    const V = dockVisible(CB.W, CB.H);
+    O.fit += (V.fit - O.fit) * (1 - Math.exp(-dt * 3));
+    const cp = Math.cos(O.pitch), dist = O.dist * O.fit, cy = 7, cz = -2;
+    P.set(CB.tx + Math.sin(O.yaw) * cp * dist, cy + Math.sin(O.pitch) * dist, cz + Math.cos(O.yaw) * cp * dist);
+    Lk.set(CB.tx, cy, cz); ox = V.ox; oy = V.oy;
+  }
+  // 兩種視角之間用飛的過去；拖曳時跟手
+  const k = 1 - Math.exp(-dt * (CB.drag ? 14 : 3.2));
+  if (!CB.cp) { CB.cp = P.clone(); CB.cl = Lk.clone(); CB.ox = ox; CB.oy = oy; C.fov = fov; }
+  else { CB.cp.lerp(P, k); CB.cl.lerp(Lk, k); CB.ox += (ox - CB.ox) * k; CB.oy += (oy - CB.oy) * k; C.fov += (fov - C.fov) * k; }
+  const near = CB.cp.y < 30 ? 0.12 : 0.5;
+  if (C.near !== near) C.near = near;
+  C.position.copy(CB.cp); C.lookAt(CB.cl);
+  C.setViewOffset(CB.W, CB.H, CB.ox, CB.oy, CB.W, CB.H); C.updateProjectionMatrix(); C.updateMatrixWorld();
+  CB.r.render(CB.scene, C);
+}
+function cbFrame() {
+  CB.raf = 0;
+  if (!document.querySelector('.cb-screen')) { CB.live = false; if (CB.wrap) CB.wrap.hidden = true; document.body.classList.remove('cb-on'); return; }   // 離開戰艦庫就停
+  CB.raf = requestAnimationFrame(cbFrame);
+  cbStep();
+}
+function cbAttach(p, sel) {
+  cbInit();
+  document.body.classList.add('cb-on'); CB.wrap.hidden = false;
+  if (!CB.live || (CB.focus && sel !== CB.sel)) { CB.tx = cbX(sel); CB.cp = null; }   // 單艦視角換船＝直接切過去（不穿牆）
+  CB.sel = sel; cbSync(p);
+  if (!CB.live) { CB.live = true; CB.tPrev = 0; requestAnimationFrame(() => cbSize()); }
+  if (!CB.raf) CB.raf = requestAnimationFrame(cbFrame);
+}
+
+// ── 畫面 ──
+function showCapBay() {
+  const p = capLoad();
+  setPhase('briefing');
+  const sel = GAME.capSel = Math.max(0, Math.min(4, GAME.capSel || 0));
+  const only = p.slots.filter(Boolean).length === 1 && p.slots[sel];
+  const slot = (k) => { const h = CAP_HULLS[p.slots[k]];
+    return `<button class="hg-slot ${k === sel ? 'on' : ''}" data-cs="${k}"><span>${k + 1} 號船塢<small>${k === p.slots.findIndex(Boolean) ? '旗艦' : ''}</small></span><b>${h ? h.name : '（空）'}<small>${h ? ` ${h.en}` : ''}</small></b></button>`; };
+  const picks = ['', ...CAP_HULL_ORDER].map((key) => { const h = CAP_HULLS[key], on = (p.slots[sel] || '') === key, dis = !key && only;
+    return `<button class="hg-chip ${on ? 'on' : ''}" data-ch="${key}" ${dis ? 'disabled' : ''}><b>${h ? h.name : '不帶'}</b><small>${h ? h.en : '船塢空著'}</small></button>`; }).join('');
+  const H = CAP_HULLS[p.slots[sel]];
+  const hd = H ? `<b>${H.name}</b>　${H.desc}<br><span class="g-dim">耐久 ${H.hp}＋護盾 ${H.sh}・速度 ${H.cruise}～${H.max}・轉向 ${H.turn}°／秒<br>主砲：${H.main.name}（${H.main.dmg} 傷害、${H.main.cd} 秒、射程 ${H.main.range}）・砲塔 ${H.tur.n} 座・點防禦 ${H.pd.n} 座${H.msl ? `・飛彈 ${H.msl.n} 枚` : ''}${H.ftr ? `・護航機 ${H.ftr} 架` : ''}</span>` : '<span class="g-dim">這個船塢空著，出擊時不帶船。</span>';
+  overlay(`<div class="ld-screen cb-screen ${CB.focus ? 'cb-focus' : ''}">
+    <div class="ld-top">
+      <button class="g-btn" id="cb-back">← 艦長</button>
+      <div class="ld-title"><h2>戰艦庫</h2><span class="crumb">艦長・小隊的特製戰艦（1～5 艘）</span></div>
+      <div class="hg-rec"><span class="g-dim">陣營 <b>${FACTION_NAME[p.fac]}</b></span><span class="g-dim">戰功 <b>${fmtN(p.merit)}</b></span><span class="g-dim">任務成功 <b>${p.wins}</b>／${p.sorties}</span></div>
+      <span class="g-sp"></span>
+      <button class="g-btn" id="cb-view">${CB.focus ? '回到總覽' : '單艦視角'}</button>
+      <button class="g-btn pri" id="cb-go">前往出擊 →</button>
+    </div>
+    <div class="cb-fbar">
+      <button class="g-btn" id="cb-prev" aria-label="上一艘">‹</button>
+      <div class="cb-fname"><small>${sel + 1} 號船塢</small><b>${H ? H.name : '（空）'}</b><span>${H ? H.en : ''}</span></div>
+      <button class="g-btn" id="cb-next" aria-label="下一艘">›</button>
+    </div>
+    <div class="ld-side g-card hg-side">
+      <div class="hg-h">船塢<small>點一個船塢，再選要停的艦種</small></div>
+      <div class="hg-slots">${[0, 1, 2, 3, 4].map(slot).join('')}</div>
+      <div class="hg-pick">${picks}</div>
+      <div class="hg-desc">${hd}</div>
+    </div>
+    <div class="ld-cap" id="cb-cap">${CB.focus ? '左右拖曳繞著船走・上下拖曳改變高度・滾輪靠近／退後' : '拖曳背景轉動視角・滾輪拉近拉遠'}</div>
+  </div>`);
+  gEl('cb-back').onclick = () => { GAME.spMode = 'captain'; showSingle(); };
+  gEl('cb-go').onclick = () => showCaptain();
+  gEl('cb-view').onclick = () => { CB.focus = !CB.focus; if (CB.focus) { CB.fo.user = -99; CB.fo.base = 0.8; CB.fo.h = 0.75; CB.fo.d = 3.5; } else CB.orb.user = -99; showCapBay(); };
+  // 單艦視角換船：只在有船的船塢之間切換
+  const step = (dir) => { const ks = [0, 1, 2, 3, 4].filter((k) => p.slots[k]); if (!ks.length) return; const i = ks.indexOf(sel); GAME.capSel = ks[((i < 0 ? 0 : i + dir) + ks.length) % ks.length]; showCapBay(); };
+  gEl('cb-prev').onclick = () => step(-1); gEl('cb-next').onclick = () => step(1);
+  const redo = () => { capSave(p); showCapBay(); };
+  document.querySelectorAll('[data-cs]').forEach((b) => (b.onclick = () => { GAME.capSel = +b.dataset.cs; redo(); }));
+  document.querySelectorAll('[data-ch]').forEach((b) => (b.onclick = () => { p.slots[sel] = b.dataset.ch; if (!p.slots.some(Boolean)) p.slots[sel] = 'assault'; redo(); }));
+  cbAttach(p, sel);
+}
+
 
 // ───────── 作戰 HUD（仿星海爭霸 2／世紀帝國）：左下小地圖、中下選取面板、右下指令卡 ─────────
 // 指令卡 3 排 × 5 格：按鍵＝格子的位置（預設 QWERT／ASDFG／ZXCVB，設定裡可以改）。陣型、技能太多時進子頁，Esc 回主頁
@@ -21581,12 +22921,13 @@ function mmDraw() {
   }
   // 艦艇（抽樣畫點）：戰爭迷霧／被干擾時，敵軍只畫看得到的
   const fog = pFiltered(), me = GAME.playerSide, step = Math.max(2, Math.ceil(shipCount / 3000));
-  for (let sd = 0; sd < 2; sd++) {
+  for (let sd = 0; sd < SIDES; sd++) {
     if (fog && sd !== me && !fowView()) continue;
+    const rl = sd === me ? 2 : REL[me][sd];
     for (let i = 0; i < shipCount; i += step) {
       if (!ships.alive[i] || ships.side[i] !== sd) continue;
       const q = squadrons[ships.sq[i]]; if (!q || q.bg || q.hidden || fowHidden(q)) continue;
-      c.fillStyle = sd === me ? '#5fe38a' : '#ff5a4a';
+      c.fillStyle = sd === me ? '#5fe38a' : rl === 1 ? '#ffd27a' : rl === 2 ? '#7fd0ff' : '#ff5a4a';   // 多方勢力：中立黃、同盟藍
       shipWorldCPU(i, _a); c.fillRect(G.toX(_a.x) - 0.75, G.toY(_a.z) - 0.75, 1.5, 1.5);
     }
   }
@@ -21914,7 +23255,7 @@ Object.assign(window.__demo, { MOUNTS: () => MOUNTS, mountsOf, openWeaponEditor,
   B && B.done();
   window.__ready = true;
 })();
-Object.assign(window.__demo, { frame, setPaused(v) { paused = v; }, pilotLayout, PILOT_MIS, shipPos(i) { const o = {}; bridgePose(i, o); return o; }, getModel, hullKey, pilotHullMesh, pilotHullCollide, pilotCredit, pilotMisTick, pilotHurt, PL, showPilot, pilotGo, pilotPickTarget, pilotLoad, pilotSave, fP: () => fP, PILOT_WEAPONS, pilotEcmHides, pilotEcmLeft });   // 王牌飛行員（除錯）
+Object.assign(window.__demo, { frame, setPaused(v) { paused = v; }, pilotLayout, PILOT_MIS, shipPos(i) { const o = {}; bridgePose(i, o); return o; }, getModel, hullKey, pilotHullMesh, pilotHullCollide, pilotCredit, pilotMisTick, pilotHurt, PL, showPilot, pilotGo, pilotPickTarget, pilotLoad, pilotSave, fP: () => fP, PILOT_WEAPONS, pilotEcmHides, pilotEcmLeft, HG, CB, showCapBay });   // 王牌飛行員（除錯）
 // 測試用：劇情關卡自動代打（玩家那一邊也交給 AI）。不畫畫面，直接跑模擬到分出勝負
 // o：diff 難度序號（預設普通）、lv 玩家指揮官等級（預設＝建議等級）、ai 玩家 AI 難度 1～5（預設 3）、tactic 玩家 AI 打法（預設照關卡目標挑）
 //    like：玩家的特性加成改成跟敵方一樣照等級算（對照組，大約是「天賦有點」的強度）
@@ -21939,7 +23280,7 @@ async function autoStory(id, o = {}) {
     GAME.reportShown = true;   // 不跳結算畫面（不然上一場的結算計時器會在下一場代打中途切走畫面）
     GAME.watch = true; GAME.replaying = false; GAME.result = null; GAME.lineK = 0; GAME.dlineK = 0; GAME.log = []; GAME.simCtl = null; GAME.phase = 'battle';
     newBattle(sc.seed + 1, setup); setRule('fire', true); setRule('advance', false);
-    GAME.init = [sideAlive(0), sideAlive(1)];
+    GAME.init = sideInits();
     const cap = o.peek ? o.peek * SIM_HZ : (sc.untimed ? sc.timeLimit * 3 : sc.timeLimit + 30) * SIM_HZ, t0 = performance.now();
     while (!GAME.result && simTick < cap) { for (let k = 0; k < 600 && !GAME.result; k++) stepSim(); await new Promise((r) => { const ch = new MessageChannel(); ch.port1.onmessage = r; ch.port2.postMessage(0); }); }   // 不用 setTimeout：背景分頁會被降速
     const R = GAME.result || { kind: 'none', why: '沒有分出勝負', t: U.uTime.value, ratio: [sideAlive(0) / GAME.init[0], sideAlive(1) / GAME.init[1]] };
@@ -21951,5 +23292,5 @@ async function autoStory(id, o = {}) {
     if (!o.peek) { GAME.watch = false; GAME.phase = 'menu'; }
   }
 }
-Object.assign(window.__demo, { autoStory, queueMode });
+Object.assign(window.__demo, { autoStory, queueMode, REL: () => REL, relDmg, relHP0, SIDES: () => SIDES, dmgDealt, gunStats, foeSides, hostile, pickTarget: (s, q) => pickTarget(s, q) });   // 多方勢力（除錯）
 Object.assign(window.__demo, { GRD: () => GRD, setGround, groundBlock, groundGen, newBattle, sandboxSetup, terrainUse, terrainSurfaceAt, TERRAIN, battleSetup: () => battleSetup, groundFrame, GV });   // 近地作戰（除錯）
