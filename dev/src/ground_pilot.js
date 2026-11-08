@@ -259,7 +259,7 @@ function groundTargetsSync() {
   GV.gtMeshes = [];
   if (!GRD || !GRD.gts) return;
   if (!GV.gtMat || GV.gtMatKey !== GRD.key) { GV.gtMat = groundMat(GRD.S.pal); GV.gtMatKey = GRD.key; }
-  for (const g of GRD.gts) { if (g.tu) { GV.gtMeshes.push(null); continue; } const m = groundTargetMesh(g); GV.group.add(m); GV.gtMeshes.push(m); }
+  for (const g of GRD.gts) { if (g.tu) { GV.gtMeshes.push(null); continue; } const m = groundTargetMesh(g); GV.group.add(m); GV.gtMeshes.push(m); capTargetGlb(g, m); }
 }
 function groundTargetsFrame() {
   if (!GRD || !GRD.gts || !GV.gtMeshes) return;

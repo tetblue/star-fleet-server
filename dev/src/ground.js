@@ -18,6 +18,7 @@ const GROUND_EXT = 1600, GROUND_N = 256, GROUND_CELL = GROUND_EXT * 2 / GROUND_N
 const GROUND_RULE = { atmoHit: 0.35, atmoDmg: 0.25, grav: 0.35, climb: 0.5, fly: 5, minAlt: 10, slope: 1.1 };
 // 地面砲台：hp 耐久（沒有護盾）、range 射程、cd 開火間隔、dmg 單發傷害、acc 命中率（再乘目標大小、大氣）
 // pick：戰艦的主／副砲有多少機率改打射程內的砲台；hitBy：戰艦打砲台的命中率
+const CAP_MS_HP = 0.3;   // 艦長戰：巨型結構的耐久倍率（小隊的火力比整支艦隊少很多）
 const TURRET_RULE = { hp: 300, range: 480, cd: 2.4, dmg: 10, acc: 0.75, pick: 0.2, hitBy: 0.8 };
 const PIL_MAX = 16;   // 柱狀障礙（巨型結構）最多幾個（著色器的陣列大小）
 
@@ -94,7 +95,7 @@ function setGround() {
   }
   const def = g.def == null ? 1 : g.def, S = GROUND_SCENES[g.scene];
   const spots = def === 0 ? D.spotsP : def === 1 ? D.spotsN : [];
-  GRD = { ...D, key, def, S, atmo: S.atmo, grav: S.grav, H: D.H.slice(), pil: D.pil.slice(), rocks: D.rocks.slice(), ms: D.ms.map((m) => ({ ...m, hpNow: m.hp, dead: false, deadT: -1 })),
+  GRD = { ...D, key, def, S, atmo: S.atmo, grav: S.grav, H: D.H.slice(), pil: D.pil.slice(), rocks: D.rocks.slice(), ms: D.ms.map((m) => { const hp = Math.round(m.hp * (g.cap ? CAP_MS_HP : 1)); return { ...m, hp, hpNow: hp, dead: false, deadT: -1 }; }),
     tur: spots.map((p, k) => ({ k, x: p.x, y: p.y, z: p.z, side: def, hp: TURRET_RULE.hp, cd: 1 + k * 0.37, aim: def === 1 ? 0 : Math.PI, deadT: -1 })), live: spots.length, gts: null };
   if (g.pilot) GRD.gts = groundTargetsInit(D, def);   // 駕駛模式：地面目標
   U.uGrdTex.value = GRD_CACHE.tex; U.uGrd.value.set(GROUND_EXT, GROUND_CELL, GROUND_N, 1);
@@ -1042,10 +1043,11 @@ function groundSky(P) {
   return s;
 }
 // 地平面：都市（城區外圍也是一片燈海）、港區混凝土（海岸線以外透出海面）、基地草地、高原沙地、山腳
-function groundFloorMesh(P, kind, y, coastF = null) {
+function groundFloorMesh(P, kind, y, coastF = null, under = false) {
   const cf = coastF || [0, 1, 0, 1, 0];
   const m = new THREE.ShaderMaterial({
     uniforms: gUni(P, { uKind: { value: kind }, uWin: { value: new THREE.Vector3(...P.win) }, uCoastOn: { value: coastF ? 1 : 0 }, uCoast: { value: new THREE.Vector4(cf[0], cf[1], cf[2], cf[3]) }, uCoastP: { value: cf[4] } }),
+    polygonOffset: under, polygonOffsetFactor: 2, polygonOffsetUnits: 8,   // 在起伏地形底下：遠處不跟地形搶深度
     vertexShader: `varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position, 1.); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
     fragmentShader: GROUND_FOG_GLSL + /* glsl */`
       uniform float uKind; uniform vec3 uWin; uniform float uCoastOn; uniform vec4 uCoast; uniform float uCoastP; varying vec3 vW;
@@ -1057,8 +1059,12 @@ function groundFloorMesh(P, kind, y, coastF = null) {
         if (uKind < .5) {   // 都市：灰色的屋頂紋理＋彎曲的道路網，遠處（城區外）也是市郊
           vec2 w = p + vec2(gn(p / 160.) - .5, gn(p / 160. + 7.3) - .5) * 60.;
           vec2 q = abs(fract(w / 4.6 + .5) - .5) * 4.6, big = abs(fract(w / 32. + .5) - .5) * 32.;
-          float road = max(1. - smoothstep(.12, .3, min(q.x, q.y)) * (1. - step(min(big.x, big.y), .6)), 0.);
-          road = mix(road, .18, smoothstep(.3, 1.2, fw));
+          float aw = max(fw, 1e-4);   // 每個像素在地面上的寬度（反鋸齒用）
+          float small = 1. - smoothstep(.12 - aw * .5, .3 + aw * .5, min(q.x, q.y));
+          small = mix(small, .09, smoothstep(.12, .45, aw));   // 小巷細到不到一個像素：改用平均值
+          float ave = 1. - smoothstep(.6 - aw * .7, .6 + aw * .7, min(big.x, big.y));
+          ave = mix(ave, .075, smoothstep(.5, 2., aw));          // 大道也一樣
+          float road = max(small, ave);
           float roof = gn(w / 1.3) * .55 + gn(w / .45) * .45 * (1. - smoothstep(.15, .6, fw)) + .22 * smoothstep(.15, .6, fw);
           float sub = 1. - smoothstep(700., 2200., length(p)) * .5, park = smoothstep(.8, .86, gn(w / 70. + 3.));
           col = mix(vec3(.07, .075, .08), vec3(.2, .205, .215), roof) * (.8 + .35 * gn(p / 55.)) * sub;
@@ -1079,6 +1085,7 @@ function groundFloorMesh(P, kind, y, coastF = null) {
 function groundSea(P, y) {
   const m = new THREE.ShaderMaterial({
     uniforms: gUni(P, { uSea: { value: new THREE.Vector3(...P.sea) }, uSunCol: { value: new THREE.Vector3(...P.sunCol) } }),
+    polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 8,   // 海面在港區地面底下只差 0.2：往後推，遠處才不會閃
     vertexShader: `varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position, 1.); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
     fragmentShader: GROUND_FOG_GLSL + /* glsl */`
       uniform vec3 uSea, uSunCol; uniform float uTime; varying vec3 vW;
@@ -1161,7 +1168,7 @@ function groundSync() {
     const gOf = (o) => { if (o.ms == null) return G; let g = MG.get(o.ms); if (!g) MG.set(o.ms, (g = gbNew())); return g; };
     GV.sky = groundSky(P); scene.add(GV.sky);
     if (D.scene === 'harbor') { GV.group.add(groundSea(P, GROUND_Y - 0.05)); GV.group.add(groundFloorMesh(P, 1, GROUND_Y + 0.15, D.extra.coastF)); }
-    else GV.group.add(groundFloorMesh(P, P.plane, GROUND_Y - (D.hf ? 1 : 0)));
+    else GV.group.add(groundFloorMesh(P, P.plane, GROUND_Y - (D.hf ? 1 : 0), null, !!D.hf));
     if (D.far) GV.group.add(groundFar(P, D.far, D.seed, D.extra));
     if (D.hf) GV.group.add(terrainBuild(P, D));   // 起伏地形（terrain.js）
     for (const b of D.boxes) gbBox(gOf(b), b);

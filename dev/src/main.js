@@ -5340,7 +5340,7 @@ const KEY_ACTIONS = [
   ['cap_up', '上升', '艦長', 'Space'], ['cap_down', '下降', '艦長', 'KeyC'], ['cap_boost', '推進加速（有能量）', '艦長', 'ShiftLeft'], ['cap_main', '主砲（滑鼠左鍵之外）', '艦長', ''], ['cap_msl', '飛彈（滑鼠右鍵之外）', '艦長', ''],
   ['cap_target', '鎖定準心附近的敵人', '艦長', 'KeyT'], ['cap_fc', '火控切換：禁止開火／自衛／自由開火', '艦長', 'KeyX'], ['cap_skill', '艦種技能', '艦長', 'KeyF'], ['cap_skill2', '支援艦：護航機出擊／收回', '艦長', 'KeyG'],
   ['cap_switch', '換船（接手下一艘）', '艦長', 'Tab'], ['cap_o1', '僚艦：跟隨', '艦長', 'Digit1'], ['cap_o2', '僚艦：集火我的目標', '艦長', 'Digit2'], ['cap_o3', '僚艦：自由交戰', '艦長', 'Digit3'], ['cap_o4', '僚艦：原地防守', '艦長', 'Digit4'],
-  ['cap_view', '鏡頭：近／遠', '艦長', 'KeyV'],
+  ['cap_view', '鏡頭：近／遠', '艦長', 'KeyV'], ['cap_warp', '躍遷撤離（任務完成、脫離戰鬥後）', '艦長', 'KeyJ'],
 ];
 const KEY_CTX = (id) => (id.startsWith('radial_') ? 'radial' : id.startsWith('pilot_') ? 'pilot' : id.startsWith('cap_') ? 'cap' : id === 'pitch_mod' ? 'drag' : 'main');   // 不同情境的鍵可以重複（例如 Z＝齊射，右鍵按住時＝仰角）
 // 介面資訊預設都顯示

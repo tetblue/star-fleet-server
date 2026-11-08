@@ -78,11 +78,11 @@ function bldApplyMap(D, C) {
 
 // ───── GLB 載入與畫面 ─────
 // 同一個檔案只下載、解析一次；回傳 { scene, box（模型座標的外框）}
-function bldModel(file, v) {
-  const k = `${file}?${v || 0}`;
+function bldModel(file, v, dir = '建築') {
+  const k = `${dir}/${file}?${v || 0}`;
   if (BLD.cache[k]) return BLD.cache[k];
   return (BLD.cache[k] = (async () => {
-    const r = await fetch(`models/${encodeURIComponent('建築')}/${encodeURIComponent(file)}?v=${v || 0}`, { cache: 'no-cache' });
+    const r = await fetch(`models/${encodeURIComponent(dir)}/${encodeURIComponent(file)}?v=${v || 0}`, { cache: 'no-cache' });
     if (!r.ok) throw new Error(`${file}：HTTP ${r.status}`);
     if (!MODEL_LOAD.loader) MODEL_LOAD.loader = new GLTFLoader();
     const gltf = await MODEL_LOAD.loader.parseAsync(await r.arrayBuffer(), '');
