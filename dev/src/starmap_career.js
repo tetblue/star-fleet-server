@@ -65,7 +65,11 @@ function smIntel(S, sid, fac) {
 function smNewMission(S, o) {
   const M = { id: S.nextId++, state: o.kind === 'order' ? 'open' : 'offer', t0: S.turn, ...o };
   S.pl.missions.push(M);
-  if (M.support && M.support.fleet) {   // 支援：撥一支艦隊給玩家指揮，任務結束收回
+  if (M.support && M.support.loans) {   // 支援：發令時依兵力差距挑好的艦隊（smPickCapture），任務結束收回
+    const got = [];
+    for (const id of M.support.loans) { const f = S.fleets.find((x) => x.id === id); if (f && !f.pl && M.state === 'open') { f.pl = true; f.loan = M.id; S.pl.fleets.push(f.id); got.push(f.name); } }
+    M.support.fleet = got.length > 0; if (got.length) M.support.got = got.join('」「');
+  } else if (M.support && M.support.fleet) {   // 支援：撥一支艦隊給玩家指揮，任務結束收回
     const f = S.fleets.find((x) => x.fac === S.pl.fac && !x.pl && smShips(x.comp) > 0 && smHop(S, x.sys, M.sys) <= 4 && !x.path);
     if (f && M.state === 'open') { f.pl = true; f.loan = M.id; S.pl.fleets.push(f.id); M.support.got = f.name; }
     else M.support.fleet = false;
@@ -136,9 +140,9 @@ function smGenMissions(S) {
   const boss = { name: p.boss, role: p.gov >= 0 ? '聯盟議會' : `上級（${SM_MIL[Math.min(4, p.mil + 1)]}）` };
   // 考核：戰功夠了就發（艦長的考核是特戰任務，其他是佔領）
   if (!p.exam && p.gov < 0 && p.mil < 4 && p.merit >= SM_MIL_MERIT[p.mil + 1] && !open.some((M) => M.exam)) {
-    const t = smPickTarget(S, targets, p.mil === 0);
+    const pk = p.mil === 0 ? null : smPickCapture(S, targets, SM_CAP_EXAM, SM_CAP_BAND[1], true), t = p.mil === 0 ? smPickTarget(S, targets, true) : pk && pk.t;
     if (t) { const M = smNewMission(S, p.mil === 0 ? { kind: 'order', from: boss, type: 'op', op: smPick(S, Object.keys(SM_OP)), sys: t.id, due: S.turn + 8, exam: true, reward: { merit: 20, trust: 5 }, intel: smIntel(S, t.id, p.fac) }
-      : { kind: 'order', from: boss, type: 'capture', sys: t.id, due: S.turn + 10, exam: true, reward: { merit: 30, trust: 6, money: 200 }, support: { fleet: p.mil >= 2 }, intel: smIntel(S, t.id, p.fac) }); p.exam = M.id; return; }
+      : { kind: 'order', from: boss, type: 'capture', sys: t.id, due: S.turn + 10, exam: true, reward: { merit: 30, trust: 6, money: 200 }, support: { loans: pk.loans.map((f) => f.id) }, intel: smIntel(S, t.id, p.fac) }); p.exam = M.id; return; }
   }
   // 上級的命令：同時最多一道
   if (!open.some((M) => M.kind === 'order') && p.gov < 0 && smRnd(S) < 0.5) {
@@ -147,7 +151,8 @@ function smGenMissions(S) {
       if (t) smNewMission(S, { kind: 'order', from: boss, type: 'op', op: smPick(S, Object.keys(SM_OP)), sys: t.id, due: S.turn + 6, reward: { merit: 15 + Math.round(smRnd(S) * 10), money: 80 }, intel: smIntel(S, t.id, p.fac) });
     } else {
       const r = smRnd(S), threatened = mine.filter((s) => S.adj[s.id].some((j) => smEnemyAt(S, p.fac, j).length));
-      if (r < 0.45 && targets.length) { const t = smPickTarget(S, targets, false); smNewMission(S, { kind: 'order', from: boss, type: 'capture', sys: t.id, due: S.turn + 8, reward: { merit: 25, money: 150, trust: 3 }, support: { fleet: smRnd(S) < 0.4, money: smRnd(S) < 0.5 ? 150 : 0 }, intel: smIntel(S, t.id, p.fac) }); }
+      const pk = r < 0.45 && targets.length ? smPickCapture(S, targets, SM_CAP_BAND[0], SM_CAP_BAND[1], true) : null;   // 打不贏的目標不發（改發防守、擊沉）
+      if (pk) { const t = pk.t; smNewMission(S, { kind: 'order', from: boss, type: 'capture', sys: t.id, due: S.turn + 8, reward: { merit: 25, money: 150, trust: 3 }, support: { loans: pk.loans.map((f) => f.id), money: smRnd(S) < 0.5 ? 150 : 0 }, intel: smIntel(S, t.id, p.fac) }); }
       else if (r < 0.75 && threatened.length) { const t = smPick(S, threatened); smNewMission(S, { kind: 'order', from: boss, type: 'defend', sys: t.id, due: S.turn + 4, reward: { merit: 15, trust: 4 }, intel: smIntel(S, S.adj[t.id].find((j) => smEnemyAt(S, p.fac, j).length), p.fac) }); }
       else smNewMission(S, { kind: 'order', from: boss, type: 'destroy', goal: 60 + 40 * p.mil, due: S.turn + 6, reward: { merit: 20, money: 100 } });
     }
@@ -155,10 +160,41 @@ function smGenMissions(S) {
   // 派系的委託（艦隊指揮官以上、或政務線）：偶爾一個
   if ((p.mil >= 2 || p.gov >= 0) && !open.some((M) => M.kind === 'request') && smRnd(S) < 0.18) {
     const k = Math.floor(smRnd(S) * 3), from = { name: smPick(S, SM_NPC), role: SM_SUP[k] };
-    if (k === 0 && targets.length) { const t = smPickTarget(S, targets, false); smNewMission(S, { kind: 'request', from, type: 'capture', sys: t.id, due: S.turn + 10, reward: { merit: 15, sup: [0, 10] }, intel: smIntel(S, t.id, p.fac) }); }
+    const pk = k === 0 && targets.length ? smPickCapture(S, targets, SM_CAP_BAND[0], SM_CAP_BAND[1], false) : null;
+    if (pk) { const t = pk.t; smNewMission(S, { kind: 'request', from, type: 'capture', sys: t.id, due: S.turn + 10, reward: { merit: 15, sup: [0, 10] }, intel: smIntel(S, t.id, p.fac) }); }
     else if (k === 1 && p.gs.length) { const t = S.sys[smPick(S, p.gs)]; smNewMission(S, { kind: 'request', from, type: 'prosper', sys: t.id, goal: Math.min(95, t.prosp + 8), due: S.turn + 10, reward: { money: 120, sup: [1, 10] } }); }
     else smNewMission(S, { kind: 'request', from, type: 'pay', goal: 150 + 50 * Math.max(p.mil, p.gov + 2), due: S.turn + 3, reward: { sup: [2, 12], trust: 2 } });
   }
+}
+// ───── 佔領任務的難度：發令前先算玩家打不打得贏（星圖勝率公式；地面防禦不算，玩家可以先突襲癱瘓）─────
+const SM_CAP_BAND = [0.35, 0.85];   // 一般命令、委託：勝率落在這個區間的目標優先；低於下限的不發
+const SM_CAP_EXAM = 0.5;            // 升遷考核：勝率至少這麼多
+const SM_CAP_AIM = 0.6;             // 撥支援時：撥到勝率至少這麼多（或撥滿上限）
+const SM_CAP_LOAN = { max: 3, keep: 2, hop: 4 };   // 支援最多撥幾支、陣營至少留幾支自己用、多遠以內的艦隊
+// 玩家能指揮的艦隊（加上 extra）打目標星系現有敵軍的勝率
+function smCapOdds(S, sid, extra = []) {
+  const mine = [...S.fleets.filter((f) => f.pl && !f.cap && smShips(f.comp) > 0), ...extra], en = smEnemyAt(S, S.pl.fac, sid);
+  if (!en.length) return 1; if (!mine.length) return 0;
+  const sum = (L) => L.reduce((c, f) => smAdd(c, f.comp), new Array(SHIP_TYPES.length).fill(0));
+  return smWinP(sum(mine), sum(en), smLv(mine), smLv(en), S.pl.fac, en[0].fac, smTac(mine), smTac(en));
+}
+// 挑佔領目標：先算玩家自己的勝率，不夠（低於 lo）就從附近的友軍撥艦隊，撥到 SM_CAP_AIM；還是低於 lo 的目標不考慮。
+// 勝率在 [lo, hi] 的優先；都太簡單（例如沒有敵艦隊、只有地面防禦）才用簡單的。回傳 { t, p, loans } 或 null
+function smPickCapture(S, targets, lo, hi, loanOk) {
+  const pool = loanOk ? S.fleets.filter((f) => f.fac === S.pl.fac && !f.pl && !f.cap && !f.loan && smShips(f.comp) > 0 && !f.path) : [];
+  const maxLoan = Math.min(SM_CAP_LOAN.max, Math.max(0, pool.length - SM_CAP_LOAN.keep)), aim = Math.max(lo, SM_CAP_AIM), opts = [];
+  for (const t of targets) {
+    let p = smCapOdds(S, t.id); const loans = [];
+    if (p < lo && maxLoan) for (const f of pool.filter((x) => smHop(S, x.sys, t.id) <= SM_CAP_LOAN.hop).sort((a, b) => smHop(S, a.sys, t.id) - smHop(S, b.sys, t.id))) {
+      if (loans.length >= maxLoan || p >= aim) break;
+      loans.push(f); p = smCapOdds(S, t.id, loans);
+    }
+    if (p >= lo) opts.push({ t, p, loans, ok: p <= hi });
+  }
+  const L = opts.some((o) => o.ok) ? opts.filter((o) => o.ok) : opts;
+  if (!L.length) return null;
+  const val = (t) => (t.pop + 3) / (smEnemyAt(S, S.pl.fac, t.id).reduce((a, f) => a + smVal(f.comp), 0) + smGround(t, S) * 0.5 + 30);
+  return L.sort((a, b) => val(b.t) - val(a.t))[Math.floor(smRnd(S) * Math.min(3, L.length))];
 }
 function smPickTarget(S, targets, op) {
   const L = targets.filter((t) => (op ? t.owner !== SM_N : true));
