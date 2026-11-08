@@ -12,18 +12,19 @@ try {
   await b.ev(`window.addEventListener('error', (e) => (window.__smErr = (window.__smErr || []).concat(String(e.message))))`);
   // 開一局，把玩家艦隊直接放到一個海盜星系旁邊，然後下令進攻
   if (arg('wave', 0)) await b.ev(`__sm.SM_RULE.wave = [${+arg('wave', 0)}, ${+arg('wave', 0)}, ${+arg('wave', 0)}]`);
-  const setup = await b.ev(`(() => { STORE.removeItem('fleet.career1'); STORE.setItem('fleet.career.meta', JSON.stringify({ runs: 0, unlock: ['cap', 'cmd', 'army', 'gov', 'head'], best: [] })); document.getElementById('m-single').click(); document.querySelector('[data-spm="career"]').click(); { const r = document.querySelector('input[name="sm-start"][value="cmd"]'); if (r) r.click(); } document.getElementById('sm-go').click();
+  const setup = await b.ev(`(() => { STORE.removeItem('fleet.career1'); STORE.setItem('fleet.career.meta', JSON.stringify({ runs: 0, unlock: ['cap', 'cmd', 'army', 'gov', 'head'], best: [] })); document.getElementById('m-single').click(); document.querySelector('[data-spm="career"]').click(); { const r = document.querySelector('#sm-start [data-v="cmd"]'); if (r) r.click(); } document.getElementById('sm-go').click();
     const S = __sm.SMU.S, tg = S.sys.find((s) => s.owner === 2 && S.adj[s.id].length), from = S.adj[tg.id][0], fl = __sm.smPlFleets(S);
     for (const f of fl) f.sys = from;
+    for (const f of S.fleets) if (f.sys === tg.id) f.path = null;   // AI 在週初就下好命令了：讓目標的守軍留下來
     for (const f of fl) document.querySelector('[data-sel="' + f.id + '"]').click();
-    __sm.SMU.sys = tg.id; __sm.smuRender(); window.confirm = () => true; document.getElementById('sm-move').click();
+    __sm.smuOpen('sys', tg.id); document.getElementById('sm-move').click(); { const ok = document.getElementById('sm-ask-ok'); if (ok) ok.click(); }
     const en = S.fleets.filter((f) => f.sys === tg.id).map((f) => f.name + ' ' + __sm.smShips(f.comp)).join('、');
     return tg.name + '（敵：' + en + '）'; })()`);
   console.log('目標：', setup);
-  await b.ev(`document.getElementById('sm-end').click()`); await sleep(300);
+  await b.ev(`document.getElementById('sm-end').click()`); await sleep(300); for (let w = 0; w < 40 && await b.ev(`!!__sm.SMU.anim`); w++) await sleep(150);   // 等移動動畫播完
   const has = await b.ev(`!!document.getElementById('sm-fight')`);
   if (!has) throw new Error('沒有出現戰鬥選項');
-  await b.ev(HOW === 'cmd' ? `document.querySelector('input[name="sm-how0"][value="cmd"]').click()` : `document.getElementById('sm-watch0').click()`);
+  await b.ev(HOW === 'cmd' ? `document.querySelector('#sm-how0 [data-v="cmd"]').click()` : `document.getElementById('sm-watch0').click()`);
   await b.ev(`document.getElementById('sm-fight').click()`); await sleep(1500);
   console.log('戰鬥中：', await b.ev(`JSON.stringify({ phase: __demo.GAME.phase, watch: __demo.GAME.watch, fleets: __demo.fleets().map((f) => f.side + ':' + f.name + (f.reserve ? '(待命)' : '')) })`));
   await b.shot(path.join(out, `live-${HOW}-battle.png`));

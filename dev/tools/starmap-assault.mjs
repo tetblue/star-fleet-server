@@ -10,14 +10,14 @@ try {
   const session = await register(srv.url, 'smas');
   await openGame(b, srv.url, session, '');
   await b.ev(`window.addEventListener('error', (e) => (window.__smErr = (window.__smErr || []).concat(String(e.message))))`);
-  const setup = await b.ev(`(() => { STORE.removeItem('fleet.career1'); STORE.setItem('fleet.career.meta', JSON.stringify({ runs: 0, unlock: ['cap', 'cmd', 'army', 'gov', 'head'], best: [] })); document.getElementById('m-single').click(); document.querySelector('[data-spm="career"]').click(); { const r = document.querySelector('input[name="sm-start"][value="cmd"]'); if (r) r.click(); } document.getElementById('sm-go').click();
+  const setup = await b.ev(`(() => { STORE.removeItem('fleet.career1'); STORE.setItem('fleet.career.meta', JSON.stringify({ runs: 0, unlock: ['cap', 'cmd', 'army', 'gov', 'head'], best: [] })); document.getElementById('m-single').click(); document.querySelector('[data-spm="career"]').click(); { const r = document.querySelector('#sm-start [data-v="cmd"]'); if (r) r.click(); } document.getElementById('sm-go').click();
     const S = __sm.SMU.S, tg = S.sys.find((s) => s.owner === 2), fl = __sm.smPlFleets(S);
     for (const f of S.fleets) if (f.sys === tg.id) f.comp = f.comp.map(() => 0);   // 軌道上的敵艦已經清掉
     for (const f of fl) f.sys = tg.id;
-    tg.sg = { f: 0, t: 1 }; __sm.SMU.sys = tg.id; __sm.smuRender(); window.confirm = () => true;
+    tg.sg = { f: 0, t: 1 }; __sm.smuRender(); __sm.smuOpen('sys', tg.id);
     return tg.name + '：守軍 ' + Math.round(tg.gar) + '、防衛建築 ' + tg.def; })()`);
   console.log('目標：', setup);
-  await b.ev(`document.getElementById('${HOW === 'cmd' ? 'sm-as-cmd' : 'sm-as-watch'}').click()`); await sleep(2000);
+  await b.ev(`document.getElementById('${HOW === 'cmd' ? 'sm-as-cmd' : 'sm-as-watch'}').click(); document.getElementById('sm-ask-ok').click()`); await sleep(2000);
   console.log('戰鬥中：', await b.ev(`JSON.stringify({ phase: __demo.GAME.phase, ground: !!__demo.GRD(), tur: __demo.GRD() && __demo.GRD().live, fleets: __demo.fleets().map((f) => f.side + ':' + f.name) })`));
   await b.shot(path.join(out, `assault-${HOW}-battle.png`));
   for (let k = 0; k < 160; k++) {

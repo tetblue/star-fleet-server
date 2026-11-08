@@ -1,6 +1,6 @@
 // ───── 星海生涯（STAR CAREER）：回合制星圖的資料模型（不碰畫面；畫面在 starmap_ui.js）─────
 // 規則見 dev/星海生涯企劃.md。這裡的程式也給 tools/starmap-run.mjs 在 node 裡跑（只用到 SHIP_TYPES 一個外部常數）。
-// 一回合＝一週。流程：玩家下令 → smTurnMove（AI 下令、所有艦隊移動、途中攔截）→ smBattles 列出戰鬥 → 玩家選擇介入方式 →
+// 一回合＝一週。流程：週初 smAiPlan（AI 先下令，玩家看得到動向）→ 玩家下令 → smTurnMove（所有艦隊移動、途中攔截）→ smBattles 列出戰鬥 → 玩家選擇介入方式 →
 //   smResolve 逐場計算 → smTurnEnd（圍城、強攻、經濟、事件、下一回合）。
 const SM_STORE = 'fleet.career1';
 const SM_A = 0, SM_E = 1, SM_P = 2, SM_N = 3;   // 勢力：聯盟、帝國、海盜、中立
@@ -159,6 +159,7 @@ function smNewGame(o = {}) {
   smTechInit(S); smIntelTick(S);
   smLog(S, start === 'cap' ? `你是聯盟的艦長，帶著特戰小隊駐守前線的 ${front.name}，等候上級的命令` : `你以${SM_STARTS[start].name}的身分開始，前線在 ${front.name}`, 'ev');
   smGenMissions(S);
+  smAiPlan(S);
   return S;
 }
 function smLog(S, t, c) { S.log.push({ turn: S.turn, t, c: c || '' }); if (S.log.length > 400) S.log.splice(0, S.log.length - 400); }
@@ -514,8 +515,10 @@ function smResupply(S, fl) {
 
 /* ───── 回合 ───── */
 // 第一段：AI 下令、所有艦隊移動；回傳這回合的戰鬥
+// AI 在每一週開始時就先下好命令（玩家看得到的單位，星圖上會畫出下一回合的動向）
+function smAiPlan(S) { for (const fac of [SM_A, SM_E, SM_P].sort(() => smRnd(S) - 0.5)) smAiTurn(S, fac); S.aiT = S.turn; }
 function smTurnMove(S) {
-  for (const fac of [SM_A, SM_E, SM_P].sort(() => smRnd(S) - 0.5)) smAiTurn(S, fac);
+  if (S.aiT !== S.turn) smAiPlan(S);   // 舊存檔：這一週還沒下令的話現在下
   for (const f of S.fleets) f.icp = false;
   smMoveAll(S);
   S.pend = smBattles(S);
@@ -548,6 +551,7 @@ function smTurnEnd(S) {
   smEvents(S);
   S.turn++;
   smIntelTick(S);   // 新的一週：更新情報（太陽風暴的星系看不到）
+  smAiPlan(S);
 }
 function smEvents(S) {
   for (const f of [SM_A, SM_E, SM_P]) S.fac[f].ww = Math.max(0, S.fac[f].ww - 0.4);
@@ -574,6 +578,8 @@ function smAutoTurn(S) {
   smAutoCareer(S);
   for (const f of smPlFleets(S)) f.pl = false;
   const ids = S.pl.fleets.slice();
+  for (const f of S.fleets) if (f.fac === S.pl.fac) f.path = null;   // 玩家的陣營重新下令一次（連同玩家的艦隊，照 AI 的方式）
+  smAiTurn(S, S.pl.fac);
   smTurnMove(S);
   for (const b of S.pend) { smResolve(S, b.sys, 'ai'); b.done = true; }
   for (const f of S.fleets) if (ids.includes(f.id)) f.pl = true;
