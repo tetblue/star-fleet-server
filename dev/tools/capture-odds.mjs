@@ -60,7 +60,8 @@ const show = (name, L) => {
   console.log(`  ① 只打目標星系現有艦隊：勝率 <5% ${pct(c((x) => x.p0 < 0.05), n)}、<20% ${pct(c((x) => x.p0 < 0.2), n)}、≥50% ${pct(c((x) => x.p0 >= 0.5), n)}、>85% ${pct(c((x) => x.p0 > 0.85), n)}（沒有敵艦隊 ${pct(c((x) => !x.eShips), n)}）`);
   console.log(`  ② 加上相鄰星系的敵艦：勝率 <5% ${pct(c((x) => x.p1 < 0.05), n)}、<20% ${pct(c((x) => x.p1 < 0.2), n)}`);
   console.log(`  ③ 任務期間最糟的時候：勝率 <5% ${pct(c((x) => x.pMin < 0.05), n)}、<20% ${pct(c((x) => x.pMin < 0.2), n)}`);
-  console.log(`  有支援艦隊 ${pct(c((x) => x.loan), n)}；結果：完成 ${pct(c((x) => x.state === 'done'), n)}、失敗 ${pct(c((x) => x.state === 'fail'), n)}`);
+  console.log(`  有支援艦隊 ${pct(c((x) => x.loan), n)}；結果：完成 ${pct(c((x) => x.state === 'done'), n)}、失敗 ${pct(c((x) => x.state === 'fail'), n)}、撤銷 ${pct(c((x) => x.state === 'withdrawn'), n)}`);
+  const live = L.filter((x) => x.state !== 'withdrawn'); console.log(`  沒撤銷的任務裡，期間最糟勝率 <5% ${pct(live.filter((x) => x.pMin < 0.05).length, live.length)}、<20% ${pct(live.filter((x) => x.pMin < 0.2).length, live.length)}`);
   const bad = L.filter((x) => x.p0 < 0.05);
   if (bad.length) console.log(`  勝率 <5% 的任務：玩家中位 ${Math.round(bad.map((x) => x.pShips).sort((a, b) => a - b)[Math.floor(bad.length / 2)] * rep)} 艘 vs 敵方中位 ${Math.round(bad.map((x) => x.eShips).sort((a, b) => a - b)[Math.floor(bad.length / 2)] * rep)} 艘；有支援艦隊 ${pct(bad.filter((x) => x.loan).length, bad.length)}；考核 ${pct(bad.filter((x) => x.exam).length, bad.length)}`);
 };

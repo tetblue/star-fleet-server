@@ -22430,9 +22430,10 @@ function smIntel(S, sid, fac) {
 }
 
 /* ───── 任務 ───── */
-// M＝{ id, from: { name, role }, kind: 'order' 上級命令｜'request' 派系委託, type, sys, due（最後一週）, goal, support, intel, reward, exam, state: 'offer'｜'open'｜'done'｜'fail'｜'declined' }
+// M＝{ id, from: { name, role }, kind: 'order' 上級命令｜'request' 派系委託, type, sys, due（最後一週）, goal, support, intel, reward, exam, state: 'offer'｜'open'｜'done'｜'fail'｜'declined'｜'withdrawn'（敵軍增援、上級撤銷，不扣分） }
 function smNewMission(S, o) {
   const M = { id: S.nextId++, state: o.kind === 'order' ? 'open' : 'offer', t0: S.turn, ...o };
+  if (M.type === 'capture') M.en0 = smCapEnemy(S, M.sys);   // 發令時目標的敵艦戰力（之後增援多少，用來判斷要不要撤銷）
   S.pl.missions.push(M);
   if (M.support && M.support.loans) {   // 支援：發令時依兵力差距挑好的艦隊（smPickCapture），任務結束收回
     const got = [];
@@ -22482,6 +22483,13 @@ function smMisFail(S, M, why) {
   smMisEnd(S, M);
   if (M.exam) S.pl.exam = null;
 }
+// 佔領任務：敵軍增援到打不贏（勝率低於 SM_CAP_QUIT，而且敵艦比發令時多），上級撤銷命令，不扣信任、戰功
+function smMisWithdraw(S, M) {
+  M.state = 'withdrawn';
+  smLog(S, `${M.kind === 'order' ? '命令撤銷' : '委託取消'}：${smMisText(S, M)}（敵軍增援，勝算太低；不扣分）`, 'ev');
+  smMisEnd(S, M);
+  if (M.exam) S.pl.exam = null;   // 考核改天重發
+}
 function smMisEnd(S, M) {   // 收回支援的艦隊
   for (const f of S.fleets) if (f.loan === M.id) { f.pl = false; f.loan = null; f.path = null; S.pl.fleets = S.pl.fleets.filter((id) => id !== f.id); }
 }
@@ -22494,6 +22502,7 @@ function smMissionTick(S) {
     const s = M.sys != null ? S.sys[M.sys] : null;
     if (M.type === 'capture' && s.owner === p.fac && (!M.exam || M.byPl)) { smMisDone(S, M); continue; }
     if (M.type === 'capture' && s.owner === p.fac && M.exam && !M.byPl) { smMisFail(S, M, '被別人佔領了'); continue; }
+    if (M.type === 'capture' && smCapEnemy(S, M.sys) > (M.en0 || 0) * SM_CAP_QUIT.grow + 3 && smCapOdds(S, M.sys, [], true) < SM_CAP_QUIT.p) { smMisWithdraw(S, M); continue; }
     if (M.type === 'destroy' && p.kills - (M.kills0 || 0) >= M.goal) { smMisDone(S, M); continue; }
     if (M.type === 'prosper' && s.prosp >= M.goal) { smMisDone(S, M); continue; }
     if (M.type === 'defend' && s.owner !== p.fac) { smMisFail(S, M, `${s.name} 失守`); continue; }
@@ -22539,13 +22548,15 @@ function smGenMissions(S) {
 const SM_CAP_BAND = [0.35, 0.85];   // 一般命令、委託：勝率落在這個區間的目標優先；低於下限的不發
 const SM_CAP_EXAM = 0.5;            // 升遷考核：勝率至少這麼多
 const SM_CAP_AIM = 0.6;             // 撥支援時：撥到勝率至少這麼多（或撥滿上限）
+const SM_CAP_QUIT = { p: 0.2, grow: 1.3 };   // 任務期間敵艦比發令時多 30% 以上、而且艦隊修好了勝率也低於 20%：撤銷命令（不扣分）
 const SM_CAP_LOAN = { max: 3, keep: 2, hop: 4 };   // 支援最多撥幾支、陣營至少留幾支自己用、多遠以內的艦隊
 // 玩家能指揮的艦隊（加上 extra）打目標星系現有敵軍的勝率
-function smCapOdds(S, sid, extra = []) {
+const smCapEnemy = (S, sid) => smEnemyAt(S, S.pl.fac, sid).reduce((a, f) => a + smVal(f.comp), 0);   // 目標星系的敵艦戰力
+function smCapOdds(S, sid, extra = [], full = false) {   // full：玩家的艦隊算修好、補滿編成
   const mine = [...S.fleets.filter((f) => f.pl && !f.cap && smShips(f.comp) > 0), ...extra], en = smEnemyAt(S, S.pl.fac, sid);
   if (!en.length) return 1; if (!mine.length) return 0;
-  const sum = (L) => L.reduce((c, f) => smAdd(c, f.comp), new Array(SHIP_TYPES.length).fill(0));
-  return smWinP(sum(mine), sum(en), smLv(mine), smLv(en), S.pl.fac, en[0].fac, smTac(mine), smTac(en));
+  const sum = (L, my) => L.reduce((c, f) => smAdd(c, my && full ? f.init || f.comp : f.comp), new Array(SHIP_TYPES.length).fill(0));
+  return smWinP(sum(mine, true), sum(en), smLv(mine), smLv(en), S.pl.fac, en[0].fac, smTac(mine), smTac(en));
 }
 // 挑佔領目標：先算玩家自己的勝率，不夠（低於 lo）就從附近的友軍撥艦隊，撥到 SM_CAP_AIM；還是低於 lo 的目標不考慮。
 // 勝率在 [lo, hi] 的優先；都太簡單（例如沒有敵艦隊、只有地面防禦）才用簡單的。回傳 { t, p, loans } 或 null
