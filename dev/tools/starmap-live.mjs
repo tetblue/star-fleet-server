@@ -24,7 +24,7 @@ try {
   await b.ev(`document.getElementById('sm-end').click()`); await sleep(300); for (let w = 0; w < 40 && await b.ev(`!!__sm.SMU.anim`); w++) await sleep(150);   // 等移動動畫播完
   const has = await b.ev(`!!document.getElementById('sm-fight')`);
   if (!has) throw new Error('沒有出現戰鬥選項');
-  await b.ev(HOW === 'cmd' ? `document.querySelector('#sm-how0 [data-v="cmd"]').click()` : `document.getElementById('sm-watch0').click()`);
+  await b.ev(HOW === 'cmd' ? `document.querySelector('#sm-how0 [data-v="cmd"]').click()` : `document.querySelector('#sm-how0 [data-v="watch"]').click()`);
   await b.ev(`document.getElementById('sm-fight').click()`); await sleep(1500);
   console.log('戰鬥中：', await b.ev(`JSON.stringify({ phase: __demo.GAME.phase, watch: __demo.GAME.watch, fleets: __demo.fleets().map((f) => f.side + ':' + f.name + (f.reserve ? '(待命)' : '')) })`));
   await b.shot(path.join(out, `live-${HOW}-battle.png`));

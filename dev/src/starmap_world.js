@@ -50,6 +50,12 @@ function smIntelTick(S) {
     if (fleetAt.has(s.id) || (s.owner === p.fac && !storm)) smSeen(S, s.id, 2, '同陣營');
     else if (near.has(s.id) && !storm) smSeen(S, s.id, 0, '雷達');
   }
+  // 深空雷達（巨型建築）：周圍 2 個航道內是普通準確度的情報（看得到艦數）
+  for (const s of S.sys) if (s.owner === p.fac && s.mega.radar && !smWxOn(S, s, 'solar')) {
+    const seen = new Set([s.id]); let R = [s.id];
+    for (let k = 0; k < 2; k++) { const nx = []; for (const i of R) for (const j of S.adj[i]) if (!seen.has(j)) { seen.add(j); nx.push(j); } R = nx; }
+    for (const j of seen) if (j !== s.id && !smWxOn(S, S.sys[j], 'solar')) smSeen(S, j, 1, '深空雷達');
+  }
 }
 function smSeen(S, sid, q, src) {
   const p = S.pl, s = S.sys[sid], old = p.intel[sid];

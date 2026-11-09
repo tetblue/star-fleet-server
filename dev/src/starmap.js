@@ -131,7 +131,7 @@ function smNewFleet(S, fac, sys, comp, o = {}) {
 }
 function smArchComp(arch, ships) { return SM_ARCH[arch].mix.map((x) => Math.round(ships * x)); }
 function smNewGame(o = {}) {
-  const S = { v: 1, r: (o.seed >>> 0) || 1, turn: 1, diff: o.diff || 1, nextId: 1, sys: [], edges: [], adj: [], fleets: [], log: [], reports: [], pend: null,
+  const S = { v: 1, r: (o.seed >>> 0) || 1, turn: 1, diff: o.diff ?? 1, nextId: 1, sys: [], edges: [], adj: [], fleets: [], log: [], reports: [], pend: null,
     fac: [0, 1, 2, 3].map((f) => ({ money: f === SM_P ? 300 : 800, ww: 0 })), rel: [[0, -60, -100, 0], [-60, 0, -100, 0], [-100, -100, 0, 0], [0, 0, 0, 0]],
     pl: { fac: SM_A, money: 400, merit: 0, fleets: [], dead: 0, autoWatch: false }, st: { cap: [0, 0, 0, 0], battles: 0, plBattles: 0 } };
   smGenMap(S);
