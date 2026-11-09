@@ -24,7 +24,7 @@ const SMU_CSS = `
 .sm-hint{width:100%;font-size:12px;color:#9fe8c0;text-shadow:0 1px 3px #000;pointer-events:none}
 .sm-card{position:absolute;width:350px;max-height:calc(100% - 20px);overflow-y:auto;background:#0b111bf4;border:1px solid #2a3a52;border-radius:8px;padding:10px 12px 12px;box-shadow:0 6px 28px #000c;z-index:2}
 .sm-card h3{margin:0 24px 6px 0;font-size:15px}.sm-card h4{margin:10px 0 4px;font-size:12px;color:#9fb3cc;font-weight:600;letter-spacing:1px}
-.sm-card a,.sm-box a{color:#7fb8ff}
+.sm-card a,.sm-box a,.sm-tip a{color:#7fb8ff}
 .sm-x{position:absolute;right:6px;top:3px;background:none;border:0;color:#8b9bb0;font-size:20px;cursor:pointer;line-height:1}.sm-x:hover{color:#fff}
 .sm-row{display:flex;align-items:center;gap:7px;padding:2px 0}.sm-dot{width:10px;height:10px;border-radius:50%;flex:none}
 .sm-kv{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;margin:0}.sm-kv dt{color:#8b9bb0}.sm-kv dd{margin:0}
@@ -49,6 +49,10 @@ const SMU_CSS = `
 .sm-say{flex:1;background:#121b29;border:1px solid #1d2838;border-radius:8px;padding:8px 12px;line-height:1.75}
 .sm-say .who{font-weight:600;margin-bottom:2px}.sm-say .who span{color:#8b9bb0;font-weight:400;margin-left:6px;font-size:12px}
 table.sm-t{border-collapse:collapse;width:100%;font-size:12px;margin-top:6px}table.sm-t td,table.sm-t th{border-bottom:1px solid #1a2433;padding:3px 6px;text-align:right}table.sm-t th:first-child,table.sm-t td:first-child{text-align:left}
+.sm-tip{position:absolute;right:10px;top:10px;width:300px;background:#0b111bf4;border:1px solid #2a3a52;border-left:3px solid #ffb35a;border-radius:8px;padding:10px 12px;box-shadow:0 6px 28px #000c;z-index:3;line-height:1.65;animation:smTipIn .35s ease-out}
+.sm-tip h4{margin:0 22px 4px 0;font-size:14px;color:#ffb35a}.sm-tip p{margin:4px 0}.sm-tip label{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12px;color:#9fb3cc;cursor:pointer}
+@keyframes smTipIn{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
+@media (max-width:760px){.sm-tip{left:8px;right:8px;width:auto}}
 @media (max-width:760px){.sm-card{left:8px!important;right:8px;width:auto;top:auto!important;bottom:8px;max-height:62%}.sm-leg{font-size:11px;line-height:1.5}}
 `;
 const smuEsc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -138,6 +142,36 @@ function smuTurnStart(reps) {
   if (reps.length) smuLater(() => smuReports(reps, `第 ${S.turn - 1} 週的戰報`));
   if (S.pl.offerGov && !S.pl.offerAsked) { S.pl.offerAsked = true; smSave(S); smuLater(smuOfferGov); }
   for (const M of S.pl.missions.filter((x) => !x.brief && (x.state === 'open' || x.state === 'offer'))) smuLater(() => smuBrief(M));
+  smuLater(smuResupplyTip);
+}
+
+// ───── 側邊提示（玩家可以勾「不再顯示」；記在 STORE，跨存檔）─────
+const SMU_TIP_STORE = 'fleet.smtips';
+function smuTipOff(k) { try { return !!(JSON.parse(STORE.getItem(SMU_TIP_STORE) || '{}') || {})[k]; } catch (e) { return false; } }
+function smuTipSetOff(k) { try { const o = JSON.parse(STORE.getItem(SMU_TIP_STORE) || '{}') || {}; o[k] = 1; STORE.setItem(SMU_TIP_STORE, JSON.stringify(o)); } catch (e) { /* 只在本次 */ } }
+function smuTip(k, title, html) {
+  const map = gEl('sm-map'); if (!map || smuTipOff(k)) return;
+  const old = gEl('sm-tip'); if (old) old.remove();
+  const el = document.createElement('div'); el.className = 'sm-tip'; el.id = 'sm-tip';
+  el.innerHTML = `<button class="sm-x" id="sm-tip-x" title="關閉">×</button><h4>${title}</h4>${html}<label><input type="checkbox" id="sm-tip-off">不再顯示這個提示</label>`;
+  map.appendChild(el);
+  gEl('sm-tip-x').onclick = () => { if (gEl('sm-tip-off').checked) smuTipSetOff(k); el.remove(); };
+  gEl('sm-tip-off').onchange = (e) => { if (e.target.checked) smuTipSetOff(k); else try { const o = JSON.parse(STORE.getItem(SMU_TIP_STORE) || '{}') || {}; delete o[k]; STORE.setItem(SMU_TIP_STORE, JSON.stringify(o)); } catch (er) { /* 只在本次 */ } };
+  el.querySelectorAll('[data-goto]').forEach((b) => (b.onclick = (e) => { e.preventDefault(); smuOpen('sys', +b.dataset.goto); }));
+}
+// 艦隊受損：告訴玩家怎麼補充（最近的己方船塢、要多少錢）。每次開啟星海生涯最多提示一次
+function smuResupplyTip() {
+  const S = SMU.S; if (!S || SMU.tipRs || smuTipOff('resupply') || S.pl.status === '終結') return;
+  const hurt = S.fleets.filter((f) => f.pl && !f.cap && !f.loan && smShips(f.comp) > 0 && smShips(f.comp) < smShips(f.init) * 0.85).sort((a, b) => smShips(a.comp) / smShips(a.init) - smShips(b.comp) / smShips(b.init));
+  if (!hurt.length) return;
+  SMU.tipRs = true;
+  const f = hurt[0], yards = smOwned(S, S.pl.fac).filter((s) => (s.cap || s.mega.dock) && !s.sg).sort((a, b) => smHop(S, f.sys, a.id) - smHop(S, f.sys, b.id)), y = yards[0], cost = smResupplyCost(S, f).cost;
+  const where = !y ? '<p class="sm-bad">目前沒有能用的己方船塢（都失守或被圍城了）。</p>'
+    : y.id === f.sys ? `<p>它現在就停在船塢 <a href="#" data-goto="${y.id}">${smuEsc(y.name)}</a>：點艦隊卡片上的「補充」就好。</p>`
+    : `<p>最近的船塢：<a href="#" data-goto="${y.id}">${smuEsc(y.name)}</a>（${smHop(S, f.sys, y.id)} 跳）。</p>`;
+  smuTip('resupply', '艦隊受損了', `<p><b>${smuEsc(f.name)}</b> 剩 ${smuShip(smShips(f.comp))}／${smuShip(smShips(f.init))} 艘。</p>
+    <p>補充方法：把艦隊開到己方的船塢星系（星圖上名稱旁有 ⚓ 的首都或大型船塢），在艦隊卡片按「補充」，用你的資金補回原本的編成。被圍城的船塢不能用。</p>${where}
+    <p class="g-dim">補滿要 ${smuN(cost)}（你有 ${smuN(S.pl.money)}）。錢不夠的話能補多少算多少。打贏、留在戰場的一方戰後會修回 25% 損失；撤退的不會。</p>`);
 }
 
 // ───── 星圖 ─────
