@@ -805,7 +805,7 @@ function pilotRay(ox, oy, oz, D, R, W, lead, es = 1 - PL.side) {   // es：要�
       const sh = s - Math.sqrt(r * r - p2); if (sh > 0 && sh < best) { best = sh; k = 's'; hi = i; }
     }
   }
-  if (GRD) { const h = groundTargetRay(ox, oy, oz, D, best, es); if (h) { best = h.s; k = 'g'; hi = h.i; } }   // 近地：地面目標
+  if (GRD || CAP.on) { const h = groundTargetRay(ox, oy, oz, D, best, es); if (h) { best = h.s; k = 'g'; hi = h.i; } }   // 近地：地面目標
   if (SOLID) { const b = rockBlock(ox, oy, oz, ox + D[0] * best, oy + D[1] * best, oz + D[2] * best); if (b >= 0) { best *= b; k = 'r'; hi = -1; } }
   if (GRD) { const h = groundRay(ox, oy, oz, D, best); if (h) { best = h.s; k = h.k; hi = h.i; } }   // 近地：地面、一般建築
   return { k, i: hi, g: hg, s: best };

@@ -98,7 +98,7 @@ function groundTargetsInit(D, def) {
 }
 // 玩家的武器打中地面目標（processHits 的 'gt'）
 function groundTargetHit(e) {
-  const g = GRD && GRD.gts && GRD.gts[e.gi]; if (!g || gtDead(g)) return;
+  const L = GRD ? GRD.gts : CAP.on && CAP.G ? CAP.G.gts : null, g = L && L[e.gi]; if (!g || gtDead(g)) return;   // 艦長的太空戰場：設施在 CAP.G
   if (g.tu) { turretHit({ k: g.tu.k, dmg: e.dmg * GT_TURRET_MUL, x: e.x, y: e.y, z: e.z, side: e.side }); if (e.pl) groundTargetCredit(g, e.dmg, gtDead(g), e.pl); return; }
   g.hp -= e.dmg;
   if (plRnd() < 0.5) spawnFx(e.x, e.y, e.z, e.side, g.kind === 'navy' || g.kind === 'bldg' ? 1.2 : 0.5, 24);
@@ -108,7 +108,7 @@ function groundTargetHit(e) {
     const big = g.kind === 'navy' || g.kind === 'bldg';
     spawnFx(g.x, g.y + g.hh, g.z, g.side, big ? 3.5 : 1.2, 22);
     groundScar(g.x, g.y, g.z, big ? 2 : 0.5);
-    if (big || plRnd() < 0.3) groundPlume(g.x, g.z, U.uTime.value, big ? 120 : 40, big ? 9 : 3, big ? 1.4 : 0.8);
+    if (GRD && (big || plRnd() < 0.3)) groundPlume(g.x, g.z, U.uTime.value, big ? 120 : 40, big ? 9 : 3, big ? 1.4 : 0.8);
   }
   if (e.pl) groundTargetCredit(g, e.dmg, kill, e.pl);
   if (CAP.on) capCreditG(g, e.dmg, kill);   // 艦長：戰果、任務進度
@@ -173,9 +173,9 @@ function groundRay(ox, oy, oz, D, maxS) {
 }
 // 射線：最先碰到的敵方地面目標（球形判定，判定半徑比模型大，好打一點）
 function groundTargetRay(ox, oy, oz, D, best, es) {
-  if (!GRD || !GRD.gts) return null;
+  const L = GRD ? GRD.gts : CAP.on && CAP.G ? CAP.G.gts : null; if (!L) return null;
   let hit = null;
-  for (const g of GRD.gts) {
+  for (const g of L) {
     if (g.side !== es || gtDead(g)) continue;
     const qx = g.x - ox, qy = g.y + g.hh - oy, qz = g.z - oz, s = qx * D[0] + qy * D[1] + qz * D[2];
     if (s <= 0 || s - g.r > best) continue;

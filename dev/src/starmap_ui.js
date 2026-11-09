@@ -729,7 +729,7 @@ function smuMissionList() {
 function smuOp(M) {
   const S = SMU.S; if (!smOpReady(S, M)) return;
   const t = S.sys[M.sys], li = Math.max(0, Math.min(4, Math.max(0, SM_INTEL.indexOf(smIntel(S, M.sys, S.pl.fac)) - 2) + (t.def >= 4 ? 1 : 0) + S.diff - 1));
-  const p = { ...capLoad(), seed: (S.turn * 7919 + t.id * 104729 + S.r) % 100000, diff: li, mis: M.op, env: 0, fac: SM_FAC[S.pl.fac].game === 0 ? 0 : 1 };
+  const p = { ...capLoad(), seed: (S.turn * 7919 + t.id * 104729 + S.r) % 100000, diff: li, mis: M.op, env: 0, space: false, fac: SM_FAC[S.pl.fac].game === 0 ? 0 : 1 };
   smSave(S);
   simEndMid(); overlay(null);
   const m = capLayout(p); m.career = { op: M.id }; m.name = `${t.name}・${m.name}`;
@@ -779,7 +779,7 @@ function smuRaidGo(t, c) {
   const S = SMU.S;
   if (!smRaidInfiltrate(S, t)) { smSave(S); smuRender(); toast('潛入時被發現，任務取消', 'bad'); return; }
   const li = Math.max(0, Math.min(4, Math.round(t.def / 2) + S.diff - 1));
-  const p = { ...capLoad(), seed: (S.turn * 7919 + t.id * 104729 + S.r) % 100000, diff: li, mis: 'sabotage', env: 0, fac: SM_FAC[S.pl.fac].game === 0 ? 0 : 1 };
+  const p = { ...capLoad(), seed: (S.turn * 7919 + t.id * 104729 + S.r) % 100000, diff: li, mis: 'sabotage', env: 0, space: false, fac: SM_FAC[S.pl.fac].game === 0 ? 0 : 1 };
   smSave(S); simEndMid(); overlay(null);
   const m = capLayout(p); m.career = { raid: t.id }; m.name = `突襲 ${t.name}・${m.name}`;
   SIM.m = m; SIM.sel = null; camAnim = null; SMB = { raid: t.id };
