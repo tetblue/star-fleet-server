@@ -435,36 +435,46 @@ function ccTakeCommand(S, q) {
   if (P && P.ships.length && P.sys !== q.sys) return '要和現在指揮的小隊在同一個星系';
   S.pl.sq = q.id; q.task = null; ccLog(S, `你改為親自指揮${q.name}`, 'ev'); return '';
 }
-// ───── 派出的小隊：任務、地面突襲的成功率與存活率 ─────
-// 用任務 AI 實際打的 393 場派出任務擬合（capmisai.js 的 capOpDuel，2026-11-10，預測準確 88%）：
-//   成功 logit ＝ 基準 ＋ 任務種類 ＋ 0.66×(平均耐久 − 0.7) − 0.49×任務難度 ＋ 偵察 0.4 − 每個守備小隊 0.2
-//   存活 logit ＝ 艦種基準 ＋ 0.2×logit(成功率) − 0.24×任務難度
-//   任務難度＝遊戲難度的 li ＋（地面防禦 ≥4 時 +1），上限 4（和親自出擊的 ccLaunch 一樣）；AI 勢力的特戰當作普通難度。
-//   小隊戰力的係數擬合出來接近 0（任務的敵人會跟著我方的小隊調整），所以不算。地面突襲（raid）照破壞任務。
-const CC_OPFIT = {
-  a0: 2.98, hp: 0.66, li: -0.49, intel: 0.4, guard: -0.2,
-  op: { decap: 0.44, escort: 0.92, intercept: -2.78, rescue: -2.36, run: 0.77, sabotage: -0.65, scan: 1.92, strike: 1.41, wipe: 0.65, raid: -0.65 },
-  surv: { assault: 3.27, gunship: 3.01, support: 3.14, ew: 3.18, stealth: 2.58 }, sp: 0.2, sli: -0.24,
+// ───── 派出的小隊（玩家與 AI 勢力共用）：任務、地面突襲的成功率與存活率 ─────
+// 統一的加減公式，每一項都是百分點，讓玩家看得懂要提升哪一方面：
+//   成功率 ＝ 90% ＋ 任務難易（易 +10／中 −10／難 −45）＋ 戰力（每 1 點 ±4，以 3 為準，±20 封頂）＋ 耐久（平均每高於 70% 10 點 +3）
+//           − 敵方難度（每級 5）＋ 偵察 +8 − 目標星系每個敵方小隊 5，限制在 5%～95%
+//   存活率 ＝ 90% ＋ 成功率 × 8% − 敵方難度 × 2% ＋（這艘船的耐久 − 70%）× 10% ＋ 艦種（匿蹤艦 −3），限制在 30%～99%
+// 係數對齊 2026-11-10 任務 AI 實打的 393 場（capmisai.js）：易＝偵察、摧毀設施、突破封鎖、護航、斬首、全滅（實測 93～100%），
+//   中＝破壞、地面突襲（77%），難＝攔截、救援撤離（32～44%）；難度 0→4 實測 89%→70%；存活率實測約 96%、匿蹤艦 93%。
+//   實測裡小隊戰力幾乎不影響結果（任務的敵人跟著我方調整），但為了讓「派更強的小隊」有意義，公式保留一個溫和的戰力項。
+const CC_OPF = {
+  base: 90, tier: { easy: 10, mid: -10, hard: -45 }, pow: 4, powRef: 3, powCap: 20, hp: 3, li: -5, intel: 8, guard: -5, lo: 5, hi: 95,
+  sBase: 90, sP: 8, sLi: -2, sHp: 10, sHull: { stealth: -3 },
 };
-const ccSig = (z) => 1 / (1 + Math.exp(-z));
+const CC_OP_TIER = { scan: 'easy', strike: 'easy', run: 'easy', escort: 'easy', decap: 'easy', wipe: 'easy', sabotage: 'mid', raid: 'mid', intercept: 'hard', rescue: 'hard' };
+const CC_TIER_NAME = { easy: '易', mid: '中', hard: '難' };
+// 敵方難度＝遊戲難度的 li ＋（地面防禦 ≥4 時 +1），上限 4（和親自出擊的 ccLaunch 一樣）；AI 勢力的特戰當作普通難度
 function ccOpLi(S, s, f) { return Math.min(4, (f === S.fac ? CC_DIFF[S.diff].li : 1) + (s.def >= 4 ? 1 : 0)); }
-function ccTaskOdds(S, q, t) {
-  const s = S.sys[t.sys], n = q.ships.length; if (!n) return { p: 0, surv: [] };
-  const op = t.kind === 'raid' ? 'raid' : (S.missions.find((M) => M.id === t.mis) || {}).op;
-  const p = ccOpP(S, q, op, s, q.fac), li = ccOpLi(S, s, q.fac);
-  return { p, surv: q.ships.map((c) => ccOpSurv(c, p, li)) };
-}
-function ccOpP(S, q, op, s, f) {
-  const n = q.ships.length; if (!n) return 0;
-  const K = CC_OPFIT, hp = q.ships.reduce((a, c) => a + c.hp, 0) / n;
+// 回傳 { p, li, parts: [[名稱, 百分點]…] }
+function ccOpCalc(S, q, op, s, f) {
+  const n = q.ships.length; if (!n) return { p: 0, li: 0, parts: [] };
+  const K = CC_OPF, tier = CC_OP_TIER[op] || 'mid', hp = q.ships.reduce((a, c) => a + c.hp, 0) / n, li = ccOpLi(S, s, f);
   const guard = ccAt(S, s.id).filter((x) => x.fac !== f && ccHostile(S, f, x.fac)).length;   // 目標星系裡有敵方的小隊
   const intel = f === S.fac ? ccIntel(S, s) : false;
-  const z = K.a0 + (K.op[op] || 0) + K.hp * (hp - 0.7) + K.li * ccOpLi(S, s, f) + (intel ? K.intel : 0) + K.guard * guard;
-  return Math.max(0.05, Math.min(0.97, ccSig(z)));
+  const parts = [['基準', K.base], [`任務難易（${CC_TIER_NAME[tier]}）`, K.tier[tier]],
+    ['戰力', Math.round(Math.max(-K.powCap, Math.min(K.powCap, K.pow * (ccPow([q]) - K.powRef))))],
+    ['耐久', Math.round(K.hp * (hp - 0.7) * 10)], ['敵方難度', K.li * li]];
+  if (intel) parts.push(['偵察', K.intel]);
+  if (guard) parts.push(['守備小隊', K.guard * guard]);
+  const v = parts.reduce((a, x) => a + x[1], 0);
+  return { p: Math.max(K.lo, Math.min(K.hi, v)) / 100, li, parts };
 }
+const ccOpP = (S, q, op, s, f) => ccOpCalc(S, q, op, s, f).p;
 function ccOpSurv(c, p, li) {
-  const K = CC_OPFIT, lp = Math.log(p / (1 - p));
-  return Math.max(0.3, Math.min(0.99, ccSig((K.surv[c.key] || 3) + K.sp * lp + K.sli * (li || 0))));
+  const K = CC_OPF;
+  return Math.max(0.3, Math.min(0.99, (K.sBase + K.sP * p + K.sLi * (li || 0) + K.sHp * (c.hp - 0.7) + (K.sHull[c.key] || 0)) / 100));
+}
+function ccTaskOp(S, t) { return t.kind === 'raid' ? 'raid' : (S.missions.find((M) => M.id === t.mis) || {}).op; }
+function ccTaskOdds(S, q, t) {
+  const s = S.sys[t.sys]; if (!q.ships.length) return { p: 0, surv: [], parts: [] };
+  const O = ccOpCalc(S, q, ccTaskOp(S, t), s, q.fac);
+  return { p: O.p, parts: O.parts, surv: q.ships.map((c) => ccOpSurv(c, O.p, O.li)) };
 }
 function ccTaskOk(S, q, t) {
   if (!q.ships.length || q.id === S.pl.sq) return false;
