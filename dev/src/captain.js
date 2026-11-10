@@ -403,8 +403,8 @@ function capSizeK(i) {
   return Math.max(0.7, Math.min(1.35, Math.sqrt(0.45 / wr)));
 }
 function capMakeUnit(u, id, hpM) {
-  const T = CAP_UNIT[u.type], y = !GRD && u.y != null ? u.y : T.sea ? GROUND_Y : terrainHAt(u.x, u.z), hp = Math.round(T.hp * hpM);
-  return { id, cu: u.type, kind: T.kind, sub: T.sub, name: T.name, x: u.x, y, z: u.z, hd: u.hd || 0, hp: u.hpf != null ? Math.max(1, Math.round(hp * u.hpf)) : hp, max: hp, di: u.di, r: T.r, hh: T.hh, aa: null, side: 1 - CAP.side, deadT: -1,
+  const T = CAP_UNIT[u.type], y = !GRD && u.y != null ? u.y : T.sea ? GROUND_Y : terrainHAt(u.x, u.z), hp = Math.round(T.hp * (u.own ? 1 : hpM));
+  return { id, cu: u.type, kind: T.kind, sub: T.sub, name: T.name, x: u.x, y, z: u.z, hd: u.hd || 0, hp: u.hpf != null ? Math.max(1, Math.round(hp * u.hpf)) : hp, max: hp, di: u.di, r: T.r, hh: T.hh, aa: null, side: u.own ? CAP.side : 1 - CAP.side, deadT: -1,
     mv: !!T.mv, mis: !!u.mis, def: !!u.def, air: u.air, st: 'idle', tx: u.x, tz: u.z, fcd: 3 + capRnd() * 6, fireT: -99, gcd: 0, moveT: 0, home: { x: u.x, z: u.z }, wp: null };
 }
 function capEnd() {
@@ -900,23 +900,23 @@ function capEscorts(t) {
 
 // ───── 敵方單位開火 ─────
 function capUnitsFire(dt, t) {
-  const Df = CAP.Df;
   for (const g of CAP.G.gts) {
-    if (g.side === CAP.side || gtDead(g)) continue;
+    if (gtDead(g)) continue;
+    const own = g.side === CAP.side, Df = own ? CAP_DIFF[1] : CAP.Df;   // 己方的軌道防禦（艦長生涯的迎擊戰）打敵艦
     const T = CAP_UNIT[g.cu]; if (!T.msl && !T.gun) continue;
     const ux = g.x, uy = g.y + g.hh * 2 + 0.3, uz = g.z;
     if (T.gun) {   // 機砲：先打護航機，再打看得到（已被發現）的船
       g.gcd -= dt;
       if (g.gcd <= 0) {
         let tj = -1, td = T.gun.range;
-        for (const j of aliveF[CAP.side]) { const d = Math.hypot(fP[j * 3] - ux, fP[j * 3 + 1] - uy, fP[j * 3 + 2] - uz); if (d < td) { td = d; tj = j; } }
+        for (const j of aliveF[own ? 1 - CAP.side : CAP.side]) { const d = Math.hypot(fP[j * 3] - ux, fP[j * 3 + 1] - uy, fP[j * 3 + 2] - uz); if (d < td) { td = d; tj = j; } }
         if (tj >= 0) {
           g.gcd = T.gun.cd * (0.8 + capRnd() * 0.4);
           const hit = capRnd() < T.gun.acc * 0.6, x = fP[tj * 3], y = fP[tj * 3 + 1], z = fP[tj * 3 + 2], dur = td / 520;
           spawnBeam(ux, uy, uz, x + (hit ? 0 : (capRnd() - 0.5) * 5), y, z + (hit ? 0 : (capRnd() - 0.5) * 5), t, dur, g.side, 0.5, Math.min(0.3, 6 / Math.max(1, td)), SIDE_FAC[g.side]);
           if (hit) pending.push({ kind: 'ak', a: 1, t: t + dur, i: tj, dmg: T.gun.dmg, side: g.side });
         } else {
-          const s = capPickShip(ux, uy, uz, T.gun.range, t);
+          const s = capPickShip(ux, uy, uz, T.gun.range, t, own);
           if (s) {
             g.gcd = T.gun.cd * (0.8 + capRnd() * 0.4); g.fireT = t;
             const d = Math.hypot(s.x - ux, s.y - uy, s.z - uz), hit = capRnd() < T.gun.acc * (GRD ? groundHitMul(uy, s.y) : 1), dur = d / 520;
@@ -930,20 +930,20 @@ function capUnitsFire(dt, t) {
     if (T.msl) {   // 反艦飛彈：要停著才能發射（飛彈車打完就換位置）
       g.fcd -= dt;
       if (g.fcd > 0 || (g.mv && g.st === 'move' && !T.sea)) continue;
-      const s = capPickShip(ux, uy, uz, T.msl.range, t);
+      const s = capPickShip(ux, uy, uz, T.msl.range, t, own);
       if (!s) { g.fcd = 1 + capRnd(); continue; }
       g.fcd = T.msl.cd * (0.85 + capRnd() * 0.3) / Math.sqrt(Df.n); g.fireT = t;
       for (let n = 0; n < T.msl.n; n++) launchMissileAt(ux, uy + 0.2, uz, g.side, null, s.i, T.msl.dmg * Df.dmg, t + n * 0.45, 1);
       if (g.mv && !T.sea) { const a = capRnd() * TAU, r = 45 + capRnd() * 60, x = g.x + Math.sin(a) * r, z = g.z + Math.cos(a) * r; if (capLandOk(x, z)) { g.st = 'move'; g.tx = x; g.tz = z; } }
-      if (t - (CAP.mslWarnT || -9) > 4 && s.k === CAP.cur) { CAP.mslWarnT = t; capFeed(`${g.name}發射飛彈！`, 'bad'); }
+      if (!own && t - (CAP.mslWarnT || -9) > 4 && s.k === CAP.cur) { CAP.mslWarnT = t; capFeed(`${g.name}發射飛彈！`, 'bad'); }
     }
   }
 }
 // 敵軍挑船：已被發現、射程內、視線沒被擋住的最近一艘
-function capPickShip(x, y, z, R, t) {
+function capPickShip(x, y, z, R, t, own) {
   let best = null, bd = R;
-  for (const s of CAP.own) {
-    if (s.dead || !ships.alive[s.i] || t >= s.knownT) continue;
+  for (const s of own ? CAP.foes : CAP.own) {   // own＝己方的單位挑敵艦（正面交戰，不必先發現）
+    if (s.dead || !ships.alive[s.i] || (!own && t >= s.knownT)) continue;
     const d = Math.hypot(s.x - x, s.y - y, s.z - z); if (d >= bd) continue;
     if (capBlock(x, y, z, s.x, s.y, s.z) >= 0) continue;
     bd = d; best = s;
@@ -1176,6 +1176,7 @@ function capCreditF() { const S = CAP.stats; if (!S) return; S.kf++; S.merit += 
 
 // ───── 任務 ─────
 function capMisInit(C) {
+  CAP.mai = null;
   const M = CAP.mis = { ...C, prog: 0, done: false, doneT: 0, gts: [], ship: -1 };
   if (M.type === 'sabotage' || M.type === 'strike') { M.gts = CAP.G.gts.filter((g) => g.mis).map((g) => g.id); M.goal = M.gts.length || 1; }
   if (M.type === 'decap') { const P = CAP.pat.find((p) => p.role === 'flag'); const q = P && P.f.sqs[0]; let best = -1; if (q) for (const i of q.list) if (best < 0 || ships.type[i] < ships.type[best]) best = i; M.ship = best; M.goal = 1; }
@@ -1321,7 +1322,8 @@ function capFinish(ok, why, extra) {
   const ret = !!(extra && extra.retreat);
   GAME.result = battleResult(ok ? 'win' : ret ? 'end' : 'lose', why, { capOk: ok, ...(extra || {}) });
   if (!ret && CAP.cfg && CAP.cfg.resumeP) { const p = capLoad(); if (p.resume) { p.resume = null; capSave(p); } }
-  if (CAP.cfg && CAP.cfg.duel) CAP.duelRow = capDuelRow();   // AI 對 AI：結果在報告畫面清掉之前記下來
+  if (CAP.cfg && CAP.cfg.duel) CAP.duelRow = capDuelRow();
+  if (CAP.cfg && CAP.cfg.opDuel) CAP.duelRow = capOpRow();   // 派出任務的實戰測試（capmisai.js）   // AI 對 AI：結果在報告畫面清掉之前記下來
 }
 
 // ───── 鏡頭 ─────

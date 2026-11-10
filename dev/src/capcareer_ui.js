@@ -30,7 +30,7 @@ function ccRender() {
   const S = CC.S, P = ccPl(S), cnt = [SM_A, SM_E, SM_P, SM_N].map((f) => S.sys.filter((s) => s.owner === f).length);
   const nMis = S.missions.filter((M) => M.state === 'open').length;
   overlay(`<style>${SMU_CSS}${CC_CSS}</style><div class="sm-wrap">
-    <div class="sm-top"><h2>艦長生涯</h2><span class="sm-chip">第 ${S.turn} 週</span><span class="sm-chip">${CC_ROLES[S.role].name}・${ccRankOf(S).name}</span><span class="sm-chip">資金 ${fmtN(Math.round(S.pl.money))}</span><span class="sm-chip">戰功 ${Math.round(S.pl.merit)}</span>
+    <div class="sm-top"><h2>艦長生涯</h2><span class="sm-chip">第 ${S.turn} 週</span><span class="sm-chip">${CC_ROLES[S.role].name}・${ccRankOf(S).name}</span><span class="sm-chip">資金 ${fmtN(Math.round(S.pl.money))}</span><span class="sm-chip">戰功 ${Math.round(S.pl.merit)}</span><span class="sm-chip" title="發出任務的勢力對你的好感度：任務失敗 −${CC_RULE.fav.fail}、完成 +${CC_RULE.fav.ok}；影響新任務的獎勵（×${ccFavK(S, S.fac).toFixed(2)}）">好感 ${Math.round(ccFavOf(S, S.fac))}</span><span class="sm-chip" title="勢力聲望（0～100）：佔領、交戰、特戰的成敗會改變，影響地面投降的評分">聲望 ${[SM_A, SM_E, SM_P].map((f) => `${SM_FAC[f].name.slice(0, 2)} ${Math.round((S.fame || [50, 50, 50])[f])}`).join('・')}</span>
       ${[SM_A, SM_E, SM_P, SM_N].map((f) => `<span class="sm-chip"><i style="background:${SM_FAC[f].col}"></i>${SM_FAC[f].name} ${cnt[f]}</span>`).join('')}
       <span class="sm-btnbar"><button class="g-btn" id="cc-mis">任務${nMis ? `<span class="sm-badge">${nMis}</span>` : ''}</button><button class="g-btn" id="cc-logb">紀錄</button><button class="g-btn" id="cc-quit">離開</button><button class="g-btn primary" id="cc-end" ${S.fin ? 'disabled' : ''}>結束這一週 →</button></span></div>
     <div class="sm-map" id="cc-map"><canvas id="cc-cv"></canvas>
@@ -183,7 +183,7 @@ function ccCard() {
       <dt>軌道防禦</dt><dd>${dl.length ? dl.map((d) => `${CAP_UNIT[d.type].name} ${Math.round(d.hp * 100)}%`).join('、') : '沒有'}</dd>
       <dt>設施</dt><dd>${[s.yard ? '維修船塢（修船、造艦）' : '', s.depot ? '補給站（補飛彈）' : ''].filter(Boolean).join('、') || '沒有'}</dd>
       <dt>太空</dt><dd>${CAP_SPACE[s.scene || 'belt'].name}<div class="g-dim" style="font-size:11px">${CAP_SPACE[s.scene || 'belt'].desc}</div></dd>
-      ${s.sg ? `<dt>圍城</dt><dd>${SM_FAC[s.sg.f].name}・第 ${s.sg.w} 週（${ccWeakGround(s) ? '地面防禦 0：投降' : `${ccSiegeNeed(s)} 週投降`}）</dd>` : ''}
+      ${s.sg ? (() => { const G = ccGroundScore(S, s, s.sg.f), P = G.p, f1 = (v) => (v >= 0 ? '+' : '') + v.toFixed(1); return `<dt>圍城</dt><dd>${SM_FAC[s.sg.f].name}・第 ${s.sg.w} 週（${ccSiegeNeed(s)} 週投降）</dd><dt>投降評分</dt><dd><b style="color:${G.v < 0 ? '#ff7a6b' : '#3fdf8f'}">${f1(G.v)}</b>${G.v < 0 ? '・下週投降' : '・抵抗'}<br><span class="g-dim">聲望 ${f1(P.fame)}・艦隊 ${f1(P.fleet)}・地面 ${f1(P.ground)}・鄰近艦隊 ${f1(P.near)}（負數就投降）</span></dd>`; })() : ''}
       ${ccCut(S, s) ? `<dt>補給</dt><dd style="color:#ffb35a">切斷到第 ${s.fx.cut} 週（不補飛彈、只修一半、防禦不重建）</dd>` : ''}
       ${ccIntel(S, s) ? `<dt>情報</dt><dd style="color:#7fdcff">偵察中，到第 ${s.fx.intel} 週</dd>` : ''}
       ${S.missions.filter((M) => M.state === 'open' && M.sys === s.id).map((M) => `<dt>任務</dt><dd style="color:#c9a7ff">${ccMisName(M)}・剩 ${M.due - S.turn} 週</dd>`).join('')}</dl>
@@ -294,10 +294,11 @@ function ccLaunch(S, kind, o) {
   let m, info = { kind, sys: s.id, own: [], foe: [], defIdx: [], mis: o.mis };
   if (kind === 'capture') {
     const B = S.pendB, A = B.A.map(ccSqById), D = B.D.map(ccSqById), mine = B.att ? A : D, foe = B.att ? D : A;
-    const own = [P, ...mine.filter((q) => q !== P)], defs = B.att ? ccDefsAlive(s) : [];
+    const own = [P, ...mine.filter((q) => q !== P)], defs = B.att ? ccDefsAlive(s) : [], ownDefs = !B.att && s.owner === S.fac ? ccDefsAlive(s) : [];
+    info.ownDefIdx = ownDefs.map((d) => s.defs.indexOf(d));
     info.own = own.map((q) => q.id); info.foe = foe.map((q) => q.id); info.att = B.att; info.defIdx = defs.map((d) => s.defs.indexOf(d));
     const duel = { a: own.map((q) => q.ships.map((c) => c.key)), b: foe.map((q) => q.ships.map((c) => c.key)), st: [own.map((q) => q.ships.map(ccShipSt)), foe.map((q) => q.ships.map(ccShipSt))], li, real: true,
-      defs: defs.map((d) => ({ type: d.type, hp: d.hp })), yard: B.att && s.yard, depot: B.att && s.depot, hm: R.tech.hull, shm: R.tech.shield };
+      defs: defs.map((d) => ({ type: d.type, hp: d.hp })), ownDefs: ownDefs.map((d) => ({ type: d.type, hp: d.hp })), yard: B.att && s.yard, depot: B.att && s.depot, hm: R.tech.hull, shm: R.tech.shield };
     m = capLayout({ ...capLoad(), fac, diff: li, env: ccSceneEnv(s), mis: 'capture', seed, ally: '', duel, noDef: false });
     m.name = `${s.name}・${B.att ? '佔領戰' : '迎擊'}`;
   } else {
@@ -330,7 +331,8 @@ function ccBattleDone() {
     for (const q of sqs) if (q) q.ships = q.ships.filter((c) => !c.dead);
   };
   put(I.own, CAP.own); put(I.foe, CAP.foes);
-  I.defIdx.forEach((di, k) => { const g = CAP.G.gts.find((u) => u.def && u.di === k); const d = s.defs[di]; if (d) d.hp = !g || gtDead(g) ? 0 : g.hp / g.max; });
+  (I.ownDefIdx || []).forEach((di, k) => { const g = CAP.G.gts.find((u) => u.def && u.side === CAP.side && u.di === k); const d = s.defs[di]; if (d) d.hp = !g || gtDead(g) ? 0 : g.hp / g.max; });
+  I.defIdx.forEach((di, k) => { const g = CAP.G.gts.find((u) => u.def && u.side !== CAP.side && u.di === k); const d = s.defs[di]; if (d) d.hp = !g || gtDead(g) ? 0 : g.hp / g.max; });
   for (const g of CAP.G.gts) { if (!gtDead(g)) continue; if (g.cu === 'yard') s.yard = false; if (g.cu === 'depot') s.depot = false; }
   S.pl.kills += st.ks; S.pl.merit += st.merit; S.pl.money += Math.round(st.merit * 0.5); S.pl.weekFought = 1;
   const P = ccPl(S), ok = !!R.capOk, ret = !!R.retreat || R.why === '超過任務時限';
@@ -373,4 +375,4 @@ function ccMissionList() {
   gEl('cc-close').onclick = smuCloseModal;
   document.querySelectorAll('[data-goto]').forEach((b) => (b.onclick = () => { smuCloseModal(); CC.sel = +b.dataset.goto; ccCard(); }));
 }
-Object.assign(window.__cap || (window.__cap = {}), { ccNewGame, ccWeekA, ccWeekB, ccLoad, ccSave, ccShow, ccState: () => CC, ccCard, ccLaunch, ccMissionDone, ccRender, ccPlan, ccTransfer, ccTakeCommand, ccSetTask, ccTaskOdds, ccRunTasks, ccBuild });
+Object.assign(window.__cap || (window.__cap = {}), { ccNewGame, ccWeekA, ccWeekB, CC_RULE, ccLoad, ccSave, ccShow, ccState: () => CC, ccCard, ccLaunch, ccMissionDone, ccRender, ccPlan, ccTransfer, ccTakeCommand, ccSetTask, ccTaskOdds, ccRunTasks, ccBuild });

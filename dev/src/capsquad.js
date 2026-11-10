@@ -55,18 +55,22 @@ function capOddsNow() {
     for (const s of L) { if (s.dead) continue; const r = { key: s.key, hp: ships.hp[s.i] / maxHp(s.i), sh: ships.shMax[s.i] ? ships.sh[s.i] / ships.shMax[s.i] : 0, msl: s.H.msl ? s.mslN / s.H.msl.n : 0 }; if (!m.has(s.sq)) m.set(s.sq, []); m.get(s.sq).push(r); }
     return { squads: [...m.values()], diff };
   };
-  const A = side(CAP.own, 1), B = side(CAP.foes, CAP.li);
-  B.defs = CAP.G.gts.filter((g) => g.def && !gtDead(g)).map((g) => ({ type: g.cu, hp: g.hp / g.max }));
+  const A = side(CAP.own, 1), B = side(CAP.foes, CAP.li), dl = (own) => CAP.G.gts.filter((g) => g.def && !gtDead(g) && (g.side === CAP.side) === own).map((g) => ({ type: g.cu, hp: g.hp / g.max }));
+  B.defs = dl(false); A.defs = dl(true);
   return A.squads.length && (B.squads.length || B.defs.length) ? capOdds([A, B]) : null;
 }
 
 // ───── 戰場：佔領戰（capLayoutSpace 呼叫；地形、出發點、據點 B 已經放好） ─────
 function capLayoutCapture(p, key, o) {
-  const { R, li, S, B, terrain, units, add, spot, near, hole } = o, D = p.duel || null;
+  const { R, li, S, B, terrain, units, add, spot, near, alt, hole } = o, D = p.duel || null;
   // 軌道防禦：防禦站（普通以上）＋防禦平台，圍著敵方據點
   if (D && D.defs) {   // 艦長生涯：星系實際的軌道防禦（di＝在星系 defs 裡的順序，hpf＝剩下的耐久）
     D.defs.forEach((d, k) => add(d.type, d.type === 'orb' && !D.defs.slice(0, k).some((x) => x.type === 'orb') ? { x: B.x, z: B.z } : spot(near(B, 140, 320), 160), { def: true, di: k, hpf: d.hp }));
     if (D.yard) add('yard', spot(near(B, 220, 420), 170));
+    if (D.ownDefs && D.ownDefs.length) {   // 迎擊戰：我方星系的軌道防禦，放在我方出發點的前方
+      const H = { x: S.x, z: 600 };
+      D.ownDefs.forEach((d, k) => add(d.type, d.type === 'orb' && !D.ownDefs.slice(0, k).some((x) => x.type === 'orb') ? { x: H.x, y: alt(0.5), z: H.z } : spot(near(H, 90, 240), 120), { def: true, own: true, di: k, hpf: d.hp }));
+    }
     if (D.depot) add('depot', spot(near(B, 220, 420), 170));
   } else if (!p.noDef) {
     if (li >= 1) add('orb', { x: B.x, z: B.z }, { def: true });   // B 已經在 used 裡，直接放在據點正中央
@@ -89,7 +93,7 @@ function capLayoutCapture(p, key, o) {
     theirs = [Array.from({ length: n1 }, pk)]; if (two) theirs.push(Array.from({ length: n - n1 }, pk));
   }
   // 有軌道防禦：守軍在防禦站前方待命，只迎擊進入防區（guard）的敵人；沒有防禦（AI 對 AI 的純小隊戰）：雙方在中間附近交戰
-  const hasDef = units.some((u) => u.def), guard = hasDef ? { x: B.x, z: B.z, R: 420 } : null;
+  const hasDef = units.some((u) => u.def && !u.own), guard = hasDef ? { x: B.x, z: B.z, R: 420 } : null;
   const near0 = D && !D.real;   // AI 對 AI 測試：雙方放近一點；生涯（real）：照一般的出發點
   const fleets = [], posA = near0 ? { x: 0, z: hasDef ? 300 : 260 } : { x: S.x, z: 760 }, posB = hasDef ? { x: B.x, z: B.z + 150 } : near0 ? { x: 0, z: -260 } : { x: Math.round(B.x * 0.5), z: -200 };
   const put = (side, list, pos) => list.forEach((q, qi) => q.forEach((hk, k) => {
@@ -111,7 +115,9 @@ function capLayoutCapture(p, key, o) {
 function capCaptureInit(M) {
   if (M.type !== 'capture') return;
   M.nShips = CAP.foes.length; M.nSq = new Set(CAP.foes.map((s) => s.sq)).size;
-  M.defs = CAP.G.gts.filter((g) => g.def).map((g) => g.id);
+  M.defs = CAP.G.gts.filter((g) => g.def && g.side !== CAP.side).map((g) => g.id);
+  M.ownDefs = CAP.G.gts.filter((g) => g.def && g.side === CAP.side).length;
+  if (M.ownDefs) capFeed(`我方的軌道防禦 ${M.ownDefs} 座參戰`, 'hint');
   M.goal = M.nShips + M.defs.length; M.prog = 0;
   M.odds = capOddsNow();
   const L = CAP.G.gts.filter((g) => CAP_UNIT[g.cu].yard || CAP_UNIT[g.cu].depot).map((g) => g.name);
@@ -169,6 +175,8 @@ function capSquadAI(s, t, dt) {
   const key = s.side * 4 + s.sq, Q = CAP.sqAI[key] || (CAP.sqAI[key] = { t: -9, tgt: null });
   if (t > Q.t) { Q.t = t + 1 + capRnd() * 0.3; Q.tgt = capSquadTarget(s); }
   let T = Q.tgt; if (T && !capTgtPos(T, _sqw)) { T = Q.tgt = capSquadTarget(s); Q.t = t + 1; }
+  const MO = capMisOrder(s, t);   // AI 對 AI 的派出任務：照任務目標行動（capmisai.js）
+  if (MO) T = MO.tgt && capTgtPos(MO.tgt, _sqw) ? MO.tgt : MO.go ? null : T;
   s.aiTgt = T;
   const tp = T ? capTgtPos(T, _sqw) : null;
   let gx, gy, gz, face = null;
@@ -183,6 +191,8 @@ function capSquadAI(s, t, dt) {
     s.aiFire = d < M.range;
     s.aiMsl = !!H.msl && s.mslN > 0 && t > s.aiMslT && T.k !== 'f' && d < H.msl.range;
     if (H.skill.key === 'burst' && d > 230 && s.skillCd <= 0) capSkill(s, t);
+    if (MO && MO.go && MO.first) { gx = MO.go.x; gy = MO.go.y; gz = MO.go.z; face = null; }   // 邊打邊走：砲塔照樣打
+  } else if (MO && MO.go) { gx = MO.go.x; gy = MO.go.y; gz = MO.go.z;
   } else if (!s.foe && !CAP.auto && capCur() && !capCur().dead) {   // 我方的另一隊沒有目標：跟在玩家後面
     const L = capCur(), side = s.sq ? 1 : -1, back = 50 + s.slot * 22;
     gx = L.x - Math.sin(L.yaw) * back + Math.cos(L.yaw) * 70 * side; gz = L.z - Math.cos(L.yaw) * back - Math.sin(L.yaw) * 70 * side; gy = L.y + 6;
@@ -216,8 +226,8 @@ function capDuelRow() {
   const C = CAP.cfg, D = C && C.duel; if (!D) return null;
   const st = (si, qi, k) => (D.st && D.st[si] && D.st[si][qi] && D.st[si][qi][k]) || { hp: 1, sh: 1, msl: 1 };
   const sides = [D.a, D.b].map((L, si) => ({ squads: L.map((q, qi) => q.map((key, k) => ({ key, ...st(si, qi, k) }))), diff: si ? (D.li != null ? D.li : 1) : 1 }));
-  const defs = CAP.G.gts.filter((g) => g.def).map((g) => g.cu); if (defs.length) sides[1].defs = defs;   // 軌道防禦（公式的 def 參數）
-  const R = GAME.result, own = CAP.own.some((s) => !s.dead), foe = CAP.foes.some((s) => !s.dead) || CAP.G.gts.some((g) => g.def && !gtDead(g));
+  const defs = CAP.G.gts.filter((g) => g.def && g.side !== CAP.side).map((g) => g.cu); if (defs.length) sides[1].defs = defs;   // 軌道防禦（公式的 def 參數）
+  const R = GAME.result, own = CAP.own.some((s) => !s.dead), foe = CAP.foes.some((s) => !s.dead) || CAP.G.gts.some((g) => g.def && g.side !== CAP.side && !gtDead(g));
   const win = !own ? 1 : !foe ? 0 : R && R.capOk ? 0 : -1;   // -1＝時間到、撤退
   return { sides, r: { win, t: Math.round(U.uTime.value), ships: CAP.ships.map((s) => ({ side: s.side, sq: s.side * 10 + s.sq, key: s.key, alive: !s.dead, hp: s.dead ? 0 : ships.hp[s.i] / maxHp(s.i) })) } };
 }
