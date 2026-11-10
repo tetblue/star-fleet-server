@@ -64,7 +64,11 @@ function capOddsNow() {
 function capLayoutCapture(p, key, o) {
   const { R, li, S, B, terrain, units, add, spot, near, hole } = o, D = p.duel || null;
   // 軌道防禦：防禦站（普通以上）＋防禦平台，圍著敵方據點
-  if (!p.noDef) {
+  if (D && D.defs) {   // 艦長生涯：星系實際的軌道防禦（di＝在星系 defs 裡的順序，hpf＝剩下的耐久）
+    D.defs.forEach((d, k) => add(d.type, d.type === 'orb' && !D.defs.slice(0, k).some((x) => x.type === 'orb') ? { x: B.x, z: B.z } : spot(near(B, 140, 320), 160), { def: true, di: k, hpf: d.hp }));
+    if (D.yard) add('yard', spot(near(B, 220, 420), 170));
+    if (D.depot) add('depot', spot(near(B, 220, 420), 170));
+  } else if (!p.noDef) {
     if (li >= 1) add('orb', { x: B.x, z: B.z }, { def: true });   // B 已經在 used 裡，直接放在據點正中央
     for (let k = 0, n = [1, 1, 2, 2, 3][li]; k < n; k++) add('plat', spot(near(B, 140, 320), 160), { def: true });
     // 後勤設施（不算佔領的目標）：有維修船塢＝玩家撤退的期間敵方會整修；有補給站＝會補飛彈
@@ -86,11 +90,12 @@ function capLayoutCapture(p, key, o) {
   }
   // 有軌道防禦：守軍在防禦站前方待命，只迎擊進入防區（guard）的敵人；沒有防禦（AI 對 AI 的純小隊戰）：雙方在中間附近交戰
   const hasDef = units.some((u) => u.def), guard = hasDef ? { x: B.x, z: B.z, R: 420 } : null;
-  const fleets = [], posA = D ? { x: 0, z: hasDef ? 300 : 260 } : { x: S.x, z: 760 }, posB = hasDef ? { x: B.x, z: B.z + 150 } : D ? { x: 0, z: -260 } : { x: Math.round(B.x * 0.5), z: -200 };
+  const near0 = D && !D.real;   // AI 對 AI 測試：雙方放近一點；生涯（real）：照一般的出發點
+  const fleets = [], posA = near0 ? { x: 0, z: hasDef ? 300 : 260 } : { x: S.x, z: 760 }, posB = hasDef ? { x: B.x, z: B.z + 150 } : near0 ? { x: 0, z: -260 } : { x: Math.round(B.x * 0.5), z: -200 };
   const put = (side, list, pos) => list.forEach((q, qi) => q.forEach((hk, k) => {
     const H = CAP_HULLS[hk], off = k - (q.length - 1) / 2, dir = side ? 1 : -1, qx = (qi - (list.length - 1) / 2) * 110;
     const st = D && D.st ? (D.st[side] || [])[qi] && D.st[side][qi][k] : null;
-    fleets.push(fleet({ side, name: side ? `敵${'AB'[qi]}隊・${H.name}` : `${qi ? 'B隊・' : ''}${'一二三四五'[k]}號艦・${H.name}`, capRole: side ? 'foe' : 'player', capSq: qi, capSlot: k, capHull: hk, capSt: st || null, capGuard: side ? guard : null,
+    fleets.push(fleet({ side, name: side ? `敵${'AB'[qi]}隊・${H.name}` : `${qi ? 'B隊・' : ''}${'一二三四五'[k]}號艦・${H.name}`, capRole: side ? 'foe' : 'player', capSq: qi, capSlot: k, capHull: hk, capSt: st || null, capGuard: side ? guard : null, capHm: !side && D ? D.hm : null, capShm: !side && D ? D.shm : null,
       comp: comp1(H.look), x: pos.x + qx + off * 18, z: pos.z - dir * Math.abs(off) * 9, y: (side ? 10 : 0) + (qi ? 12 : 0), h: side ? 0 : Math.PI }));
   }));
   put(0, ours, posA); put(1, theirs, posB);

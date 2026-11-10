@@ -115,6 +115,7 @@ function capHubItems(own) {
     ops: [
       { id: 'sp-story', icon: 'story', en: 'CAMPAIGN', name: '主線', desc: '特種部隊的劇情戰役', off: true },
       { id: 'sp-rand', icon: 'rand', en: 'MISSION', name: '隨機任務', desc: '隨機生成的敵後作戰：潛入、破壞、斬首、全滅，完成後撤離', st: `${CAP_DIFF[p.diff].name}・${FACTION_NAME[p.fac]}・出擊 ${p.sorties}`, cls: 'pri' },
+      { id: 'sp-ccr', icon: 'career', en: 'CAPTAIN CAREER', name: '艦長生涯', desc: '回合制的星圖：所有勢力都是戰艦小隊，小隊戰的結果決定星系的所有權；損傷會留下，小隊全滅＝生涯結束', st: ccSummary(), cls: 'pri' },
       { id: 'sp-camp', icon: 'endless', en: 'ENDLESS', name: '無限戰場', desc: '一場接一場的連續任務', off: true },
       { id: 'sp-sand', icon: 'sim', en: 'SIMULATOR', name: '模擬室', desc: '自由布置敵軍與目標', off: true },
       { id: 'sp-train', icon: 'train', en: 'TRAINING', name: '訓練場', desc: '操艦、潛行、火控的教學', off: true },
@@ -123,7 +124,7 @@ function capHubItems(own) {
       { id: 'sp-crew', icon: 'tav', name: '船員', desc: `各艦的軍官、經歷與紀念牆・陣亡 ${grLoad().fallen.length} 人`, tag: own }],
   };
 }
-function capHubBind() { gEl('sp-rand').onclick = () => showCaptain(); gEl('sp-capsq').onclick = () => showCapBay(); gEl('sp-crew').onclick = () => showCrew(); }
+function capHubBind() { gEl('sp-ccr').onclick = () => ccShow(); gEl('sp-rand').onclick = () => showCaptain(); gEl('sp-capsq').onclick = () => showCapBay(); gEl('sp-crew').onclick = () => showCrew(); }
 
 // ───── 出擊設定 ─────
 function capKeyRows() {
@@ -347,7 +348,8 @@ function capBegin(C) {
       const fd = SIM.m.fleets[f.id] || {}, foe = f.side !== CAP.side;
       const i = q.list[0], key = fd.capHull || C.hulls[hk], H = CAP_HULLS[key], k = CAP.ships.length; if (!fd.capHull) hk++;
       const t = ships.type[i], hm = foe ? CAP.Df.hp : 1, st = fd.capSt || null;   // 敵方：難度的耐久倍率；capSt＝帶傷開戰（船體、護盾、飛彈剩下的比例）
-      ships.hpCap[i] = H.hp * hm / SHIP_TYPES[t].hp; ships.hp[i] = H.hp * hm * (st ? st.hp : 1); ships.shMax[i] = H.sh * hm; ships.sh[i] = H.sh * hm * (st ? st.sh : 1);
+      const hm2 = foe ? hm : fd.capHm || 1, sm2 = foe ? hm : fd.capShm || 1;   // 艦長生涯：陣營科技（船體、護盾）
+      ships.hpCap[i] = H.hp * hm2 / SHIP_TYPES[t].hp; ships.hp[i] = H.hp * hm2 * (st ? st.hp : 1); ships.shMax[i] = H.sh * sm2; ships.sh[i] = H.sh * sm2 * (st ? st.sh : 1);
       ships.ammo[i] = 0; ships.ftr[i] = 0; ships.rep[i] = 0; for (let r = 0; r < 4; r++) ships.hang[i * 4 + r] = 0;
       ships.lx0[i] = ships.lx1[i] = ships.ly0[i] = ships.ly1[i] = ships.lz0[i] = ships.lz1[i] = 0;
       aL.array.set([0, 0, 0], i * 3); aL2.array.set([0, 0, 0], i * 3);
@@ -401,7 +403,7 @@ function capSizeK(i) {
 }
 function capMakeUnit(u, id, hpM) {
   const T = CAP_UNIT[u.type], y = !GRD && u.y != null ? u.y : T.sea ? GROUND_Y : terrainHAt(u.x, u.z), hp = Math.round(T.hp * hpM);
-  return { id, cu: u.type, kind: T.kind, sub: T.sub, name: T.name, x: u.x, y, z: u.z, hd: u.hd || 0, hp, max: hp, r: T.r, hh: T.hh, aa: null, side: 1 - CAP.side, deadT: -1,
+  return { id, cu: u.type, kind: T.kind, sub: T.sub, name: T.name, x: u.x, y, z: u.z, hd: u.hd || 0, hp: u.hpf != null ? Math.max(1, Math.round(hp * u.hpf)) : hp, max: hp, di: u.di, r: T.r, hh: T.hh, aa: null, side: 1 - CAP.side, deadT: -1,
     mv: !!T.mv, mis: !!u.mis, def: !!u.def, air: u.air, st: 'idle', tx: u.x, tz: u.z, fcd: 3 + capRnd() * 6, fireT: -99, gcd: 0, moveT: 0, home: { x: u.x, z: u.z }, wp: null };
 }
 function capEnd() {
@@ -1691,6 +1693,7 @@ function capTargetGeo(G, g, box, ac) {
 // ───── 任務報告 ─────
 function capReport() {
   if (!GAME.result || !SIM.m || !SIM.m.captain) return;   // 已經開始下一場（AI 對 AI 連續測試）
+  if (SIM.m.captain.cc) { ccBattleDone(); return; }   // 艦長生涯（capcareer_ui.js）
   const R = GAME.result, S = CAP.stats || { ks: 0, kg: 0, kf: 0, dmg: 0, lost: 0, shots: 0, msl: 0, merit: 0, alarmed: false, kills: [] }, m = SIM.m, M = CAP.mis, C = m.captain;
   const snap = grCapSnap();   // 各艦的狀態：報告畫面一開就會清掉
   setPhase('report');
