@@ -30,9 +30,10 @@ const CAP_RULE = {
   see: 330, seeShip: 450,      // 我方偵測：地面單位（要視線）、敵方戰艦
 };
 // 巨艦手感（2026-11-11 試做，暫停選單可以開關＝SETTINGS.capHeavy）：
-//   鏡頭：視角縮小（長焦＝遠處的敵艦看起來更大、更近）、鏡頭拉遠一點保持自己的船在畫面上的大小、壓低貼近船身、跟隨有延遲、主砲開火震動
-//   操船：速度、加速、轉向都變慢（巨艦每秒只走零點幾個船身）。敵我都用同一套（capFly），AI 不用改。
-const CAP_FEEL = { fov: 26, boostFov: 3, dist: 3.8, up: 0.5, lag: 3.5, spd: 0.65, acc: 0.55, turn: 0.65, turnAcc: 0.5, shake: 0.35 };
+//   鏡頭＝艦橋上方的第三人稱：鏡頭繞著艦橋上方的一點（pivot）轉，瞄準轉到哪裡都一樣，船永遠在準心下方固定的角度（atan(up/dist) ≈ 15°，畫面約 3/4 高的地方），不會被轉出畫面。
+//     離船很近（船身佔滿畫面下方）＝巨艦的份量；沒有跟隨延遲（延遲會讓船滑出畫面）；主砲開火震動。
+//   操船：速度、加速、轉向都變慢。敵我都用同一套（capFly），AI 不用改。
+const CAP_FEEL = { fov: 55, boostFov: 4, dist: 0.95, up: 0.26, spd: 0.65, acc: 0.55, turn: 0.65, turnAcc: 0.5, shake: 0.35 };
 const capHeavy = () => SETTINGS.capHeavy !== false;
 const CAP_FC = [
   { key: 'hold', name: '禁止開火', en: 'HOLD FIRE', col: '#8fe39a', desc: '自動武器全部停火（潛行用）；主砲、飛彈照常手動發射，護航機收回' },
@@ -1340,19 +1341,16 @@ function capAim() { const cp = Math.cos(CAP.pitch); return [Math.sin(CAP.yaw) * 
 function capCamera() {
   const s = capCur(); if (!s) return;
   const A = capAim(), Wu = v3.norm([-A[0] * A[1], 1 - A[1] * A[1], -A[2] * A[1]]);
-  const FE = capHeavy() ? CAP_FEEL : null;
-  const dist = s.L * (FE ? FE.dist : 2.4) * CAP.camD * (CAP.far ? 2.4 : 1), up = s.L * (FE ? FE.up : 0.55) * CAP.camD * (CAP.far ? 1.6 : 1);
+  const FE = capHeavy() ? CAP_FEEL : null, zk = CAP.camD * (CAP.far ? 2.2 : 1);   // 滾輪、遠景：距離和高度一起縮放＝船在畫面上的角度不變
+  const dist = s.L * (FE ? FE.dist * zk : 2.4 * CAP.camD * (CAP.far ? 2.4 : 1)), up = s.L * (FE ? FE.up * zk : 0.55 * CAP.camD * (CAP.far ? 1.6 : 1));
   camera = camPersp;
   camPersp.aspect = VW / VH; camPersp.near = Math.max(0.05, Math.min(0.45, s.L * 0.25));   // 太小的話遠處地面深度不夠精確，會閃
   camPersp.far = 9000; camPersp.fov = FE ? FE.fov + (s.boosting ? FE.boostFov : 0) : 58 + (s.boosting ? 5 : 0);
   let px = s.x - A[0] * dist + Wu[0] * up, py = s.y - A[1] * dist + Wu[1] * up, pz = s.z - A[2] * dist + Wu[2] * up;
-  if (FE) {   // 跟隨的延遲（巨艦的質量感）＋主砲開火的震動
-    const now = performance.now(), C0 = CAP.camS, dt = C0 ? Math.min(0.1, (now - C0.t) / 1000) : 0;
-    if (!C0 || C0.k !== s.k || Math.hypot(px - C0.x, py - C0.y, pz - C0.z) > s.L * 8) CAP.camS = { x: px, y: py, z: pz, t: now, k: s.k };
-    else { const al = 1 - Math.exp(-dt * FE.lag); C0.x += (px - C0.x) * al; C0.y += (py - C0.y) * al; C0.z += (pz - C0.z) * al; C0.t = now; px = C0.x; py = C0.y; pz = C0.z; }
-    const sk = CAP.shakeT ? Math.max(0, 1 - (now - CAP.shakeT) / 350) : 0;
-    if (sk > 0) { const m = s.L * 0.05 * FE.shake * sk; px += (Math.random() - 0.5) * m; py += (Math.random() - 0.5) * m; pz += (Math.random() - 0.5) * m; }
-  } else CAP.camS = null;
+  if (FE) {   // 艦橋上方的第三人稱：位置照上面的算法（up 沿著和瞄準垂直的方向＝不管瞄哪裡，船在畫面上的位置都一樣），只加開火震動
+    const sk = CAP.shakeT ? Math.max(0, 1 - (performance.now() - CAP.shakeT) / 350) : 0;
+    if (sk > 0) { const m = s.L * 0.04 * FE.shake * sk; px += (Math.random() - 0.5) * m; py += (Math.random() - 0.5) * m; pz += (Math.random() - 0.5) * m; }
+  }
   if (GRD) py = Math.max(py, capGroundH(px, pz) + 0.6);
   camPersp.position.set(px, py, pz);
   camPersp.up.set(Wu[0], Wu[1], Wu[2]);
