@@ -29,6 +29,11 @@ const CAP_RULE = {
   time: 1500,                  // 任務時限（秒）
   see: 330, seeShip: 450,      // 我方偵測：地面單位（要視線）、敵方戰艦
 };
+// 巨艦手感（2026-11-11 試做，暫停選單可以開關＝SETTINGS.capHeavy）：
+//   鏡頭：視角縮小（長焦＝遠處的敵艦看起來更大、更近）、鏡頭拉遠一點保持自己的船在畫面上的大小、壓低貼近船身、跟隨有延遲、主砲開火震動
+//   操船：速度、加速、轉向都變慢（巨艦每秒只走零點幾個船身）。敵我都用同一套（capFly），AI 不用改。
+const CAP_FEEL = { fov: 26, boostFov: 3, dist: 3.8, up: 0.5, lag: 3.5, spd: 0.5, acc: 0.45, turn: 0.6, turnAcc: 0.5, shake: 0.35 };
+const capHeavy = () => SETTINGS.capHeavy !== false;
 const CAP_FC = [
   { key: 'hold', name: '禁止開火', en: 'HOLD FIRE', col: '#8fe39a', desc: '自動武器全部停火（潛行用）；主砲、飛彈照常手動發射，護航機收回' },
   { key: 'def', name: '自衛', en: 'DEFENSIVE', col: '#ffd36a', desc: '點防禦攔截飛彈與戰機；砲塔只打正在攻擊小隊的敵人' },
@@ -470,9 +475,10 @@ function capFly(s, inp, dt, t) {
   if (boost) s.boostE = Math.max(0, s.boostE - dt / H.boostT); else s.boostE = Math.min(1, s.boostE + dt / (H.boostT * 2.5));
   s.boosting = boost;
   // 轉向：往要的方向轉（有角加速度，大船轉得慢）；船頭最多抬／壓 pitchMax
-  const rate = H.turn * DEG * (burst ? 1.6 : 1);
+  const FE = capHeavy() ? CAP_FEEL : null, kS = FE ? FE.spd : 1, kA = FE ? FE.acc : 1, kTa = FE ? FE.turnAcc : 1;   // 巨艦手感
+  const rate = H.turn * DEG * (burst ? 1.6 : 1) * (FE ? FE.turn : 1);
   const want = inp.turn != null ? -inp.turn * rate : Math.max(-rate, Math.min(rate, wrapAngle(inp.yaw - s.yaw) * 2.5));
-  s.yr += Math.max(-rate * 2.5 * dt, Math.min(rate * 2.5 * dt, want - s.yr));
+  s.yr += Math.max(-rate * 2.5 * kTa * dt, Math.min(rate * 2.5 * kTa * dt, want - s.yr));
   s.yaw = wrapAngle(s.yaw + s.yr * dt);
   const pw = Math.max(-CAP_RULE.pitchMax, Math.min(CAP_RULE.pitchMax, inp.pitch)), pr = rate * 0.7;
   s.P += Math.max(-pr * dt, Math.min(pr * dt, (pw - s.P) * Math.min(1, dt * 3)));
@@ -480,9 +486,9 @@ function capFly(s, inp, dt, t) {
   const F = [sh * cp, sp, ch * cp], Rr = [-ch, 0, sh];
   // 速度：要的速度＝油門×巡航（加速＝最高速）＋平移＋升降；加速度有上限＝慣性，放開按鍵會自動抵消漂移
   // 前進是水平的（自動保持高度）：船頭抬／壓只是為了瞄準主砲，升降用空白鍵／C
-  const fwd = inp.thr * (boost ? H.max : H.cruise) * km, st = inp.strafe * H.strafe * km, vt = inp.vert * H.climb * km;
+  const fwd = inp.thr * (boost ? H.max : H.cruise) * km * kS, st = inp.strafe * H.strafe * km * kS, vt = inp.vert * H.climb * km * kS;
   const tx = sh * fwd + Rr[0] * st, ty = vt, tz = ch * fwd + Rr[2] * st;
-  let dx = tx - s.vx, dy = ty - s.vy, dz = tz - s.vz; const dl = Math.hypot(dx, dy, dz), a = H.acc * (boost ? 1.4 : 1) * (burst ? 1.6 : 1) * dt;
+  let dx = tx - s.vx, dy = ty - s.vy, dz = tz - s.vz; const dl = Math.hypot(dx, dy, dz), a = H.acc * (boost ? 1.4 : 1) * (burst ? 1.6 : 1) * kA * dt;
   if (dl > a) { dx *= a / dl; dy *= a / dl; dz *= a / dl; }
   s.vx += dx; s.vy += dy; s.vz += dz;
   s.x += s.vx * dt; s.y += s.vy * dt; s.z += s.vz * dt;
@@ -672,7 +678,7 @@ function capShipWeapons(s, dt, t) {
   if (T && !tp && ctl) CAP.tgt = null;
   // 主砲砲塔：轉向準心（僚艦：轉向目標），在射界內、對準了才開火
   capGunAim(s, dt, ctl ? CAP.aimPt : s.aimP);
-  if ((ctl ? CAP.fire[0] && CAP.locked : s.aiFire) && s.mainCd <= 0 && s.gOk && s.gAl) capMain(s, t);
+  if ((ctl ? CAP.fire[0] && CAP.locked : s.aiFire) && s.mainCd <= 0 && s.gOk && s.gAl) { capMain(s, t); if (ctl) CAP.shakeT = performance.now(); }
   else if (ctl && CAP.press[0] && s.mainCd <= 0 && !s.gOk) capFeed('主砲：準心在射界外，先把船轉過去', 'hint');
   if (simTick % 3 === s.k % 3) capRam(s, t);
   if (ctl ? CAP.press[1] || (CAP.fire[1] && CAP.locked) : s.aiMsl) capMissile(s, t, ctl && CAP.press[1]);
@@ -1334,10 +1340,19 @@ function capAim() { const cp = Math.cos(CAP.pitch); return [Math.sin(CAP.yaw) * 
 function capCamera() {
   const s = capCur(); if (!s) return;
   const A = capAim(), Wu = v3.norm([-A[0] * A[1], 1 - A[1] * A[1], -A[2] * A[1]]);
-  const dist = s.L * 2.4 * CAP.camD * (CAP.far ? 2.4 : 1), up = s.L * 0.55 * CAP.camD * (CAP.far ? 1.6 : 1);
+  const FE = capHeavy() ? CAP_FEEL : null;
+  const dist = s.L * (FE ? FE.dist : 2.4) * CAP.camD * (CAP.far ? 2.4 : 1), up = s.L * (FE ? FE.up : 0.55) * CAP.camD * (CAP.far ? 1.6 : 1);
   camera = camPersp;
-  camPersp.aspect = VW / VH; camPersp.near = Math.max(0.05, Math.min(0.45, s.L * 0.25));   // 太小的話遠處地面深度不夠精確，會閃 camPersp.far = 9000; camPersp.fov = 58 + (s.boosting ? 5 : 0);
+  camPersp.aspect = VW / VH; camPersp.near = Math.max(0.05, Math.min(0.45, s.L * 0.25));   // 太小的話遠處地面深度不夠精確，會閃
+  camPersp.far = 9000; camPersp.fov = FE ? FE.fov + (s.boosting ? FE.boostFov : 0) : 58 + (s.boosting ? 5 : 0);
   let px = s.x - A[0] * dist + Wu[0] * up, py = s.y - A[1] * dist + Wu[1] * up, pz = s.z - A[2] * dist + Wu[2] * up;
+  if (FE) {   // 跟隨的延遲（巨艦的質量感）＋主砲開火的震動
+    const now = performance.now(), C0 = CAP.camS, dt = C0 ? Math.min(0.1, (now - C0.t) / 1000) : 0;
+    if (!C0 || C0.k !== s.k || Math.hypot(px - C0.x, py - C0.y, pz - C0.z) > s.L * 8) CAP.camS = { x: px, y: py, z: pz, t: now, k: s.k };
+    else { const al = 1 - Math.exp(-dt * FE.lag); C0.x += (px - C0.x) * al; C0.y += (py - C0.y) * al; C0.z += (pz - C0.z) * al; C0.t = now; px = C0.x; py = C0.y; pz = C0.z; }
+    const sk = CAP.shakeT ? Math.max(0, 1 - (now - CAP.shakeT) / 350) : 0;
+    if (sk > 0) { const m = s.L * 0.05 * FE.shake * sk; px += (Math.random() - 0.5) * m; py += (Math.random() - 0.5) * m; pz += (Math.random() - 0.5) * m; }
+  } else CAP.camS = null;
   if (GRD) py = Math.max(py, capGroundH(px, pz) + 0.6);
   camPersp.position.set(px, py, pz);
   camPersp.up.set(Wu[0], Wu[1], Wu[2]);
@@ -1438,8 +1453,9 @@ function capHudBuild() {
     CAP.pauseEl = document.createElement('div'); CAP.pauseEl.id = 'cappause'; document.body.appendChild(CAP.pauseEl);
   }
   CAP.pauseEl.innerHTML = `<div class="g-card"><h3>暫停</h3><table class="pl-keys" style="margin-bottom:10px">${capKeyRows().map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('')}</table>
-    <div class="g-row"><button class="g-btn" id="cpp-quit">結束任務</button><span class="g-sp"></span><button class="g-btn pri" id="cpp-go">繼續</button></div></div>`;
+    <div class="g-row"><button class="g-btn" id="cpp-quit">結束任務</button><button class="g-btn" id="cpp-heavy" title="鏡頭長焦、貼近船身、跟隨延遲；操船變慢變重（試做）">巨艦手感：${capHeavy() ? '開' : '關'}</button><span class="g-sp"></span><button class="g-btn pri" id="cpp-go">繼續</button></div></div>`;
   CAP.pauseEl.querySelector('#cpp-go').onclick = () => capPause(false);
+  CAP.pauseEl.querySelector('#cpp-heavy').onclick = (e) => { SETTINGS.capHeavy = !capHeavy(); saveSettings(); e.currentTarget.textContent = `巨艦手感：${capHeavy() ? '開' : '關'}`; };
   CAP.pauseEl.querySelector('#cpp-quit').onclick = () => { CAP.pauseEl.hidden = true; paused = false; updateTimeUI(); quitBattle(); };
   CAP.el.hidden = false; CAP.pauseEl.hidden = true;
 }
