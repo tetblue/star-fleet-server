@@ -100,7 +100,8 @@ function capLayoutCapture(p, key, o) {
   // 有軌道防禦：守軍在防禦站前方待命，只迎擊進入防區（guard）的敵人；沒有防禦（AI 對 AI 的純小隊戰）：雙方在中間附近交戰
   const hasDef = units.some((u) => u.def && !u.own), guard = hasDef ? { x: B.x, z: B.z, R: 420 } : null;
   const near0 = D && !D.real;   // AI 對 AI 測試：雙方放近一點；生涯（real）：照一般的出發點
-  const fleets = [], posA = near0 ? { x: 0, z: hasDef ? 300 : 260 } : { x: S.x, z: 760 }, posB = hasDef ? { x: B.x, z: B.z + 150 } : near0 ? { x: 0, z: -260 } : { x: Math.round(B.x * 0.5), z: -200 };
+  const inbPt = D && D.inb ? { x: Math.round(D.inb.dx * CAP_EDGE.R * 0.68), z: Math.round(D.inb.dz * CAP_EDGE.R * 0.68) } : null;   // 迎擊戰：敵軍躍遷進來的點（照星圖上來的方向）
+  const fleets = [], posA = near0 ? { x: 0, z: hasDef ? 300 : 260 } : { x: S.x, z: 760 }, posB = inbPt || (hasDef ? { x: B.x, z: B.z + 150 } : near0 ? { x: 0, z: -260 } : { x: Math.round(B.x * 0.5), z: -200 });
   const put = (side, list, pos) => list.forEach((q, qi) => q.forEach((hk, k) => {
     const H = CAP_HULLS[hk], off = k - (q.length - 1) / 2, dir = side ? 1 : -1, qx = (qi - (list.length - 1) / 2) * 110;
     const st = D && D.st ? (D.st[side] || [])[qi] && D.st[side][qi][k] : null;
@@ -111,7 +112,7 @@ function capLayoutCapture(p, key, o) {
   const space = { key, R: CAP_EDGE.R, Ry: CAP_EDGE.Ry, hole, edge: key === 'nebula' ? 'ion' : 'part' };
   const mis = { type: 'capture', li, goal: 1, names: '' };
   const m = { name: '', fac: p.fac === 1 ? 1 : 0, victory: false, ctl: -1, timeLimit: D && D.idle ? 1e9 : CAP_RULE.time, seed: campHash(p.seed, 13) % 100000, fleets, terrain, sides: [{ lv: 0 }, { lv: li }],
-    captain: { li, hulls: mine, mis, units, S: { x: posA.x, z: posA.z }, B: { x: B.x, z: B.z }, ext: { x: posA.x, z: posA.z + 120 }, waves: 0, ftr: 0, scene: null, space, open: true, auto: !!p.auto, duel: D } };
+    captain: { li, hulls: mine, mis, units, S: { x: posA.x, z: posA.z }, B: { x: B.x, z: B.z }, ext: { x: posA.x, z: posA.z + 120 }, waves: 0, ftr: 0, scene: null, space, open: true, auto: !!p.auto, duel: D, inbPt } };
   m.name = `${CAP_MIS.capture.name}・${CAP_SPACE[key].name}・${CAP_DIFF[li].name}`;
   return m;
 }
@@ -120,6 +121,11 @@ function capLayoutCapture(p, key, o) {
 function capCaptureInit(M) {
   if (M.type !== 'capture') return;
   if (CAP.cfg.duel && CAP.cfg.duel.cont) capContApply(CAP.cfg.duel.cont);   // 艦長生涯：從巡航直接接續的迎擊戰
+  if (CAP.cfg.duel && CAP.cfg.duel.inb && CAP.cfg.inbPt) {   // 敵軍即將躍遷進入：倒數結束才出現
+    const P = CAP.cfg.inbPt; M.inb = { t: CAP.cfg.duel.inb.t, x: P.x, y: 0, z: P.z, done: false };
+    for (const s of CAP.foes) { s.inb = true; s.q.hidden = true; }
+    capFeed(`警告：偵測到敵軍躍遷訊號，${M.inb.t} 秒後抵達（紅色箭頭＝方向）`, 'bad');
+  }
   if (CAP.cfg.duel && CAP.cfg.duel.idle) {   // 艦長生涯的星系巡航：沒有目標、不計時
     M.idle = true; M.goal = 1; M.prog = 0; M.nShips = 0; M.defs = []; CAP.tLim = 1e9;
     capFeed(`在星系中巡航・按 ${keyText('cap_map')} 打開星圖`, 'hint'); return;
@@ -136,6 +142,16 @@ function capCaptureInit(M) {
 // 回傳 true＝佔領戰（其他任務的判定跳過）
 function capCaptureTick(M, t) {
   if (M.type !== 'capture') return false;
+  if (M.inb && !M.inb.done) {
+    if (t < M.inb.t) return true;   // 倒數中：還不算交戰
+    M.inb.done = true;
+    for (const s of CAP.foes) {
+      if (!s.inb) continue; s.inb = false; s.q.hidden = false;
+      const yaw = Math.atan2(-s.x, -s.z); s.yaw = yaw; s.inp.yaw = yaw; s.F = [Math.sin(yaw), 0, Math.cos(yaw)]; s.Rr = [-Math.cos(yaw), 0, Math.sin(yaw)];
+    }
+    capSyncAll();
+    capFeed('敵軍躍遷抵達！', 'bad'); toast('敵軍躍遷抵達：迎擊！', 'pilot');
+  }
   if (M.idle) { CAP.warp = null; return true; }   // 巡航：不會結束（離開＝回星圖、結束這一週）
   const sunk = CAP.foes.filter((s) => s.dead).length, gone = M.defs.filter((i) => gtDead(CAP.G.gts[i])).length;
   M.prog = sunk + gone; M.sunk = sunk; M.gone = gone;
@@ -181,6 +197,7 @@ function capSquadTarget(s) {
 // 戰法：小隊集火同一個目標；站在主砲射程的六～八成，船頭對準目標、橫移繞圈（每艘繞的方向錯開，偶爾換邊）
 function capSquadAI(s, t, dt) {
   const I = s.inp, H = s.H, M = H.main;
+  if (s.inb) { I.thr = 0; I.boost = false; I.turn = null; s.aiFire = false; s.aiMsl = false; s.vx = s.vy = s.vz = 0; return; }   // 還在躍遷途中
   I.boost = false; I.turn = null; I.pitch = 0; s.aiFire = false; s.aiMsl = false; s.aimP = null; s.aiEng = false;
   const hpNow = ships.hp[s.i] + ships.sh[s.i]; if (s.lastHp != null && hpNow < s.lastHp - 0.5) s.hitT = t; s.lastHp = hpNow;   // 敵方的船不經過 capHurt
   const key = s.side * 4 + s.sq, Q = CAP.sqAI[key] || (CAP.sqAI[key] = { t: -9, tgt: null });
@@ -259,5 +276,4 @@ function capContApply(K) {
   if (K.cur >= 0 && K.cur < L.length && !L[K.cur].dead) CAP.cur = L[K.cur].k;
   CAP.thr = K.thr; CAP.far = K.far; CAP.camD = K.camD;
   capSyncAll();
-  capFeed('敵軍躍遷進入星系！', 'bad'); toast('敵軍躍遷進入星系：迎擊！', 'pilot');
 }

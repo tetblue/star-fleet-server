@@ -261,7 +261,7 @@ function ccEndWeek(go) {
   CC.cont = ccIdleOn() ? { sys: SIM.m.captain.cc.sys, seed: SIM.m.captain.cc.seed, env: SIM.m.captain.cc.env, turn: S.turn, key: CC.idle && CC.idle.key, snap: capContSnap() } : null;   // 巡航中結束這一週：迎擊戰接著打
   ccIdleStop();
   ccWeekA(S); ccSave(S);
-  if (S.pendB) return ccBattleAsk(S);
+  if (S.pendB) return ccBattleGo(S);
   ccFinishWeek(S);
 }
 function ccFinishWeek(S) {
@@ -317,7 +317,12 @@ function ccLaunch(S, kind, o) {
       defs: defs.map((d) => ({ type: d.type, hp: d.hp })), ownDefs: ownDefs.map((d) => ({ type: d.type, hp: d.hp })), yard: B.att && s.yard, depot: B.att && s.depot, hm: R.tech.hull, shm: R.tech.shield,
       ownYard: !B.att && s.owner === S.fac && s.yard, ownDepot: !B.att && s.owner === S.fac && s.depot };
     const K = CC.cont; CC.cont = null;
-    if (K && K.snap && !B.att && K.sys === s.id && K.turn === S.turn && own[0] === P && K.key === ccIdleKey(S, P)) duel.cont = K.snap;   // 同一個星系、同一週、船沒變：接著巡航的位置打
+    if (K && K.snap && !B.att && K.sys === s.id && K.turn === S.turn && own[0] === P && K.snap.ships.length === P.ships.length) duel.cont = K.snap;
+    if (!B.att) {   // 迎擊戰：敵軍從星圖上來的方向躍遷進來（倒數 CC_INB_T 秒）
+      const from = foe.map((x) => S.sys[x.prev != null ? x.prev : x.sys]).filter((o) => o && o.id !== s.id);
+      let dx = 0, dz = 0; for (const o of from) { dx += o.x - s.x; dz += o.y - s.y; } const L = Math.hypot(dx, dz);
+      duel.inb = { dx: L ? dx / L : 0, dz: L ? dz / L : -1, t: CC_INB_T };
+    }   // 同一個星系、同一週、船沒變：接著巡航的位置打
     m = capLayout({ ...capLoad(), fac, diff: li, env: duel.cont ? K.env : ccSceneEnv(s), mis: 'capture', seed: duel.cont ? K.seed : seed, ally: '', duel, noDef: false });   // 接續：和巡航同一個場景
     m.name = `${s.name}・${B.att ? '佔領戰' : '迎擊'}`;
   } else {
@@ -490,4 +495,12 @@ function ccFly() {
   window.removeEventListener('resize', ccResize);
   if (ccIdleOn() && CC.idle && CC.idle.key === ccIdleKey(S, P)) { overlay(null); CC.over = false; capPause(false); return; }
   ccIdleStop(); ccIdle(S);
+}
+
+// ───── 玩家的小隊捲入的戰鬥：直接開打（2026-11-11）─────
+// 要撤退就在上一週移動到別的星系；開進敵方星系＝你下的命令。這週已經親自打過一場：用公式計算。
+const CC_INB_T = 12;   // 迎擊戰：敵軍躍遷進來前的倒數（秒）
+function ccBattleGo(S) {
+  if (S.pl.weekFought) { ccLog(S, `${S.sys[S.pendB.sys].name}：這週已經親自打過一場，這場用公式計算`, 'ev'); return ccCalcPlayerBattle(S); }
+  ccLaunch(S, 'capture', { sys: S.pendB.sys });
 }

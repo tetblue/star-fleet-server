@@ -946,7 +946,7 @@ function capUnitsFire(dt, t) {
 function capPickShip(x, y, z, R, t, own) {
   let best = null, bd = R;
   for (const s of own ? CAP.foes : CAP.own) {   // own＝己方的單位挑敵艦（正面交戰，不必先發現）
-    if (s.dead || !ships.alive[s.i] || (!own && t >= s.knownT)) continue;
+    if (s.dead || s.inb || !ships.alive[s.i] || (!own && t >= s.knownT)) continue;
     const d = Math.hypot(s.x - x, s.y - y, s.z - z); if (d >= bd) continue;
     if (capBlock(x, y, z, s.x, s.y, s.z) >= 0) continue;
     bd = d; best = s;
@@ -1500,6 +1500,12 @@ function capMarkers(g, sw, s, red, grn, amb, col, now) {
   const box = (p, r, c, lw = 1.5) => { g.strokeStyle = c; g.lineWidth = lw; const q = r * 0.4; g.beginPath(); for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { g.moveTo(p[0] + sx * r, p[1] + sy * (r - q)); g.lineTo(p[0] + sx * r, p[1] + sy * r); g.lineTo(p[0] + sx * (r - q), p[1] + sy * r); } g.stroke(); g.lineWidth = 1.5; };
   const dia = (p, r, c) => { g.strokeStyle = c; g.lineWidth = 2; g.beginPath(); g.moveTo(p[0], p[1] - r); g.lineTo(p[0] + r, p[1]); g.lineTo(p[0], p[1] + r); g.lineTo(p[0] - r, p[1]); g.closePath(); g.stroke(); g.lineWidth = 1.5; };
   const T = CAP.tgt, M = CAP.mis;
+  // 敵軍即將躍遷進來的點：畫面內＝脈動的圈與倒數，畫面外＝邊緣的箭頭
+  if (M && M.inb && !M.inb.done) {
+    const left = Math.max(0, M.inb.t - t), d = Math.hypot(M.inb.x - s.x, M.inb.y - s.y, M.inb.z - s.z), p = sw(M.inb.x, M.inb.y, M.inb.z), lab = `敵軍躍遷 ${left.toFixed(0)} 秒・${Math.round(d)}`;
+    if (!p) { _ch.set(M.inb.x, M.inb.y, M.inb.z); pilotEdgeArrow(g, _ch, red, lab); }
+    else { const k = 0.5 + 0.5 * Math.sin(now / 120); g.strokeStyle = red; g.lineWidth = 2; for (const rr of [16, 26 + k * 10]) { g.beginPath(); g.arc(p[0], p[1], rr, 0, 7); g.stroke(); } g.fillStyle = red; g.fillText(lab, p[0] + 30, p[1] - 4); }
+  }
   // 地面單位
   for (const G of CAP.G.gts) {
     if (G.side !== es || gtDead(G) || !CAP.seeG[G.id]) continue;
@@ -1514,7 +1520,7 @@ function capMarkers(g, sw, s, red, grn, amb, col, now) {
   }
   // 敵艦
   for (let i = 0; i < shipCount; i++) {
-    if (!ships.alive[i] || ships.side[i] !== es || !CAP.seeS[i]) continue;
+    if (!ships.alive[i] || ships.side[i] !== es || !CAP.seeS[i] || squadrons[ships.sq[i]].hidden) continue;
     shipWorldCPU(i, _cp); const p = sw(_cp.x, _cp.y, _cp.z), d = Math.hypot(_cp.x - s.x, _cp.y - s.y, _cp.z - s.z), isT = M && M.ship === i;
     if (!p) { if (isT) pilotEdgeArrow(g, _cp.clone(), '#ff9f40', `TGT ${Math.round(d)}`); continue; }
     if (isT) dia(p, 14, '#ff9f40'); else box(p, 11, red);
@@ -1558,7 +1564,8 @@ function capTopHud(g, W, cx, red, grn, amb, t, top) {
   // 警戒狀態
   let txt, c, sub = '';
   const seen = Math.max(...CAP.own.filter((o) => !o.dead).map((o) => Math.min(1, o.seen)), 0), known = CAP.own.some((o) => !o.dead && t < o.knownT);
-  if (M && M.idle) { txt = '巡航中'; c = grn; sub = `沒有敵人・按 ${keyText('cap_map')} 打開星圖`; }
+  if (M && M.inb && !M.inb.done) { txt = `敵軍躍遷中 ${Math.max(0, M.inb.t - t).toFixed(1)}`; c = red; sub = '紅色箭頭＝敵軍躍遷進來的方向，先占好位置'; }
+  else if (M && M.idle) { txt = '巡航中'; c = grn; sub = `沒有敵人・按 ${keyText('cap_map')} 打開星圖`; }
   else if (M && M.type === 'capture') { txt = '交戰中'; c = '#ff9a5a'; const O = capOddsNow(); sub = O ? `目前評估：勝率 ${Math.round(O.win * 100)}%` : ''; }
   else if (CAP.alarm) { txt = '警報中'; c = red; sub = `${CAP.waves > 0 && capCommAlive() ? `增援還有 ${CAP.waves} 波${CAP.nextWave > t ? `（${Math.ceil(CAP.nextWave - t)} 秒）` : ''}` : '沒有更多增援'}${known ? '・位置暴露' : '・敵軍在搜索'}`; }
   else if (CAP.report) { txt = `回報中 ${Math.max(0, CAP.report.t - t).toFixed(1)}`; c = red; sub = `摧毀 ${capSrcName(CAP.report.src)} 就不會拉警報`; }
