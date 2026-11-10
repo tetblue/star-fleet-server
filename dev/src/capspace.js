@@ -59,6 +59,7 @@ function capLayoutSpace(p, key, misType) {
   const B = spot(area(-850, -450, 1200), 100) || { x: 0, z: -650 };
   const units = [];
   const add = (type, pt, extra = {}) => { if (pt) units.push({ type, x: Math.round(pt.x * 10) / 10, y: pt.y != null ? pt.y : alt(0.5), z: Math.round(pt.z * 10) / 10, hd: R() * TAU, ...extra }); return pt; };
+  if (misType === 'capture') return capLayoutCapture(p, key, { R, li, S, B, terrain, units, add, spot, near, area, alt, hole });   // 佔領戰（capsquad.js）
   add('relay', spot(near(B, 60, 180), 60));
   add('hangar', spot(near(B, 120, 300), 120), { air: 0 });
   // 偵測浮標：散在中間；防禦平台：據點附近、路線上
@@ -168,7 +169,7 @@ function capSpaceStep(dt, t) {
     }
     if (hurt > 0 && tick && capLive()) {
       const dmg = hurt * 0.5 * (ships.shMax[s.i] + maxHp(s.i));
-      pending.push({ t, target: s.i, side: 1 - CAP.side, asp: 0, dmg, hm: 1, fx: false, dirIdx: 0, x: s.x, y: s.y, z: s.z, crash: true });
+      pending.push({ t, target: s.i, side: 1 - s.side, asp: 0, dmg, hm: 1, fx: false, dirIdx: 0, x: s.x, y: s.y, z: s.z, crash: true });
       if (s.k === CAP.cur && t - (s.edgeFeedT || -9) > 4) { s.edgeFeedT = t; capFeed(h && s.holeD < h.hurt ? '黑洞的潮汐力正在撕裂船體！' : '高能粒子帶：船體受損，快離開！', 'bad'); }
     }
   }
@@ -176,10 +177,10 @@ function capSpaceStep(dt, t) {
   for (const g of CAP.G.gts) {
     if (g.cu !== 'mine' || gtDead(g)) continue;
     const T = CAP_UNIT.mine.mine;
-    let hit = false; for (const s of CAP.ships) if (!s.dead && Math.hypot(s.x - g.x, s.y - g.y, s.z - g.z) < T.r + s.L * 0.4) { hit = true; break; }
+    let hit = false; for (const s of CAP.own) if (!s.dead && Math.hypot(s.x - g.x, s.y - g.y, s.z - g.z) < T.r + s.L * 0.4) { hit = true; break; }
     if (!hit) continue;
     g.hp = 0; g.deadT = t; spawnFx(g.x, g.y, g.z, g.side, 4, 22);
-    for (const s of CAP.ships) { if (s.dead) continue; const d = Math.hypot(s.x - g.x, s.y - g.y, s.z - g.z); if (d < T.blast) pending.push({ t, target: s.i, side: g.side, asp: 0, dmg: T.dmg * CAP.Df.dmg * (1 - 0.6 * d / T.blast), hm: 1, fx: true, dirIdx: 0, x: g.x, y: g.y, z: g.z, sx: g.x, sz: g.z }); }
+    for (const s of CAP.own) { if (s.dead) continue; const d = Math.hypot(s.x - g.x, s.y - g.y, s.z - g.z); if (d < T.blast) pending.push({ t, target: s.i, side: g.side, asp: 0, dmg: T.dmg * CAP.Df.dmg * (1 - 0.6 * d / T.blast), hm: 1, fx: true, dirIdx: 0, x: g.x, y: g.y, z: g.z, sx: g.x, sz: g.z }); }
     s0Feed('觸雷！');
   }
   function s0Feed(m) { if (t - (CAP.mineFeedT || -9) > 2) { CAP.mineFeedT = t; capFeed(m, 'bad'); } }
@@ -201,7 +202,7 @@ function capConvoyAI(P, t) {
   // 護航
   const V = CAP.pat.find((q) => q.role === 'convoy');
   let best = null, bd = 420;
-  for (const s of CAP.ships) { if (s.dead || t >= s.knownT) continue; const d = Math.hypot(s.x - C.x, s.z - C.z); if (d < bd) { bd = d; best = s; } }
+  for (const s of CAP.own) { if (s.dead || t >= s.knownT) continue; const d = Math.hypot(s.x - C.x, s.z - C.z); if (d < bd) { bd = d; best = s; } }
   let dest;
   if (best) { g.target = best.q; const hx = C.x - best.x, hz = C.z - best.z, hd = Math.hypot(hx, hz) || 1; dest = { x: best.x + hx / hd * 110, z: best.z + hz / hd * 110, y: best.y + 8 }; }
   else {
@@ -324,6 +325,11 @@ function capSpaceBuild() {
     } else if (g.cu === 'hangar') {
       add(new THREE.BoxGeometry(6, 0.8, 3.6), hull); add(new THREE.BoxGeometry(5.2, 0.12, 2.6), glow, 0, 0.46);
       add(new THREE.BoxGeometry(1.2, 2.2, 1.2), dark, -2.2, 1.4); add(new THREE.CylinderGeometry(0.8, 0.8, 2.4, 8), dark, 2, -0.9, 0, 0, Math.PI / 2);
+    } else if (g.cu === 'orb') {   // 軌道防禦站：中央塔＋環＋輻條＋砲塔
+      add(new THREE.CylinderGeometry(1.6, 2.2, 6, 10), hull); add(new THREE.SphereGeometry(1.8, 14, 10), dark, 0, 3.4); add(new THREE.ConeGeometry(1.4, 2.6, 10), dark, 0, -4.2, 0, Math.PI);
+      add(new THREE.TorusGeometry(6.2, 0.55, 8, 40), hull, 0, 0, 0, Math.PI / 2); add(new THREE.TorusGeometry(6.2, 0.2, 6, 40), glow, 0, 0.6, 0, Math.PI / 2);
+      for (let k = 0; k < 4; k++) { const a = k / 4 * TAU; add(new THREE.BoxGeometry(0.4, 0.4, 6), dark, Math.sin(a) * 3.2, 0, Math.cos(a) * 3.2).rotation.y = a; add(new THREE.BoxGeometry(1, 0.8, 1.6), dark, Math.sin(a + 0.4) * 6.2, 0.9, Math.cos(a + 0.4) * 6.2).rotation.y = a; }
+      add(new THREE.SphereGeometry(0.25, 8, 6), red, 0, 4.9);
     } else add(new THREE.BoxGeometry(g.r, g.r, g.r), hull);
     group.add(o); V.meshes[g.id] = o;
   }
@@ -338,7 +344,7 @@ function capSpaceFrame() {
     let o = V.meshes[g.id];
     if (!o) continue;
     o.visible = !gtDead(g) && (g.cu !== 'mine' || CAP.seeG[g.id] === 1);
-    if (g.cu === 'plat' || g.cu === 'buoy') o.rotation.y = (g.hd || 0) + t * (g.cu === 'buoy' ? 0.4 : 0.08);
+    if (g.cu === 'plat' || g.cu === 'buoy' || g.cu === 'orb') o.rotation.y = (g.hd || 0) + t * (g.cu === 'buoy' ? 0.4 : 0.08);
   }
 }
 // 新增的設施（增援等）補模型：目前太空沒有中途新增的設施

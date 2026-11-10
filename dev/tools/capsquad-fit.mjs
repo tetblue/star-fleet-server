@@ -1,5 +1,8 @@
 // 艦長生涯：小隊戰的勝率與存活率公式（用 capsquad-sim.mjs 的模擬結果擬合）
 // 用法（在 dev 資料夾）：node tools/capsquad-fit.mjs --n=8000 --seed=1
+// 實戰資料（遊戲裡 AI 對 AI 的佔領戰，__cap.capDuel）：--real=實戰.txt（一行一場的精簡格式，見 readReal）
+// 只驗證現有的公式、不重新擬合：再加 --params=公式.json（{ win, surv }）
+// 有軌道防禦的戰鬥（defs）：先用沒有防禦的戰鬥擬合主要參數，再單獨擬合每種防禦設施的火力、耐久（def）
 // 產生隨機戰鬥（每方 1～2 個小隊、每隊 1～5 艘、受損狀態、飛彈存量、敵方難度），
 // 七成拿來擬合、三成拿來驗證：預測勝負的準確度、預測勝率和實際勝率是否相符（分組比較）、存活率是否相符。
 import fs from 'node:fs';
@@ -22,10 +25,25 @@ function mkSide(diff, near) {
   for (let q = 0; q < nq; q++) { const n = near ? Math.max(1, Math.min(5, Math.round(tot / nq) + (q && tot % nq ? -1 : 0))) : 1 + Math.floor(R() * 5); squads.push(Array.from({ length: n }, mkShip)); }
   return { squads, diff };
 }
-const CACHE = arg('cache', '');
+const CACHE = arg('cache', ''), REAL = arg('real', '');
 let rows = [];
 const t0 = Date.now();
-if (CACHE && fs.existsSync(CACHE)) rows = JSON.parse(fs.readFileSync(CACHE, 'utf8'));
+// 精簡格式：勝方,秒數;我方;敵方　一方＝難度:小隊/小隊[:防禦設施,…]　小隊＝船.船…　船＝艦種字母-船體%-護盾%-飛彈%-存活(1/0)
+// 例：0,84;1:a-100-100-100-1.g-60-20-50-0;2:s-100-100-100-0:orb,plat
+function readReal(file) {
+  const K = { a: 'assault', g: 'gunship', s: 'support' };
+  return fs.readFileSync(file, 'utf8').split('\n').map((l) => l.trim()).filter(Boolean).map((line) => {
+    const [head, ...sd] = line.split(';'), [win, t] = head.split(',').map(Number), ships = [];
+    const sides = sd.map((x, si) => {
+      const [diff, sq, defs] = x.split(':');
+      const squads = sq.split('/').map((q, qi) => q.split('.').map((c) => { const [k, hp, sh, msl, al] = c.split('-'); ships.push({ side: si, sq: si * 10 + qi, key: K[k], alive: al === '1' }); return { key: K[k], hp: hp / 100, sh: sh / 100, msl: msl / 100 }; }));
+      return { squads, diff: +diff, ...(defs ? { defs: defs.split(',') } : {}) };
+    });
+    return { sides, r: { win, t, ships } };
+  });
+}
+if (REAL) rows = readReal(REAL);
+else if (CACHE && fs.existsSync(CACHE)) rows = JSON.parse(fs.readFileSync(CACHE, 'utf8'));
 else for (let b = 0; b < N; b++) {
   const A = mkSide(1), bal = R() < 0.5, sides = [A, mkSide(R() < 0.6 ? 1 : Math.floor(R() * 5), bal ? A.squads.flat().length : 0)];
   const r = battle(sides, SEED * 100003 + b, { time: TIME });
@@ -47,7 +65,13 @@ function shipFE(p, c, diff) {
   const H = HULLS[c.key], D = DIFF[diff];
   return { F: D.dmg * p.f[c.key], E: D.hp * (H.hp * c.hp + p.alpha * H.sh * c.sh) / 100, M: H.msl ? D.dmg * H.msl.n * c.msl * H.msl.dmg / 100 : 0 };
 }
-function sideFEM(p, S) { let F = 0, E = 0, M = 0; for (const q of S.squads) for (const c of q) { const x = shipFE(p, c, S.diff); F += x.F; E += x.E; M += x.M; } return { F, E, M }; }
+// 防禦設施：每座 F＝難度傷害 × def[種類].F、E＝難度耐久 × def[種類].E（和船同一個單位）
+const DEF_KEYS = ['orb', 'plat'];
+function sideFEM(p, S) {
+  let F = 0, E = 0, M = 0; for (const q of S.squads) for (const c of q) { const x = shipFE(p, c, S.diff); F += x.F; E += x.E; M += x.M; }
+  if (S.defs && p.def) { const D = DIFF[S.diff]; for (const d of S.defs) { F += D.dmg * p.def[d].F; E += D.hp * p.def[d].E; } }
+  return { F, E, M };
+}
 function sideS(p, S, foe) {
   const a = sideFEM(p, S), b = sideFEM(p, foe), E = Math.max(a.E * 0.1, a.E - p.lambda * b.M);
   return Math.log(Math.max(1e-6, a.F)) + p.gamma * Math.log(Math.max(1e-6, E)) - p.delta * (S.squads.length - 1);
@@ -55,8 +79,10 @@ function sideS(p, S, foe) {
 const sig = (z) => 1 / (1 + Math.exp(-z));
 const pWin = (p, sides) => sig(p.k * (sideS(p, sides[0], sides[1]) - sideS(p, sides[1], sides[0])));
 
-const decided = rows.filter((x) => x.r.win >= 0);
-const cut = Math.floor(decided.length * 0.7), train = decided.slice(0, cut), test = decided.slice(cut);
+const hasDef = (x) => x.sides.some((S) => S.defs && S.defs.length);
+const all = rows.filter((x) => x.r.win >= 0), decided = all.filter((x) => !hasDef(x)), decDef = all.filter(hasDef);
+const PARAMS = arg('params', ''), FIXED = PARAMS ? JSON.parse(fs.readFileSync(PARAMS, 'utf8')) : null;
+const cut = FIXED ? 0 : Math.floor(decided.length * 0.7), train = decided.slice(0, cut), test = decided.slice(cut);
 function loss(v, L) {
   const p = unflat(v); let s = 0;
   for (const x of L) { const q = Math.min(1 - 1e-9, Math.max(1e-9, pWin(p, x.sides))); s -= x.r.win === 0 ? Math.log(q) : Math.log(1 - q); }
@@ -72,15 +98,20 @@ function fit(v, f, steps = 600, lr = 0.03, lo = null) {
   }
   return v;
 }
-const v = fit(flat(P0), (u) => loss(u, train), 1500, 0.03, WIN_MIN);
+const v = FIXED ? flat(FIXED.win) : fit(flat(P0), (u) => loss(u, train), 1500, 0.03, WIN_MIN);
 const P = unflat(v);
+// 防禦設施的參數（主要參數固定）
+const dflat = (d) => DEF_KEYS.flatMap((k) => [d[k].F, d[k].E]), dun = (u) => Object.fromEntries(DEF_KEYS.map((k, i) => [k, { F: u[i * 2], E: u[i * 2 + 1] }]));
+const dcut = FIXED ? 0 : Math.floor(decDef.length * 0.7), dTrain = decDef.slice(0, dcut), dTest = decDef.slice(dcut);
+if (FIXED && FIXED.win.def) P.def = FIXED.win.def;
+else if (decDef.length) { const u0 = fit([1, 5, 0.5, 2], (u) => { P.def = dun(u); let s = 0; for (const x of dTrain) { const q = Math.min(1 - 1e-9, Math.max(1e-9, pWin(P, x.sides))); s -= x.r.win === 0 ? Math.log(q) : Math.log(1 - q); } return s / dTrain.length; }, 600, 0.05, [0, 0, 0, 0]); P.def = dun(u0); }
 const acc = (L) => L.filter((x) => (pWin(P, x.sides) >= 0.5) === (x.r.win === 0)).length / L.length;
 console.log('\n勝率公式的參數：');
 console.log(`  艦種基本火力 f：突擊艦 1（基準）、重砲艦 ${P.f.gunship.toFixed(2)}、支援艦 ${P.f.support.toFixed(2)}`);
 console.log(`  護盾的耐久價值 α＝${P.alpha.toFixed(2)}（1 點護盾約等於 ${P.alpha.toFixed(2)} 點船體）`);
 console.log(`  飛彈齊射 λ＝${P.lambda.toFixed(2)}（敵方剩下的飛彈總傷害，有 ${Math.round(P.lambda * 100)}% 會先扣掉我方耐久）`);
 console.log(`  耐久的指數 γ＝${P.gamma.toFixed(2)}、分成兩個小隊的懲罰 δ＝${P.delta.toFixed(2)}、斜率 k＝${P.k.toFixed(2)}`);
-console.log(`\n驗證（${test.length} 場沒用來擬合的戰鬥）：預測勝負準確 ${(acc(test) * 100).toFixed(1)}%（擬合用的 ${(acc(train) * 100).toFixed(1)}%）；log loss ${loss(v, test).toFixed(3)}`);
+console.log(`\n驗證（${test.length} 場${FIXED ? '，用現有的公式' : '沒用來擬合的戰鬥'}）：預測勝負準確 ${(acc(test) * 100).toFixed(1)}%${FIXED ? '' : `（擬合用的 ${(acc(train) * 100).toFixed(1)}%）`}；log loss ${loss(v, test).toFixed(3)}`);
 console.log('  預測勝率 → 實際勝率（場數）');
 for (let b = 0; b < 10; b++) {
   const L = test.filter((x) => { const q = pWin(P, x.sides); return q >= b / 10 && q < (b + 1) / 10 + (b === 9 ? 1e-9 : 0); });
@@ -97,6 +128,18 @@ for (let d = 0; d < 5; d++) grp(`敵方難度 ${DIFF[d].name}`, (x) => x.sides[1
 grp('我方全部滿血', (x) => x.sides[0].squads.flat().every((c) => c.hp === 1));
 grp('我方有受損的船', (x) => x.sides[0].squads.flat().some((c) => c.hp < 1));
 
+if (decDef.length) {
+  const L = dTest.length ? dTest : decDef, pm = L.reduce((a, x) => a + pWin(P, x.sides), 0) / L.length, am = L.filter((x) => x.r.win === 0).length / L.length;
+  console.log();
+  for (const k of DEF_KEYS) console.log();
+  console.log();
+}
+if (decDef.length) {
+  const L = dTest.length ? dTest : decDef, pm = L.reduce((a, x) => a + pWin(P, x.sides), 0) / L.length, am = L.filter((x) => x.r.win === 0).length / L.length;
+  console.log(`\n軌道防禦（${decDef.length} 場有防禦的戰鬥，驗證 ${L.length} 場）：每座的火力、耐久（和船同單位：突擊艦火力 1、耐久＝船體 ÷ 100）`);
+  for (const k of DEF_KEYS) console.log(`  ${k === 'orb' ? '軌道防禦站' : '防禦平台'}：火力 ${P.def[k].F.toFixed(2)}、耐久 ${P.def[k].E.toFixed(2)}`);
+  console.log(`  預測勝負準確 ${(acc(L) * 100).toFixed(1)}%；平均預測 ${(pm * 100).toFixed(0)}%、實際 ${(am * 100).toFixed(0)}%`);
+}
 // ───── 每艘船的存活率 ─────
 // z = b[艦種] + c1 × logit(我方勝率) + c2 × ln(這艘船剩下的耐久比例) + c3 × ln(我方船數 ÷ 敵方船數)
 function shipRows(L) {
@@ -117,7 +160,7 @@ function shipRows(L) {
 const STr = shipRows(train), STe = shipRows(test);
 const sz = (u, r) => u[HULL_KEYS.indexOf(r.key)] + u[3] * Math.max(-8, Math.min(8, r.lp)) + u[4] * r.fr + u[5] * r.rel;
 const sloss = (u, L) => { let s = 0; for (const r of L) { const q = Math.min(1 - 1e-9, Math.max(1e-9, sig(sz(u, r)))); s -= r.y ? Math.log(q) : Math.log(1 - q); } return s / L.length; };
-const u = fit([0, 0, 0, 1, 1, 0], (w) => sloss(w, STr), 800, 0.05);
+const u = FIXED ? [FIXED.surv.b.assault, FIXED.surv.b.gunship, FIXED.surv.b.support, FIXED.surv.c1, FIXED.surv.c2, FIXED.surv.c3] : fit([0, 0, 0, 1, 1, 0], (w) => sloss(w, STr), 800, 0.05);
 console.log('\n存活率公式的參數：');
 console.log(`  艦種基準：突擊艦 ${u[0].toFixed(2)}、重砲艦 ${u[1].toFixed(2)}、支援艦 ${u[2].toFixed(2)}`);
 console.log(`  我方勝率的影響 c1＝${u[3].toFixed(2)}、自己剩下的耐久 c2＝${u[4].toFixed(2)}、船數比 c3＝${u[5].toFixed(2)}`);

@@ -29,7 +29,7 @@ function grShip(G, slot, key) {
 const grMem = (c, t) => { c.mem.push(t); if (c.mem.length > 6) c.mem.splice(1, 1); };   // 留第一筆（初次出擊）和最近的
 // 艦長任務結束（艦長模式的報告、星海生涯的任務都會呼叫）
 // 結束時各艦的狀態（報告畫面一開就會清掉 CAP.ships，所以先記下來）
-function grCapSnap() { return (CAP && CAP.ships || []).map((s) => ({ key: s.key, dead: !!s.dead, hp: s.dead ? 0 : Math.max(0, ships.hp[s.i]) / s.H.hp })); }
+function grCapSnap() { return (CAP && (CAP.own || CAP.ships) || []).filter((s) => !s.sq).map((s) => ({ key: s.key, dead: !!s.dead, hp: s.dead ? 0 : Math.max(0, ships.hp[s.i]) / s.H.hp })); }
 function grAfterCaptain(ok, misName, sceneName, alarmed, snap) {
   snap = snap || grCapSnap(); if (!snap.length) return;
   const G = grLoad(), p = capLoad(), slots = p.slots.map((k, i) => [k, i]).filter(([k]) => k); G.missions++;

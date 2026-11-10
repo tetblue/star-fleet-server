@@ -8,7 +8,7 @@ import * as esbuild from 'esbuild';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const src = path.join(root, 'src'), web = path.join(root, '..', 'web');
-const parts = ['audio.js', 'particles.js', 'cinecam.js', 'main.js', 'data.js', 'ground.js', 'terrain.js', 'debris.js', 'collapse.js', 'mounts_default.js', 'weapons.js', 'game.js', 'campaign.js', 'story.js', 'story_war.js', 'tavern.js', 'dock.js', 'sim.js', 'building.js', 'tutorial.js', 'watch.js', 'multi.js', 'cutin.js', 'overlay.js', 'tac.js', 'bridge.js', 'pilot.js', 'ground_pilot.js', 'captain.js', 'capspace.js', 'starmap.js', 'starmap_career.js', 'starmap_world.js', 'starmap_ui.js', 'hangar.js', 'capbay.js', 'growth.js', 'hud.js', 'settings.js', 'paint_link.js', 'boot.js'];
+const parts = ['audio.js', 'particles.js', 'cinecam.js', 'main.js', 'data.js', 'ground.js', 'terrain.js', 'debris.js', 'collapse.js', 'mounts_default.js', 'weapons.js', 'game.js', 'campaign.js', 'story.js', 'story_war.js', 'tavern.js', 'dock.js', 'sim.js', 'building.js', 'tutorial.js', 'watch.js', 'multi.js', 'cutin.js', 'overlay.js', 'tac.js', 'bridge.js', 'pilot.js', 'ground_pilot.js', 'captain.js', 'capspace.js', 'capsquad.js', 'starmap.js', 'starmap_career.js', 'starmap_world.js', 'starmap_ui.js', 'hangar.js', 'capbay.js', 'growth.js', 'hud.js', 'settings.js', 'paint_link.js', 'boot.js'];
 fs.writeFileSync(path.join(src, '_entry.js'), parts.map((f) => fs.readFileSync(path.join(src, f), 'utf8')).join('\n'), 'utf8');
 fs.mkdirSync(path.join(web, 'assets'), { recursive: true });
 // 音效、配樂（audio.js）：dev/sfx、dev/bgm 的 mp3 → web/assets/sfx.js、bgm.js（window.__SFX／__BGM＝{鍵: base64}），
