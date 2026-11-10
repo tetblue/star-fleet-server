@@ -167,7 +167,22 @@ function capSpaceEnd() {
   CAP.spV = null; CAP.sp = null;
 }
 // 船在戰區的哪裡：e＝橢球距離（1＝邊界）
-const capEdgeE = (x, y, z) => Math.sqrt((x * x + z * z) / (CAP_EDGE.R * CAP_EDGE.R) + (y * y) / (CAP_EDGE.Ry * CAP_EDGE.Ry));
+// 戰場縮小（2026-11-11）：太空戰場的位置、戰區、地形、危險天體都 ×CAP_SPACE_K（船、武器射程不變）＝接敵、到目標比較快，船相對變大
+const CAP_SPACE_K = 0.55;
+const capER = () => (CAP.sp && CAP.sp.R) || CAP_EDGE.R, capERy = () => (CAP.sp && CAP.sp.Ry) || CAP_EDGE.Ry;
+function capSpaceScale(m, k) {
+  if (!m || !m.captain || !m.captain.space || m.captain.space.k) return m;
+  const C = m.captain, xz = (o) => { if (!o) return; o.x *= k; o.z *= k; if (o.y != null) o.y *= k; };
+  for (const f of m.fleets) { f.x *= k; f.z *= k; if (f.y != null) f.y *= k; if (f.wp) f.wp = f.wp.map(([x, z]) => [Math.round(x * k), Math.round(z * k)]); }
+  for (const u of C.units || []) xz(u);
+  for (const t of m.terrain || []) { xz(t); if (t.r != null) t.r *= k; }
+  [C.S, C.B, C.ext, C.inbPt].forEach(xz);
+  if (C.mis && C.mis.pts) for (const q of C.mis.pts) { xz(q); if (q.r != null) q.r *= k; }
+  const S = C.space; S.R *= k; S.Ry *= k; S.k = k;
+  if (S.hole) { const H = S.hole; xz(H); for (const key of ['r', 'pull', 'hurt']) if (H[key] != null) H[key] *= k; }
+  return m;
+}
+const capEdgeE = (x, y, z) => Math.sqrt((x * x + z * z) / (capER() * capER()) + (y * y) / (capERy() * capERy()));
 // 每 tick（capFly 之後）：粒子帶、黑洞的拉力與傷害
 function capSpaceStep(dt, t) {
   const sp = CAP.sp; if (!sp) return;
@@ -287,7 +302,7 @@ function capSpaceBuild() {
   // 邊界光牆
   const em = new THREE.ShaderMaterial({ vertexShader: CAP_EDGE_VS, fragmentShader: CAP_EDGE_FS, uniforms: { uT: { value: 0 }, uP: { value: new THREE.Vector3() }, uCol: { value: sp.edge === 'ion' ? new THREE.Color(0.3, 0.85, 1.0) : new THREE.Color(0.55, 0.45, 1.0) } },
     transparent: true, depthWrite: false, side: THREE.BackSide, blending: THREE.AdditiveBlending });
-  const wall = new THREE.Mesh(new THREE.SphereGeometry(1, 96, 48), em); wall.scale.set(CAP_EDGE.R, CAP_EDGE.Ry, CAP_EDGE.R); wall.renderOrder = 5; group.add(wall);
+  const wall = new THREE.Mesh(new THREE.SphereGeometry(1, 96, 48), em); wall.scale.set(capER(), capERy(), capER()); wall.renderOrder = 5; group.add(wall);
   V.edge = em;
   // 地形：指揮官視角用的範圍球殼、外框線藏起來（近看像玻璃泡）；小行星區改放真的小石塊
   V.hidden = [];
@@ -392,7 +407,7 @@ const CAP_WELL_TX = {
 function capDangers(s) {
   const out = [], e = s.edge || 0, h = CAP.sp && CAP.sp.hole;
   if (e > 0.72) {
-    const nx = s.x / CAP_EDGE.R ** 2, ny = s.y / CAP_EDGE.Ry ** 2, nz = s.z / CAP_EDGE.R ** 2, nl = Math.hypot(nx, ny, nz) || 1, ny1 = ny / nl;
+    const nx = s.x / capER() ** 2, ny = s.y / capERy() ** 2, nz = s.z / capER() ** 2, nl = Math.hypot(nx, ny, nz) || 1, ny1 = ny / nl;
     out.push({ k: CAP.sp.edge === 'ion' ? 'ion' : 'edge', dir: [nx / nl, ny1, nz / nl], d: e >= 1 ? 0 : Math.hypot(s.x, s.y, s.z) * (1 / e - 1), in: e > 1, side: ny1 > 0.7 ? '上方' : ny1 < -0.7 ? '下方' : '' });
   }
   if (h && s.holeD < Math.max(h.pull, h.hurt) * 1.15) out.push({ k: h.kind || 'hole', dir: [(h.x - s.x) / s.holeD, (h.y - s.y) / s.holeD, (h.z - s.z) / s.holeD], d: Math.max(0, s.holeD - h.hurt), in: s.holeD < h.hurt, pull: s.holeD < h.pull, side: '' });
@@ -437,7 +452,7 @@ function capSpaceRadar(g, s, cx, cy, k, fw) {
   if (!CAP.sp) return;
   const pr = (x, z) => { const dx = x - s.x, dz = z - s.z; return [cx + (-dx * fw[1] + dz * fw[0]) * k, cy - (dx * fw[0] + dz * fw[1]) * k]; };
   const ring = (x, z, r, col, lw, dash) => { const c = pr(x, z); g.strokeStyle = col; g.lineWidth = lw; g.setLineDash(dash || []); g.beginPath(); g.arc(c[0], c[1], r * k, 0, TAU); g.stroke(); g.setLineDash([]); g.lineWidth = 1.5; };
-  const yk = Math.max(0, 1 - (s.y / CAP_EDGE.Ry) ** 2), Rh = CAP_EDGE.R * Math.sqrt(yk);   // 這個高度的橫切面
+  const yk = Math.max(0, 1 - (s.y / capERy()) ** 2), Rh = capER() * Math.sqrt(yk);   // 這個高度的橫切面
   const c0 = pr(0, 0);
   const ion = CAP.sp.edge === 'ion', ec = ion ? '95,216,255' : '190,150,255';
   g.fillStyle = ion ? 'rgba(95,216,255,.16)' : 'rgba(180,140,255,.18)'; g.beginPath(); g.arc(c0[0], c0[1], Rh * k + 400, 0, TAU); g.arc(c0[0], c0[1], Rh * k, 0, TAU, true); g.fill();   // 邊界外塗色

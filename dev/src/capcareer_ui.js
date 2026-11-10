@@ -349,7 +349,6 @@ function ccLaunch(S, kind, o) {
 function ccBattleDone() {
   const S = CC.S || ccLoad(); CC.S = S;
   const C = SIM.m.captain, I = C.cc;
-  if (I.kind === 'idle') { CC.idle = null; CC.over = false; setPhase('menu'); return ccRender(); }   // 巡航：沒有戰果
   const R = GAME.result || {}, s = S.sys[I.sys], st = CAP.stats || { ks: 0, merit: 0 };
   const put = (ids, L) => {
     const sqs = ids.map(ccSqById);
@@ -357,6 +356,11 @@ function ccBattleDone() {
     for (const q of sqs) if (q) q.ships = q.ships.filter((c) => !c.dead);
   };
   put(I.own, CAP.own); put(I.foe, CAP.foes);
+  if (I.kind === 'idle') {   // 巡航中結束（撞進危險區被擊沉、暫停選單結束）：損傷照樣留下，小隊全滅＝生涯結束
+    CC.idle = null; CC.over = false;
+    const P = ccPl(S); if (!P || !P.ships.length) { S.fin = { why: `你的小隊在 ${s.name} 巡航時全滅`, turn: S.turn }; ccLog(S, S.fin.why, 'bad'); }
+    ccSave(S); setPhase('menu'); return ccRender();
+  }
   (I.ownDefIdx || []).forEach((di, k) => { const g = CAP.G.gts.find((u) => u.def && u.side === CAP.side && u.di === k); const d = s.defs[di]; if (d) d.hp = !g || gtDead(g) ? 0 : g.hp / g.max; });
   I.defIdx.forEach((di, k) => { const g = CAP.G.gts.find((u) => u.def && u.side !== CAP.side && u.di === k); const d = s.defs[di]; if (d) d.hp = !g || gtDead(g) ? 0 : g.hp / g.max; });
   for (const g of CAP.G.gts) { if (!gtDead(g)) continue; if (g.cu === 'yard') s.yard = false; if (g.cu === 'depot') s.depot = false; }

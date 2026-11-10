@@ -32,7 +32,7 @@ const CAP_RULE = {
 // 巨艦手感（2026-11-11 試做，暫停選單可以開關＝SETTINGS.capHeavy）：
 //   鏡頭：視角縮小（長焦＝遠處的敵艦看起來更大、更近）、鏡頭拉遠一點保持自己的船在畫面上的大小、壓低貼近船身、跟隨有延遲、主砲開火震動
 //   操船：速度、加速、轉向都變慢（巨艦每秒只走零點幾個船身）。敵我都用同一套（capFly），AI 不用改。
-const CAP_FEEL = { fov: 26, boostFov: 3, dist: 3.8, up: 0.5, lag: 3.5, spd: 0.5, acc: 0.45, turn: 0.6, turnAcc: 0.5, shake: 0.35 };
+const CAP_FEEL = { fov: 26, boostFov: 3, dist: 3.8, up: 0.5, lag: 3.5, spd: 0.65, acc: 0.55, turn: 0.65, turnAcc: 0.5, shake: 0.35 };
 const capHeavy = () => SETTINGS.capHeavy !== false;
 const CAP_FC = [
   { key: 'hold', name: '禁止開火', en: 'HOLD FIRE', col: '#8fe39a', desc: '自動武器全部停火（潛行用）；主砲、飛彈照常手動發射，護航機收回' },
@@ -201,7 +201,7 @@ function capLayout(p) {
   }
   const at = sp ? 's' : 'g';
   if (!mt) { const L = Object.keys(CAP_MIS).filter((k) => CAP_MIS[k].at.includes(at)); mt = L[Math.floor(R0() * L.length)]; }
-  if (sp) return capLayoutSpace(p, sp, mt);
+  if (sp) return capSpaceScale(capLayoutSpace(p, sp, mt), CAP_SPACE_K);   // 太空戰場整體縮小（capspace.js）
   return capLayoutGround({ ...p, env: p.env > nG ? 0 : p.env }, mt);
 }
 function capLayoutGround(p, misType) {
