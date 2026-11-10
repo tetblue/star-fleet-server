@@ -72,7 +72,7 @@ function capLayoutCapture(p, key, o) {
       D.ownDefs.forEach((d, k) => add(d.type, d.type === 'orb' && !D.ownDefs.slice(0, k).some((x) => x.type === 'orb') ? { x: H.x, y: alt(0.5), z: H.z } : spot(near(H, 90, 240), 120), { def: true, own: true, di: k, hpf: d.hp }));
     }
     if (D.depot) add('depot', spot(near(B, 220, 420), 170));
-    if (D.idle) {   // 巡航：我方星系的設施（不參戰）
+    if (D.ownYard || D.ownDepot) {   // 我方星系的設施（不參戰）：巡航、迎擊戰都放，放法一樣
       const H = { x: S.x, z: 600 };
       if (D.ownYard) add('yard', spot(near(H, 160, 320), 150), { own: true });
       if (D.ownDepot) add('depot', spot(near(H, 160, 320), 150), { own: true });
@@ -119,6 +119,7 @@ function capLayoutCapture(p, key, o) {
 // ───── 任務：佔領戰 ─────
 function capCaptureInit(M) {
   if (M.type !== 'capture') return;
+  if (CAP.cfg.duel && CAP.cfg.duel.cont) capContApply(CAP.cfg.duel.cont);   // 艦長生涯：從巡航直接接續的迎擊戰
   if (CAP.cfg.duel && CAP.cfg.duel.idle) {   // 艦長生涯的星系巡航：沒有目標、不計時
     M.idle = true; M.goal = 1; M.prog = 0; M.nShips = 0; M.defs = []; CAP.tLim = 1e9;
     capFeed(`在星系中巡航・按 ${keyText('cap_map')} 打開星圖`, 'hint'); return;
@@ -129,7 +130,7 @@ function capCaptureInit(M) {
   if (M.ownDefs) capFeed(`我方的軌道防禦 ${M.ownDefs} 座參戰`, 'hint');
   M.goal = M.nShips + M.defs.length; M.prog = 0;
   M.odds = capOddsNow();
-  const L = CAP.G.gts.filter((g) => CAP_UNIT[g.cu].yard || CAP_UNIT[g.cu].depot).map((g) => g.name);
+  const L = CAP.G.gts.filter((g) => g.side !== CAP.side && (CAP_UNIT[g.cu].yard || CAP_UNIT[g.cu].depot)).map((g) => g.name);   // 只算敵方的（我方星系的設施不會幫敵人修）
   if (L.length) capFeed(`這個星系有${L.join('、')}：你撤退的期間敵方會${L.includes('維修船塢') ? '修船' : ''}${L.length > 1 ? '、' : ''}${L.includes('補給站') ? '補飛彈' : ''}；先炸掉就不會`, 'hint');
 }
 // 回傳 true＝佔領戰（其他任務的判定跳過）
@@ -242,3 +243,21 @@ function capDuelRow() {
   return { sides, r: { win, t: Math.round(U.uTime.value), ships: CAP.ships.map((s) => ({ side: s.side, sq: s.side * 10 + s.sq, key: s.key, alive: !s.dead, hp: s.dead ? 0 : ships.hp[s.i] / maxHp(s.i) })) } };
 }
 Object.assign(window.__cap || (window.__cap = {}), { capDuel, capDuelRow, capOdds, capOddsNow, CAP_ODDS });
+
+// ───── 艦長生涯：巡航 → 迎擊戰的接續 ─────
+// 巡航時記下我方每艘船的位置、方向、速度（capContSnap）；同一個星系、同一週開打的迎擊戰把船放回原處（capContApply），
+// 場景用同樣的種子＝地形、設施都一樣，看起來就是敵人躍遷進來、直接在原地開打。
+function capContSnap() {
+  if (!CAP.on) return null;
+  const c = capCur();
+  return { cur: c ? CAP.own.indexOf(c) : 0, thr: CAP.thr, far: CAP.far, camD: CAP.camD,
+    ships: CAP.own.map((s) => ({ x: s.x, y: s.y, z: s.z, yaw: s.yaw, P: s.P || 0, vx: s.vx || 0, vy: s.vy || 0, vz: s.vz || 0 })) };
+}
+function capContApply(K) {
+  const L = CAP.own.filter((s) => s.sq === 0);
+  L.forEach((s, k) => { const v = K.ships[k]; if (!v) return; Object.assign(s, v); });
+  if (K.cur >= 0 && K.cur < L.length && !L[K.cur].dead) CAP.cur = L[K.cur].k;
+  CAP.thr = K.thr; CAP.far = K.far; CAP.camD = K.camD;
+  capSyncAll();
+  capFeed('敵軍躍遷進入星系！', 'bad'); toast('敵軍躍遷進入星系：迎擊！', 'pilot');
+}

@@ -258,6 +258,7 @@ function ccEndWeek(go) {
     gEl('cc-endback').onclick = () => { smuCloseModal(); const q = W[0]; CC.cur = q.id; CC.sel = q.sys; ccRender(); };
     return;
   }
+  CC.cont = ccIdleOn() ? { sys: SIM.m.captain.cc.sys, seed: SIM.m.captain.cc.seed, env: SIM.m.captain.cc.env, turn: S.turn, key: CC.idle && CC.idle.key, snap: capContSnap() } : null;   // 巡航中結束這一週：迎擊戰接著打
   ccIdleStop();
   ccWeekA(S); ccSave(S);
   if (S.pendB) return ccBattleAsk(S);
@@ -305,7 +306,7 @@ function ccSkipPlayerBattle(S, why) {
 function ccShipSt(c) { return { hp: c.hp, sh: c.sh, msl: c.msl }; }
 function ccLaunch(S, kind, o) {
   const s = S.sys[o.sys], P = ccPl(S), R = CC_ROLES[S.role], li = CC_DIFF[S.diff].li, fac = SM_FAC[S.fac].game === 0 ? 0 : 1;
-  const seed = (S.turn * 7919 + s.id * 104729 + (S.r % 9973)) % 100000;
+  const seed = ccSeedOf(S, s);
   let m, info = { kind, sys: s.id, own: [], foe: [], defIdx: [], mis: o.mis };
   if (kind === 'capture') {
     const B = S.pendB, A = B.A.map(ccSqById), D = B.D.map(ccSqById), mine = B.att ? A : D, foe = B.att ? D : A;
@@ -313,8 +314,11 @@ function ccLaunch(S, kind, o) {
     info.ownDefIdx = ownDefs.map((d) => s.defs.indexOf(d));
     info.own = own.map((q) => q.id); info.foe = foe.map((q) => q.id); info.att = B.att; info.defIdx = defs.map((d) => s.defs.indexOf(d));
     const duel = { a: own.map((q) => q.ships.map((c) => c.key)), b: foe.map((q) => q.ships.map((c) => c.key)), st: [own.map((q) => q.ships.map(ccShipSt)), foe.map((q) => q.ships.map(ccShipSt))], li, real: true,
-      defs: defs.map((d) => ({ type: d.type, hp: d.hp })), ownDefs: ownDefs.map((d) => ({ type: d.type, hp: d.hp })), yard: B.att && s.yard, depot: B.att && s.depot, hm: R.tech.hull, shm: R.tech.shield };
-    m = capLayout({ ...capLoad(), fac, diff: li, env: ccSceneEnv(s), mis: 'capture', seed, ally: '', duel, noDef: false });
+      defs: defs.map((d) => ({ type: d.type, hp: d.hp })), ownDefs: ownDefs.map((d) => ({ type: d.type, hp: d.hp })), yard: B.att && s.yard, depot: B.att && s.depot, hm: R.tech.hull, shm: R.tech.shield,
+      ownYard: !B.att && s.owner === S.fac && s.yard, ownDepot: !B.att && s.owner === S.fac && s.depot };
+    const K = CC.cont; CC.cont = null;
+    if (K && K.snap && !B.att && K.sys === s.id && K.turn === S.turn && own[0] === P && K.key === ccIdleKey(S, P)) duel.cont = K.snap;   // 同一個星系、同一週、船沒變：接著巡航的位置打
+    m = capLayout({ ...capLoad(), fac, diff: li, env: duel.cont ? K.env : ccSceneEnv(s), mis: 'capture', seed: duel.cont ? K.seed : seed, ally: '', duel, noDef: false });   // 接續：和巡航同一個場景
     m.name = `${s.name}・${B.att ? '佔領戰' : '迎擊'}`;
   } else {
     const M = kind === 'op' ? S.missions.find((x) => x.id === o.mis) : null, mis = kind === 'raid' ? 'sabotage' : M.op;
@@ -459,7 +463,7 @@ function ccIdle(S) {
   const duel = { a: [P.ships.map((c) => c.key)], b: [], st: [[P.ships.map(ccShipSt)], []], li, real: true, idle: true, defs: [], ownDefs: mine ? ccDefsAlive(s).map((d) => ({ type: d.type, hp: d.hp })) : [],
     ownYard: mine && s.yard, ownDepot: mine && s.depot, hm: R.tech.hull, shm: R.tech.shield };
   const m = capLayout({ ...capLoad(), fac, diff: li, env: ccSceneEnv(s), mis: 'capture', seed: ccSeedOf(S, s), ally: '', duel, noDef: false });
-  m.captain.cc = { kind: 'idle', sys: s.id, own: [P.id], foe: [], defIdx: [] }; m.name = `${s.name}・巡航`;
+  m.captain.cc = { kind: 'idle', sys: s.id, own: [P.id], foe: [], defIdx: [], seed: ccSeedOf(S, s), env: ccSceneEnv(s) }; m.name = `${s.name}・巡航`;
   CC.idle = { key: ccIdleKey(S, P) }; CC.over = false;
   window.removeEventListener('resize', ccResize);
   simEndMid(); overlay(null);
