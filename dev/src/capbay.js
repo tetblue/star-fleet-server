@@ -10,7 +10,7 @@ const CB = {
   focus: false, fo: { base: 0.8, h: 0.75, d: 3.5, user: -99 }, cp: null, cl: null, ox: 0, oy: 0,
 };
 const CB_GAP = 76;                                          // 機庫間距
-const CB_LEN = { assault: 30, gunship: 40, support: 37 };   // 船長（世界單位）
+const CB_LEN = { assault: 30, gunship: 40, support: 37, ew: 36, stealth: 27 };   // 船長（世界單位）
 const CB_CRADLE = 1.4;                                      // 托架高度（船的最低點離地）
 const CB_HALL = { hw: 19, z0: -30, z1: 16, h: 22 };         // 機庫內部：半寬、後牆、前緣、高度
 const CB_SHIP_Z = -7;                                       // 船停的位置（機庫中間偏後）

@@ -10,6 +10,8 @@
 // 同一個星系的我方小隊可以換船、分出新小隊（ccTransfer），也可以把親自指揮換到那一隊（ccTakeCommand）。輸＝親自指揮的小隊全滅。
 // 第 6 階段：每個星系有固定的太空場景（s.scene：小行星帶、黑洞、深空、行星軌道、星雲、太空站周邊），太空戰都在那個場景打。
 // 特戰任務多了摧毀設施（太空：船塢、補給站）、護送、救援撤離、偵察；破壞改成只炸軌道防禦的管制中心（地面）。地面、太空任務混著出。
+// 第 7 階段：升遷（CC_RANKS）。戰功到了上級發「升遷考核」（佔領任務），完成就一定升（有人出缺）。軍階決定能帶幾隊、能造的船型、任務數、據點。
+// 周目（CC_META，跨局）：當上的最高軍階解鎖較高的開局身分、地獄難度。
 const CC_STORE = 'fleet.capcareer';
 const CC_ROLES = {
   emp: { name: '帝國艦長', fac: SM_E, hulls: ['gunship', 'assault'], tech: { hull: 1.1, shield: 1 }, techName: '強化裝甲：船體 +10%',
@@ -21,6 +23,7 @@ const CC_DIFF = [
   { name: '簡單', li: 0, aggr: 0.8, desc: '敵方的特製戰艦弱一級，AI 比較保守。' },
   { name: '普通', li: 1, aggr: 1, desc: '標準的局勢。' },
   { name: '困難', li: 2, aggr: 1.25, desc: '敵方的特製戰艦強一級，AI 積極進攻。' },
+  { name: '地獄', li: 3, aggr: 1.5, need: 3, desc: '敵方的特製戰艦強兩級，AI 非常積極、收入更多。' },
 ];
 const CC_RULE = {
   siegeT: SM_RULE.siegeT,   // 圍城幾週地面投降（沿用星海生涯）
@@ -29,21 +32,85 @@ const CC_RULE = {
   salary: 80,               // 玩家每週的薪餉
   repair: 1.2,              // 修理：每點缺少的船體多少資金（要在有維修船塢的己方星系）
   missile: 3,               // 補飛彈：每枚多少資金（有補給站、維修船塢或首都的己方星系）
-  build: { assault: 500, gunship: 900, support: 700 },   // 新造艦（下週到）
+  build: { assault: 500, gunship: 900, support: 700, ew: 800, stealth: 850 },   // 新造艦（下週到）
+  baseCost: 400,            // 把據點搬到另一個有維修船塢的己方星系
   defEvery: 2,              // 己方星系每幾週補一座防禦（沒有敵人在場時）
   merit: { ship: 40, cap: 300, def: 30 },
   fx: { cut: 4, dis: 4, intel: 5, disHp: 0.7, defBack: 4 },   // 任務效果：補給切斷幾週、指揮中斷幾週（耐久當作 ×0.7）、偵察幾週、地面防禦每幾週回復 1
   maxMis: 4,
   sqMerit: [0, 800, 2000],   // 指揮權：戰功到了才能多帶一個小隊（暫定，第 7 階段改成升遷）
 };
-const CC_HULL_LETTER = { assault: '突', gunship: '砲', support: '支' };
+const CC_HULL_LETTER = { assault: '突', gunship: '砲', support: '支', ew: '電', stealth: '匿' };
+
+// ───── 升遷（第 7 階段）─────
+// merit＝發考核的戰功；sq＝能帶幾隊；hulls＝能造的船型；mis＝同時最多幾個任務；base＝據點（1＝有據點、2＝據點多一座軌道防禦站）
+const CC_RANKS = [
+  { name: '單艦艦長', merit: 0, sq: 1, hulls: ['assault', 'gunship', 'support'], mis: 3, base: 0, desc: '帶一個小隊' },
+  { name: '小隊長', merit: 600, sq: 2, hulls: ['assault', 'gunship', 'support', 'ew'], mis: 4, base: 0, desc: '帶兩個小隊・可以建造電戰艦・任務多一個' },
+  { name: '特戰隊長', merit: 1600, sq: 3, hulls: ['assault', 'gunship', 'support', 'ew', 'stealth'], mis: 5, base: 1, desc: '帶三個小隊・可以建造匿蹤艦・有自己的據點（修理、補飛彈半價，軌道防禦每週重建）' },
+  { name: '特戰司令', merit: 3200, sq: 4, hulls: ['assault', 'gunship', 'support', 'ew', 'stealth'], mis: 6, base: 2, desc: '帶四個小隊・據點多一座軌道防禦站' },
+];
+const ccRankOf = (S) => CC_RANKS[S.pl.rank || 0];
+const ccHullOk = (S, k) => ccRankOf(S).hulls.includes(k);
+const ccMaxMis = (S) => ccRankOf(S).mis;
+// 周目：跨局的紀錄（最高軍階、局數）；開局身分照最高軍階解鎖
+const CC_META = 'fleet.capcareer.meta';
+const CC_STARTS = [
+  { name: '單艦艦長', rank: 0, need: 0, desc: '從一個小隊開始' },
+  { name: '小隊長', rank: 1, need: 1, desc: '開局就帶兩個小隊、可以造電戰艦' },
+  { name: '特戰隊長', rank: 2, need: 2, desc: '開局帶三個小隊、可以造匿蹤艦，有據點' },
+];
+function ccMetaLoad() { try { return Object.assign({ runs: 0, best: 0 }, JSON.parse(STORE.getItem(CC_META) || 'null') || {}); } catch (e) { return { runs: 0, best: 0 }; } }
+function ccMetaSave(M) { try { STORE.setItem(CC_META, JSON.stringify(M)); } catch (e) { /* 只在本次 */ } }
+// 升遷考核：戰功到了，上級交辦一個佔領任務（已經有佔領任務就把它當考核）；完成＝一定升遷
+function ccExamTick(S) {
+  const N = CC_RANKS[(S.pl.rank || 0) + 1], P = ccPl(S); if (!N || !P || S.fin) return;
+  if (S.pl.merit < N.merit || (S.pl.examCd || 0) > S.turn || S.missions.some((M) => M.exam && M.state === 'open')) return;
+  let M = S.missions.find((x) => x.state === 'open' && x.type === 'cap');
+  if (!M) {
+    const t = S.sys.filter((s) => s.owner !== S.fac && s.owner !== SM_N && ccHostile(S, S.fac, s.owner) && smHop(S, P.sys, s.id) <= 3).sort((a, b) => smHop(S, P.sys, a.id) - smHop(S, P.sys, b.id) || b.tier - a.tier)[0]
+      || S.sys.filter((s) => s.owner !== S.fac && ccHostile(S, S.fac, s.owner)).sort((a, b) => smHop(S, P.sys, a.id) - smHop(S, P.sys, b.id))[0];
+    if (!t) return;
+    M = { id: S.nextId++, type: 'cap', sys: t.id, due: S.turn + 6 + smHop(S, P.sys, t.id) * 2, state: 'open', reward: { money: 600 + t.tier * 200, merit: 250 }, t0: S.turn };
+    S.missions.push(M);
+  } else M.due = Math.max(M.due, S.turn + 5);
+  M.exam = N.name; M.reward.money += 400;
+  ccLog(S, `升遷考核：${CC_MIS.cap.desc(S, M)}。完成就升任${N.name}（${N.desc}）`, 'ev');
+}
+function ccPromote(S) {
+  const r = (S.pl.rank || 0) + 1, N = CC_RANKS[r]; if (!N) return;
+  S.pl.rank = r;
+  ccLog(S, `${smPick(S, SM_NPC)}（${N.name}）${smPick(S, SM_NPC_EXIT)}，職缺由你遞補：升任${N.name}（${N.desc}）`, 'ev');
+  if (N.base) ccBaseTick(S, true);
+  const M = ccMetaLoad(); if (r > M.best) { M.best = r; ccMetaSave(M); const u = CC_STARTS.find((x) => x.need === r), d = CC_DIFF.find((x) => x.need === r); if (u || d) ccLog(S, `周目解鎖：${[u ? `開局身分「${u.name}」` : '', d ? `「${d.name}」難度` : ''].filter(Boolean).join('、')}`, 'ok'); }
+}
+// 據點：特戰隊長以上。沒有據點（剛升遷或失守）就選親自指揮的小隊附近有維修船塢的己方星系
+function ccBaseTick(S, force) {
+  const R = ccRankOf(S); if (!R.base) return;
+  const b = S.pl.base != null ? S.sys[S.pl.base] : null;
+  if (b && b.owner !== S.fac) { b.plBase = 0; S.pl.base = null; ccLog(S, `你的據點 ${b.name} 失守`, 'bad'); }
+  if (S.pl.base == null) {
+    const P = ccPl(S), L = S.sys.filter((s) => s.owner === S.fac && s.yard).sort((a, c) => smHop(S, P.sys, a.id) - smHop(S, P.sys, c.id));
+    const s = L[0] || S.sys.find((x) => x.owner === S.fac && x.cap); if (!s) return;
+    ccSetBase(S, s); ccLog(S, `${s.name} 成為你的據點`, force ? 'ev' : 'ok');
+  }
+  const B = S.sys[S.pl.base]; if (B) B.plBase = R.base;
+}
+function ccSetBase(S, s) {
+  if (S.pl.base != null && S.sys[S.pl.base]) S.sys[S.pl.base].plBase = 0;
+  S.pl.base = s.id; s.plBase = ccRankOf(S).base;
+}
+function ccMoveBase(S, s) {
+  if (!ccRankOf(S).base || s.owner !== S.fac || !s.yard || S.pl.base === s.id || S.pl.money < CC_RULE.baseCost) return false;
+  S.pl.money -= CC_RULE.baseCost; ccSetBase(S, s); ccLog(S, `據點搬到 ${s.name}（${CC_RULE.baseCost} 資金）`, 'ok'); return true;
+}
 
 // ───── 新局 ─────
 function ccNewGame(o) {
-  const R = CC_ROLES[o.role] || CC_ROLES.emp;
+  const R = CC_ROLES[o.role] || CC_ROLES.emp, ST = CC_STARTS[o.start || 0] || CC_STARTS[0];
   const S = { v: 1, r: (o.seed >>> 0) || 1, turn: 1, diff: o.diff != null ? o.diff : 1, role: o.role, fac: R.fac, nextId: 1, sys: [], edges: [], adj: [], sq: [], log: [], missions: [], fin: null, pendB: null,
     rel: [[0, -60, -100, 0], [-60, 0, -100, 0], [-100, -100, 0, 0], [0, 0, 0, 0]], money: [0, 0, 0, 0],
-    pl: { money: 600, merit: 0, sq: 0, kills: 0, caps: 0, weekFought: 0, build: [] } };
+    pl: { money: 600, merit: CC_RANKS[ST.rank].merit, sq: 0, kills: 0, caps: 0, weekFought: 0, build: [], rank: ST.rank, base: null, start: o.start || 0 } };
   smGenMap(S);
   for (const s of S.sys) ccSysInit(S, s);
   // AI 的小隊：聯盟、帝國各 6 隊（首都 2、前線），海盜 3 隊
@@ -59,8 +126,12 @@ function ccNewGame(o) {
   const front = S.sys.filter((s) => s.owner === R.fac && smFront(S, s)).sort((a, b) => Math.hypot(a.x - ecap.x, a.y - ecap.y) - Math.hypot(b.x - ecap.x, b.y - ecap.y))[0] || S.sys.find((s) => s.owner === R.fac);
   const P = ccNewSquad(S, R.fac, front.id, R.hulls.slice(), { pl: true, name: '第1小隊' });
   S.pl.sq = P.id;
+  // 較高的開局身分：多帶幾個小隊（每隊 2 艘）、據點
+  for (let k = 1; k < CC_RANKS[ST.rank].sq; k++) ccNewSquad(S, R.fac, front.id, ccRandHulls(S, 2), { pl: true, name: `第${k + 1}小隊` });
+  if (CC_RANKS[ST.rank].base) ccBaseTick(S, true);
+  if (!o.noMeta) { const M = ccMetaLoad(); M.runs++; ccMetaSave(M); }
   // 起點附近不要有 AI 小隊把玩家擠掉（一個星系最多 2 隊）
-  ccLog(S, `你是${R.name}，帶著小隊（${R.hulls.map((k) => CAP_HULLS[k].name).join('、')}）駐守前線的 ${front.name}。開局科技：${R.techName}`, 'ev');
+  ccLog(S, `${ST.rank ? `開局身分：${CC_RANKS[ST.rank].name}。` : ''}你是${R.name}，帶著小隊（${R.hulls.map((k) => CAP_HULLS[k].name).join('、')}）駐守前線的 ${front.name}。開局科技：${R.techName}`, 'ev');
   ccGenMissions(S);
   ccPlan(S);
   return S;
@@ -82,7 +153,8 @@ function ccSceneFor(S, s) {
 }
 // capLayout 的地點編號（太空場景）
 const ccSceneEnv = (s) => GROUND_KEYS.length + 1 + Math.max(0, CAP_SPACE_KEYS.indexOf(s.scene || 'belt'));
-function ccDefBase(s) {
+function ccDefBase(s) { const b = ccDefBase0(s); return s.plBase >= 2 ? b.concat(['orb']) : b; }   // 特戰司令的據點：多一座軌道防禦站
+function ccDefBase0(s) {
   if (s.cap) return ['orb', 'plat', 'plat', 'plat'];
   if (s.owner === SM_N) return s.tier >= 2 ? ['plat', 'plat'] : ['plat'];
   if (s.owner === SM_P) return ['plat'];
@@ -112,7 +184,7 @@ function ccSeen(S, q) {
 }
 // 玩家的小隊（有船的）；指揮權（可以帶幾隊）
 const ccOwn = (S) => S.sq.filter((q) => q.pl && q.ships.length);
-const ccSlots = (S) => CC_RULE.sqMerit.filter((m) => S.pl.merit >= m).length;
+const ccSlots = (S) => ccRankOf(S).sq;
 const ccOwnCount = (S) => ccOwn(S).length + S.pl.build.filter((b) => b.sq === 'new').length;
 function ccOwnName(S) { for (let n = 1; ; n++) if (!S.sq.some((q) => q.pl && q.ships.length && q.name === `第${n}小隊`)) return `第${n}小隊`; }
 // 每週開始：AI 決定這週的命令（存在 q.to；玩家看得到的部分畫在星圖上）
@@ -150,7 +222,7 @@ function ccWeekB(S) {
     if (s.def < s.def0 && S.turn - (s.fx.gT || 0) >= CC_RULE.fx.defBack) { s.def++; s.fx.gT = S.turn; }   // 地面防禦慢慢回復
     if (ccCut(S, s)) continue;   // 補給線切斷：防禦不重建、不整修
     for (const d of live) d.hp = Math.min(1, d.hp + 0.2);
-    if (live.length < base.length && ++s.defT >= CC_RULE.defEvery) { s.defT = 0; s.defs = live.concat([{ type: base[live.length], hp: 0.5 }]); }
+    if (live.length < base.length && ++s.defT >= (s.id === S.pl.base ? 1 : CC_RULE.defEvery)) { s.defT = 0; s.defs = live.concat([{ type: base[live.length], hp: 0.5 }]); }
     else s.defs = live.concat(s.defs.filter((d) => d.hp <= 0)).slice(0, Math.max(live.length, base.length));
   }
   // 整修：護盾一律充滿；AI 的小隊在己方有維修船塢的星系修船體（缺少的 60%）、有補給站補飛彈；玩家的要花錢（ccRepair）
@@ -176,6 +248,7 @@ function ccWeekB(S) {
   S.turn++; S.pl.weekFought = 0;   // 新的一週：玩家的小隊又可以打一場
   ccMissionTick(S, true);
   if (S.turn % 3 === 1) ccGenMissions(S);
+  ccBaseTick(S); ccExamTick(S);
   ccPlan(S);
 }
 function ccMove(S) {
@@ -303,8 +376,9 @@ function ccCanMove(S, to, P = ccPl(S)) {
   if (n >= CC_RULE.maxSq) return `那裡已經有 ${CC_RULE.maxSq} 個我方小隊`;
   return '';
 }
-function ccRepairCost(S, P) { return Math.round(P.ships.reduce((a, c) => a + (1 - c.hp) * CAP_HULLS[c.key].hp, 0) * CC_RULE.repair); }
-function ccMissileCost(S, P) { return Math.round(P.ships.reduce((a, c) => a + (CAP_HULLS[c.key].msl ? (1 - c.msl) * CAP_HULLS[c.key].msl.n : 0), 0) * CC_RULE.missile); }
+const ccBaseK = (S, P) => (P.sys === S.pl.base ? 0.5 : 1);   // 據點：半價
+function ccRepairCost(S, P) { return Math.round(P.ships.reduce((a, c) => a + (1 - c.hp) * CAP_HULLS[c.key].hp, 0) * CC_RULE.repair * ccBaseK(S, P)); }
+function ccMissileCost(S, P) { return Math.round(P.ships.reduce((a, c) => a + (CAP_HULLS[c.key].msl ? (1 - c.msl) * CAP_HULLS[c.key].msl.n : 0), 0) * CC_RULE.missile * ccBaseK(S, P)); }
 function ccCanService(S, kind, P = ccPl(S)) {
   const s = S.sys[P.sys];
   if (s.owner !== S.fac) return '要在己方的星系';
@@ -319,7 +393,7 @@ const ccBuildsFor = (S, q) => S.pl.build.filter((b) => (b.sq || S.pl.sq) === q.i
 // 新造艦：加入小隊 P（滿 5 艘就不行），或 asNew＝下週在這裡成立新小隊（要有指揮權）
 function ccBuild(S, key, P = ccPl(S), asNew) {
   const cost = CC_RULE.build[key];
-  if (ccCanService(S, 'build', P) || S.pl.money < cost) return false;
+  if (!ccHullOk(S, key) || ccCanService(S, 'build', P) || S.pl.money < cost) return false;
   if (asNew ? ccOwnCount(S) >= ccSlots(S) : P.ships.length + ccBuildsFor(S, P) >= CC_RULE.maxShips) return false;
   S.pl.money -= cost; S.pl.build.push(asNew ? { key, sq: 'new', sys: P.sys } : { key, sq: P.id });
   ccLog(S, `訂造一艘${CAP_HULLS[key].name}（${cost} 資金），下週${asNew ? `在 ${S.sys[P.sys].name} 成立新的小隊` : `加入${P.name}`}`, 'ok'); return true;
@@ -329,7 +403,7 @@ function ccTransfer(S, a, k, to) {
   const c = a.ships[k]; if (!c) return '沒有這艘船';
   if (a.id === S.pl.sq && a.ships.length <= 1) return '親自指揮的小隊至少要留一艘';
   let b;
-  if (to === 'new') { if (ccOwnCount(S) >= ccSlots(S)) return `指揮權不夠（戰功 ${CC_RULE.sqMerit[ccSlots(S)] || '—'} 可以多帶一隊）`; b = ccNewSquad(S, S.fac, a.sys, [], { pl: true, name: ccOwnName(S) }); }
+  if (to === 'new') { if (ccOwnCount(S) >= ccSlots(S)) return `指揮權不夠（${ccRankOf(S).name}最多帶 ${ccSlots(S)} 隊，升遷才能多帶）`; b = ccNewSquad(S, S.fac, a.sys, [], { pl: true, name: ccOwnName(S) }); }
   else { b = S.sq.find((q) => q.id === to); if (!b || !b.pl || b.sys !== a.sys) return '要在同一個星系'; if (b.ships.length >= CC_RULE.maxShips) return '那一隊已經滿了'; }
   b.ships.push(a.ships.splice(k, 1)[0]); b.to = b.to ?? null;
   if (!a.ships.length) { S.sq = S.sq.filter((q) => q !== a); for (const x of S.pl.build) if (x.sq === a.id) x.sq = b.id; }
@@ -424,7 +498,7 @@ function ccGenMissions(S) {
   const near = (n) => S.sys.filter((s) => s.owner !== S.fac && ccHostile(S, S.fac, s.owner) && smHop(S, P.sys, s.id) <= n);
   const taken = (sid) => open().some((M) => M.sys === sid);
   const tc = near(3).filter((s) => !taken(s.id)).sort((a, b) => smHop(S, P.sys, a.id) - smHop(S, P.sys, b.id))[0];
-  if (tc && open().length < CC_RULE.maxMis && !open().some((M) => M.type === 'cap')) S.missions.push({ id: S.nextId++, type: 'cap', sys: tc.id, due: S.turn + 6 + smHop(S, P.sys, tc.id) * 2, state: 'open', reward: { money: 600 + tc.tier * 200, merit: 250 } });
+  if (tc && open().length < ccMaxMis(S) && !open().some((M) => M.type === 'cap')) S.missions.push({ id: S.nextId++, type: 'cap', sys: tc.id, due: S.turn + 6 + smHop(S, P.sys, tc.id) * 2, state: 'open', reward: { money: 600 + tc.tier * 200, merit: 250 } });
   // 特戰任務：1～2 個，每種找合適的目標
   const enemy = near(3).filter((s) => s.owner !== SM_N && !taken(s.id));
   const pick = {
@@ -439,7 +513,7 @@ function ccGenMissions(S) {
   };
   const rew = { intercept: [400, 170], sabotage: [350, 150], decap: [450, 200], wipe: [350, 160], run: [250, 120], strike: [350, 150], escort: [300, 140], rescue: [350, 160], scan: [250, 120] };
   const nOp = 1 + (smRnd(S) < 0.6 ? 1 : 0), types = Object.keys(pick).sort(() => smRnd(S) - 0.5);
-  for (let k = 0, made = 0; k < types.length && made < nOp && open().length < CC_RULE.maxMis; k++) {
+  for (let k = 0, made = 0; k < types.length && made < nOp && open().length < ccMaxMis(S); k++) {
     const op = types[k]; if (open().some((M) => M.op === op)) continue;
     const t = pick[op](); if (!t) continue;
     S.missions.push({ id: S.nextId++, type: 'op', op, ...t, due: S.turn + 4 + smHop(S, P.sys, t.sys), state: 'open', reward: { money: rew[op][0], merit: rew[op][1] } }); made++;
@@ -452,7 +526,7 @@ function ccMissionTick(S, track) {
     if (M.state !== 'open') continue;
     if (M.type === 'op' && M.op === 'decap') { const q = S.sq.find((x) => x.id === M.sq); if (!q || !q.ships.length) { M.state = 'gone'; ccLog(S, '斬首的目標小隊已經被消滅：任務取消', ''); continue; } M.sys = q.sys; }
     if (M.type === 'op' && M.op !== 'decap' && M.f != null && S.sys[M.sys].owner !== M.f) { M.state = 'gone'; ccLog(S, `${S.sys[M.sys].name} 已經易主：${ccMisName(M)}任務取消`, ''); continue; }
-    if (!track && S.turn >= M.due) { M.state = 'fail'; ccLog(S, `任務失敗（時限已過）：${CC_MIS[M.type].desc(S, M)}`, 'bad'); }
+    if (!track && S.turn >= M.due) { M.state = 'fail'; ccLog(S, `任務失敗（時限已過）：${CC_MIS[M.type].desc(S, M)}`, 'bad'); if (M.exam) { S.pl.examCd = S.turn + 2; ccLog(S, `升遷考核沒有通過：2 週後上級會再給一次機會`, 'bad'); } }
   }
 }
 function ccMissionDone(S, M, ok) {
@@ -461,7 +535,10 @@ function ccMissionDone(S, M, ok) {
   S.pl.money += M.reward.money; S.pl.merit += M.reward.merit;
   ccLog(S, `任務完成：${ccMisName(M)}・${M.type === 'op' ? CC_OPFX[M.op].goal(S, M) : CC_MIS[M.type].desc(S, M)}（資金 +${M.reward.money}、戰功 +${M.reward.merit}）`, 'ok');
   if (M.type === 'op') { const t = CC_OPFX[M.op].apply(S, M); M.res = t; ccLog(S, `任務的影響：${t}`, 'ok'); }
+  if (M.exam) ccPromote(S);
 }
 
 function ccSave(S) { try { STORE.setItem(CC_STORE, JSON.stringify(S)); return true; } catch (e) { return false; } }
-function ccLoad() { try { const t = STORE.getItem(CC_STORE); const S = t ? JSON.parse(t) : null; if (!S || S.v !== 1) return null; for (const s of S.sys) { if (s.def0 == null) s.def0 = s.def; if (!s.fx) s.fx = {}; if (!s.scene) s.scene = ccSceneFor(S, s); } return S; } catch (e) { return null; } }
+function ccLoad() { try { const t = STORE.getItem(CC_STORE); const S = t ? JSON.parse(t) : null; if (!S || S.v !== 1) return null; for (const s of S.sys) { if (s.def0 == null) s.def0 = s.def; if (!s.fx) s.fx = {}; if (!s.scene) s.scene = ccSceneFor(S, s); }
+    if (S.pl.rank == null) S.pl.rank = S.pl.merit >= 2000 ? 2 : S.pl.merit >= 800 ? 1 : 0;   // 舊存檔：照以前的指揮權換算軍階
+    return S; } catch (e) { return null; } }

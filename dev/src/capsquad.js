@@ -200,6 +200,7 @@ function capSquadAI(s, t, dt) {
   I.vert = Math.max(-1, Math.min(1, (gy - s.y) * 0.6 / H.climb));
   if (GRD) { let need = -1e9; for (const k of [1, 2.5]) need = Math.max(need, capGroundH(s.x + s.vx * k, s.z + s.vz * k)); if (s.y < need + s.L * 0.13 + 1.5) I.vert = 1; }
   if (H.skill.key === 'shield' && s.skillCd <= 0 && ships.hp[s.i] < maxHp(s.i) * 0.5 && t - s.hitT < 2) capSkill(s, t);
+  if (!s.foe) capHullAI(s, t);   // 匿蹤艦、電戰艦（caphulls.js）
 }
 
 // ───── AI 對 AI 實測（校正公式）─────

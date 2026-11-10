@@ -581,6 +581,7 @@ function capWing(s, t, lead, idx, dt) {
   if (s.y < need + s.L * 0.13 + 1.5) { I.vert = 1; if (s.y < need + s.L * 0.13) I.thr = Math.min(I.thr, 0.2); }
   // 支援艦：替受傷的友艦修理；重砲艦：受傷時開護盾
   if (s.H.skill.key === 'shield' && s.skillCd <= 0 && ships.hp[s.i] < maxHp(s.i) * 0.5 && t - s.hitT < 2) capSkill(s, t);
+  capHullAI(s, t);
 }
 function capNearestEnemy(s, R) {
   let best = null, bd = R;
@@ -656,7 +657,7 @@ function capCombat(dt) {
   capShipsCheck(t);
   if (simTick % 30 === 21) capMisTick(t);
 }
-function capSig(s, t, k = 1) { s.sigT = Math.max(s.sigT, t + CAP_RULE.sig * k); }
+function capSig(s, t, k = 1) { s.sigT = Math.max(s.sigT, t + CAP_RULE.sig * k); capCloakBreak(s, t); }
 function capShipWeapons(s, dt, t) {
   const ai = capIsAI(s), ctl = !ai && s.k === CAP.cur, H = s.H;
   s.mainCd -= dt; s.mslCd -= dt; s.skillCd -= dt;
@@ -850,6 +851,7 @@ function capSkill(s, t) {
   if (K.key === 'repair') return;
   if (s.skillCd > 0) { if (ctl) capFeed(`${K.name}冷卻中（${Math.ceil(s.skillCd)} 秒）`, 'hint'); return; }
   s.skillCd = K.cd;
+  if (capSkill2(s, K, t, ctl)) return;   // 匿蹤、電子干擾（caphulls.js）
   if (K.key === 'burst') { s.burstT = t + K.dur; s.boostE = 1; if (ctl) capFeed(`${K.name}！${K.dur} 秒內速度、轉向提升`, 'ok'); }
   if (K.key === 'shield') { s.shieldT = t + K.dur; ships.sh[s.i] = ships.shMax[s.i]; ships.shT[s.i] = -99; spawnFx(s.x, s.y, s.z, fxShield(s.side), s.L * 0.8, 22); if (ctl) capFeed(`${K.name}！護盾充滿，${K.dur} 秒內傷害減半`, 'ok'); }
 }
@@ -960,10 +962,12 @@ function capDetect(dt, t) {
   const sens = capSensors(), mul = CAP.Df.sens * (CAP.alarm ? 1.25 : 1);
   for (const s of CAP.own) {
     if (s.dead) continue;
+    capCloakTick(s, t); if (capCloakOn(s, t)) { s.seeing = false; s.seen = 0; continue; }   // 匿蹤中：看不到
     const low = CAP.sp ? !!(s.inRock || inTerrain('nebula', s.x, s.z, s.y)) : s.agl < CAP_RULE.lowAGL, sig = t < s.sigT;   // 太空：在小行星區、星雲裡＝雷達難發現
     let best = 0, by = null;
     for (const S of sens) {
-      const R = S.R * mul * (S.radar && low ? CAP_RULE.lowMul : 1) * (sig ? CAP_RULE.sigMul : 1);
+      if (capJammed(S.x, S.y, S.z, t)) continue;   // 電子干擾範圍內的偵測失效
+      const R = S.R * mul * (S.radar && low ? CAP_RULE.lowMul : 1) * (sig ? CAP_RULE.sigMul : 1) * (s.H.stealth || 1);
       const d = Math.hypot(S.x - s.x, S.y - s.y, S.z - s.z);
       if (sig && d < CAP_RULE.noise && S.src.k !== 'f') { best = Math.max(best, 6); by = S.src; continue; }   // 開火的聲光：近的敵軍立刻知道
       if (d > R || capBlock(S.x, S.y, S.z, s.x, s.y, s.z) >= 0) continue;
@@ -1129,8 +1133,9 @@ function capTake(s, pre) {
 function capHurt(ti, e, shD, hullD) {
   const k = capShip(ti); if (k < 0) return;
   const s = CAP.ships[k], t = U.uTime.value;
-  if (!e.crash) { s.hitT = t; s.knownT = Math.max(s.knownT, t + 3); }
+  if (!e.crash) { s.hitT = t; if (!capCloakOn(s, t)) s.knownT = Math.max(s.knownT, t + 3); }
   if (t < s.shieldT && ships.alive[ti]) { ships.hp[ti] = Math.min(maxHp(ti), ships.hp[ti] + hullD * 0.5); ships.sh[ti] = Math.min(ships.shMax[ti], ships.sh[ti] + shD * 0.5); }
+  capJamRefund(s, ti, shD, hullD, t);   // 電子干擾（caphulls.js）
   if (k === CAP.cur) {
     const now = performance.now(); CAP.flash = { t: now, hull: hullD > 0 };
     if (e.sx != null) { CAP.hits.push({ t: now, x: e.sx, z: e.sz, hull: hullD > 0 }); if (CAP.hits.length > 8) CAP.hits.shift(); }
@@ -1597,6 +1602,8 @@ function capShipHud(g, W, H, cx, s, ca, red, grn, amb, col, t) {
   g.fillStyle = 'rgba(255,255,255,.7)'; g.fillRect(x + 52 + 150 * CAP_BOOST_RE, y + 35, 1, 10); if (s.boostLock) { g.fillStyle = red; g.fillText('回充中', x + 240, y + 40); }
   g.fillStyle = '#e8eef8'; g.fillText(`${Math.round(ships.hp[s.i])}`, x + 208, y + 12); g.fillText(`${Math.round(ships.sh[s.i])}`, x + 208, y + 26);
   if (t < s.shieldT) { g.fillStyle = '#7cc4ff'; g.fillText('超載', x + 240, y + 26); }
+  if (capCloakOn(s, t)) { g.fillStyle = '#b8a8ff'; g.fillText(`匿蹤 ${Math.ceil(s.cloakT - t)}`, x + 240, y + 12); }
+  if (t < (s.jamT || -9)) { g.fillStyle = '#5fd8ff'; g.fillText(`干擾 ${Math.ceil(s.jamT - t)}`, x + 240, y + 26); }
   if (t < s.burstT && !s.boostLock) { g.fillStyle = amb; g.fillText('過載', x + 240, y + 40); }
   // 速度、油門、離地高度
   const fwd = s.vx * s.F[0] + s.vy * s.F[1] + s.vz * s.F[2];
