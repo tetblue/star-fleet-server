@@ -14,6 +14,7 @@ const CAP_RULE = {
   rangeMul: 0.3,               // 敵方戰艦的武器射程倍率（小規模戰場）
   gunMul: 3, ftrMul: 1.5,      // 敵方戰艦的砲、戰機打玩家小隊的傷害倍率（艦隊戰的數值是給大軍用的）
   ftrSpd: 0.3, misSpd: 0.3,    // 艦載機、飛彈的速度倍率（main.js 的 FTR_SPD、MIS_SPD）
+  misFuel: 1.8,                // 飛彈追船：速度固定，船跑開就要飛更久；超過「原本飛行時間 × misFuel」燃料用完、自爆（不造成傷害）
   zone: 1350, ceil: -6,        // 戰區半徑；飛行高度上限（y）
   pitchMax: 0.6,               // 船頭最多抬／壓幾弧度（約 34°）
   sig: 6, sigMul: 1.8, noise: 90,   // 開火：sig 秒內被偵測的距離 ×sigMul；noise 內的敵軍單位立刻發現

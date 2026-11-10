@@ -2947,6 +2947,45 @@ function bezCPU(i, u, out) {
   return out;
 }
 const _c = new THREE.Vector3(), _d = new THREE.Vector3();
+// 艦長模式：船開得快、飛彈又放慢，飛彈終點要跟著目標走（不然飛彈飛到船原本的位置爆炸，傷害卻算在已經開走的船上）
+// 命中的飛彈終點＝目標現在的位置，沒命中的＝目標旁邊同樣的偏移；爆炸位置（pending 的 x/y/z）一起更新
+// 速度固定：終點移動後依新航線長度重算飛行時間（船跑開＝飛彈要飛更久，點防禦多幾次機會）；
+//   保持目前的進度 u 不變，所以飛彈不會跳位置。超過燃料時間（原本飛行時間 × CAP_RULE.misFuel）就自爆、不造成傷害
+const misTrk = [], _mt = new THREE.Vector3(), _ml = new THREE.Vector3();
+function misTrackAdd(i, target, bx, by, bz, e) {
+  if (!CAP.on || !e) return;
+  const t0 = misT[i * 4], dur = misT[i * 4 + 1];
+  misTrk.push({ i, g: misGen[i], tg: target, ox: misC[i * 3] - bx, oy: misC[i * 3 + 1] - by, oz: misC[i * 3 + 2] - bz, e, v: bezLen(i) / dur, end: t0 + dur * CAP_RULE.misFuel });
+}
+// 二次貝茲曲線的長度（分 8 段量）
+function bezLen(i) {
+  let L = 0; bezCPU(i, 0, _ml);
+  for (let k = 1; k <= 8; k++) { const px = _ml.x, py = _ml.y, pz = _ml.z; bezCPU(i, k / 8, _ml); L += Math.hypot(_ml.x - px, _ml.y - py, _ml.z - pz); }
+  return L;
+}
+let misTrkLo = -1, misTrkHi = -1;
+function misTrack() {
+  misTrkLo = misTrkHi = -1;
+  const t = U.uTime.value;
+  for (let k = misTrk.length - 1; k >= 0; k--) {
+    const m = misTrk[k], i = m.i, e = m.e;
+    if (!misLive[i] || misGen[i] !== m.g || !ships.alive[m.tg]) { misTrk[k] = misTrk[misTrk.length - 1]; misTrk.pop(); continue; }
+    const t0 = misT[i * 4], dur = misT[i * 4 + 1], u = t0 > t ? 0 : Math.min(1, (t - t0) / dur);
+    if (t >= m.end) {   // 燃料用完：在目前位置自爆（改成沒命中的爆炸，不扣血）
+      bezCPU(i, u, _mt); misT[i * 4 + 3] = u; misCut = true;
+      e.kind = 'mi'; e.t = t; e.x = _mt.x; e.y = _mt.y; e.z = _mt.z; e.mi = i; e.g = m.g;
+      misTrk[k] = misTrk[misTrk.length - 1]; misTrk.pop(); continue;
+    }
+    shipWorldCPU(m.tg, _mt);
+    const x = _mt.x + m.ox, y = _mt.y + m.oy, z = _mt.z + m.oz;
+    misC[i * 3] = x; misC[i * 3 + 1] = y; misC[i * 3 + 2] = z;
+    const nd = Math.max(0.05, bezLen(i) / m.v), nt0 = t0 > t ? t0 : t - u * nd;
+    misT[i * 4] = nt0; misT[i * 4 + 1] = nd;
+    e.x = x; e.y = y; e.z = z; e.t = nt0 + nd;
+    if (misTrkLo < 0 || i < misTrkLo) misTrkLo = i;
+    if (i > misTrkHi) misTrkHi = i;
+  }
+}
 // 飛彈、艦載機打船的命中率：基本 × 目標大小^sizePow × 目標速度 × 星雲 × 被干擾
 function strikeChance(rule, target, side, pos) {
   const tq = squadrons[ships.sq[target]];
@@ -2981,6 +3020,7 @@ function launchMissileAt(x, y, z, side, msq, target, dmg, t0, src, accM = 1) {
   if (blk >= 0) { bezCPU(i, cut, _c); pending.push({ kind: 'mi', t: t0 + dur * cut, side, x: _c.x, y: _c.y, z: _c.z }); }
   else if (!hit) { wStats[side].mMiss++; pending.push({ kind: 'mi', mi: i, g: misGen[i], t: tHit, side, x: misC[i * 3], y: misC[i * 3 + 1], z: misC[i * 3 + 2] }); }
   else { const asp = hitAspect(target, x, z, _b.x, _b.z, y, _b.y), lm = msq && fleetMods(msq.fleet); pending.push({ kind: 'mh', rt: lm && lm.fac === 1 ? 1 + lm.facR : 0, acid: lm && lm.fac === 6 ? 1 : 0, src, mi: i, g: misGen[i], t: tHit, target, side, asp, dmg, hm: hitMul(asp, msq, tg), dirIdx: dirIndexOf(dx, dz), x: _b.x, y: _b.y, z: _b.z }); }
+  if (blk < 0) misTrackAdd(i, target, _b.x, _b.y, _b.z, pending[pending.length - 1]);
   wStats[side].mFired++;
   return true;
 }
@@ -3032,6 +3072,7 @@ function launchMissile(launcher, t0, maxRange = 0) {
     const md = SHIP_TYPES[ships.type[launcher]].missile;
     pending.push({ kind: 'mh', rt, acid: lm.fac === 6 ? 1 : 0, src: 1, mi: i, g: misGen[i], t: tHit, target, side: sq.side, asp, dmg: (md ? md.dmg : 30) * lm.dmg, hm: hitMul(asp, sq, tg), dirIdx: dirIndexOf(dx, dz), x: _b.x, y: _b.y, z: _b.z });
   }
+  if (!intercepted) misTrackAdd(i, target, _b.x, _b.y, _b.z, pending[pending.length - 1]);
   rigFire(launcher, 'msl', t0, _b.x, _b.y, _b.z, target);   // 3D：發射艙開蓋
   wStats[sq.side].mFired++;
   return true;
@@ -3812,7 +3853,7 @@ function resetCombat() {
   facZones = []; paraToastT = -99;
   facStatReset();
   for (let i = 0; i < MIS_MAX; i++) misT[i * 4] = -999;
-  misLive.fill(0); AIR.tick = -1;
+  misLive.fill(0); misTrk.length = 0; AIR.tick = -1;
   misAttrs.aMT.needsUpdate = true;
 }
 
@@ -5658,8 +5699,17 @@ function frame() {
     updateCamera();
   }
 
+  if (misTrk.length) misTrack();
+  const misNew = misDirtyFrom >= 0 && misDirtyCount > 0, misFull = misDirtyCount >= MIS_MAX;
   flushRing(misTrailGeo, ['aM0', 'aM1', 'aM2', 'aMT'], [3, 3, 3, 4], misDirtyFrom, misDirtyCount, MIS_MAX);
   misDirtyFrom = -1; misDirtyCount = 0;
+  if (misTrkLo >= 0 && !misFull) {   // 追蹤中的飛彈：終點（aM2）、時間（aMT）重新上傳
+    for (const [nm, sz] of [['aM2', 3], ['aMT', 4]]) {
+      const a = misTrailGeo.getAttribute(nm);
+      if (a.addUpdateRange) { if (!misNew && a.clearUpdateRanges) a.clearUpdateRanges(); a.addUpdateRange(misTrkLo * sz, (misTrkHi - misTrkLo + 1) * sz); }
+      a.needsUpdate = true;
+    }
+  }
   if (misCut) { const a = misTrailGeo.getAttribute('aMT'); a.clearUpdateRanges && a.clearUpdateRanges(); a.needsUpdate = true; misCut = false; }
   flushRing(beamGeo, ['aA', 'aB', 'aT'], [3, 3, 4], beamDirtyFrom, beamDirtyCount, BEAM_MAX);
   beamDirtyFrom = -1; beamDirtyCount = 0;
