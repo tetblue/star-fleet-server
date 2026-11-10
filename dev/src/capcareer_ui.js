@@ -8,6 +8,7 @@ function ccShow() {
   if (!S) return ccNewDialog();
   CC = { S, sel: -1, raf: 0, view: null }; SMU.q = [];
   if (S.pendB) { ccSkipPlayerBattle(S, '離開了戰場'); ccWeekB(S); ccSave(S); }   // 打到一半離開：當作撤退，接著結束這一週
+  if (!S.fin && !S.pendB && !S.missions.some((M) => M.state === 'open' && !M.brief)) return ccIdle(S);
   ccRender();
   if (!S.fin && !S.pendB) ccTurnStart(S, false);
 }
@@ -33,11 +34,12 @@ function ccRender() {
   const nMis = S.missions.filter((M) => M.state === 'open').length;
   overlay(`<style>${SMU_CSS}${CC_CSS}</style><div class="sm-wrap">
     <div class="sm-top"><h2>艦長生涯</h2><span class="sm-chip">第 ${S.turn} 週</span><span class="sm-chip">${CC_ROLES[S.role].name}・${ccRankOf(S).name}</span><span class="sm-chip">資金 ${fmtN(Math.round(S.pl.money))}</span><span class="sm-chip">戰功 ${Math.round(S.pl.merit)}</span>${ccTopChips(S, cnt)}
-      <span class="sm-btnbar"><button class="g-btn" id="cc-mis">任務${nMis ? `<span class="sm-badge">${nMis}</span>` : ''}</button><button class="g-btn" id="cc-logb">紀錄</button><button class="g-btn" id="cc-quit">離開</button><button class="g-btn primary" id="cc-end" ${S.fin ? 'disabled' : ''}>結束這一週 →</button></span></div>
+      <span class="sm-btnbar"><button class="g-btn" id="cc-mis">任務${nMis ? `<span class="sm-badge">${nMis}</span>` : ''}</button><button class="g-btn" id="cc-logb">紀錄</button><button class="g-btn" id="cc-quit">離開</button>${S.fin ? '' : `<button class="g-btn" id="cc-fly" title="回到${smuEsc(ccPl(S) ? S.sys[ccPl(S).sys].name : '')}的太空（${keyText('cap_map')}）">回到星系 ✈</button>`}<button class="g-btn primary" id="cc-end" ${S.fin ? 'disabled' : ''}>結束這一週 →</button></span></div>
     <div class="sm-map" id="cc-map"><canvas id="cc-cv"></canvas>
       <div class="sm-leg" id="cc-leg" style="cursor:pointer;pointer-events:auto">${CC.leg ? `<div><b>圖例 ▾</b></div>${['own', 'ally', 'enemy', 'neutral'].map((k) => `<div><i style="background:${SMU_REL[k].col}"></i>${k === 'own' ? '你的小隊（★＝親自指揮，粗框＝選中）' : SMU_REL[k].name}</div>`).join('')}<div class="g-dim">星系的顏色＝擁有的勢力</div><div>! ＝ 你的小隊下週會被進攻</div><div>◆ 軌道防禦・⚓ 維修船塢・✚ 補給站</div><div>虛線圈：圍城中・⚔ 這週會交戰</div><div>箭頭：看得到的預定動向（你的小隊周圍、偵察過的星系）</div><div>藍色虛線大圈：偵察中・亂＝指揮中斷</div><div class="g-dim">點星系看詳情；點相鄰的星系下令移動</div>` : '<div><b>圖例 ▸</b></div>'}</div>
       <div class="sm-dock" id="cc-dock"></div><div class="sm-card" id="cc-card" hidden></div></div></div>`);
-  gEl('cc-quit').onclick = () => { ccSave(S); window.removeEventListener('resize', ccResize); GAME.spMode = 'captain'; showSingle(); };
+  gEl('cc-quit').onclick = () => { ccSave(S); ccIdleStop(); window.removeEventListener('resize', ccResize); GAME.spMode = 'captain'; showSingle(); };
+  if (gEl('cc-fly')) gEl('cc-fly').onclick = () => ccFly();
   gEl('cc-end').onclick = () => ccEndWeek();
   gEl('cc-mis').onclick = ccMissionList;
   gEl('cc-leg').onclick = () => { CC.leg = !CC.leg; ccRender(); };
@@ -256,6 +258,7 @@ function ccEndWeek(go) {
     gEl('cc-endback').onclick = () => { smuCloseModal(); const q = W[0]; CC.cur = q.id; CC.sel = q.sys; ccRender(); };
     return;
   }
+  ccIdleStop();
   ccWeekA(S); ccSave(S);
   if (S.pendB) return ccBattleAsk(S);
   ccFinishWeek(S);
@@ -336,7 +339,9 @@ function ccLaunch(S, kind, o) {
 // 戰鬥結束（capReport 呼叫，CAP 還沒清掉）：各艦的狀態、戰果寫回生涯
 function ccBattleDone() {
   const S = CC.S || ccLoad(); CC.S = S;
-  const C = SIM.m.captain, I = C.cc, R = GAME.result || {}, s = S.sys[I.sys], st = CAP.stats || { ks: 0, merit: 0 };
+  const C = SIM.m.captain, I = C.cc;
+  if (I.kind === 'idle') { CC.idle = null; CC.over = false; setPhase('menu'); return ccRender(); }   // 巡航：沒有戰果
+  const R = GAME.result || {}, s = S.sys[I.sys], st = CAP.stats || { ks: 0, merit: 0 };
   const put = (ids, L) => {
     const sqs = ids.map(ccSqById);
     for (const x of L) { const q = sqs[x.sq], c = q && q.ships[x.slot]; if (!c) continue; if (x.dead || !ships.alive[x.i]) { c.dead = true; continue; } c.hp = Math.max(0.02, ships.hp[x.i] / maxHp(x.i)); c.sh = ships.shMax[x.i] ? ships.sh[x.i] / ships.shMax[x.i] : 0; c.msl = x.H.msl ? x.mslN / x.H.msl.n : 0; }
@@ -441,4 +446,44 @@ function ccBrief(M, again) {
   const seen = () => { M.brief = true; ccSave(S); smuCloseModal(); };   // 按了才算看過（畫面被換掉的話下次再出現）
   gEl('cc-brief-ok').onclick = seen;
   gEl('cc-brief-map').onclick = () => { seen(); CC.sel = M.sys; ccCard(); };
+}
+
+// ───── 星系中巡航（2026-11-11）：平時開著親自指揮的小隊在所在星系的太空裡，按 M 疊出星圖下令 ─────
+// 回合制不變：巡航、整備都不耗時間，只有在星圖按「結束這一週」才推進。戰鬥用同一個星系的場景（同樣的種子）開打。
+const ccSeedOf = (S, s) => (S.turn * 7919 + s.id * 104729 + (S.r % 9973)) % 100000;   // 和 ccLaunch 一樣：巡航與戰鬥是同一個場景
+const ccIdleKey = (S, P) => `${P.id}:${P.sys}:${S.turn}:${P.ships.map((c) => c.key + c.hp.toFixed(2) + c.sh.toFixed(2) + c.msl.toFixed(2)).join(',')}`;
+const ccIdleOn = () => CAP.on && SIM.m && SIM.m.captain && SIM.m.captain.cc && SIM.m.captain.cc.kind === 'idle';
+function ccIdle(S) {
+  const P = ccPl(S); if (!P || !P.ships.length || S.fin) return ccRender();
+  const s = S.sys[P.sys], R = CC_ROLES[S.role], li = CC_DIFF[S.diff].li, fac = SM_FAC[S.fac].game === 0 ? 0 : 1, mine = s.owner === S.fac;
+  const duel = { a: [P.ships.map((c) => c.key)], b: [], st: [[P.ships.map(ccShipSt)], []], li, real: true, idle: true, defs: [], ownDefs: mine ? ccDefsAlive(s).map((d) => ({ type: d.type, hp: d.hp })) : [],
+    ownYard: mine && s.yard, ownDepot: mine && s.depot, hm: R.tech.hull, shm: R.tech.shield };
+  const m = capLayout({ ...capLoad(), fac, diff: li, env: ccSceneEnv(s), mis: 'capture', seed: ccSeedOf(S, s), ally: '', duel, noDef: false });
+  m.captain.cc = { kind: 'idle', sys: s.id, own: [P.id], foe: [], defIdx: [] }; m.name = `${s.name}・巡航`;
+  CC.idle = { key: ccIdleKey(S, P) }; CC.over = false;
+  window.removeEventListener('resize', ccResize);
+  simEndMid(); overlay(null);
+  SIM.m = m; SIM.sel = null; camAnim = null;
+  simStart();
+}
+// 收起巡航的場景（不算戰鬥、沒有戰果）
+function ccIdleStop() {
+  if (!ccIdleOn()) return;
+  CC.idle = null; CC.over = false;
+  if (paused) { paused = false; updateTimeUI(); }
+  setPhase('menu');
+}
+// 巡航中按 M：暫停、疊出星圖
+function ccMapOpen() {
+  if (!ccIdleOn()) return;
+  paused = true; updateTimeUI(); if (document.pointerLockElement) document.exitPointerLock();
+  CC.over = true; CC.S = CC.S || ccLoad(); ccRender();
+}
+// 回到星系：場景還是同一個星系、同一週、船的狀態沒變就接著飛；不然重新開一個
+function ccFly() {
+  const S = CC.S, P = S && ccPl(S); if (!P) return;
+  if (gEl('sm-modal')) smuCloseModal();
+  window.removeEventListener('resize', ccResize);
+  if (ccIdleOn() && CC.idle && CC.idle.key === ccIdleKey(S, P)) { overlay(null); CC.over = false; capPause(false); return; }
+  ccIdleStop(); ccIdle(S);
 }

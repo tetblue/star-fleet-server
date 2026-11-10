@@ -15,7 +15,7 @@ Object.assign(CAP_UNIT, {
   orb: { kind: 'site', sub: 'orb', name: '軌道防禦站', hp: 1400, r: 8, hh: 0, sensor: 320, sh: 0, radar: true, intel: true, merit: 150, space: true,
     msl: { range: 300, n: 4, cd: 16, dmg: 34 }, gun: { range: 170, cd: 0.45, dmg: 2.5, acc: 0.5, ship: 2.6 } },
 });
-CAP_MIS.capture = { name: '佔領戰', at: 's', text: (M) => `${M.nShips ? `擊沉敵方 ${M.nSq || 1} 個小隊（${M.nShips} 艘）` : ''}${M.defs && M.defs.length ? `${M.nShips ? '、' : ''}摧毀軌道防禦 ${M.defs.length} 座` : ''}，取得軌道控制` };
+CAP_MIS.capture = { name: '佔領戰', at: 's', text: (M) => M.idle ? `巡航待命：按 ${keyText('cap_map')} 打開星圖下令；敵軍開進這個星系時，戰鬥就在這裡開始` : `${M.nShips ? `擊沉敵方 ${M.nSq || 1} 個小隊（${M.nShips} 艘）` : ''}${M.defs && M.defs.length ? `${M.nShips ? '、' : ''}摧毀軌道防禦 ${M.defs.length} 座` : ''}，取得軌道控制` };
 
 // ───── 勝率與存活率公式 ─────
 // win：tools/capsquad-fit.mjs 用無頭模擬 12000 場擬合（2026-11-10）；拿遊戲裡 600 場 AI 對 AI 的佔領戰驗證，準確 90%，重新擬合也沒有更準，所以沿用
@@ -72,6 +72,11 @@ function capLayoutCapture(p, key, o) {
       D.ownDefs.forEach((d, k) => add(d.type, d.type === 'orb' && !D.ownDefs.slice(0, k).some((x) => x.type === 'orb') ? { x: H.x, y: alt(0.5), z: H.z } : spot(near(H, 90, 240), 120), { def: true, own: true, di: k, hpf: d.hp }));
     }
     if (D.depot) add('depot', spot(near(B, 220, 420), 170));
+    if (D.idle) {   // 巡航：我方星系的設施（不參戰）
+      const H = { x: S.x, z: 600 };
+      if (D.ownYard) add('yard', spot(near(H, 160, 320), 150), { own: true });
+      if (D.ownDepot) add('depot', spot(near(H, 160, 320), 150), { own: true });
+    }
   } else if (!p.noDef) {
     if (li >= 1) add('orb', { x: B.x, z: B.z }, { def: true });   // B 已經在 used 裡，直接放在據點正中央
     for (let k = 0, n = [1, 1, 2, 2, 3][li]; k < n; k++) add('plat', spot(near(B, 140, 320), 160), { def: true });
@@ -105,7 +110,7 @@ function capLayoutCapture(p, key, o) {
   put(0, ours, posA); put(1, theirs, posB);
   const space = { key, R: CAP_EDGE.R, Ry: CAP_EDGE.Ry, hole, edge: key === 'nebula' ? 'ion' : 'part' };
   const mis = { type: 'capture', li, goal: 1, names: '' };
-  const m = { name: '', fac: p.fac === 1 ? 1 : 0, victory: false, ctl: -1, timeLimit: CAP_RULE.time, seed: campHash(p.seed, 13) % 100000, fleets, terrain, sides: [{ lv: 0 }, { lv: li }],
+  const m = { name: '', fac: p.fac === 1 ? 1 : 0, victory: false, ctl: -1, timeLimit: D && D.idle ? 1e9 : CAP_RULE.time, seed: campHash(p.seed, 13) % 100000, fleets, terrain, sides: [{ lv: 0 }, { lv: li }],
     captain: { li, hulls: mine, mis, units, S: { x: posA.x, z: posA.z }, B: { x: B.x, z: B.z }, ext: { x: posA.x, z: posA.z + 120 }, waves: 0, ftr: 0, scene: null, space, open: true, auto: !!p.auto, duel: D } };
   m.name = `${CAP_MIS.capture.name}・${CAP_SPACE[key].name}・${CAP_DIFF[li].name}`;
   return m;
@@ -114,6 +119,10 @@ function capLayoutCapture(p, key, o) {
 // ───── 任務：佔領戰 ─────
 function capCaptureInit(M) {
   if (M.type !== 'capture') return;
+  if (CAP.cfg.duel && CAP.cfg.duel.idle) {   // 艦長生涯的星系巡航：沒有目標、不計時
+    M.idle = true; M.goal = 1; M.prog = 0; M.nShips = 0; M.defs = []; CAP.tLim = 1e9;
+    capFeed(`在星系中巡航・按 ${keyText('cap_map')} 打開星圖`, 'hint'); return;
+  }
   M.nShips = CAP.foes.length; M.nSq = new Set(CAP.foes.map((s) => s.sq)).size;
   M.defs = CAP.G.gts.filter((g) => g.def && g.side !== CAP.side).map((g) => g.id);
   M.ownDefs = CAP.G.gts.filter((g) => g.def && g.side === CAP.side).length;
@@ -126,6 +135,7 @@ function capCaptureInit(M) {
 // 回傳 true＝佔領戰（其他任務的判定跳過）
 function capCaptureTick(M, t) {
   if (M.type !== 'capture') return false;
+  if (M.idle) { CAP.warp = null; return true; }   // 巡航：不會結束（離開＝回星圖、結束這一週）
   const sunk = CAP.foes.filter((s) => s.dead).length, gone = M.defs.filter((i) => gtDead(CAP.G.gts[i])).length;
   M.prog = sunk + gone; M.sunk = sunk; M.gone = gone;
   if (M.prog >= M.goal) { M.done = true; capFinish(true, '取得軌道控制'); return true; }

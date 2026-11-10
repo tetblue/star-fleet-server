@@ -36,6 +36,7 @@ const CAP_FC = [
 ];
 // 切換小隊（同一場戰鬥有兩個我方小隊時）：按鍵表在 main.js，這裡補上
 { const k = KEY_ACTIONS.findIndex((a) => a[0] === 'cap_switch'); if (k >= 0 && !KEY_ACTIONS.some((a) => a[0] === 'cap_squad')) KEY_ACTIONS.splice(k + 1, 0, ['cap_squad', '切換小隊（兩個小隊同場時）', '艦長', 'KeyB']); if (SETTINGS.keys.cap_squad == null) SETTINGS.keys.cap_squad = 'KeyB'; }
+{ const k = KEY_ACTIONS.findIndex((a) => a[0] === 'cap_squad'); if (k >= 0 && !KEY_ACTIONS.some((a) => a[0] === 'cap_map')) KEY_ACTIONS.splice(k + 1, 0, ['cap_map', '星圖（艦長生涯：在星系中巡航時）', '艦長', 'KeyM']); if (SETTINGS.keys.cap_map == null) SETTINGS.keys.cap_map = 'KeyM'; }
 const CAP_ORDERS = [{ key: 'follow', name: '跟隨' }, { key: 'focus', name: '集火我的目標' }, { key: 'free', name: '自由交戰' }, { key: 'hold', name: '原地防守' }];
 // 難度：n＝敵軍數量倍率、sens＝偵測距離倍率、dmg＝敵方地面單位傷害倍率、hp＝敵方地面單位耐久倍率
 //   foeMax＝任務裡敵方戰艦（巡邏隊、指揮艦）的數量上限：敵艦數照我方船數增加，但不超過上限，
@@ -1356,6 +1357,10 @@ function capKey(e) {
   if (e.repeat) return true;
   CAP.keys.add(k);
   const live = capLive(), is = (id) => plCodeIs(id, k);
+  if (CAP.mis && CAP.mis.idle) {   // 艦長生涯的星系巡航：M 叫出／收起星圖（capcareer_ui.js）
+    if (CC.over) { if (k === 'Escape' || is('cap_map')) ccFly(); return true; }
+    if (is('cap_map')) { ccMapOpen(); return true; }
+  }
   if (k === 'Escape') { capPause(true); return true; }
   if (k === 'KeyP') { capPause(!paused); return true; }
   if (!live) return true;
@@ -1546,14 +1551,15 @@ function capTopHud(g, W, cx, red, grn, amb, t, top) {
   // 任務
   plFont(g, 13, true); g.textAlign = 'center'; g.fillStyle = M && M.done ? grn : '#e8eef8';
   const prog = !M ? '' : M.type === 'capture' ? capCaptureProg(M) : M.type === 'escort' || M.type === 'rescue' ? capMis2Prog(M) : M.type === 'wipe' ? `剩 ${M.left != null ? M.left : M.goal} 個${M.pend ? '＋增援' : ''}` : `${M.prog}／${M.goal}`;
-  g.fillText(M ? `${CAP_MIS[M.type].name}　${M.done && M.type !== 'capture' ? '完成！回到撤離點' : prog}` : '', cx, top + 76);
+  g.fillText(M ? (M.idle ? '巡航' : `${CAP_MIS[M.type].name}　${M.done && M.type !== 'capture' ? '完成！回到撤離點' : prog}`) : '', cx, top + 76);
   plFont(g, 11, false); g.fillStyle = 'rgba(220,230,245,.75)';
   g.fillText(M && !M.done ? CAP_MIS[M.type].text(M) : `剩餘時間 ${_fmtT(Math.max(0, CAP.tLim - t))}`, cx, top + 94);
   if (M && (M.done || CAP.warp) && !GAME.result) capWarpHud(g, cx, top + 114, grn, amb, t);
   // 警戒狀態
   let txt, c, sub = '';
   const seen = Math.max(...CAP.own.filter((o) => !o.dead).map((o) => Math.min(1, o.seen)), 0), known = CAP.own.some((o) => !o.dead && t < o.knownT);
-  if (M && M.type === 'capture') { txt = '交戰中'; c = '#ff9a5a'; const O = capOddsNow(); sub = O ? `目前評估：勝率 ${Math.round(O.win * 100)}%` : ''; }
+  if (M && M.idle) { txt = '巡航中'; c = grn; sub = `沒有敵人・按 ${keyText('cap_map')} 打開星圖`; }
+  else if (M && M.type === 'capture') { txt = '交戰中'; c = '#ff9a5a'; const O = capOddsNow(); sub = O ? `目前評估：勝率 ${Math.round(O.win * 100)}%` : ''; }
   else if (CAP.alarm) { txt = '警報中'; c = red; sub = `${CAP.waves > 0 && capCommAlive() ? `增援還有 ${CAP.waves} 波${CAP.nextWave > t ? `（${Math.ceil(CAP.nextWave - t)} 秒）` : ''}` : '沒有更多增援'}${known ? '・位置暴露' : '・敵軍在搜索'}`; }
   else if (CAP.report) { txt = `回報中 ${Math.max(0, CAP.report.t - t).toFixed(1)}`; c = red; sub = `摧毀 ${capSrcName(CAP.report.src)} 就不會拉警報`; }
   else if (known) { txt = '被發現'; c = '#ff9a5a'; sub = capCommAlive() ? '敵軍正在攻擊' : '通訊塔已毀：無法拉警報'; }

@@ -1379,6 +1379,7 @@ function buildBattleHud() {
   gEl('bh-quit').onclick = (e) => {
     if (GAME.replaying) { endReplay(); return; }
     if (NET.on) { mpQuitBattle(e.currentTarget); return; }   // 多人：投降（要按兩次）／離開觀戰
+    if (CAP.on && CAP.mis && CAP.mis.idle) { ccMapOpen(); return; }   // 艦長生涯的星系巡航：打開星圖
     quitBattle();
   };
   watchHud();   // 觀摩：雙方 AI 的解說面板
@@ -1433,7 +1434,7 @@ function gameFrame(dt) {
   pb.title = NET.on ? '多人對戰不能暫停' : `${paused ? '繼續' : '暫停'}（${keyText('pause')}）`;
   gEl('bh-speed').textContent = NET.on ? `×${NET.speed}${NET.lag ? ' …' : ''}` : cmdSlowOn ? `×${effSpeed()}` : '×' + SPEEDS[speedIdx]; gEl('bh-speed').classList.toggle('slow', cmdSlowOn);
   gEl('bh-speed').title = NET.on ? (NET.lag ? '等待連線…' : '遊戲速度（房主決定）') : cmdSlowOn ? '下令中：自動放慢' : `遊戲速度（${keyText('speed_up')}／${keyText('speed_down')}）`;
-  if (!gEl('bh-quit').dataset.sure) gEl('bh-quit').textContent = GAME.replaying ? '結束回放' : NET.on ? (NET.spec ? '離開觀戰' : '投降') : GAME.watch ? '結束觀摩' : GAME.pilot ? '結束出擊' : GAME.captain ? '結束任務' : sim ? '結束模擬' : GAME.sc && GAME.sc.tut ? '結束教學' : '撤退';
+  if (!gEl('bh-quit').dataset.sure) gEl('bh-quit').textContent = CAP.on && CAP.mis && CAP.mis.idle ? `星圖（${keyText('cap_map')}）` : GAME.replaying ? '結束回放' : NET.on ? (NET.spec ? '離開觀戰' : '投降') : GAME.watch ? '結束觀摩' : GAME.pilot ? '結束出擊' : GAME.captain ? '結束任務' : sim ? '結束模擬' : GAME.sc && GAME.sc.tut ? '結束教學' : '撤退';
   if (gEl('bh-ctl')) gEl('bh-ctl').textContent = `切換 → ${simSideName(SIM.m, simNextSide())}`;
   gEl('bh-3d').textContent = mode3D ? '2D' : '3D';
   gEl('bh-br').title = `${BR.on ? '離開艦橋' : '艦橋視角'}（${keyText('bridge')}）`; gEl('bh-br').classList.toggle('on', BR.on);
