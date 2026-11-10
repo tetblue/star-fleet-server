@@ -6,7 +6,21 @@
 const CAP_SPACE = {
   belt: { name: '小行星帶', en: 'ASTEROID BELT', desc: '巨大的小行星可以擋住雷達與射線；小行星區裡速度變慢，但敵方雷達很難發現你。外圍是高能粒子帶。' },
   hole: { name: '黑洞邊緣', en: 'EVENT HORIZON', desc: '戰區一側是黑洞：靠近會被重力井拉過去，越過事件視界附近船體會被撕裂。殘骸與小行星比較少，不好躲。' },
+  deep: { name: '深空・恆星', en: 'DEEP SPACE', desc: '開闊的深空，掩護很少；戰區一側是恆星：太靠近會被高溫灼傷。外圍是高能粒子帶。' },
+  orbit: { name: '行星軌道', en: 'PLANET ORBIT', desc: '戰區一側是行星：重力把船往下拉，進入大氣層會摩擦燃燒；行星本身擋得住射線。外圍是高能粒子帶。' },
+  nebula: { name: '星雲', en: 'NEBULA', desc: '到處是星雲：躲在裡面敵方雷達很難發現你。戰區外圍是離子風暴。' },
+  station: { name: '太空站周邊', en: 'STATION', desc: '巨大的太空站與殘骸區：太空站和殘骸擋得住射線，殘骸區裡雷達難發現你。外圍是高能粒子帶。' },
 };
+// 場景的危險天體（sp.hole，kind 分種類）：r＝核心（黑洞事件視界、恆星本體、行星本體）、pull＝重力範圍、acc＝最大拉力、hurt＝開始受損的距離
+function capWell(key, R) {
+  const sd = R() < 0.5 ? -1 : 1, z = -150 + R() * 300;
+  if (key === 'hole') return { kind: 'hole', x: sd * 1080, y: 0, z, ...CAP_EDGE.hole };
+  if (key === 'deep') return { kind: 'star', x: sd * 1180, y: 0, z, r: 80, pull: 0, acc: 0, hurt: 340 };
+  if (key === 'orbit') return { kind: 'planet', x: sd * 1560, y: -120, z, r: 470, pull: 860, acc: 4, hurt: 560 };
+  return null;
+}
+// 每個場景的地形數量：巨大岩塊、小行星區、星雲
+const CAP_SCENE_T = { belt: [8, 4, 0.5, 0], hole: [4, 2, 0.5, 0], deep: [2, 1, 0.3, 0], orbit: [3, 2, 0, 0], nebula: [4, 1, 0, 5], station: [3, 3, 0.3, 0] };
 const CAP_SPACE_KEYS = Object.keys(CAP_SPACE);
 // R＝戰區水平半徑、Ry＝上下半徑（橢球）；warn＝開始警告的比例；dmg＝在粒子帶裡每秒受到最大耐久的幾成（越深越痛）；hard＝最多能進去多深
 // hole：r 事件視界、pull 重力範圍、acc 最大拉力（每秒把船拖過去幾單位）、hurt 開始受損的距離
@@ -31,9 +45,9 @@ function capLayoutSpace(p, key, misType) {
   const seed = p.seed, R = mulberry32(campHash(seed, 47)), li = p.diff, Df = CAP_DIFF[li];
   const pick = (a) => a[Math.floor(R() * a.length)];
   const N = (a) => Math.max(0, Math.round(a[li] * (0.85 + R() * 0.3)));
-  const hole = key === 'hole' ? { x: (R() < 0.5 ? -1 : 1) * 1080, y: 0, z: -150 + R() * 300, ...CAP_EDGE.hole } : null;
+  const hole = capWell(key, R), TT = CAP_SCENE_T[key] || CAP_SCENE_T.belt;
   const terrain = [], used = [];
-  const inZone = (x, z, m = 120) => Math.hypot(x, z) < CAP_EDGE.R - m && (!hole || Math.hypot(x - hole.x, z - hole.z) > hole.pull * 0.7);
+  const inZone = (x, z, m = 120) => Math.hypot(x, z) < CAP_EDGE.R - m && (!hole || Math.hypot(x - hole.x, z - hole.z) > Math.max(hole.pull * 0.7, hole.hurt * 1.1));
   const free = (x, z, gap) => inZone(x, z) && terrain.every((t) => t.type !== 'rock' || Math.hypot(t.x - x, t.z - z) > t.r + 25) && used.every((u) => Math.hypot(u.x - x, u.z - z) > Math.max(gap, u.ex || 0));
   const spot = (gen, gap) => { for (let k = 0; k < 300; k++) { const c = gen(); if (free(c.x, c.z, gap)) { used.push({ x: c.x, z: c.z }); return c; } } return null; };
   const area = (z0, z1, w = 1700) => () => ({ x: (R() - 0.5) * w, z: z0 + R() * (z1 - z0) });
@@ -42,10 +56,11 @@ function capLayoutSpace(p, key, misType) {
   // 出發點（攔截：撤離點；突破封鎖：入口）
   const S = { x: (R() - 0.5) * 500, z: 980 };
   used.push({ x: S.x, z: S.z, ex: 360 });
-  // 地形：巨大小行星（實體，最多 8 顆）、小行星區、星雲
-  const nRock = key === 'hole' ? 4 : 8;
+  // 地形：太空站（實體，換成太空站模型）、巨大小行星（實體，最多 8 顆）、小行星區（太空站周邊＝殘骸區）、星雲
+  if (key === 'station') { const c = { x: (R() - 0.5) * 500, z: -250 + R() * 300 }; terrain.push({ type: 'rock', x: Math.round(c.x), y: 0, z: Math.round(c.z), r: 110, st: 1 }); }
+  const nRock = TT[0];
   for (let k = 0; k < nRock; k++) {
-    const r = key === 'hole' ? 30 + R() * 30 : 45 + R() * 45;
+    const r = key === 'belt' ? 45 + R() * 45 : 30 + R() * 30;
     for (let n = 0; n < 60; n++) {
       const x = (R() - 0.5) * 1900, z = -950 + R() * 1700;
       if (!inZone(x, z, r + 80) || Math.hypot(x - S.x, z - S.z) < 330 || terrain.some((t) => Math.hypot(t.x - x, t.z - z) < t.r + r + 70)) continue;
@@ -53,8 +68,9 @@ function capLayoutSpace(p, key, misType) {
     }
   }
   const rocks = terrain.filter((t) => t.type === 'rock');
-  for (let k = 0, n = key === 'hole' ? 2 : 4; k < n; k++) { const c = rocks[k] || { x: (R() - 0.5) * 1400, y: 0, z: (R() - 0.5) * 1400 }; terrain.push({ type: 'asteroid', x: c.x + Math.round((R() - 0.5) * 80), y: c.y || 0, z: c.z + Math.round((R() - 0.5) * 80), r: Math.round(170 + R() * 110) }); }
-  if (R() < 0.5) { const c = area(-700, 300, 1300)(); terrain.push({ type: 'nebula', x: Math.round(c.x), y: 0, z: Math.round(c.z), r: Math.round(200 + R() * 80) }); }
+  for (let k = 0, n = TT[1]; k < n; k++) { const c = rocks[k] ||{ x: (R() - 0.5) * 1400, y: 0, z: (R() - 0.5) * 1400 }; terrain.push({ type: 'asteroid', x: c.x + Math.round((R() - 0.5) * 80), y: c.y || 0, z: c.z + Math.round((R() - 0.5) * 80), r: Math.round(170 + R() * 110) }); }
+  if (R() < TT[2]) { const c = area(-700, 300, 1300)(); terrain.push({ type: 'nebula', x: Math.round(c.x), y: 0, z: Math.round(c.z), r: Math.round(200 + R() * 80) }); }
+  for (let k = 0; k < TT[3]; k++) { for (let n = 0; n < 40; n++) { const x = (R() - 0.5) * 2000, z = -1000 + R() * 1900; if (!inZone(x, z, 100) || terrain.some((t) => t.type === 'nebula' && Math.hypot(t.x - x, t.z - z) < t.r + 120)) continue; terrain.push({ type: 'nebula', x: Math.round(x), y: alt(0.4), z: Math.round(z), r: Math.round(170 + R() * 130) }); break; } }
   // 敵方據點（通訊中繼站在這裡）
   const B = spot(area(-850, -450, 1200), 100) || { x: 0, z: -650 };
   const units = [];
@@ -81,8 +97,10 @@ function capLayoutSpace(p, key, misType) {
   let nEn = Math.min(nShips + (li >= 3 ? 1 : 0), Math.max(li >= 1 ? 1 : 0, Math.round(nShips * (0.3 + 0.15 * li) + R() * 0.8)));
   if (misType === 'intercept') {
     // 運輸船隊：從戰區一側橫越到另一側；護航跟著船隊
-    const nC = [2, 2, 3, 3, 4][li], dir = R() < 0.5 ? 1 : -1, z0 = -250 + R() * 300, y0 = alt(0.4);
-    const wp = [-0.55, -0.15, 0.25, 0.62, 1.2].map((f) => [Math.round(dir * f * 1150), Math.round(z0 + (R() - 0.5) * 360)]);
+    const dir0 = R() < 0.5 ? 1 : -1, nC = [2, 2, 3, 3, 4][li], dir = hole ? Math.sign(hole.x) : dir0, z0 = -250 + R() * 300, y0 = alt(0.4);
+    let wp = [-0.55, -0.15, 0.25, 0.62, 1.2].map((f) => [Math.round(dir * f * 1150), Math.round(z0 + (R() - 0.5) * 360)]);
+    // 有危險天體：船隊從另一側出發，在危險區前轉向，從戰區上方（遠端）離開
+    if (hole) { const lim = Math.min(800, Math.abs(hole.x) - hole.hurt - 80); wp = wp.map(([x, z], k) => (k === wp.length - 1 ? [Math.round(dir * Math.min(lim, 600)), -1180] : [Math.round(Math.sign(x) * Math.min(Math.abs(x), lim)), z])); }
     const x0 = -dir * 1150;
     fleets.push(fleet({ side: 1, name: '運輸船隊', capRole: 'convoy', comp: comp1(5, nC), x: x0, z: z0, y: y0, h: Math.atan2(dir, 0), wp, formation: 'column' }));
     const ce = new Array(SHIP_TYPES.length).fill(0); for (let k = 0, n = Math.max(1, Math.min(3, Math.ceil(nEn * 0.6))); k < n; k++) ce[shipT()]++;
@@ -100,7 +118,8 @@ function capLayoutSpace(p, key, misType) {
     }
     for (let k = 0, n = Math.max(2, Math.min(3, nEn + 1)); k < n; k++) {   // 巡邏線：沿 x 來回
       const z = -150 - k * 260 + (R() - 0.5) * 80, c = new Array(SHIP_TYPES.length).fill(0); c[shipT()]++; if (li >= 2 && R() < 0.5) c[shipT()]++;
-      const wp = [[-800, z], [800, z + (R() - 0.5) * 120]].map(([x, zz]) => [Math.round(x * (0.7 + R() * 0.3)), Math.round(zz)]);
+      const lim = hole ? Math.min(1000, Math.abs(hole.x) - hole.hurt - 60) : 1000;
+      const wp = [[-800, z], [800, z + (R() - 0.5) * 120]].map(([x, zz]) => [Math.round(x * (0.7 + R() * 0.3)), Math.round(zz)]).map(([x, zz]) => [hole && Math.sign(x) === Math.sign(hole.x) ? Math.sign(x) * Math.min(Math.abs(x), lim) : x, zz]);
       fleets.push(fleet({ side: 1, name: `封鎖線 ${k + 1}`, capRole: 'patrol', comp: c, x: wp[0][0] + R() * 400, z, y: alt(0.6), h: Math.PI / 2, wp }));
     }
     nEn = 0;
@@ -109,6 +128,8 @@ function capLayoutSpace(p, key, misType) {
     fleets.push(fleet({ side: 1, name: '敵方指揮艦', capRole: 'flag', comp: c, x: B.x, z: B.z - 60, y: 10, h: 0 }));
     nEn--;
   }
+  const r2 = capMisLayout2(misType, p, { R, li, S, B, fleets, fleet, comp1, shipT, mis, add, spot, near, area, alt, used, nEn, N, units, nShips });   // 護送、救援、摧毀設施、偵察（capmissions.js）
+  if (r2) { nEn = r2.nEn; if (r2.ext) ext = r2.ext; }
   for (let k = 0; nEn > 0 && k < 2; k++) {
     const n = k === 1 ? nEn : Math.max(1, Math.ceil(nEn / 2)), c = new Array(SHIP_TYPES.length).fill(0);
     for (let m = 0; m < n; m++) c[shipT()]++;
@@ -123,7 +144,7 @@ function capLayoutSpace(p, key, misType) {
     fleets.push(fleet({ side: 1, name: `增援 ${k + 1}`, capRole: 'reinf', comp: c, x: (R() - 0.5) * 1100, z: -1500, y: 0, h: 0, reserve: true }));
   }
   units.filter((u) => CAP_UNIT[u.type].air).forEach((u, k) => { u.air = k; fleets.push(fleet({ side: 1, name: '艦載機平台', capRole: 'airbase', comp: comp1(0), x: u.x, z: u.z, y: u.y + 6, h: 0 })); });
-  const space = { key, R: CAP_EDGE.R, Ry: CAP_EDGE.Ry, hole };
+  const space = { key, R: CAP_EDGE.R, Ry: CAP_EDGE.Ry, hole, edge: key === 'nebula' ? 'ion' : 'part' };
   const m = { name: '', fac: p.fac === 1 ? 1 : 0, victory: false, ctl: -1, timeLimit: CAP_RULE.time, seed: campHash(seed, 13) % 100000, fleets, terrain, sides: [{ lv: 0 }, { lv: li }],
     captain: { li, hulls, mis, units, S: { x: S.x, z: S.z }, B: { x: B.x, z: B.z }, ext, waves: nWave, ftr: [4, 6, 8, 10, 12][li], scene: null, space } };
   m.name = `${CAP_MIS[misType].name}・${CAP_SPACE[key].name}・${CAP_DIFF[li].name}`;
@@ -136,7 +157,7 @@ function capSpaceBegin(C) {
   CAP.G = GRD || { space: true, gts: [], pil: [], ms: [] };
   CAP.noWarp = C.mis.type === 'run';
   if (C.ext) CAP.ext = { x: C.ext.x, z: C.ext.z };
-  CAP.edgeT = 0;
+  CAP.edgeT = 0; CAP.ally = [];
 }
 function capSpaceEnd() {
   const V = CAP.spV; if (!V) return;
@@ -165,13 +186,16 @@ function capSpaceStep(dt, t) {
     if (h) {
       const dx = h.x - s.x, dy = h.y - s.y, dz = h.z - s.z, d = Math.hypot(dx, dy, dz) || 1; s.holeD = d;
       if (d < h.pull) { const a = h.acc * (1 - d / h.pull) ** 2 * dt; s.x += dx / d * a; s.y += dy / d * a; s.z += dz / d * a; }   // 直接拖動位置：自動抵消漂移抵消不了，要全速才逃得開
-      if (d < h.hurt) hurt += 0.04 + 0.5 * (1 - Math.max(0, d - h.r) / (h.hurt - h.r)) ** 2;
-      if (d < h.r) hurt += 1;
+      if (d < h.hurt) hurt += (h.kind === 'planet' ? 0.03 : 0.04) + (h.kind === 'planet' ? 0.3 : 0.5) * (1 - Math.max(0, d - h.r) / (h.hurt - h.r)) ** 2;
+      if (d < h.r) {
+        if (h.kind === 'planet') { const f = h.r / d; s.x = h.x - dx * f; s.y = h.y - dy * f; s.z = h.z - dz * f; const vr = -(s.vx * dx + s.vy * dy + s.vz * dz) / d; if (vr < 0) { s.vx -= -dx / d * vr; s.vy -= -dy / d * vr; s.vz -= -dz / d * vr; } hurt += 0.4; }   // 撞上行星表面：推回大氣層
+        else hurt += 1;
+      }
     }
     if (hurt > 0 && tick && capLive()) {
       const dmg = hurt * 0.5 * (ships.shMax[s.i] + maxHp(s.i));
       pending.push({ t, target: s.i, side: 1 - s.side, asp: 0, dmg, hm: 1, fx: false, dirIdx: 0, x: s.x, y: s.y, z: s.z, crash: true });
-      if (s.k === CAP.cur && t - (s.edgeFeedT || -9) > 4) { s.edgeFeedT = t; capFeed(h && s.holeD < h.hurt ? '黑洞的潮汐力正在撕裂船體！' : '高能粒子帶：船體受損，快離開！', 'bad'); }
+      if (s.k === CAP.cur && t - (s.edgeFeedT || -9) > 4) { s.edgeFeedT = t; capFeed(h && s.holeD < h.hurt ? CAP_WELL_TX[h.kind].feed : CAP_EDGE_TX[CAP.sp.edge || 'part'].feed, 'bad'); }
     }
   }
   // 水雷：我方的船靠近就爆炸
@@ -261,7 +285,7 @@ function capSpaceBuild() {
   const group = new THREE.Group(); scene.add(group);
   const V = CAP.spV = { group, meshes: [], mats: {} };
   // 邊界光牆
-  const em = new THREE.ShaderMaterial({ vertexShader: CAP_EDGE_VS, fragmentShader: CAP_EDGE_FS, uniforms: { uT: { value: 0 }, uP: { value: new THREE.Vector3() }, uCol: { value: new THREE.Color(0.55, 0.45, 1.0) } },
+  const em = new THREE.ShaderMaterial({ vertexShader: CAP_EDGE_VS, fragmentShader: CAP_EDGE_FS, uniforms: { uT: { value: 0 }, uP: { value: new THREE.Vector3() }, uCol: { value: sp.edge === 'ion' ? new THREE.Color(0.3, 0.85, 1.0) : new THREE.Color(0.55, 0.45, 1.0) } },
     transparent: true, depthWrite: false, side: THREE.BackSide, blending: THREE.AdditiveBlending });
   const wall = new THREE.Mesh(new THREE.SphereGeometry(1, 96, 48), em); wall.scale.set(CAP_EDGE.R, CAP_EDGE.Ry, CAP_EDGE.R); wall.renderOrder = 5; group.add(wall);
   V.edge = em;
@@ -273,7 +297,7 @@ function capSpaceBuild() {
     const n = fields.reduce((a, t) => a + Math.round(t.r * 0.45), 0), geo = new THREE.IcosahedronGeometry(1, 1), P = geo.getAttribute('position');
     for (let i = 0; i < P.count; i++) { const k = 0.75 + 0.5 * Math.abs(Math.sin(P.getX(i) * 5.1 + P.getY(i) * 3.7 + P.getZ(i) * 4.3)); P.setXYZ(i, P.getX(i) * k, P.getY(i) * k * 0.8, P.getZ(i) * k); }
     geo.computeVertexNormals();
-    const im = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: 0x7d7062, roughness: 0.95, metalness: 0.05, flatShading: true }), n), Mx = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler(), Sc = new THREE.Vector3(), Ps = new THREE.Vector3();
+    const junk = sp.key === 'station', im = new THREE.InstancedMesh(junk ? new THREE.BoxGeometry(1.4, 0.5, 1) : geo, new THREE.MeshStandardMaterial({ color: junk ? 0x6a717e : 0x7d7062, roughness: junk ? 0.55 : 0.95, metalness: junk ? 0.6 : 0.05, flatShading: true }), n), Mx = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler(), Sc = new THREE.Vector3(), Ps = new THREE.Vector3();
     let k = 0;
     for (const t of fields) {
       const R = mulberry32(Math.round(t.x * 3 + t.z * 11) >>> 0);
@@ -286,8 +310,9 @@ function capSpaceBuild() {
     }
     im.instanceMatrix.needsUpdate = true; group.add(im);
   }
+  capSceneBuild(group, V, sp);   // 恆星、行星、星雲、太空站（capmissions.js）
   // 黑洞：黑球＋吸積盤＋外圈的光暈
-  if (sp.hole) {
+  if (sp.hole && sp.hole.kind === 'hole') {
     const h = sp.hole, hg = new THREE.Group(); hg.position.set(h.x, h.y, h.z); group.add(hg);
     hg.add(new THREE.Mesh(new THREE.SphereGeometry(h.r * 0.75, 48, 24), new THREE.MeshBasicMaterial({ color: 0x000000 })));
     const dm = new THREE.ShaderMaterial({ vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }', fragmentShader: CAP_DISK_FS,
@@ -335,7 +360,7 @@ function capSpaceBuild() {
       add(new THREE.TorusGeometry(6.2, 0.55, 8, 40), hull, 0, 0, 0, Math.PI / 2); add(new THREE.TorusGeometry(6.2, 0.2, 6, 40), glow, 0, 0.6, 0, Math.PI / 2);
       for (let k = 0; k < 4; k++) { const a = k / 4 * TAU; add(new THREE.BoxGeometry(0.4, 0.4, 6), dark, Math.sin(a) * 3.2, 0, Math.cos(a) * 3.2).rotation.y = a; add(new THREE.BoxGeometry(1, 0.8, 1.6), dark, Math.sin(a + 0.4) * 6.2, 0.9, Math.cos(a + 0.4) * 6.2).rotation.y = a; }
       add(new THREE.SphereGeometry(0.25, 8, 6), red, 0, 4.9);
-    } else add(new THREE.BoxGeometry(g.r, g.r, g.r), hull);
+    } else if (!capUnitGeo(g, add, V.mats)) add(new THREE.BoxGeometry(g.r, g.r, g.r), hull);
     group.add(o); V.meshes[g.id] = o;
     capStationModel(o, g);   // 換成專案的太空站模型（capstate.js）
   }
@@ -346,6 +371,7 @@ function capSpaceFrame() {
   V.edge.uniforms.uT.value = t; if (s) V.edge.uniforms.uP.value.set(s.x, s.y, s.z);
   if (V.disk) V.disk.uniforms.uT.value = t;
   if (V.halo) V.halo.quaternion.copy(camera.quaternion);
+  capSceneFrame(V, t);
   for (const g of CAP.G.gts) {
     let o = V.meshes[g.id];
     if (!o) continue;
@@ -356,21 +382,27 @@ function capSpaceFrame() {
 // 新增的設施（增援等）補模型：目前太空沒有中途新增的設施
 // 儀表：粒子帶、黑洞的警告（capHud 呼叫）
 // 船附近的危險（粒子帶、黑洞）：dir＝危險的方向（單位向量）、d＝離危險區還有多遠（進去了＝0）、in＝已經在受損
-const CAP_DANGER = { edge: { name: '高能粒子帶', col: '#b48cff' }, hole: { name: '黑洞重力井', col: '#ff9a3c' } };
+const CAP_DANGER = { edge: { name: '高能粒子帶', col: '#b48cff' }, ion: { name: '離子風暴', col: '#5fd8ff' }, hole: { name: '黑洞重力井', col: '#ff9a3c' }, star: { name: '恆星高溫區', col: '#ffd040' }, planet: { name: '大氣層', col: '#6fb0ff' } };
+const CAP_EDGE_TX = { part: { feed: '高能粒子帶：船體受損，快離開！' }, ion: { feed: '離子風暴：船體受損，快離開！' } };
+const CAP_WELL_TX = {
+  hole: { feed: '黑洞的潮汐力正在撕裂船體！', in: '黑洞的潮汐力正在撕裂船體：往綠色箭頭全速脫離！', pull: (km) => `被黑洞的重力拉住（${km} km 後開始受損）：往綠色箭頭推進`, near: (km) => `前方是黑洞重力井（${km} km）`, near2: (km) => `距黑洞危險區 ${km} km`, label: '黑洞' },
+  star: { feed: '恆星的高溫正在灼燒船體！', in: '恆星的高溫正在灼燒船體：往綠色箭頭離開！', pull: (km) => `接近恆星（${km} km 後開始受損）`, near: (km) => `前方是恆星高溫區（${km} km）`, near2: (km) => `距恆星高溫區 ${km} km`, label: '恆星' },
+  planet: { feed: '進入大氣層：船體摩擦燃燒！', in: '大氣層摩擦燃燒：往綠色箭頭爬升脫離！', pull: (km) => `行星的重力把船往下拉（${km} km 後進入大氣層）：往綠色箭頭推進`, near: (km) => `前方是行星大氣層（${km} km）`, near2: (km) => `距大氣層 ${km} km`, label: '行星' },
+};
 function capDangers(s) {
   const out = [], e = s.edge || 0, h = CAP.sp && CAP.sp.hole;
   if (e > 0.72) {
     const nx = s.x / CAP_EDGE.R ** 2, ny = s.y / CAP_EDGE.Ry ** 2, nz = s.z / CAP_EDGE.R ** 2, nl = Math.hypot(nx, ny, nz) || 1, ny1 = ny / nl;
-    out.push({ k: 'edge', dir: [nx / nl, ny1, nz / nl], d: e >= 1 ? 0 : Math.hypot(s.x, s.y, s.z) * (1 / e - 1), in: e > 1, side: ny1 > 0.7 ? '上方' : ny1 < -0.7 ? '下方' : '' });
+    out.push({ k: CAP.sp.edge === 'ion' ? 'ion' : 'edge', dir: [nx / nl, ny1, nz / nl], d: e >= 1 ? 0 : Math.hypot(s.x, s.y, s.z) * (1 / e - 1), in: e > 1, side: ny1 > 0.7 ? '上方' : ny1 < -0.7 ? '下方' : '' });
   }
-  if (h && s.holeD < h.pull * 1.15) out.push({ k: 'hole', dir: [(h.x - s.x) / s.holeD, (h.y - s.y) / s.holeD, (h.z - s.z) / s.holeD], d: Math.max(0, s.holeD - h.hurt), in: s.holeD < h.hurt, pull: s.holeD < h.pull, side: '' });
+  if (h && s.holeD < Math.max(h.pull, h.hurt) * 1.15) out.push({ k: h.kind || 'hole', dir: [(h.x - s.x) / s.holeD, (h.y - s.y) / s.holeD, (h.z - s.z) / s.holeD], d: Math.max(0, s.holeD - h.hurt), in: s.holeD < h.hurt, pull: s.holeD < h.pull, side: '' });
   return out;
 }
 const _cdv = new THREE.Vector3();
 // 船的儀表：最近的危險（種類＋距離）
 function capNearDanger(s) {
   const e = s.edge || 0, de = e >= 1 ? 0 : Math.hypot(s.x, s.y, s.z) * (1 / Math.max(0.01, e) - 1), h = CAP.sp && CAP.sp.hole, dh = h ? Math.max(0, s.holeD - h.hurt) : 1e9;
-  return dh < de ? `距黑洞危險區 ${(dh * GROUND_KM).toFixed(1)} km` : `距粒子帶 ${(de * GROUND_KM).toFixed(1)} km`;
+  return dh < de ? CAP_WELL_TX[h.kind || 'hole'].near2((dh * GROUND_KM).toFixed(1)) : `距${CAP.sp.edge === 'ion' ? '離子風暴' : '粒子帶'} ${(de * GROUND_KM).toFixed(1)} km`;
 }
 // 儀表：危險的種類、方向（畫面上的箭頭指向危險、綠色箭頭＝脫離方向）、距離；在危險區裡＝畫面邊緣閃爍
 function capSpaceHud(g, s, cx, cy, m, red, amb) {
@@ -389,8 +421,9 @@ function capSpaceHud(g, s, cx, cy, m, red, amb) {
     const R0 = m * 0.17;
     arrow(D.dir[0], D.dir[1], D.dir[2], T.col, `${T.name}${D.side ? `（${D.side}）` : ''} ${D.in ? '受損中' : km + ' km'}`, R0);
     if (D.in || D.pull || D.d < 120) arrow(-D.dir[0], -D.dir[1], -D.dir[2], '#8fe39a', '脫離方向', R0);
-    const msg = D.k === 'hole' ? (D.in ? '黑洞的潮汐力正在撕裂船體：往綠色箭頭全速脫離！' : D.pull ? `被黑洞的重力拉住（${km} km 後開始受損）：往綠色箭頭推進` : `前方是黑洞重力井（${km} km）`)
-      : D.in ? `${D.side ? D.side + '的' : ''}高能粒子帶：船體受損，往綠色箭頭離開！` : `接近戰區邊界：${D.side ? D.side + '的' : ''}高能粒子帶（${km} km）`;
+    const W = CAP_WELL_TX[D.k], EN = T.name;
+    const msg = W ? (D.in ? W.in : D.pull ? W.pull(km) : W.near(km))
+      : D.in ? `${D.side ? D.side + '的' : ''}${EN}：船體受損，往綠色箭頭離開！` : `接近戰區邊界：${D.side ? D.side + '的' : ''}${EN}（${km} km）`;
     pilotText(g, cx, y0, msg, D.in ? red : D.pull || D.d < 80 ? amb : T.col, D.in ? 16 : 14);
     if (D.in) {   // 畫面邊緣閃爍（顏色＝危險的種類）
       const a = 0.25 + 0.2 * Math.sin(now / 160);
@@ -406,12 +439,15 @@ function capSpaceRadar(g, s, cx, cy, k, fw) {
   const ring = (x, z, r, col, lw, dash) => { const c = pr(x, z); g.strokeStyle = col; g.lineWidth = lw; g.setLineDash(dash || []); g.beginPath(); g.arc(c[0], c[1], r * k, 0, TAU); g.stroke(); g.setLineDash([]); g.lineWidth = 1.5; };
   const yk = Math.max(0, 1 - (s.y / CAP_EDGE.Ry) ** 2), Rh = CAP_EDGE.R * Math.sqrt(yk);   // 這個高度的橫切面
   const c0 = pr(0, 0);
-  g.fillStyle = 'rgba(180,140,255,.18)'; g.beginPath(); g.arc(c0[0], c0[1], Rh * k + 400, 0, TAU); g.arc(c0[0], c0[1], Rh * k, 0, TAU, true); g.fill();   // 邊界外塗色
-  ring(0, 0, Rh, 'rgba(190,150,255,.95)', 2); ring(0, 0, Rh * CAP_EDGE.warn, 'rgba(190,150,255,.35)', 1, [4, 4]);
+  const ion = CAP.sp.edge === 'ion', ec = ion ? '95,216,255' : '190,150,255';
+  g.fillStyle = ion ? 'rgba(95,216,255,.16)' : 'rgba(180,140,255,.18)'; g.beginPath(); g.arc(c0[0], c0[1], Rh * k + 400, 0, TAU); g.arc(c0[0], c0[1], Rh * k, 0, TAU, true); g.fill();   // 邊界外塗色
+  ring(0, 0, Rh, `rgba(${ec},.95)`, 2); ring(0, 0, Rh * CAP_EDGE.warn, `rgba(${ec},.35)`, 1, [4, 4]);
   const h = CAP.sp.hole;
   if (h) {
-    ring(h.x, h.z, h.pull, 'rgba(255,154,60,.6)', 1, [5, 4]); ring(h.x, h.z, h.hurt, 'rgba(255,90,60,.9)', 2);
-    const c = pr(h.x, h.z); g.fillStyle = '#000'; g.beginPath(); g.arc(c[0], c[1], Math.max(3, h.r * k), 0, TAU); g.fill();
-    plFont(g, 10, true); g.fillStyle = '#ffb070'; g.textAlign = 'center'; g.fillText('黑洞', c[0], c[1] - h.hurt * k - 4); g.textAlign = 'left';
+    const kd = h.kind || 'hole', col = kd === 'planet' ? ['111,176,255', '#2a4f8a', '#9fc8ff'] : kd === 'star' ? ['255,208,64', '#fff0b0', '#ffe080'] : ['255,154,60', '#000', '#ffb070'];
+    if (h.pull) ring(h.x, h.z, h.pull, `rgba(${col[0]},.6)`, 1, [5, 4]);
+    ring(h.x, h.z, h.hurt, kd === 'hole' ? 'rgba(255,90,60,.9)' : `rgba(${col[0]},.95)`, 2);
+    const c = pr(h.x, h.z); g.fillStyle = col[1]; g.beginPath(); g.arc(c[0], c[1], Math.max(3, (kd === 'hole' ? h.r : h.r) * k), 0, TAU); g.fill();
+    plFont(g, 10, true); g.fillStyle = col[2]; g.textAlign = 'center'; g.fillText(CAP_WELL_TX[kd].label, c[0], c[1] - h.hurt * k - 4); g.textAlign = 'left';
   }
 }

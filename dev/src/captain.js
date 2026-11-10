@@ -372,7 +372,7 @@ function capBegin(C) {
       for (const i of q.list) ships.ammo[i] = 0;   // 敵方戰艦不帶長程飛彈（射程沒有跟著縮小）
       const fd = SIM.m.fleets[f.id] || {};
       CAP.pat.push({ f, g, role: f.capRole || 'patrol', wp: (fd.wp || []).map(([x, z]) => ({ x, z })), wi: 0, dest: null, destT: -99, home: { x: g.ax, z: g.az }, on: !f.reserve });
-    }
+    } else if (f.capRole) capAllyAdd(f, g);   // 我方的運輸艦、受困的友艦（capmissions.js）
   }
   aL.needsUpdate = true; aL2.needsUpdate = true;
   CAP.ships = CAP.own.concat(CAP.foes); CAP.ships.forEach((s, k) => { s.k = k; s.q.capK = k; CAP.byI[s.i] = k; });   // 我方的船排在前面（CAP.cur 同時是 CAP.own 的索引）
@@ -1065,6 +1065,7 @@ function capSeeEnemies(t) {
 
 // ───── 敵方戰艦（艦隊模擬）：巡邏 → 追擊已被發現的船 → 警報中搜索最後看到的位置 ─────
 function capEnemyAI(t) {
+  capAllyAI(t);
   for (const P of CAP.pat) {
     if (!P.on) continue;
     if (P.role === 'convoy' || P.role === 'escort') { capConvoyAI(P, t); continue; }   // 太空：運輸船隊（capspace.js）
@@ -1072,11 +1073,13 @@ function capEnemyAI(t) {
     const C = centerOf(al);
     let best = null, bd = P.role === 'flag' ? 520 : 900;
     for (const s of CAP.own) { if (s.dead || t >= s.knownT) continue; const d = Math.hypot(s.x - C.x, s.z - C.z); if (d < bd) { bd = d; best = s; } }
+    const A2 = capAllyTarget(C, bd); if (A2) best = A2;   // 我方的運輸艦、友艦比較近
     let dest = null, H = null, y = null;
     if (best) {
       g.target = best.q;
       const R = 110, hx = C.x - best.x, hz = C.z - best.z, hd = Math.hypot(hx, hz) || 1;
       dest = { x: best.x + hx / hd * R, z: best.z + hz / hd * R }; H = Math.atan2(-hx, -hz); y = Math.max(best.y + 10, capGY(dest.x, dest.z) + 12);
+      if (best.lead) { dest = { x: best.lead.x, z: best.lead.z }; H = Math.atan2(best.x - dest.x, best.z - dest.z); }   // 移動中的我方運輸艦：搶到它前面攔截
     } else {
       g.target = null;
       if (CAP.alarm && CAP.last && t - CAP.last.t < 90 && P.role !== 'flag') { dest = { x: CAP.last.x, z: CAP.last.z }; y = GRD ? terrainHAt(dest.x, dest.z) + 16 : CAP.last.y; }
@@ -1168,11 +1171,12 @@ function capCreditF() { const S = CAP.stats; if (!S) return; S.kf++; S.merit += 
 // ───── 任務 ─────
 function capMisInit(C) {
   const M = CAP.mis = { ...C, prog: 0, done: false, doneT: 0, gts: [], ship: -1 };
-  if (M.type === 'sabotage') { M.gts = CAP.G.gts.filter((g) => g.mis).map((g) => g.id); M.goal = M.gts.length || 1; }
+  if (M.type === 'sabotage' || M.type === 'strike') { M.gts = CAP.G.gts.filter((g) => g.mis).map((g) => g.id); M.goal = M.gts.length || 1; }
   if (M.type === 'decap') { const P = CAP.pat.find((p) => p.role === 'flag'); const q = P && P.f.sqs[0]; let best = -1; if (q) for (const i of q.list) if (best < 0 || ships.type[i] < ships.type[best]) best = i; M.ship = best; M.goal = 1; }
   if (M.type === 'wipe') { M.goal = capWipeLeft(); M.total = M.goal; }
   if (M.type === 'intercept') M.esc = 0;
   if (M.type === 'run') { M.goal = 1; M.prog = 0; }
+  capMis2Init(M);
   capCaptureInit(M);
 }
 function capWipeLeft() {
@@ -1192,7 +1196,7 @@ function capMisTick(t) {
     if (w) { CAP.warp = null; capFeed(`躍遷充能中斷：${w}`, 'bad'); }
     else if (t - CAP.warp.t0 >= CAP_RULE.warpT) { if (M.done) capFinish(true, '躍遷撤離'); else capRetreat(); return; }
   }
-  if (M.type === 'sabotage') M.prog = M.gts.filter((i) => gtDead(CAP.G.gts[i])).length;
+  if (M.type === 'sabotage' || M.type === 'strike') M.prog = M.gts.filter((i) => gtDead(CAP.G.gts[i])).length;
   if (M.type === 'decap') M.prog = M.ship >= 0 && !ships.alive[M.ship] ? 1 : 0;
   if (M.type === 'wipe') {
     M.left = capWipeLeft(); M.pend = CAP.alarm && CAP.waves > 0 && capCommAlive();
@@ -1200,6 +1204,7 @@ function capMisTick(t) {
     M.prog = M.left === 0 && !M.pend ? M.goal : 0;
   }
   capSpaceMisTick(M);
+  capMis2Tick(M, t); if (GAME.result) return;
   if (capCaptureTick(M, t)) return;
   if (M.type === 'run') {   // 突破封鎖：小隊的船抵達躍遷點就成功
     if (CAP.own.some((s) => !s.dead && Math.hypot(s.x - CAP.ext.x, s.z - CAP.ext.z) < CAP_RULE.extR * 1.4)) { M.prog = 1; capFinish(true, '突破封鎖'); }
@@ -1514,9 +1519,10 @@ function capMarkers(g, sw, s, red, grn, amb, col, now) {
       if (s.H.msl) { g.strokeStyle = L >= 1 ? '#ff5a4a' : amb; g.beginPath(); g.arc(p[0], p[1], 24, -Math.PI / 2, -Math.PI / 2 + TAU * L); g.stroke(); if (L >= 1) { plFont(g, 11, true); g.fillStyle = '#ff5a4a'; g.fillText('LOCK', p[0] - 14, p[1] + 34); plFont(g, 11, false, true); } }
       g.fillStyle = '#ff8a7a'; g.fillText(`${capTgtName(T)} ${Math.round(d)}`, p[0] + 22, p[1] - 22);
     } else { _ch.copy(tp); pilotEdgeArrow(g, _ch, '#ff5a4a', `LOCK ${Math.round(d)}`); } } }
+  capMis2Marks(g, sw, s, dia);   // 我方艦艇、偵察點（capmissions.js）
   // 撤離點
   const eh = GRD ? terrainHAt(CAP.ext.x, CAP.ext.z) + 3 : 0, ep = sw(CAP.ext.x, eh, CAP.ext.z), ed = Math.hypot(CAP.ext.x - s.x, CAP.ext.z - s.z);
-  if (M && (M.done || M.type === 'run')) { if (ep) { dia(ep, 14, grn); g.fillStyle = grn; g.fillText(`撤離點 ${Math.round(ed)}`, ep[0] + 18, ep[1]); } else { _ch.set(CAP.ext.x, eh, CAP.ext.z); pilotEdgeArrow(g, _ch, grn, `撤離 ${Math.round(ed)}`); } }
+  if (M && (M.done || M.type === 'run' || M.type === 'escort')) { if (ep) { dia(ep, 14, grn); g.fillStyle = grn; g.fillText(`撤離點 ${Math.round(ed)}`, ep[0] + 18, ep[1]); } else { _ch.set(CAP.ext.x, eh, CAP.ext.z); pilotEdgeArrow(g, _ch, grn, `撤離 ${Math.round(ed)}`); } }
   else if (ep && ed < 900) { g.globalAlpha = 0.6; dia(ep, 9, grn); g.fillStyle = grn; g.fillText('撤離點', ep[0] + 14, ep[1]); g.globalAlpha = 1; }
   // 僚艦
   for (const o of CAP.own) {
@@ -1529,7 +1535,7 @@ function capTopHud(g, W, cx, red, grn, amb, t, top) {
   const M = CAP.mis, s = capCur();
   // 任務
   plFont(g, 13, true); g.textAlign = 'center'; g.fillStyle = M && M.done ? grn : '#e8eef8';
-  const prog = !M ? '' : M.type === 'capture' ? capCaptureProg(M) : M.type === 'wipe' ? `剩 ${M.left != null ? M.left : M.goal} 個${M.pend ? '＋增援' : ''}` : `${M.prog}／${M.goal}`;
+  const prog = !M ? '' : M.type === 'capture' ? capCaptureProg(M) : M.type === 'escort' || M.type === 'rescue' ? capMis2Prog(M) : M.type === 'wipe' ? `剩 ${M.left != null ? M.left : M.goal} 個${M.pend ? '＋增援' : ''}` : `${M.prog}／${M.goal}`;
   g.fillText(M ? `${CAP_MIS[M.type].name}　${M.done && M.type !== 'capture' ? '完成！回到撤離點' : prog}` : '', cx, top + 76);
   plFont(g, 11, false); g.fillStyle = 'rgba(220,230,245,.75)';
   g.fillText(M && !M.done ? CAP_MIS[M.type].text(M) : `剩餘時間 ${_fmtT(Math.max(0, CAP.tLim - t))}`, cx, top + 94);
@@ -1639,6 +1645,7 @@ function capRadar(g, W, H, s, ca, red, grn, amb, col, t) {
   for (const j of aliveF[es]) { if (FT.kind[j] === 1) continue; const p = pt(fP[j * 3], fP[j * 3 + 2]); if (!p || Math.hypot(fP[j * 3] - s.x, fP[j * 3 + 2] - s.z) > 320) continue; g.fillStyle = 'rgba(255,120,100,.9)'; g.fillRect(p[0] - 1, p[1] - 1, 2, 2); }
   const ep = pt(CAP.ext.x, CAP.ext.z); if (ep) { g.strokeStyle = grn; g.beginPath(); g.arc(ep[0], ep[1], CAP_RULE.extR * k, 0, TAU); g.stroke(); }
   else { const a = Math.atan2(-(CAP.ext.x - s.x) * fw[1] + (CAP.ext.z - s.z) * fw[0], (CAP.ext.x - s.x) * fw[0] + (CAP.ext.z - s.z) * fw[1]); g.fillStyle = grn; g.beginPath(); g.arc(cx + Math.sin(a) * (R - 5), cy - Math.cos(a) * (R - 5), 3, 0, TAU); g.fill(); }
+  capMis2Radar(g, pt, k);
   if (CAP.last && CAP.alarm) { const p = pt(CAP.last.x, CAP.last.z); if (p) { g.strokeStyle = 'rgba(255,90,70,.6)'; g.beginPath(); g.moveTo(p[0] - 4, p[1] - 4); g.lineTo(p[0] + 4, p[1] + 4); g.moveTo(p[0] + 4, p[1] - 4); g.lineTo(p[0] - 4, p[1] + 4); g.stroke(); } }
   for (const o of CAP.own) { if (o.dead) continue; const p = pt(o.x, o.z); if (!p) continue; g.fillStyle = o === s ? '#fff' : col; g.beginPath(); g.arc(p[0], p[1], o === s ? 3.5 : 2.5, 0, TAU); g.fill(); }
   // 受擊方向

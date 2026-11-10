@@ -99,7 +99,7 @@ function capLayoutCapture(p, key, o) {
       comp: comp1(H.look), x: pos.x + qx + off * 18, z: pos.z - dir * Math.abs(off) * 9, y: (side ? 10 : 0) + (qi ? 12 : 0), h: side ? 0 : Math.PI }));
   }));
   put(0, ours, posA); put(1, theirs, posB);
-  const space = { key, R: CAP_EDGE.R, Ry: CAP_EDGE.Ry, hole };
+  const space = { key, R: CAP_EDGE.R, Ry: CAP_EDGE.Ry, hole, edge: key === 'nebula' ? 'ion' : 'part' };
   const mis = { type: 'capture', li, goal: 1, names: '' };
   const m = { name: '', fac: p.fac === 1 ? 1 : 0, victory: false, ctl: -1, timeLimit: CAP_RULE.time, seed: campHash(p.seed, 13) % 100000, fleets, terrain, sides: [{ lv: 0 }, { lv: li }],
     captain: { li, hulls: mine, mis, units, S: { x: posA.x, z: posA.z }, B: { x: B.x, z: B.z }, ext: { x: posA.x, z: posA.z + 120 }, waves: 0, ftr: 0, scene: null, space, open: true, auto: !!p.auto, duel: D } };
