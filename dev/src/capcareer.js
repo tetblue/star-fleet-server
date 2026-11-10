@@ -437,14 +437,14 @@ function ccTakeCommand(S, q) {
 }
 // ───── 派出的小隊（玩家與 AI 勢力共用）：任務、地面突襲的成功率與存活率 ─────
 // 統一的加減公式，每一項都是百分點，讓玩家看得懂要提升哪一方面：
-//   成功率 ＝ 90% ＋ 任務難易（易 +10／中 −10／難 −45）＋ 戰力（每 1 點 ±4，以 3 為準，±20 封頂）＋ 耐久（平均每高於 70% 10 點 +3）
-//           − 敵方難度（每級 5）＋ 偵察 +8 − 目標星系每個敵方小隊 5，限制在 5%～95%
+//   成功率 ＝ 90% ＋ 任務難易（易 +10／中 −10／難 −45）＋ 戰力（比敵方戰力基準每多 1 點 +4、少 1 點 −4，±20 封頂；基準照敵方難度 2／3／4／6／8，見 captain.js 的 CAP_DIFF）＋ 耐久（平均每高於 70% 10 點 +3）
+//           − 敵方難度（每級 2）＋ 偵察 +8 − 目標星系每個敵方小隊 5，限制在 5%～95%
 //   存活率 ＝ 90% ＋ 成功率 × 8% − 敵方難度 × 2% ＋（這艘船的耐久 − 70%）× 10% ＋ 艦種（匿蹤艦 −3），限制在 30%～99%
 // 係數對齊 2026-11-10 任務 AI 實打的 393 場（capmisai.js）：易＝偵察、摧毀設施、突破封鎖、護航、斬首、全滅（實測 93～100%），
 //   中＝破壞、地面突襲（77%），難＝攔截、救援撤離（32～44%）；難度 0→4 實測 89%→70%；存活率實測約 96%、匿蹤艦 93%。
 //   實測裡小隊戰力幾乎不影響結果（任務的敵人跟著我方調整），但為了讓「派更強的小隊」有意義，公式保留一個溫和的戰力項。
 const CC_OPF = {
-  base: 90, tier: { easy: 10, mid: -10, hard: -45 }, pow: 4, powRef: 3, powCap: 20, hp: 3, li: -5, intel: 8, guard: -5, lo: 5, hi: 95,
+  base: 90, tier: { easy: 10, mid: -10, hard: -45 }, pow: 4, powCap: 20, hp: 3, li: -2, intel: 8, guard: -5, lo: 5, hi: 95,
   sBase: 90, sP: 8, sLi: -2, sHp: 10, sHull: { stealth: -3 },
 };
 const CC_OP_TIER = { scan: 'easy', strike: 'easy', run: 'easy', escort: 'easy', decap: 'easy', wipe: 'easy', sabotage: 'mid', raid: 'mid', intercept: 'hard', rescue: 'hard' };
@@ -458,7 +458,7 @@ function ccOpCalc(S, q, op, s, f) {
   const guard = ccAt(S, s.id).filter((x) => x.fac !== f && ccHostile(S, f, x.fac)).length;   // 目標星系裡有敵方的小隊
   const intel = f === S.fac ? ccIntel(S, s) : false;
   const parts = [['基準', K.base], [`任務難易（${CC_TIER_NAME[tier]}）`, K.tier[tier]],
-    ['戰力', Math.round(Math.max(-K.powCap, Math.min(K.powCap, K.pow * (ccPow([q]) - K.powRef))))],
+    [`戰力（${ccPow([q]).toFixed(1)}，敵方 ${CAP_DIFF[li].pow}）`, Math.round(Math.max(-K.powCap, Math.min(K.powCap, K.pow * (ccPow([q]) - CAP_DIFF[li].pow))))],
     ['耐久', Math.round(K.hp * (hp - 0.7) * 10)], ['敵方難度', K.li * li]];
   if (intel) parts.push(['偵察', K.intel]);
   if (guard) parts.push(['守備小隊', K.guard * guard]);

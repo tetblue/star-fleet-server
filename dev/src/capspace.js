@@ -94,7 +94,7 @@ function capLayoutSpace(p, key, misType) {
   const mis = { type: misType, li, goal: 1, names: '' };
   let ext = { x: S.x, z: S.z };
   // 巡邏艦：總數不超過我方（高難度最多多一艘）
-  let nEn = Math.min(nShips + (li >= 3 ? 1 : 0), Math.max(li >= 1 ? 1 : 0, Math.round(nShips * (0.3 + 0.15 * li) + R() * 0.8)));
+  let nEn = Math.min(nShips + (li >= 3 ? 1 : 0), Df.foeMax, Math.max(li >= 1 ? 1 : 0, Math.round(nShips * (0.3 + 0.15 * li) + R() * 0.8)));
   if (misType === 'intercept') {
     // 運輸船隊：從戰區一側橫越到另一側；護航跟著船隊
     const dir0 = R() < 0.5 ? 1 : -1, nC = [2, 2, 3, 3, 4][li], dir = hole ? Math.sign(hole.x) : dir0, z0 = -250 + R() * 300, y0 = alt(0.4);

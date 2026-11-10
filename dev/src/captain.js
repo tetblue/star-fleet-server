@@ -38,12 +38,14 @@ const CAP_FC = [
 { const k = KEY_ACTIONS.findIndex((a) => a[0] === 'cap_switch'); if (k >= 0 && !KEY_ACTIONS.some((a) => a[0] === 'cap_squad')) KEY_ACTIONS.splice(k + 1, 0, ['cap_squad', '切換小隊（兩個小隊同場時）', '艦長', 'KeyB']); if (SETTINGS.keys.cap_squad == null) SETTINGS.keys.cap_squad = 'KeyB'; }
 const CAP_ORDERS = [{ key: 'follow', name: '跟隨' }, { key: 'focus', name: '集火我的目標' }, { key: 'free', name: '自由交戰' }, { key: 'hold', name: '原地防守' }];
 // 難度：n＝敵軍數量倍率、sens＝偵測距離倍率、dmg＝敵方地面單位傷害倍率、hp＝敵方地面單位耐久倍率
+//   foeMax＝任務裡敵方戰艦（巡邏隊、指揮艦）的數量上限：敵艦數照我方船數增加，但不超過上限，
+//   所以低難度可以靠更多、更強的戰艦壓過敵人；pow＝派出任務公式裡的敵方戰力基準（capcareer.js 的 ccOpCalc）
 const CAP_DIFF = [
-  { name: '新兵', n: 0.7, sens: 0.85, dmg: 0.7, hp: 0.8 },
-  { name: '普通', n: 1, sens: 1, dmg: 1, hp: 1 },
-  { name: '老練', n: 1.2, sens: 1.1, dmg: 1.15, hp: 1.1 },
-  { name: '精英', n: 1.4, sens: 1.2, dmg: 1.3, hp: 1.2 },
-  { name: '傳奇', n: 1.65, sens: 1.3, dmg: 1.5, hp: 1.35 },
+  { name: '新兵', n: 0.7, sens: 0.85, dmg: 0.7, hp: 0.8, foeMax: 1, pow: 2 },
+  { name: '普通', n: 1, sens: 1, dmg: 1, hp: 1, foeMax: 2, pow: 3 },
+  { name: '老練', n: 1.2, sens: 1.1, dmg: 1.15, hp: 1.1, foeMax: 3, pow: 4 },
+  { name: '精英', n: 1.4, sens: 1.2, dmg: 1.3, hp: 1.2, foeMax: 5, pow: 6 },
+  { name: '傳奇', n: 1.65, sens: 1.3, dmg: 1.5, hp: 1.35, foeMax: 7, pow: 8 },
 ];
 // 特製戰艦：look＝外觀借用的艦種（SHIP_TYPES 的索引）；速度單位／秒、轉向度／秒
 // main＝艦首主砲（手動，船頭對準才打得到）；tur＝自動砲塔；pd＝點防禦（攔飛彈、打戰機）；msl＝垂直發射飛彈（要先鎖定）
@@ -262,7 +264,7 @@ function capLayoutGround(p, misType) {
     fleets.push(fleet({ side: 0, name: `${'一二三四五'[k]}號艦・${H.name}`, capRole: 'player', comp: comp1(H.look), x, z, y: Math.max(hAt(x, z), GROUND_Y) + 4, h: Math.PI }));
   });
   // 敵方戰艦：總數不超過我方（高難度最多多一艘），多半更少
-  const nEn = Math.min(nShips + (li >= 3 ? 1 : 0), Math.max(li >= 1 ? 1 : 0, Math.round(nShips * (0.3 + 0.15 * li) + R() * 0.8)));
+  const nEn = Math.min(nShips + (li >= 3 ? 1 : 0), Df.foeMax, Math.max(li >= 1 ? 1 : 0, Math.round(nShips * (0.3 + 0.15 * li) + R() * 0.8)));
   const shipT = () => (li >= 2 && R() < 0.3 ? 2 : R() < 0.5 ? 3 : 4);
   let left = nEn - (misType === 'decap' ? 1 : 0);
   if (misType === 'decap') {
