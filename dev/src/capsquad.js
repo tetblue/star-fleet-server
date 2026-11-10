@@ -15,7 +15,7 @@ Object.assign(CAP_UNIT, {
   orb: { kind: 'site', sub: 'orb', name: '軌道防禦站', hp: 1400, r: 8, hh: 0, sensor: 320, sh: 0, radar: true, intel: true, merit: 150, space: true,
     msl: { range: 300, n: 4, cd: 16, dmg: 34 }, gun: { range: 170, cd: 0.45, dmg: 2.5, acc: 0.5, ship: 2.6 } },
 });
-CAP_MIS.capture = { name: '佔領戰', at: 's', text: (M) => `擊沉敵方 ${M.nSq || 1} 個小隊（${M.nShips || 0} 艘）${M.defs && M.defs.length ? `、摧毀軌道防禦 ${M.defs.length} 座` : ''}，取得軌道控制` };
+CAP_MIS.capture = { name: '佔領戰', at: 's', text: (M) => `${M.nShips ? `擊沉敵方 ${M.nSq || 1} 個小隊（${M.nShips} 艘）` : ''}${M.defs && M.defs.length ? `${M.nShips ? '、' : ''}摧毀軌道防禦 ${M.defs.length} 座` : ''}，取得軌道控制` };
 
 // ───── 勝率與存活率公式 ─────
 // win：tools/capsquad-fit.mjs 用無頭模擬 12000 場擬合（2026-11-10）；拿遊戲裡 600 場 AI 對 AI 的佔領戰驗證，準確 90%，重新擬合也沒有更準，所以沿用

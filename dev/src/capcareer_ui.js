@@ -132,22 +132,19 @@ function ccDock() {
   const on = (id, fn) => { const b = gEl(id); if (b) b.onclick = fn; };
   on('cc-cmd', () => { if (ccTakeCommand(S, Q)) return; ccSave(S); ccRender(); });
   on('cc-swap', () => ccSwapView(Q));
-  const ev = gEl('cc-evade'); if (ev) ev.onclick = () => { Q.to = +ev.dataset.to; Q.task = null; ccSave(S); ccDock(); ccCard(); };
 }
 // 看得到的敵方小隊，預定開進 at
 const ccThreatA = (S, q, at) => S.sq.filter((x) => x.to === at && x.ships.length && ccHostile(S, x.fac, S.fac) && x.fac !== SM_N && ccSeen(S, x));
-// 敵軍預定開進小隊所在（或要去）的星系：駐守的勝率、每艘船的存活率，和撤退的選項
+// 敵軍預定開進小隊所在（或要去）的星系：駐守的勝率、每艘船的存活率
 function ccThreat(S, Q) {
   if (S.fin || Q.task) return '';
   const at = Q.to != null ? Q.to : Q.sys, s = S.sys[at], A = ccThreatA(S, Q, at);
   if (!A.length || (Q.to != null && s.owner !== S.fac)) return '';   // 開進敵方星系的勝率在星系卡片上
   const D = [Q, ...S.sq.filter((q) => q !== Q && q.fac === S.fac && q.ships.length && !q.task && (q.to != null ? q.to : q.sys) === at)].slice(0, CC_RULE.maxSq);
   const O = ccOdds(S, A.slice(0, CC_RULE.maxSq), D, s.owner === S.fac ? ccDefsAlive(s) : [], 1), w = 1 - O.win;
-  const safe = Q.to == null ? S.adj[Q.sys].map((j) => S.sys[j]).filter((t) => t.owner === S.fac && !ccCanMove(S, t.id, Q) && !ccThreatA(S, Q, t.id).length && !ccAt(S, t.id).some((x) => ccHostile(S, x.fac, S.fac) && x.fac !== SM_N)).sort((a, b) => (b.yard ? 1 : 0) - (a.yard ? 1 : 0))[0] : null;
   return `<div style="margin:5px 0;padding:5px 7px;border:1px solid #ff6a5a;border-radius:6px;background:#2a1416"><b style="color:#ff8a7a">⚠ 下週敵軍${Q.to != null ? `開進 ${s.name}` : '來襲'}</b>：${A.map((q) => smuEsc(q.name)).join('、')}（${A.reduce((a, q) => a + q.ships.length, 0)} 艘）
     <div>駐守的勝率 <b style="color:${ccOddCol(w)}">${Math.round(w * 100)}%</b>・存活率 ${ccSurvTx(Q, (O.surv[1] && O.surv[1][0]) || [])}</div>
-    <div class="g-dim" style="font-size:11px">${D.length > 1 ? `一起駐守：${D.slice(1).map((q) => smuEsc(q.name)).join('、')}・` : ''}${s.owner === S.fac && ccDefsAlive(s).length ? `軌道防禦 ${ccDefsAlive(s).length} 座` : ''}</div>
-    ${Q.to == null ? (safe ? `<button class="g-btn" id="cc-evade" data-to="${safe.id}" style="margin-top:3px">撤退到 ${safe.name}（避開這場戰鬥${safe.yard ? '，有維修船塢' : ''}）</button>` : '<div class="g-dim" style="font-size:11px">相鄰沒有安全的己方星系可以撤退</div>') : ''}</div>`;
+    <div class="g-dim" style="font-size:11px">${D.length > 1 ? `一起駐守：${D.slice(1).map((q) => smuEsc(q.name)).join('、')}・` : ''}${s.owner === S.fac && ccDefsAlive(s).length ? `軌道防禦 ${ccDefsAlive(s).length} 座` : ''}</div></div>`;
 }
 function ccCard() {
   const S = CC.S, el = gEl('cc-card'); if (!el) return;
@@ -228,8 +225,17 @@ function ccSqNote(S, q) {
 function CC_place(el) { const W = gEl('cc-map').clientWidth; el.style.left = (W - el.offsetWidth - 10) + 'px'; el.style.top = '10px'; }
 
 // ───── 結束這一週 ─────
-function ccEndWeek() {
+function ccEndWeek(go) {
   const S = CC.S; if (S.fin) return;
+  // 提醒：駐守（沒有移動、沒有派出）的小隊下週會被進攻
+  const W = go ? [] : S.sq.filter((q) => q.pl && q.ships.length && q.to == null && !q.task && ccThreatA(S, q, q.sys).length);
+  if (W.length) {
+    smuModal(`<h3>有小隊下週會被進攻</h3><p>這些小隊留在原地駐守，敵軍預定開進：</p>${W.map((q) => `<div class="cc-sq"><b>${q === ccPl(S) ? '★ ' : ''}${smuEsc(q.name)}</b>（${S.sys[q.sys].name}）${ccThreat(S, q)}</div>`).join('')}
+      ${smuActs([{ id: 'cc-endgo', cls: 'go', name: '照樣結束這一週', desc: '這些小隊駐守迎戰' }, { id: 'cc-endback', name: '返回', desc: '回去重新下命令（移動、進攻）' }], 200)}`);
+    gEl('cc-endgo').onclick = () => { smuCloseModal(); ccEndWeek(true); };
+    gEl('cc-endback').onclick = () => { smuCloseModal(); const q = W[0]; CC.cur = q.id; CC.sel = q.sys; ccRender(); };
+    return;
+  }
   ccWeekA(S); ccSave(S);
   if (S.pendB) return ccBattleAsk(S);
   ccFinishWeek(S);
@@ -246,19 +252,19 @@ function ccBattleAsk(S) {
   const B = S.pendB, s = S.sys[B.sys], A = B.A.map(ccSqById), D = B.D.map(ccSqById), P = ccPl(S), plA = B.att;
   const defs = B.owner === s.owner && plA ? ccDefsAlive(s) : [];
   const mine = plA ? A : D, foe = plA ? D : A, O = plA ? ccOdds(S, A, D, defs, 0) : ccOdds(S, D, A, [], 0);
-  const busy = !!S.pl.weekFought, noFoe = !foe.some((q) => q.ships.length), calc = busy || noFoe;
+  const busy = !!S.pl.weekFought, noFoe = !foe.some((q) => q.ships.length), calc = busy;
   smuModal(`<h3>${plA ? '進攻' : '敵軍來襲'}：${s.name}</h3>
     <p>${plA ? `你的小隊開進 ${s.name}` : `${foe.map((q) => smuEsc(q.name)).join('、')} 進攻你所在的 ${s.name}`}。我方 ${mine.length} 隊 ${mine.reduce((a, q) => a + q.ships.length, 0)} 艘，敵方 ${foe.length} 隊 ${foe.reduce((a, q) => a + q.ships.length, 0)} 艘${defs.length ? `、軌道防禦 ${defs.length} 座` : ''}。</p>
     <div>評估勝率 <b class="cc-odds" style="color:${O.win >= 0.6 ? '#5fd39a' : O.win >= 0.4 ? '#ffd36a' : '#ff6a5a'}">${Math.round(O.win * 100)}%</b></div>
     <div style="margin-top:4px">你的船的存活率：${P.ships.map((c, k) => `${CAP_HULLS[c.key].name} ${Math.round((O.surv[0][mine.indexOf(P)] || [])[k] * 100)}%`).join('、')}</div>
     ${mine.length > 1 ? `<div class="g-dim">同行的我方小隊（${mine.filter((q) => q !== P).map((q) => smuEsc(q.name)).join('、')}）由 AI 操控，戰鬥中按 ${keyText('cap_squad')} 可以切換過去指揮。</div>` : ''}
-    <h4 style="margin:10px 0 4px">敵方</h4>${foe.map((q) => `<div class="cc-sq"><b>${smuEsc(q.name)}</b>${ccShipRows(q)}</div>`).join('')}
-    ${smuActs([{ id: 'cc-fight', cls: 'go', name: calc ? (noFoe ? '攻擊軌道防禦（計算）' : '迎戰（計算）') : '親自指揮', desc: noFoe ? '敵方沒有小隊，只有軌道防禦：直接用公式計算' : busy ? '這週已經打過一場：這場用公式計算' : '進入戰場親自操艦（可以隨時躍遷撤退）' }, { id: 'cc-flee', name: '撤退', desc: plA ? '取消進攻，回到原本的星系' : '撤到相鄰的己方星系；這裡交給其他守軍' }], 200)}`);
+    ${noFoe ? '' : '<h4 style="margin:10px 0 4px">敵方</h4>'}${foe.filter((q) => q.ships.length).map((q) => `<div class="cc-sq"><b>${smuEsc(q.name)}</b>${ccShipRows(q)}</div>`).join('')}
+    ${smuActs([{ id: 'cc-fight', cls: 'go', name: calc ? '迎戰（計算）' : noFoe ? '親自指揮（攻擊軌道防禦）' : '親自指揮', desc: busy ? '這週已經打過一場：這場用公式計算' : noFoe ? '敵方沒有小隊，只剩軌道防禦：摧毀全部就取得軌道（可以隨時躍遷撤退）' : '進入戰場親自操艦（可以隨時躍遷撤退）' }, { id: 'cc-flee', name: '撤退', desc: plA ? '取消進攻，回到原本的星系' : '撤到相鄰的己方星系；這裡交給其他守軍' }], 200)}`);
   gEl('cc-fight').onclick = () => { smuCloseModal(); if (calc) ccCalcPlayerBattle(S); else ccLaunch(S, 'capture', { sys: s.id }); };
   gEl('cc-flee').onclick = () => { smuCloseModal(); ccSkipPlayerBattle(S, '撤退'); ccFinishWeek(S); };
 }
 const ccSqById = (id) => CC.S.sq.find((q) => q.id === id);
-// 親自指揮的小隊的戰鬥改用公式計算（這週已經打過、敵方只有軌道防禦、戰場開不起來）
+// 親自指揮的小隊的戰鬥改用公式計算（這週已經打過、戰場開不起來）
 function ccCalcPlayerBattle(S) {
   const B = S.pendB, s = S.sys[B.sys], A = B.A.map(ccSqById), D = B.D.map(ccSqById);
   ccFightCalc(S, s, { A, D, defs: B.att && B.owner === s.owner ? ccDefsAlive(s) : [], owner: B.owner }); S.pendB = null; ccFinishWeek(S);
@@ -296,7 +302,7 @@ function ccLaunch(S, kind, o) {
   }
   m.captain.cc = info;
   // 戰場要雙方都有艦隊才開得起來：開不起來就改用計算的（佔領戰），或回到星圖（任務）
-  if ([0, 1].some((sd) => !m.fleets.some((f) => f.side === sd && !f.reserve && simComp(f) > 0))) {
+  if ([0, 1].some((sd) => !m.fleets.some((f) => f.side === sd && !f.reserve && simComp(f) > 0) && !(sd === 1 && kind === 'capture' && info.defIdx.length))) {
     if (kind === 'capture') return ccCalcPlayerBattle(S);
     ccLog(S, `${s.name}：戰場沒辦法開始，任務沒有執行`, 'bad'); return ccRender();
   }
