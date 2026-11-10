@@ -6,6 +6,8 @@
 // 輸：玩家的小隊全滅＝生涯結束。
 // 第 4 階段：特戰任務的結果寫回星圖（CC_OPFX）：補給線切斷、設施被毀、指揮中斷、地面守軍重創、滲透偵察（看得到敵軍的預定動向）。
 // AI 的命令在每週開始時就決定（ccPlan），所以偵察看到的動向就是下週真的會發生的。
+// 第 5 階段：玩家可以擁有多個小隊（q.pl），親自指揮的只有 S.pl.sq 那一隊（ccPl）。其他小隊用命令：移動、駐守／撤退、派出執行任務（ccTaskOdds 估計、週末擲出結果）。
+// 同一個星系的我方小隊可以換船、分出新小隊（ccTransfer），也可以把親自指揮換到那一隊（ccTakeCommand）。輸＝親自指揮的小隊全滅。
 const CC_STORE = 'fleet.capcareer';
 const CC_ROLES = {
   emp: { name: '帝國艦長', fac: SM_E, hulls: ['gunship', 'assault'], tech: { hull: 1.1, shield: 1 }, techName: '強化裝甲：船體 +10%',
@@ -30,6 +32,7 @@ const CC_RULE = {
   merit: { ship: 40, cap: 300, def: 30 },
   fx: { cut: 4, dis: 4, intel: 5, disHp: 0.7, defBack: 4 },   // 任務效果：補給切斷幾週、指揮中斷幾週（耐久當作 ×0.7）、偵察幾週、地面防禦每幾週回復 1
   maxMis: 4,
+  sqMerit: [0, 800, 2000],   // 指揮權：戰功到了才能多帶一個小隊（暫定，第 7 階段改成升遷）
 };
 const CC_HULL_LETTER = { assault: '突', gunship: '砲', support: '支' };
 
@@ -52,7 +55,7 @@ function ccNewGame(o) {
   // 玩家：從前線最靠近敵方首都的星系出發
   const ef = R.fac === SM_A ? SM_E : SM_A, ecap = S.sys.find((s) => s.owner === ef && s.cap);
   const front = S.sys.filter((s) => s.owner === R.fac && smFront(S, s)).sort((a, b) => Math.hypot(a.x - ecap.x, a.y - ecap.y) - Math.hypot(b.x - ecap.x, b.y - ecap.y))[0] || S.sys.find((s) => s.owner === R.fac);
-  const P = ccNewSquad(S, R.fac, front.id, R.hulls.slice(), { pl: true, name: '你的小隊' });
+  const P = ccNewSquad(S, R.fac, front.id, R.hulls.slice(), { pl: true, name: '第1小隊' });
   S.pl.sq = P.id;
   // 起點附近不要有 AI 小隊把玩家擠掉（一個星系最多 2 隊）
   ccLog(S, `你是${R.name}，帶著小隊（${R.hulls.map((k) => CAP_HULLS[k].name).join('、')}）駐守前線的 ${front.name}。開局科技：${R.techName}`, 'ev');
@@ -94,9 +97,13 @@ const ccIntel = (S, s) => ((s.fx && s.fx.intel) || 0) > S.turn;   // 滲透偵�
 // 看得到這個小隊的預定動向嗎：我方的小隊、你的小隊所在或相鄰的星系、偵察過的星系
 function ccSeen(S, q) {
   if (q.fac === S.fac) return true;
-  const P = ccPl(S);
-  return !!(P && P.ships.length && (q.sys === P.sys || S.adj[P.sys].includes(q.sys))) || ccIntel(S, S.sys[q.sys]);
+  return ccOwn(S).some((P) => q.sys === P.sys || S.adj[P.sys].includes(q.sys)) || ccIntel(S, S.sys[q.sys]);
 }
+// 玩家的小隊（有船的）；指揮權（可以帶幾隊）
+const ccOwn = (S) => S.sq.filter((q) => q.pl && q.ships.length);
+const ccSlots = (S) => CC_RULE.sqMerit.filter((m) => S.pl.merit >= m).length;
+const ccOwnCount = (S) => ccOwn(S).length + S.pl.build.filter((b) => b.sq === 'new').length;
+function ccOwnName(S) { for (let n = 1; ; n++) if (!S.sq.some((q) => q.pl && q.ships.length && q.name === `第${n}小隊`)) return `第${n}小隊`; }
 // 每週開始：AI 決定這週的命令（存在 q.to；玩家看得到的部分畫在星圖上）
 function ccPlan(S) { for (const f of [SM_A, SM_E, SM_P]) ccAi(S, f); S.plan = S.turn; }
 function ccOdds(S, A, D, defs, plSide) {
@@ -124,6 +131,7 @@ function ccWeekA(S) {
 function ccWeekB(S) {
   S.pendB = null;
   const P0 = ccPl(S); if (P0 && !P0.ships.length && !S.fin) { S.fin = { why: `你的小隊在 ${S.sys[P0.sys].name} 全滅`, turn: S.turn }; ccLog(S, S.fin.why, 'bad'); return; }   // 計算的戰鬥裡全滅（或無路可退）
+  ccRunTasks(S);
   ccSiege(S);
   for (const s of S.sys) {   // 防禦重建：沒有敵人在場時，每 defEvery 週補一座
     const base = ccDefBase(s), live = s.defs.filter((d) => d.hp > 0);
@@ -145,11 +153,15 @@ function ccWeekB(S) {
   }
   ccEconomy(S);
   // 玩家新造的船到了
-  const P = ccPl(S);
-  for (const b of S.pl.build.splice(0)) if (P && P.ships.length < CC_RULE.maxShips) { P.ships.push({ key: b, hp: 1, sh: 1, msl: 1 }); ccLog(S, `新造的${CAP_HULLS[b].name}加入小隊`, 'ok'); }
+  for (const b of S.pl.build.splice(0)) {   // 舊存檔：字串＝加入親自指揮的小隊
+    const key = b.key || b, add = { key, hp: 1, sh: 1, msl: 1 };
+    if (b.sq === 'new') { const q = ccNewSquad(S, S.fac, b.sys, [], { pl: true, name: ccOwnName(S) }); q.ships.push(add); ccLog(S, `新造的${CAP_HULLS[key].name}在 ${S.sys[b.sys].name} 成立${q.name}`, 'ok'); continue; }
+    const q = S.sq.find((x) => x.id === b.sq && x.ships.length) || ccPl(S);
+    if (q && q.ships.length < CC_RULE.maxShips) { q.ships.push(add); ccLog(S, `新造的${CAP_HULLS[key].name}加入${q.name}`, 'ok'); }
+  }
   S.pl.money += CC_RULE.salary;
   ccMissionTick(S);
-  S.sq = S.sq.filter((q) => q.ships.length || q.pl);
+  S.sq = S.sq.filter((q) => q.ships.length || q.id === S.pl.sq);
   S.turn++; S.pl.weekFought = 0;   // 新的一週：玩家的小隊又可以打一場
   ccMissionTick(S, true);
   if (S.turn % 3 === 1) ccGenMissions(S);
@@ -163,7 +175,8 @@ function ccMove(S) {
 }
 // 這個星系有沒有交戰：擁有者（小隊＋軌道防禦）對 敵對的入侵者；沒有擁有者的戰力時，兩個在場的敵對勢力互打
 function ccBattleAt(S, s) {
-  const here = ccAt(S, s.id), facs = [...new Set(here.map((q) => q.fac))];
+  const pri = (q) => q.id === S.pl.sq ? 0 : q.pl ? 1 : 2;   // 每方最多 2 隊：親自指揮的、你的其他小隊優先上場
+  const here = ccAt(S, s.id).sort((a, b) => pri(a) - pri(b)), facs = [...new Set(here.map((q) => q.fac))];
   const own = here.filter((q) => q.fac === s.owner), defs = ccDefsAlive(s);
   const inv = facs.filter((f) => f !== s.owner && ccHostile(S, f, s.owner));
   if (inv.length && (own.length || defs.length)) {
@@ -178,6 +191,7 @@ const ccPow = (L) => L.reduce((a, q) => a + q.ships.reduce((b, c) => b + CAP_ODD
 // 計算的戰鬥：照 capOdds 擲勝負與每艘船的存活；活下來的船受傷；輸的一方撤到相鄰的己方星系（沒有就全滅）
 function ccFightCalc(S, s, B) {
   const O = ccOdds(S, B.A, B.D, B.defs, B.A.some((q) => q.pl) ? 0 : B.D.some((q) => q.pl) ? 1 : -1), aWin = smRnd(S) < O.win;
+  const own0 = [...B.A, ...B.D].filter((q) => q.pl).map((q) => [q, q.ships.length]);
   const nA = B.A.reduce((a, q) => a + q.ships.length, 0), nD = B.D.reduce((a, q) => a + q.ships.length, 0);
   const hurt = (L, surv, won) => L.forEach((q, qi) => { q.ships = q.ships.filter((c, k) => { const p = (surv[qi] || [])[k] ?? 0.5; if (smRnd(S) >= p) return false; c.hp = Math.max(0.05, c.hp * (won ? 0.5 + 0.5 * smRnd(S) : 0.3 + 0.5 * smRnd(S))); c.sh = 0.2; c.msl *= 0.3 + 0.4 * smRnd(S); return true; }); });
   hurt(B.A, O.surv[0], aWin); hurt(B.D, O.surv[1], !aWin);
@@ -188,6 +202,7 @@ function ccFightCalc(S, s, B) {
   const fa = B.A[0] ? B.A[0].fac : -1, fd = B.D[0] ? B.D[0].fac : s.owner;
   const mine = fa === S.fac || fd === S.fac || s.owner === S.fac;
   ccLog(S, `${s.name}：${SM_FAC[fa].name}進攻${fd >= 0 ? SM_FAC[fd].name : ''}${B.defs.length ? `（軌道防禦 ${B.defs.length} 座）` : ''}，${aWin ? SM_FAC[fa].name : SM_FAC[fd].name}獲勝（預測勝率 ${Math.round(O.win * 100)}%）・損失 ${lA}／${lD} 艘`, mine ? (aWin === (fa === S.fac) ? 'ok' : 'bad') : '');
+  for (const [q, n] of own0) { const won = B.A.includes(q) === aWin; ccLog(S, `${q.name}（計算）：${won ? '打贏了' : '打輸了'}${n > q.ships.length ? `，損失 ${n - q.ships.length} 艘` : ''}${q.ships.length ? (won ? '' : `，撤到 ${S.sys[q.sys].name}`) : '（全滅）'}`, won && q.ships.length ? 'ok' : 'bad'); }
 }
 // 輸的小隊撤退到相鄰的己方星系（沒有就投降＝全滅）
 function ccFlee(S, q) {
@@ -270,8 +285,8 @@ function ccEconomy(S) {
 }
 
 // ───── 玩家的指令 ─────
-function ccCanMove(S, to) {
-  const P = ccPl(S); if (!P || S.fin) return '生涯已結束';
+function ccCanMove(S, to, P = ccPl(S)) {
+  if (!P || S.fin) return '生涯已結束';
   if (!S.adj[P.sys].includes(to)) return '只能移動到相鄰的星系（一週一個航道）';
   const n = S.sq.filter((q) => q.fac === S.fac && q !== P && (q.to != null ? q.to : q.sys) === to && q.ships.length).length;
   if (n >= CC_RULE.maxSq) return `那裡已經有 ${CC_RULE.maxSq} 個我方小隊`;
@@ -279,20 +294,71 @@ function ccCanMove(S, to) {
 }
 function ccRepairCost(S, P) { return Math.round(P.ships.reduce((a, c) => a + (1 - c.hp) * CAP_HULLS[c.key].hp, 0) * CC_RULE.repair); }
 function ccMissileCost(S, P) { return Math.round(P.ships.reduce((a, c) => a + (CAP_HULLS[c.key].msl ? (1 - c.msl) * CAP_HULLS[c.key].msl.n : 0), 0) * CC_RULE.missile); }
-function ccCanService(S, kind) {
-  const P = ccPl(S), s = S.sys[P.sys];
+function ccCanService(S, kind, P = ccPl(S)) {
+  const s = S.sys[P.sys];
   if (s.owner !== S.fac) return '要在己方的星系';
   if (kind === 'repair' && !s.yard) return '這裡沒有維修船塢';
   if (kind === 'missile' && !(s.depot || s.yard || s.cap)) return '這裡沒有補給站';
   if (kind === 'build' && !s.yard) return '這裡沒有維修船塢';
   return '';
 }
-function ccRepair(S) { const P = ccPl(S), c = ccRepairCost(S, P); if (ccCanService(S, 'repair') || S.pl.money < c) return false; S.pl.money -= c; for (const x of P.ships) x.hp = 1; ccLog(S, `在 ${S.sys[P.sys].name} 修好小隊（${c} 資金）`, 'ok'); return true; }
-function ccResupply(S) { const P = ccPl(S), c = ccMissileCost(S, P); if (ccCanService(S, 'missile') || S.pl.money < c) return false; S.pl.money -= c; for (const x of P.ships) x.msl = 1; ccLog(S, `補滿飛彈（${c} 資金）`, 'ok'); return true; }
-function ccBuild(S, key) {
-  const P = ccPl(S), cost = CC_RULE.build[key];
-  if (ccCanService(S, 'build') || S.pl.money < cost || P.ships.length + S.pl.build.length >= CC_RULE.maxShips) return false;
-  S.pl.money -= cost; S.pl.build.push(key); ccLog(S, `訂造一艘${CAP_HULLS[key].name}（${cost} 資金），下週加入小隊`, 'ok'); return true;
+function ccRepair(S, P = ccPl(S)) { const c = ccRepairCost(S, P); if (ccCanService(S, 'repair', P) || S.pl.money < c) return false; S.pl.money -= c; for (const x of P.ships) x.hp = 1; ccLog(S, `在 ${S.sys[P.sys].name} 修好${P.name}（${c} 資金）`, 'ok'); return true; }
+function ccResupply(S, P = ccPl(S)) { const c = ccMissileCost(S, P); if (ccCanService(S, 'missile', P) || S.pl.money < c) return false; S.pl.money -= c; for (const x of P.ships) x.msl = 1; ccLog(S, `${P.name}補滿飛彈（${c} 資金）`, 'ok'); return true; }
+const ccBuildsFor = (S, q) => S.pl.build.filter((b) => (b.sq || S.pl.sq) === q.id).length;
+// 新造艦：加入小隊 P（滿 5 艘就不行），或 asNew＝下週在這裡成立新小隊（要有指揮權）
+function ccBuild(S, key, P = ccPl(S), asNew) {
+  const cost = CC_RULE.build[key];
+  if (ccCanService(S, 'build', P) || S.pl.money < cost) return false;
+  if (asNew ? ccOwnCount(S) >= ccSlots(S) : P.ships.length + ccBuildsFor(S, P) >= CC_RULE.maxShips) return false;
+  S.pl.money -= cost; S.pl.build.push(asNew ? { key, sq: 'new', sys: P.sys } : { key, sq: P.id });
+  ccLog(S, `訂造一艘${CAP_HULLS[key].name}（${cost} 資金），下週${asNew ? `在 ${S.sys[P.sys].name} 成立新的小隊` : `加入${P.name}`}`, 'ok'); return true;
+}
+// 換船：同一個星系的我方小隊之間，不花時間。to＝'new' 分出新小隊（要有指揮權）
+function ccTransfer(S, a, k, to) {
+  const c = a.ships[k]; if (!c) return '沒有這艘船';
+  if (a.id === S.pl.sq && a.ships.length <= 1) return '親自指揮的小隊至少要留一艘';
+  let b;
+  if (to === 'new') { if (ccOwnCount(S) >= ccSlots(S)) return `指揮權不夠（戰功 ${CC_RULE.sqMerit[ccSlots(S)] || '—'} 可以多帶一隊）`; b = ccNewSquad(S, S.fac, a.sys, [], { pl: true, name: ccOwnName(S) }); }
+  else { b = S.sq.find((q) => q.id === to); if (!b || !b.pl || b.sys !== a.sys) return '要在同一個星系'; if (b.ships.length >= CC_RULE.maxShips) return '那一隊已經滿了'; }
+  b.ships.push(a.ships.splice(k, 1)[0]); b.to = b.to ?? null;
+  if (!a.ships.length) { S.sq = S.sq.filter((q) => q !== a); for (const x of S.pl.build) if (x.sq === a.id) x.sq = b.id; }
+  return '';
+}
+// 親自指揮換到另一隊：要和現在指揮的小隊在同一個星系（艦長換船）
+function ccTakeCommand(S, q) {
+  const P = ccPl(S); if (!q || !q.pl || !q.ships.length) return '沒有這個小隊';
+  if (P && P.ships.length && P.sys !== q.sys) return '要和現在指揮的小隊在同一個星系';
+  S.pl.sq = q.id; q.task = null; ccLog(S, `你改為親自指揮${q.name}`, 'ev'); return '';
+}
+// ───── 派出的小隊：任務、地面突襲用公式估計（暫定，還沒用實戰校正）─────
+// 成功率：戰力（ccPow）＋平均耐久 − 地面防禦（太空任務當作 1）＋任務難易＋偵察；存活率：艦種基準 − 失敗的風險 + 這艘船的耐久
+const CC_TASK_ADJ = { raid: -0.03, intercept: 0, sabotage: 0.04, decap: -0.08, wipe: -0.05, run: 0.08 };
+function ccTaskOdds(S, q, t) {
+  const s = S.sys[t.sys], n = q.ships.length; if (!n) return { p: 0, surv: [] };
+  const op = t.kind === 'raid' ? 'raid' : (S.missions.find((M) => M.id === t.mis) || {}).op, space = op && CAP_MIS[op] && (CAP_MIS[op].at || '').includes('s');
+  const hp = q.ships.reduce((a, c) => a + c.hp, 0) / n, cl = (v, a, b) => Math.max(a, Math.min(b, v));
+  const p = cl(0.42 + 0.09 * ccPow([q]) - 0.07 * (space ? 1 : s.def) + 0.12 * (hp - 0.7) + (CC_TASK_ADJ[op] || 0) + (ccIntel(S, s) ? 0.08 : 0), 0.1, 0.92);
+  const base = { assault: 0.8, gunship: 0.92, support: 0.87 };
+  return { p, surv: q.ships.map((c) => cl(base[c.key] - (1 - p) * 0.35 + (c.hp - 0.7) * 0.2, 0.3, 0.99)) };
+}
+function ccTaskOk(S, q, t) {
+  if (!q.ships.length || q.id === S.pl.sq) return false;
+  if (t.kind === 'raid') { const s = S.sys[t.sys]; return q.sys === s.id && !!s.sg && s.sg.f === S.fac; }
+  const M = S.missions.find((x) => x.id === t.mis); return !!M && ccCanOp(S, M, q);
+}
+function ccSetTask(S, q, t) { if (!ccTaskOk(S, q, t)) return false; q.task = t; q.to = null; return true; }
+function ccRunTasks(S) {
+  for (const q of ccOwn(S)) {
+    const t = q.task; if (!t) continue; q.task = null;
+    const s = S.sys[t.sys], M = t.kind === 'op' ? S.missions.find((x) => x.id === t.mis) : null, name = t.kind === 'raid' ? '地面突襲' : CC_OPFX[M.op].name;
+    if (!ccTaskOk(S, q, t)) { ccLog(S, `${q.name}的${name}取消（情況改變了）`, ''); continue; }
+    const O = ccTaskOdds(S, q, t), ok = smRnd(S) < O.p, n0 = q.ships.length;
+    q.ships = q.ships.filter((c, k) => { if (smRnd(S) >= O.surv[k]) return false; c.hp = Math.max(0.05, c.hp * (0.65 + 0.3 * smRnd(S))); c.msl *= 0.5; return true; });
+    ccLog(S, `${q.name}在 ${s.name} 執行${name}（計算，成功率 ${Math.round(O.p * 100)}%）：${ok ? '成功' : '失敗'}${n0 > q.ships.length ? `，損失 ${n0 - q.ships.length} 艘` : ''}${q.ships.length ? '' : '（全滅）'}`, ok ? 'ok' : 'bad');
+    if (!ok) continue;
+    S.pl.merit += 40;
+    if (t.kind === 'raid') { if (s.sg) s.sg.raid = true; } else ccMissionDone(S, M, true);
+  }
 }
 
 // ───── NPC 任務：上級交辦（時限、目標必填；獎勵資金與戰功） ─────
@@ -322,7 +388,7 @@ const CC_OPFX = {
 };
 const ccMisName = (M) => M.type === 'op' ? CC_OPFX[M.op].name : CC_MIS[M.type].name;
 // 特戰任務：小隊要在目標星系或相鄰的星系（滲透出擊）
-function ccCanOp(S, M) { const P = ccPl(S); return !!(P && P.ships.length && M.state === 'open' && M.type === 'op' && (P.sys === M.sys || S.adj[P.sys].includes(M.sys))); }
+function ccCanOp(S, M, P = ccPl(S)) { return !!(P && P.ships.length && M.state === 'open' && M.type === 'op' && (P.sys === M.sys || S.adj[P.sys].includes(M.sys))); }
 function ccGenMissions(S) {
   if (S.fin) return;
   const P = ccPl(S); if (!P) return;
