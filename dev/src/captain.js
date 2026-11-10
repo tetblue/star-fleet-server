@@ -152,6 +152,7 @@ function showCaptain() {
     <div class="g-head"><h2>隨機任務</h2><span class="crumb">艦長・帶領特種小隊執行敵後作戰・沒有回放</span><span class="g-sp"></span><button class="g-btn" id="cp-back">← 艦長</button></div>
     <div class="g-card pl-rec"><div><span class="g-dim">戰功</span><b>${fmtN(p.merit)}</b></div><div><span class="g-dim">出擊</span><b>${p.sorties}</b></div><div><span class="g-dim">任務成功</span><b>${p.wins}</b></div><div><span class="g-dim">無聲完成</span><b>${p.ghost}</b></div><div><span class="g-dim">摧毀</span><b>${fmtN(p.kills)}</b></div><div><span class="g-dim">損失</span><b>${p.lost}</b> 艘</div>
       <span class="g-dim pl-note">損失的船任務後會修好，只影響這次的評等與戰功。</span></div>
+    ${capResumeCard(p)}
     <div class="g-card" style="margin-top:12px"><h3>小隊編成 <span class="g-dim" style="font-weight:400">1～5 艘・你親自駕駛其中一艘，其他是僚艦</span></h3>
       <div class="cap-slots">${[0, 1, 2, 3, 4].map(slot).join('')}</div>
       <div class="hg-pick" style="margin-top:10px">${picks}</div><div class="hg-desc" style="margin-top:8px">${hd}</div></div>
@@ -163,16 +164,17 @@ function showCaptain() {
         <dt>任務</dt><dd>${seg('mis', [['', '隨機'], ...Object.entries(CAP_MIS).map(([k, M]) => [k, M.name + (M.at === 's' ? '（太空）' : M.at === 'g' ? '（地面）' : '')])])}<div class="g-dim">任務和地點不合時，以任務為準換地點</div></dd>
         <dt>友軍小隊</dt><dd>${seg('ally', Object.entries(CAP_ALLY).map(([k, A]) => [k, A.name]))}<div class="g-dim">只有佔領戰會出動：另一個由 AI 指揮的小隊，按 ${keyText('cap_squad')} 可以切換過去親自指揮</div></dd>
         <dt>規則</dt><dd>敵軍在後方：戰艦很少，多半是地面飛彈車、飛彈陣地、防空砲、戰機與海上軍艦。<b>雷達</b>看得到你就會漸漸發現你（偵測條）；山、巨型結構擋得住雷達，<b>貼地飛</b>（離地約 ${Math.round(CAP_RULE.lowAGL * GROUND_KM * 1000)} 公尺內）雷達的範圍會縮小；<b>開火</b>會暴露 ${CAP_RULE.sig} 秒。被發現後 ${CAP_RULE.report} 秒內摧毀發現你的單位，它就來不及拉警報。<b>警報</b>：機場派戰機、增援（有限）陸續趕來；先炸掉<b>通訊塔</b>，敵軍就無法拉警報、呼叫增援。完成主要目標後回到<b>撤離點</b>（出發的地方）。<br><b>太空戰場</b>：沒有地面可以躲，改躲進<b>小行星區</b>或星雲（雷達的範圍縮小，但速度變慢），大石頭擋得住雷達與射線；<b>通訊中繼站</b>就是通訊塔；戰區外圍的<b>高能粒子帶</b>、黑洞附近都會傷害船體。</dd>
-        <dt>失敗</dt><dd>小隊全滅，或超過 ${Math.round(CAP_RULE.time / 60)} 分鐘還沒撤離。</dd></dl></div>
+        <dt>失敗</dt><dd>任務時限（${Math.round(CAP_RULE.time / 60)} 分鐘，每次出擊的戰鬥時間累計）用完，或你的小隊全滅。脫離戰鬥後按 ${keyText('cap_warp')} 可以隨時<b>躍遷撤退</b>：不算失敗，戰況會保留，修好船之後可以接續（敵方會不會整修，看星系裡有沒有維修船塢、補給站）。</dd></dl></div>
       <div class="g-card"><h3>操作（滑鼠＋鍵盤）</h3><table class="pl-keys">${capKeyRows().map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('')}</table>
         <div style="margin-top:6px"><button class="g-btn sm" id="cp-keys">修改按鍵…</button></div>
         <div class="g-dim" style="margin-top:6px">需要滑鼠：開戰後點一下畫面開始操艦（滑鼠游標會被鎖定）。</div></div>
     </div>
-    <div class="g-row" style="margin-top:12px"><span class="g-dim">${p.slots.filter(Boolean).map((k) => CAP_HULLS[k].name).join('＋')}</span><span class="g-sp"></span><button class="g-btn pri" id="cp-go">出擊 →</button></div></div>`);
+    <div class="g-row" style="margin-top:12px"><span class="g-dim">${p.slots.filter(Boolean).map((k) => CAP_HULLS[k].name).join('＋')}</span><span class="g-sp"></span><button class="g-btn pri" id="cp-go">${p.resume ? '出擊新任務（放棄撤退中的戰鬥）→' : '出擊 →'}</button></div></div>`);
   gEl('cp-back').onclick = () => { GAME.spMode = 'captain'; showSingle(); };
   gEl('cp-keys').onclick = () => openSettings();
   gEl('cp-go').onclick = () => capGo();
   const keep = () => { const y = gEl('game').scrollTop; capSave(p); showCaptain(); gEl('game').scrollTop = y; };
+  capResumeBind(p, keep);
   document.querySelectorAll('[data-cs]').forEach((b) => (b.onclick = () => { GAME.capSel = +b.dataset.cs; keep(); }));
   document.querySelectorAll('[data-ch]').forEach((b) => (b.onclick = () => { p.slots[sel] = b.dataset.ch; if (!p.slots.some(Boolean)) p.slots[sel] = 'assault'; keep(); }));
   document.querySelectorAll('[data-co]').forEach((g) => g.querySelectorAll('button').forEach((b) => (b.onclick = () => { const k = g.dataset.co; p[k] = k === 'mis' || k === 'ally' ? b.dataset.v : +b.dataset.v; keep(); })));
@@ -290,10 +292,15 @@ function capLayoutGround(p, misType) {
   m.name = `${CAP_MIS[misType].name}・${GROUND_SCENES[scene].name}・${CAP_DIFF[li].name}`;
   return m;
 }
-function capGo() {
-  const p = capLoad(); p.seed = randSeed(); capSave(p);
+// resume＝true：接續撤退中的戰鬥（用當時的編成、種子重建戰場，再套上存下的戰況）；其他＝新任務（放棄撤退中的戰鬥）
+function capGo(resume) {
+  const p = capLoad(), R = resume === true ? p.resume : null;
+  if (!R) { p.seed = randSeed(); p.resume = null; capSave(p); }
+  const q = R ? { ...p, ...R.p } : p;
   simEndMid(); overlay(null);
-  SIM.m = capLayout(p); SIM.sel = null;
+  SIM.m = capLayout(q); SIM.sel = null;
+  SIM.m.captain.resumeP = { fac: q.fac, diff: q.diff, env: q.env, mis: q.mis, seed: q.seed, slots: q.slots.slice(), ally: q.ally };
+  if (R) SIM.m.captain.resume = R;
   camAnim = null;
   simStart();
 }
@@ -322,6 +329,7 @@ function capBegin(C) {
   CAP.rng = (battleSeed ^ 0x2545f491) >>> 0 || 1;
   CAP.saveRange = opts.rangeMul; opts.rangeMul = CAP_RULE.rangeMul; MIS_SPD = CAP_RULE.misSpd;
   CAP.byI = new Int16Array(shipCount).fill(-1); CAP.ships = []; CAP.own = []; CAP.foes = []; CAP.pat = []; CAP.air = []; CAP.sqAI = {};
+  CAP.tUsed0 = C.resume ? C.resume.tUsed : 0; CAP.tLim = CAP_RULE.time - CAP.tUsed0;   // 任務時限：每次出擊的戰鬥時間累計
   CAP.auto = !!C.auto; CAP.home = C.auto ? -1 : 0; CAP.allSee = !!C.open;   // home＝玩家自己的小隊（全滅＝輸）；AI 對 AI＝整方全滅才算輸
   CAP.cur = 0; CAP.fc = C.open ? 2 : 0; CAP.order = 'follow'; CAP.esc = false; CAP.tgt = null; CAP.feed = []; CAP.msl = []; CAP.alarm = false; CAP.alarmT = 0; CAP.report = null; CAP.last = null;
   CAP.waves = C.waves; CAP.nextWave = 0; CAP.commLost = false; CAP.saved = false; CAP.hits = []; CAP.flash = null; CAP.pop = null;
@@ -371,9 +379,11 @@ function capBegin(C) {
   const hpM = CAP.Df.hp;
   CAP.G.gts = C.units.map((u, id) => capMakeUnit(u, id, hpM));
   CAP.G.gts.filter((g) => CAP_UNIT[g.cu].air).forEach((g) => { const A = CAP.air[g.air]; g.carrier = A ? A.i : -1; g.ftrLeft = C.ftr; g.nextT = 0; g.patT = 6 + capRnd() * 10; });
+  capResumeApply(C);   // 接續撤退中的戰鬥（capstate.js）
   groundTargetsSync(); capSpaceBuild();
   CAP.seeG = new Uint8Array(CAP.G.gts.length + 64); CAP.seeS = new Uint8Array(shipCount);
   capMisInit(C.mis);
+  if (C.resume && CAP.mis) CAP.mis.esc = C.resume.esc || 0;
   const s0 = capCur(); CAP.yaw = s0.yaw; CAP.pitch = -0.08;
   capSyncAll();
   capHudBuild(); document.body.classList.add('pilot-on', 'cap-on');
@@ -1009,13 +1019,14 @@ function capAlarm(t) {
   toast(`警報！敵軍已發現小隊${CAP.waves ? `：增援 ${CAP.waves} 波將陸續趕到` : ''}（先炸${CAP.sp ? '通訊中繼站' : '通訊塔'}可以切斷增援）`, 'bad');
   capFeed('警報！', 'bad');
 }
+function capWaveOn(P) {
+  P.on = true; P.f.reserve = false; GAME.init[P.f.side] += P.f.initial;
+  for (const q of P.f.sqs) { q.bg = false; q.hidden = false; if (q.label) q.label.classList.remove('bg'); }
+  P.g.inactive = false;
+}
 function capWave(t) {
   const P = CAP.pat.find((p) => p.role === 'reinf' && !p.on);
-  if (P) {
-    P.on = true; P.f.reserve = false; GAME.init[P.f.side] += P.f.initial;
-    for (const q of P.f.sqs) { q.bg = false; q.hidden = false; if (q.label) q.label.classList.remove('bg'); }
-    P.g.inactive = false;
-  }
+  if (P) capWaveOn(P);
   // 兩輛飛彈車從敵方後方（離最後看到你的地方 500～650）開過來
   const es = 1 - CAP.side, P0 = CAP.last || { x: CAP.cfg.B.x, z: CAP.cfg.B.z };
   for (let k = 0; GRD && k < 2; k++) {   // 地面：飛彈車
@@ -1174,6 +1185,11 @@ function capMisText() {
 }
 function capMisTick(t) {
   const M = CAP.mis; if (!M || GAME.result) return;
+  if (CAP.warp) {
+    const w = capCalmWhy(t);
+    if (w) { CAP.warp = null; capFeed(`躍遷充能中斷：${w}`, 'bad'); }
+    else if (t - CAP.warp.t0 >= CAP_RULE.warpT) { if (M.done) capFinish(true, '躍遷撤離'); else capRetreat(); return; }
+  }
   if (M.type === 'sabotage') M.prog = M.gts.filter((i) => gtDead(CAP.G.gts[i])).length;
   if (M.type === 'decap') M.prog = M.ship >= 0 && !ships.alive[M.ship] ? 1 : 0;
   if (M.type === 'wipe') {
@@ -1185,7 +1201,7 @@ function capMisTick(t) {
   if (capCaptureTick(M, t)) return;
   if (M.type === 'run') {   // 突破封鎖：小隊的船抵達躍遷點就成功
     if (CAP.own.some((s) => !s.dead && Math.hypot(s.x - CAP.ext.x, s.z - CAP.ext.z) < CAP_RULE.extR * 1.4)) { M.prog = 1; capFinish(true, '突破封鎖'); }
-    if (t > CAP_RULE.time) capFinish(false, '超過任務時限');
+    if (t > CAP.tLim) capFinish(false, '超過任務時限');
     return;
   }
   if (!M.done && M.prog >= M.goal) {
@@ -1195,13 +1211,8 @@ function capMisTick(t) {
   if (M.done) {
     const c = capCur();
     if (c && !c.dead && Math.hypot(c.x - CAP.ext.x, c.z - CAP.ext.z) < CAP_RULE.extR) capFinish(true, '撤離成功');
-    if (CAP.warp && !GAME.result) {
-      const w = capCalmWhy(t);
-      if (w) { CAP.warp = null; capFeed(`躍遷充能中斷：${w}`, 'bad'); }
-      else if (t - CAP.warp.t0 >= CAP_RULE.warpT) capFinish(true, '躍遷撤離');
-    }
   }
-  if (t > CAP_RULE.time) capFinish(false, '超過任務時限');
+  if (t > CAP.tLim) capFinish(false, '超過任務時限');
 }
 // ───── 躍遷撤離：主要目標完成、脫離戰鬥後按鍵，充能幾秒就算撤離成功（被打到或敵人靠近就中斷）─────
 // 回傳還不算脫離戰鬥的原因；空字串＝已脫離
@@ -1216,7 +1227,7 @@ function capCalmWhy(t) {
 }
 function capWarpKey() {
   const M = CAP.mis, t = U.uTime.value;
-  if (!M || (!M.done && M.type !== 'capture')) { capFeed('完成主要目標後才能躍遷撤離', 'hint'); return; }
+  if (!M) return;
   if (CAP.warp) { CAP.warp = null; capFeed('取消躍遷', 'hint'); return; }
   const w = capCalmWhy(t); if (w) { capFeed(`還不能躍遷：${w}`, 'bad'); return; }
   CAP.warp = { t0: t }; capFeed(`躍遷${M.done ? '' : '撤退'}充能 ${CAP_RULE.warpT} 秒…被攻擊會中斷`, M.done ? 'ok' : 'bad');
@@ -1226,7 +1237,7 @@ function capWarpHud(g, cx, y, grn, amb, t) {
   g.fillStyle = 'rgba(8,12,20,.6)'; g.fillRect(cx - 200, y - 10, 400, CAP.warp ? 28 : 20);   // 底色：天空很亮時也看得清楚
   if (CAP.warp) {
     const u = Math.min(1, (t - CAP.warp.t0) / CAP_RULE.warpT);
-    g.fillStyle = grn; g.fillText(`躍遷充能 ${Math.max(0, CAP_RULE.warpT - (t - CAP.warp.t0)).toFixed(1)} 秒（${keyText('cap_warp')} 取消）`, cx, y);
+    g.fillStyle = grn; g.fillText(`躍遷${CAP.mis && !CAP.mis.done ? '撤退' : ''}充能 ${Math.max(0, CAP_RULE.warpT - (t - CAP.warp.t0)).toFixed(1)} 秒（${keyText('cap_warp')} 取消）`, cx, y);
     capBar(g, cx - 90, y + 10, 180, 5, u, grn);
   } else { const w = capCalmWhy(t); g.fillStyle = w ? amb : grn; g.fillText(w ? `脫離戰鬥後可以按 ${keyText('cap_warp')} 躍遷撤離（${w}）` : `已脫離戰鬥：按 ${keyText('cap_warp')} 躍遷到撤離點`, cx, y); }
   g.textAlign = 'left';
@@ -1294,7 +1305,9 @@ function capMegaPlan(p, scene, li, R, B, spot, used, land, hAt) {
 }
 function capFinish(ok, why, extra) {
   if (GAME.result) return;
-  GAME.result = battleResult(ok ? 'win' : 'lose', why, { capOk: ok, ...(extra || {}) });
+  const ret = !!(extra && extra.retreat);
+  GAME.result = battleResult(ok ? 'win' : ret ? 'end' : 'lose', why, { capOk: ok, ...(extra || {}) });
+  if (!ret && CAP.cfg && CAP.cfg.resumeP) { const p = capLoad(); if (p.resume) { p.resume = null; capSave(p); } }
   if (CAP.cfg && CAP.cfg.duel) CAP.duelRow = capDuelRow();   // AI 對 AI：結果在報告畫面清掉之前記下來
 }
 
@@ -1517,8 +1530,8 @@ function capTopHud(g, W, cx, red, grn, amb, t, top) {
   const prog = !M ? '' : M.type === 'capture' ? capCaptureProg(M) : M.type === 'wipe' ? `剩 ${M.left != null ? M.left : M.goal} 個${M.pend ? '＋增援' : ''}` : `${M.prog}／${M.goal}`;
   g.fillText(M ? `${CAP_MIS[M.type].name}　${M.done && M.type !== 'capture' ? '完成！回到撤離點' : prog}` : '', cx, top + 76);
   plFont(g, 11, false); g.fillStyle = 'rgba(220,230,245,.75)';
-  g.fillText(M && !M.done ? CAP_MIS[M.type].text(M) : `剩餘時間 ${_fmtT(Math.max(0, CAP_RULE.time - t))}`, cx, top + 94);
-  if (M && (M.done || (M.type === 'capture' && CAP.warp)) && !GAME.result) capWarpHud(g, cx, top + 114, grn, amb, t);
+  g.fillText(M && !M.done ? CAP_MIS[M.type].text(M) : `剩餘時間 ${_fmtT(Math.max(0, CAP.tLim - t))}`, cx, top + 94);
+  if (M && (M.done || CAP.warp) && !GAME.result) capWarpHud(g, cx, top + 114, grn, amb, t);
   // 警戒狀態
   let txt, c, sub = '';
   const seen = Math.max(...CAP.own.filter((o) => !o.dead).map((o) => Math.min(1, o.seen)), 0), known = CAP.own.some((o) => !o.dead && t < o.knownT);
@@ -1583,7 +1596,7 @@ function capShipHud(g, W, H, cx, s, ca, red, grn, amb, col, t) {
   g.fillText(`速度 ${Math.round(Math.abs(fwd) * GROUND_KM * 3600)} km/h${fwd < -0.3 ? '（倒退）' : ''}`, x + 10, y + 58);
   const low = s.agl < CAP_RULE.lowAGL;
   g.fillStyle = s.agl < s.L * 0.4 ? red : low ? grn : '#e8eef8'; g.textAlign = 'right';
-  g.fillText(CAP.sp ? `距邊界 ${(Math.max(0, 1 - (s.edge || 0)) * CAP_EDGE.R * GROUND_KM).toFixed(1)} km${s.inRock ? '・小行星區' : ''}` : `離地 ${Math.round(s.agl * GROUND_KM * 1000)} m${low ? '・貼地' : ''}`, x + w - 10, y + 58); g.textAlign = 'left';
+  g.fillText(CAP.sp ? `${capNearDanger(s)}${s.inRock ? '・小行星區' : ''}` : `離地 ${Math.round(s.agl * GROUND_KM * 1000)} m${low ? '・貼地' : ''}`, x + w - 10, y + 58); g.textAlign = 'left';
   capBar(g, x + 10, y + 66, w - 20, 4, Math.abs(CAP.thr), CAP.thr < 0 ? amb : ca(0.9));
   // 武器（右下）
   const wx = W - 250, wy = H - 120;
@@ -1611,6 +1624,7 @@ function capRadar(g, W, H, s, ca, red, grn, amb, col, t) {
     const dx = G.x - s.x, dz = G.z - s.z, ah = dx * fw[0] + dz * fw[1], rt = -dx * fw[1] + dz * fw[0], rr = T.sensor * mul * (T.radar && low ? CAP_RULE.lowMul : 1) * (sig ? CAP_RULE.sigMul : 1) * k;
     g.fillStyle = 'rgba(255,90,70,.07)'; g.strokeStyle = 'rgba(255,90,70,.3)'; g.beginPath(); g.arc(cx + rt * k, cy - ah * k, rr, 0, TAU); g.fill(); g.stroke();
   }
+  capSpaceRadar(g, s, cx, cy, k, fw);   // 太空：粒子帶邊界、黑洞
   g.restore();
   for (const G of CAP.G.gts) {
     if (G.side !== es || gtDead(G) || !CAP.seeG[G.id]) continue;
@@ -1686,11 +1700,12 @@ function capReport() {
   const grade = !ok ? '失敗' : ghost && noLoss ? 'S' : ghost || noLoss ? 'A' : 'B';
   const p = capLoad();
   if (!CAP.saved && !C.auto) { CAP.saved = true; p.merit += gain; p.sorties++; if (ok) p.wins++; if (ghost) p.ghost++; p.kills += S.ks + S.kg; p.lost += S.lost; capSave(p); grAfterCaptain(ok, M ? CAP_MIS[M.type].name : '', C.scene && GROUND_SCENES[C.scene] ? GROUND_SCENES[C.scene].name : '', S.alarmed, snap); }   // 船員與戰痕（growth.js）
-  const why = ok ? '' : R.retreat ? '中途結束任務' : R.why;
+  const ret = !ok && R.retreat && R.why === '躍遷撤退', pr = ret ? capLoad().resume : null;
+  const why = ok ? '' : ret ? (pr ? `戰況已保留：任務時限剩 ${_fmtT(Math.max(0, CAP_RULE.time - pr.tUsed))}，修好船之後可以接續（隨機任務的選單）` : '') : R.retreat ? '中途結束任務' : R.why;
   const kills = {}; for (const k of S.kills) kills[k] = (kills[k] || 0) + 1;
   overlay(`<div class="g-wrap" style="max-width:820px">
     <div class="g-head"><h2>任務報告</h2><span class="crumb">${escH(m.name)}　·　${C.hulls.length} 艘　·　時間 ${_fmtT(R.t)}</span></div>
-    <div class="g-card" style="margin-bottom:12px;text-align:center"><p class="result ${ok ? 'win' : 'lose'}">${ok ? `任務成功・評等 ${grade}` : '任務失敗'}</p>
+    <div class="g-card" style="margin-bottom:12px;text-align:center"><p class="result ${ok ? 'win' : ret ? '' : 'lose'}">${ok ? `任務成功・評等 ${grade}` : ret ? '躍遷撤退' : '任務失敗'}</p>
       <div>${M ? escH(`${CAP_MIS[M.type].name}：${CAP_MIS[M.type].text(M)}`) : ''}</div>${why ? `<div class="g-dim">${escH(why)}</div>` : ''}
       <div class="g-dim" style="margin-top:6px">${open ? (M.odds ? `戰前評估：勝率 ${Math.round(M.odds.win * 100)}%` : '正面交戰') : S.alarmed ? '敵軍拉響了警報' : '全程沒有拉警報'}・損失 ${S.lost} 艘</div></div>
     <div class="intel-grid">
@@ -1701,9 +1716,10 @@ function capReport() {
         <dt>累積</dt><dd>${fmtN(p.merit)}</dd><dt>任務成功</dt><dd>${p.wins}／${p.sorties}</dd></dl>
         <div class="g-dim" style="font-size:calc(12px * var(--ui));margin-top:8px">損失的船任務後會修好。艦長模式沒有回放，也不算進指揮官的戰績。</div></div>
     </div>
-    <div class="g-row" style="margin-top:14px"><button class="g-btn" id="cr-menu">單人戰鬥</button><span class="g-sp"></span><button class="g-btn" id="cr-sq">小隊編成</button><button class="g-btn pri" id="cr-again">再出擊（新任務）→</button></div></div>`);
+    <div class="g-row" style="margin-top:14px"><button class="g-btn" id="cr-menu">單人戰鬥</button><span class="g-sp"></span><button class="g-btn" id="cr-sq">小隊編成</button>${pr ? '<button class="g-btn" id="cr-again">放棄、出擊新任務</button><button class="g-btn pri" id="cr-resume">修好船、接續戰鬥 →</button>' : '<button class="g-btn pri" id="cr-again">再出擊（新任務）→</button>'}</div></div>`);
   gEl('cr-menu').onclick = () => { GAME.spMode = 'captain'; showSingle(); };
   gEl('cr-sq').onclick = () => showCaptain();
   gEl('cr-again').onclick = () => capGo();
+  if (pr) gEl('cr-resume').onclick = () => capGo(true);
 }
 window.__cap = { bounds: () => Object.fromEntries(Object.entries(R3.models).filter(([k]) => /^[ea][0-5]$/.test(k)).map(([k, M]) => { const g = M.lods[0]; g.computeBoundingBox(); const b = g.boundingBox; return [k, [b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z].map((v) => +v.toFixed(2))]; })), frame: () => frame(), capHud, grd: () => GRD, gv: () => GV, dbg: () => ({ gunStats, dmgDealt, wStats, ftrStats }), pending: () => pending, capPickTarget, capMain, CAP, capLoad, capSave, capLayout, capGo, capDetect, capSwitch, capOrder, capFinish, CAP_RULE, CAP_UNIT, CAP_HULLS };

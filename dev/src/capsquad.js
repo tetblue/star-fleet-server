@@ -12,7 +12,7 @@ const CAP_ALLY = {
   ags: { name: '突擊＋重砲＋支援', hulls: ['assault', 'gunship', 'support'] },
 };
 Object.assign(CAP_UNIT, {
-  orb: { kind: 'site', sub: 'orb', name: '軌道防禦站', hp: 1400, r: 5, hh: 0, sensor: 320, sh: 0, radar: true, intel: true, merit: 150, space: true,
+  orb: { kind: 'site', sub: 'orb', name: '軌道防禦站', hp: 1400, r: 8, hh: 0, sensor: 320, sh: 0, radar: true, intel: true, merit: 150, space: true,
     msl: { range: 300, n: 4, cd: 16, dmg: 34 }, gun: { range: 170, cd: 0.45, dmg: 2.5, acc: 0.5, ship: 2.6 } },
 });
 CAP_MIS.capture = { name: '佔領戰', at: 's', text: (M) => `擊沉敵方 ${M.nSq || 1} 個小隊（${M.nShips || 0} 艘）${M.defs && M.defs.length ? `、摧毀軌道防禦 ${M.defs.length} 座` : ''}，取得軌道控制` };
@@ -67,6 +67,9 @@ function capLayoutCapture(p, key, o) {
   if (!p.noDef) {
     if (li >= 1) add('orb', { x: B.x, z: B.z }, { def: true });   // B 已經在 used 裡，直接放在據點正中央
     for (let k = 0, n = [1, 1, 2, 2, 3][li]; k < n; k++) add('plat', spot(near(B, 140, 320), 160), { def: true });
+    // 後勤設施（不算佔領的目標）：有維修船塢＝玩家撤退的期間敵方會整修；有補給站＝會補飛彈
+    if (!D && R() < [0.3, 0.4, 0.5, 0.6, 0.7][li]) add('yard', spot(near(B, 220, 420), 170));
+    if (!D && R() < [0.4, 0.5, 0.5, 0.6, 0.7][li]) add('depot', spot(near(B, 220, 420), 170));
   }
   const cmdr = { base: null, name: '', title: '', trait: 'shield', level: 1, mode: 'lv', tal: {}, skills: [] };
   const fleet = (x) => ({ cmdr, noCmdr: true, hangar: HANGAR_DEFAULT.slice(), formation: 'line', orderly: false, layers: 1, ai: null, reserve: false, at: 1e9, cap: true, ...x });
@@ -106,6 +109,8 @@ function capCaptureInit(M) {
   M.defs = CAP.G.gts.filter((g) => g.def).map((g) => g.id);
   M.goal = M.nShips + M.defs.length; M.prog = 0;
   M.odds = capOddsNow();
+  const L = CAP.G.gts.filter((g) => CAP_UNIT[g.cu].yard || CAP_UNIT[g.cu].depot).map((g) => g.name);
+  if (L.length) capFeed(`這個星系有${L.join('、')}：你撤退的期間敵方會${L.includes('維修船塢') ? '修船' : ''}${L.length > 1 ? '、' : ''}${L.includes('補給站') ? '補飛彈' : ''}；先炸掉就不會`, 'hint');
 }
 // 回傳 true＝佔領戰（其他任務的判定跳過）
 function capCaptureTick(M, t) {
@@ -113,12 +118,7 @@ function capCaptureTick(M, t) {
   const sunk = CAP.foes.filter((s) => s.dead).length, gone = M.defs.filter((i) => gtDead(CAP.G.gts[i])).length;
   M.prog = sunk + gone; M.sunk = sunk; M.gone = gone;
   if (M.prog >= M.goal) { M.done = true; capFinish(true, '取得軌道控制'); return true; }
-  if (CAP.warp && !GAME.result) {   // 躍遷撤退（佔領戰隨時可以撤，算任務失敗，但船保住了）
-    const w = capCalmWhy(t);
-    if (w) { CAP.warp = null; capFeed(`躍遷充能中斷：${w}`, 'bad'); }
-    else if (t - CAP.warp.t0 >= CAP_RULE.warpT) capFinish(false, '躍遷撤退', { retreat: true });
-  }
-  if (t > CAP_RULE.time) capFinish(false, '超過任務時限');
+  if (t > CAP.tLim) capFinish(false, '超過任務時限');
   return true;
 }
 function capCaptureProg(M) { return `敵艦 ${M.sunk || 0}／${M.nShips}${M.defs.length ? `・軌道防禦 ${M.gone || 0}／${M.defs.length}` : ''}`; }

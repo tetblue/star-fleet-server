@@ -141,7 +141,8 @@ function capSpaceBegin(C) {
 function capSpaceEnd() {
   const V = CAP.spV; if (!V) return;
   for (const o of V.hidden || []) o.visible = true;
-  scene.remove(V.group); V.group.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+  for (const m of Object.values(V.mats || {})) m.dispose();
+  scene.remove(V.group); V.group.traverse((o) => { if (o.userData.shared) return; if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });   // shared＝太空站模型（共用快取，不能釋放）
   CAP.spV = null; CAP.sp = null;
 }
 // 船在戰區的哪裡：e＝橢球距離（1＝邊界）
@@ -297,6 +298,10 @@ function capSpaceBuild() {
       uniforms: { uT: { value: 0 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
     const halo = new THREE.Mesh(new THREE.PlaneGeometry(h.r * 4.2, h.r * 4.2), hm); hg.add(halo);   // 光子環：永遠面向鏡頭，圍著黑洞的輪廓
     V.disk = dm; V.halo = halo;
+    for (const [r, c, o] of [[h.pull, 0xff9a3c, 0.35], [h.hurt, 0xff4020, 0.7]]) {   // 重力範圍（虛線感的淡環）、開始受損的範圍
+      const P = []; for (let k = 0; k <= 128; k++) { const a = k / 128 * TAU; P.push(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r)); }
+      hg.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(P), new THREE.LineBasicMaterial({ color: c, transparent: true, opacity: o, depthWrite: false })));
+    }
   }
   // 設施
   const ec = new THREE.Color(FACTION[SIDE_FAC[1 - CAP.side]].ui);
@@ -332,6 +337,7 @@ function capSpaceBuild() {
       add(new THREE.SphereGeometry(0.25, 8, 6), red, 0, 4.9);
     } else add(new THREE.BoxGeometry(g.r, g.r, g.r), hull);
     group.add(o); V.meshes[g.id] = o;
+    capStationModel(o, g);   // 換成專案的太空站模型（capstate.js）
   }
 }
 function capSpaceFrame() {
@@ -349,11 +355,63 @@ function capSpaceFrame() {
 }
 // 新增的設施（增援等）補模型：目前太空沒有中途新增的設施
 // 儀表：粒子帶、黑洞的警告（capHud 呼叫）
+// 船附近的危險（粒子帶、黑洞）：dir＝危險的方向（單位向量）、d＝離危險區還有多遠（進去了＝0）、in＝已經在受損
+const CAP_DANGER = { edge: { name: '高能粒子帶', col: '#b48cff' }, hole: { name: '黑洞重力井', col: '#ff9a3c' } };
+function capDangers(s) {
+  const out = [], e = s.edge || 0, h = CAP.sp && CAP.sp.hole;
+  if (e > 0.72) {
+    const nx = s.x / CAP_EDGE.R ** 2, ny = s.y / CAP_EDGE.Ry ** 2, nz = s.z / CAP_EDGE.R ** 2, nl = Math.hypot(nx, ny, nz) || 1, ny1 = ny / nl;
+    out.push({ k: 'edge', dir: [nx / nl, ny1, nz / nl], d: e >= 1 ? 0 : Math.hypot(s.x, s.y, s.z) * (1 / e - 1), in: e > 1, side: ny1 > 0.7 ? '上方' : ny1 < -0.7 ? '下方' : '' });
+  }
+  if (h && s.holeD < h.pull * 1.15) out.push({ k: 'hole', dir: [(h.x - s.x) / s.holeD, (h.y - s.y) / s.holeD, (h.z - s.z) / s.holeD], d: Math.max(0, s.holeD - h.hurt), in: s.holeD < h.hurt, pull: s.holeD < h.pull, side: '' });
+  return out;
+}
+const _cdv = new THREE.Vector3();
+// 船的儀表：最近的危險（種類＋距離）
+function capNearDanger(s) {
+  const e = s.edge || 0, de = e >= 1 ? 0 : Math.hypot(s.x, s.y, s.z) * (1 / Math.max(0.01, e) - 1), h = CAP.sp && CAP.sp.hole, dh = h ? Math.max(0, s.holeD - h.hurt) : 1e9;
+  return dh < de ? `距黑洞危險區 ${(dh * GROUND_KM).toFixed(1)} km` : `距粒子帶 ${(de * GROUND_KM).toFixed(1)} km`;
+}
+// 儀表：危險的種類、方向（畫面上的箭頭指向危險、綠色箭頭＝脫離方向）、距離；在危險區裡＝畫面邊緣閃爍
 function capSpaceHud(g, s, cx, cy, m, red, amb) {
   if (!CAP.sp) return false;
-  const e = s.edge || 0, h = CAP.sp.hole;
-  if (h && s.holeD < h.pull) pilotText(g, cx, cy - m * 0.24, s.holeD < h.hurt ? '黑洞：船體受損，全速遠離！' : '被黑洞的重力拉住：注意航向', s.holeD < h.hurt ? red : amb, 16);
-  if (e > 1) pilotText(g, cx, cy - m * 0.2, '高能粒子帶：船體受損，請回頭', red, 16);
-  else if (e > CAP_EDGE.warn) pilotText(g, cx, cy - m * 0.2, `接近戰區邊界（${Math.round((1 - e) * CAP_EDGE.R * GROUND_KM * 10) / 10} km）`, amb, 14);
+  const W = innerWidth, H = innerHeight, now = performance.now(), L = capDangers(s);
+  L.forEach((D, n) => {
+    const T = CAP_DANGER[D.k], km = (D.d * GROUND_KM).toFixed(1), y0 = cy - m * (0.24 - n * 0.05);
+    // 畫面上的方向：把危險方向投影到畫面，從畫面中央往外指
+    const arrow = (dx, dy, dz, col, label, R0) => {
+      _cdv.set(s.x + dx * 80, s.y + dy * 80, s.z + dz * 80).project(camera);
+      let ax = _cdv.x, ay = -_cdv.y; if (_cdv.z > 1) { ax = -ax; ay = -ay; }
+      const l = Math.hypot(ax, ay) || 1, ux = ax / l, uy = ay / l, px = cx + ux * R0, py = cy + uy * R0, a = Math.atan2(uy, ux);
+      g.save(); g.translate(px, py); g.rotate(a); g.fillStyle = col; g.beginPath(); g.moveTo(16, 0); g.lineTo(-8, -11); g.lineTo(-3, 0); g.lineTo(-8, 11); g.closePath(); g.fill(); g.restore();
+      plFont(g, 12, true); g.textAlign = 'center'; g.fillStyle = col; g.fillText(label, px - ux * 30, py - uy * 30 + (uy > 0.5 ? -14 : 14)); g.textAlign = 'left';
+    };
+    const R0 = m * 0.17;
+    arrow(D.dir[0], D.dir[1], D.dir[2], T.col, `${T.name}${D.side ? `（${D.side}）` : ''} ${D.in ? '受損中' : km + ' km'}`, R0);
+    if (D.in || D.pull || D.d < 120) arrow(-D.dir[0], -D.dir[1], -D.dir[2], '#8fe39a', '脫離方向', R0);
+    const msg = D.k === 'hole' ? (D.in ? '黑洞的潮汐力正在撕裂船體：往綠色箭頭全速脫離！' : D.pull ? `被黑洞的重力拉住（${km} km 後開始受損）：往綠色箭頭推進` : `前方是黑洞重力井（${km} km）`)
+      : D.in ? `${D.side ? D.side + '的' : ''}高能粒子帶：船體受損，往綠色箭頭離開！` : `接近戰區邊界：${D.side ? D.side + '的' : ''}高能粒子帶（${km} km）`;
+    pilotText(g, cx, y0, msg, D.in ? red : D.pull || D.d < 80 ? amb : T.col, D.in ? 16 : 14);
+    if (D.in) {   // 畫面邊緣閃爍（顏色＝危險的種類）
+      const a = 0.25 + 0.2 * Math.sin(now / 160);
+      g.save(); g.strokeStyle = T.col; g.globalAlpha = a; g.lineWidth = 22; g.strokeRect(0, 0, W, H); g.restore();
+    }
+  });
   return true;
+}
+// 雷達：戰區邊界（粒子帶）與黑洞的範圍（capRadar 呼叫；已經裁成圓形）
+function capSpaceRadar(g, s, cx, cy, k, fw) {
+  if (!CAP.sp) return;
+  const pr = (x, z) => { const dx = x - s.x, dz = z - s.z; return [cx + (-dx * fw[1] + dz * fw[0]) * k, cy - (dx * fw[0] + dz * fw[1]) * k]; };
+  const ring = (x, z, r, col, lw, dash) => { const c = pr(x, z); g.strokeStyle = col; g.lineWidth = lw; g.setLineDash(dash || []); g.beginPath(); g.arc(c[0], c[1], r * k, 0, TAU); g.stroke(); g.setLineDash([]); g.lineWidth = 1.5; };
+  const yk = Math.max(0, 1 - (s.y / CAP_EDGE.Ry) ** 2), Rh = CAP_EDGE.R * Math.sqrt(yk);   // 這個高度的橫切面
+  const c0 = pr(0, 0);
+  g.fillStyle = 'rgba(180,140,255,.18)'; g.beginPath(); g.arc(c0[0], c0[1], Rh * k + 400, 0, TAU); g.arc(c0[0], c0[1], Rh * k, 0, TAU, true); g.fill();   // 邊界外塗色
+  ring(0, 0, Rh, 'rgba(190,150,255,.95)', 2); ring(0, 0, Rh * CAP_EDGE.warn, 'rgba(190,150,255,.35)', 1, [4, 4]);
+  const h = CAP.sp.hole;
+  if (h) {
+    ring(h.x, h.z, h.pull, 'rgba(255,154,60,.6)', 1, [5, 4]); ring(h.x, h.z, h.hurt, 'rgba(255,90,60,.9)', 2);
+    const c = pr(h.x, h.z); g.fillStyle = '#000'; g.beginPath(); g.arc(c[0], c[1], Math.max(3, h.r * k), 0, TAU); g.fill();
+    plFont(g, 10, true); g.fillStyle = '#ffb070'; g.textAlign = 'center'; g.fillText('黑洞', c[0], c[1] - h.hurt * k - 4); g.textAlign = 'left';
+  }
 }
