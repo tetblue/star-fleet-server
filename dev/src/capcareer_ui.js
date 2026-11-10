@@ -28,7 +28,8 @@ function ccNewDialog() {
   gEl('cc-go').onclick = () => { const S = ccNewGame({ seed: (Math.random() * 1e9) >>> 0, role: smuVal('cc-role') || 'emp', diff: +smuVal('cc-diff'), start: +smuVal('cc-start') || 0 }); ccSave(S); CC = { S, sel: -1, raf: 0, view: null }; ccRender(); ccTurnStart(S, false); };
 }
 function ccRender() {
-  const S = CC.S, P = ccPl(S), cnt = [SM_A, SM_E, SM_P, SM_N].map((f) => S.sys.filter((s) => s.owner === f).length);
+  ccFogTick(CC.S);
+  const S = CC.S, P = ccPl(S), cnt = [SM_A, SM_E, SM_P, SM_N].map((f) => S.sys.filter((s) => ccSee(S, s).owner === f).length);   // 照所知的情報（迷霧）
   const nMis = S.missions.filter((M) => M.state === 'open').length;
   overlay(`<style>${SMU_CSS}${CC_CSS}</style><div class="sm-wrap">
     <div class="sm-top"><h2>艦長生涯</h2><span class="sm-chip">第 ${S.turn} 週</span><span class="sm-chip">${CC_ROLES[S.role].name}・${ccRankOf(S).name}</span><span class="sm-chip">資金 ${fmtN(Math.round(S.pl.money))}</span><span class="sm-chip">戰功 ${Math.round(S.pl.merit)}</span>${ccTopChips(S, cnt)}
@@ -67,7 +68,8 @@ function ccDraw(ts) {
   const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
   const k = Math.min((W - 40) / 100, (H - 140) / 60); CC.view = { k, ox: (W - 100 * k) / 2, oy: Math.max(20, (H - 60 * k) / 2 - 30) };
   g.fillStyle = '#070b12'; g.fillRect(0, 0, W, H);
-  for (const s of S.sys) { if (s.owner === SM_N) continue; const [x, y] = ccXY(s), r = k * 9, gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, SM_FAC[s.owner].col + '2a'); gr.addColorStop(1, SM_FAC[s.owner].col + '00'); g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); }
+  const SEE = S.sys.map((s) => ccSee(S, s));
+  for (const s of S.sys) { const o = SEE[s.id].owner; if (o < 0 || o === SM_N) continue; const [x, y] = ccXY(s), r = k * 9, gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, SM_FAC[o].col + (SEE[s.id].live ? '2a' : '14')); gr.addColorStop(1, SM_FAC[o].col + '00'); g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); }
   g.lineWidth = 1.2; g.strokeStyle = '#243247';
   for (const [a, b] of S.edges) { const [x1, y1] = ccXY(S.sys[a]), [x2, y2] = ccXY(S.sys[b]); g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke(); }
   // 你的小隊的移動命令（選中的較粗）
@@ -83,27 +85,28 @@ function ccDraw(ts) {
   }
   g.textAlign = 'center';
   for (const s of S.sys) {
-    const [x, y] = ccXY(s), r = 5 + s.tier * 1.6, here = ccAt(S, s.id), mineHere = own.filter((q) => q.sys === s.id);
+    const V = SEE[s.id], [x, y] = ccXY(s), r = 5 + s.tier * 1.6, here = V.sq, mineHere = own.filter((q) => q.sys === s.id);
     if (ccIntel(S, s)) { g.strokeStyle = 'rgba(110,220,255,.35)'; g.lineWidth = 1; g.setLineDash([2, 4]); g.beginPath(); g.arc(x, y, r + 20, 0, 7); g.stroke(); g.setLineDash([]); }
     if (ccCut(S, s)) { g.fillStyle = '#ffb35a'; g.font = 'bold 10px sans-serif'; g.textAlign = 'right'; g.fillText('補給切斷', x - r - 4, y + 4); g.textAlign = 'center'; }
     if (Q && Q.sys === s.id) { const p = 0.5 + 0.5 * Math.sin(t * 3); g.strokeStyle = `rgba(63,223,143,${0.4 + 0.45 * p})`; g.lineWidth = 3; g.beginPath(); g.arc(x, y, r + 8 + p * 3, 0, 7); g.stroke(); }
     else if (mineHere.length) { g.strokeStyle = 'rgba(63,223,143,.6)'; g.lineWidth = 1.5; g.beginPath(); g.arc(x, y, r + 8, 0, 7); g.stroke(); }
     if (Q && S.adj[Q.sys].includes(s.id) && !S.fin) { g.strokeStyle = 'rgba(63,223,143,.25)'; g.lineWidth = 1; g.beginPath(); g.arc(x, y, r + 5, 0, 7); g.stroke(); }
     if (s.id === CC.sel) { g.strokeStyle = '#fff'; g.lineWidth = 2; g.setLineDash([4, 3]); g.beginPath(); g.arc(x, y, r + 14, 0, 7); g.stroke(); g.setLineDash([]); }
-    if (s.sg) { g.strokeStyle = SM_FAC[s.sg.f].col; g.lineWidth = 2; g.setLineDash([3, 3]); g.beginPath(); g.arc(x, y, r + 3, 0, 7); g.stroke(); g.setLineDash([]); }
-    g.fillStyle = SM_FAC[s.owner].col; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+    if (V.sg) { g.strokeStyle = SM_FAC[V.sg.f].col; g.lineWidth = 2; g.setLineDash([3, 3]); g.beginPath(); g.arc(x, y, r + 3, 0, 7); g.stroke(); g.setLineDash([]); }
+    g.globalAlpha = V.live ? 1 : 0.55; g.fillStyle = V.owner < 0 ? '#3a4352' : SM_FAC[V.owner].col; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); g.globalAlpha = 1;
+    if (V.owner < 0) { g.fillStyle = '#cfd8e3'; g.font = 'bold 11px sans-serif'; g.fillText('?', x, y + 4); }
     if (s.cap) { g.strokeStyle = '#ffe28a'; g.lineWidth = 1.5; g.beginPath(); g.arc(x, y, r + 1.5, 0, 7); g.stroke(); }
-    const dn = ccDefsAlive(s).length;
-    g.fillStyle = '#cfd8e3'; g.font = '12px sans-serif'; g.fillText(`${s.name}${s.yard ? ' ⚓' : ''}${s.depot ? ' ✚' : ''}${s.id === S.pl.base ? '［據點］' : ''}`, x, y - r - 6);
-    if (dn) { g.fillStyle = '#e8eef8'; g.font = 'bold 11px sans-serif'; g.textAlign = 'left'; g.fillText('◆' + dn, x + r + 3, y + 4); g.textAlign = 'center'; }
+    const dn = V.defs.length;
+    g.fillStyle = V.live ? '#cfd8e3' : '#7d8794'; g.font = '12px sans-serif'; g.fillText(`${s.name}${V.yard ? ' ⚓' : ''}${V.depot ? ' ✚' : ''}${V.live || V.age == null ? '' : `（${V.age}週前）`}${s.id === S.pl.base ? '［據點］' : ''}`, x, y - r - 6);
+    if (dn) { g.fillStyle = V.live ? '#e8eef8' : '#7d8794'; g.font = 'bold 11px sans-serif'; g.textAlign = 'left'; g.fillText('◆' + dn, x + r + 3, y + 4); g.textAlign = 'center'; }
     // 小隊：每個勢力一個標籤（隊數、艘數）；你的小隊單獨一個標籤
     const groups = []; for (const q of here) { const k = q.pl ? 'pl' : q.fac; let G = groups.find((x) => x.k === k); if (!G) groups.push(G = { k, f: q.fac, L: [] }); G.L.push(q); }
     groups.sort((a, b) => (a.k === 'pl' ? -1 : b.k === 'pl' ? 1 : 0)).forEach(({ k: gk, f, L }, n) => {
       const mine = gk === 'pl', rel = SMU_REL[ccRel(S, L[0])], col = rel.col;
       const tx = mine ? `${L.some((q) => q.id === S.pl.sq) ? '★' : ''}${L.length > 1 ? `你的 ${L.length}隊` : L[0].name} ${L.reduce((a, q) => a + q.ships.length, 0)}艘` : `${rel.tag}・${SM_FAC[f].name} ${L.length > 1 ? L.length + '隊 ' : ''}${L.reduce((a, q) => a + q.ships.length, 0)}艘${L.some((q) => ccDis(S, q)) ? '・亂' : ''}`;
-      g.font = 'bold 11px sans-serif'; const w = g.measureText(tx).width + 12, bx = x - w / 2, by = y + r + 6 + n * 17;
+      g.font = 'bold 11px sans-serif'; const w = g.measureText(tx).width + 12, bx = x - w / 2, by = y + r + 6 + n * 17; g.globalAlpha = V.live ? 1 : 0.5;
       g.fillStyle = '#0a0f18e6'; smuRRect(g, bx, by, w, 15, 4); g.fill(); g.strokeStyle = col; g.lineWidth = mine && L.includes(Q) ? 2.5 : mine ? 1.5 : 1.3; smuRRect(g, bx, by, w, 15, 4); g.stroke();
-      g.fillStyle = col; g.fillText(tx, x, by + 11.5);
+      g.fillStyle = col; g.fillText(tx, x, by + 11.5); g.globalAlpha = 1;
     });
     let bx = x + r + 12;
     if (ccWillFight(S, s)) { const p = 0.5 + 0.5 * Math.sin(t * 4); g.fillStyle = `rgba(255,179,90,${p > 0.5 ? 1 : 0.7})`; g.beginPath(); g.arc(bx, y - 2, 9, 0, 7); g.fill(); g.fillStyle = '#111'; g.font = 'bold 12px sans-serif'; g.fillText('⚔', bx, y + 2); bx += 20; }
@@ -113,7 +116,8 @@ function ccDraw(ts) {
 // 預計交戰：你的小隊要開進可以進攻的星系，或已經在交戰中的星系
 function ccWillFight(S, s) {
   if (S.fin) return false;
-  return ccOwn(S).some((q) => (q.to != null ? q.to : q.sys) === s.id && !q.task) && ((ccHostile(S, S.fac, s.owner) && s.owner !== S.fac && (ccDefsAlive(s).length || ccAt(S, s.id, s.owner).length)) || ccAt(S, s.id).some((q) => q.fac !== S.fac && q.fac !== SM_N && ccHostile(S, S.fac, q.fac)));
+  const V = ccSee(S, s), o = V.owner;   // 照所知的情報（看不到的星系用舊情報）
+  return ccOwn(S).some((q) => (q.to != null ? q.to : q.sys) === s.id && !q.task) && ((o >= 0 && ccHostile(S, S.fac, o) && o !== S.fac && (V.defs.length || V.sq.some((q) => q.fac === o))) || V.sq.some((q) => q.fac !== S.fac && q.fac !== SM_N && ccHostile(S, S.fac, q.fac)));
 }
 const ccBar = (v, col) => `<div class="cc-bar"><i style="width:${Math.round(Math.max(0, Math.min(1, v)) * 100)}%;background:${col}"></i></div>`;
 const ccOddCol = (v) => v >= 0.6 ? '#5fd39a' : v >= 0.4 ? '#ffd36a' : '#ff6a5a';
@@ -157,10 +161,10 @@ function ccCard() {
   const S = CC.S, el = gEl('cc-card'); if (!el) return;
   ccDraw();
   if (CC.sel < 0) { el.hidden = true; return; }
-  const s = S.sys[CC.sel], P = ccPl(S), Q = ccCur(S), me = Q === P, here = ccAt(S, s.id), dl = ccDefsAlive(s);
+  const s = S.sys[CC.sel], V = ccSee(S, s), P = ccPl(S), Q = ccCur(S), me = Q === P, here = V.sq, dl = V.defs, own0 = V.owner;
   const why = Q ? ccCanMove(S, s.id, Q) : '', qAt = Q && Q.sys === s.id, who = Q ? smuEsc(Q.name) : '';
   const acts = [], busy = me && !!S.pl.weekFought;
-  if (Q && !qAt && !S.fin) acts.push(Q.to === s.id ? { id: 'cc-cancel', name: `取消移動（${who}）`, desc: '小隊留在原地' } : { id: 'cc-go', name: `${who}移動到這裡`, desc: why || (Q.task ? '會取消派出的任務・' : '') + (ccHostile(S, S.fac, s.owner) && s.owner !== S.fac ? '這週結束時開進去：會和軌道防禦、守軍交戰' : '這週結束時抵達'), off: !!why });
+  if (Q && !qAt && !S.fin) acts.push(Q.to === s.id ? { id: 'cc-cancel', name: `取消移動（${who}）`, desc: '小隊留在原地' } : { id: 'cc-go', name: `${who}移動到這裡`, desc: why || (Q.task ? '會取消派出的任務・' : '') + (own0 < 0 ? '沒有情報：不知道裡面有什麼' : ccHostile(S, S.fac, own0) && own0 !== S.fac ? '這週結束時開進去：會和軌道防禦、守軍交戰' : '這週結束時抵達'), off: !!why });
   if (qAt && !S.fin) {
     const rc = ccRepairCost(S, Q), mc = ccMissileCost(S, Q), w1 = ccCanService(S, 'repair', Q), w2 = ccCanService(S, 'missile', Q), w3 = ccCanService(S, 'build', Q);
     acts.push({ id: 'cc-repair', name: `修理${who}`, desc: w1 || (rc ? `${rc} 資金` : '不用修'), off: !!w1 || !rc || S.pl.money < rc });
@@ -176,23 +180,25 @@ function ccCard() {
   if (!S.fin && ccRankOf(S).base && s.owner === S.fac && s.yard && S.pl.base !== s.id) acts.push({ id: 'cc-base', name: '設為據點', desc: `${CC_RULE.baseCost} 資金・在據點修理、補飛彈半價，軌道防禦每週重建`, off: S.pl.money < CC_RULE.baseCost });
   // 進攻這裡的勝率（選中的小隊＋同一週也要開進來的你的其他小隊 對 守軍＋防禦）
   let odds = '';
-  if (Q && ccHostile(S, S.fac, s.owner) && s.owner !== S.fac && (dl.length || ccAt(S, s.id, s.owner).length)) {
-    const A = [Q, ...ccOwn(S).filter((q) => q !== Q && (q.to != null ? q.to : q.sys) === s.id && !q.task)].slice(0, CC_RULE.maxSq), O = ccOdds(S, A, ccAt(S, s.id, s.owner).slice(0, 2), dl, 0);
-    odds = `<h4>${A.map((q) => smuEsc(q.name)).join('＋')}進攻這裡</h4><div>勝率 <b class="cc-odds" style="color:${ccOddCol(O.win)}">${Math.round(O.win * 100)}%</b>　${who}存活率：${ccSurvTx(Q, O.surv[0][0])}</div><div class="g-dim" style="font-size:11px">${me ? '公式不含親自操艦的技術、地形；開戰前還會再顯示一次' : '不是親自指揮的小隊：照這個機率計算結果'}</div>`;
+  const defSq = here.filter((q) => q.fac === own0);
+  if (Q && own0 >= 0 && ccHostile(S, S.fac, own0) && own0 !== S.fac && (dl.length || defSq.length)) {
+    const A = [Q, ...ccOwn(S).filter((q) => q !== Q && (q.to != null ? q.to : q.sys) === s.id && !q.task)].slice(0, CC_RULE.maxSq), O = ccOdds(S, A, defSq.slice(0, 2), dl, 0);
+    odds = `<h4>${A.map((q) => smuEsc(q.name)).join('＋')}進攻這裡</h4><div>勝率 <b class="cc-odds" style="color:${ccOddCol(O.win)}">${Math.round(O.win * 100)}%</b>　${who}存活率：${ccSurvTx(Q, O.surv[0][0])}</div><div class="g-dim" style="font-size:11px">${V.live ? '' : `照 ${V.age} 週前的情報估計・`}${me ? '公式不含親自操艦的技術、地形；開戰前還會再顯示一次' : '不是親自指揮的小隊：照這個機率計算結果'}</div>`;
   }
+  const unk = own0 < 0, intelTx = V.live ? '' : unk ? '<dt>情報</dt><dd style="color:#ffb35a">沒有情報：從沒看過這個星系</dd>' : `<dt>情報</dt><dd style="color:#ffb35a">${V.age} 週前（第 ${S.turn - V.age} 週）看到的樣子・小隊靠近（相鄰）或偵察才會更新</dd>`;
   el.hidden = false;
-  el.innerHTML = `<button class="sm-x" id="cc-x">×</button><h3><span style="color:${SM_FAC[s.owner].col}">●</span> ${s.name}</h3>
-    <dl class="sm-kv"><dt>擁有者</dt><dd>${SM_FAC[s.owner].name}${s.cap ? '・首都' : ''}${s.id === S.pl.base ? '・<b style="color:#3fdf8f">你的據點</b>' : ''}</dd><dt>等級</dt><dd>${SM_TIER[s.tier]}・地面防禦 ${s.def}${s.def0 != null && s.def < s.def0 ? `／${s.def0}（受創，圍城 ${ccSiegeNeed(s)} 週）` : ''}</dd>
+  el.innerHTML = `<button class="sm-x" id="cc-x">×</button><h3><span style="color:${unk ? '#7d8794' : SM_FAC[own0].col}">●</span> ${s.name}</h3>
+    <dl class="sm-kv">${intelTx}<dt>擁有者</dt><dd>${unk ? '不明' : SM_FAC[own0].name}${s.cap && !unk ? '・首都' : ''}${s.id === S.pl.base ? '・<b style="color:#3fdf8f">你的據點</b>' : ''}</dd>${unk ? '' : `<dt>等級</dt><dd>${SM_TIER[s.tier]}・地面防禦 ${V.def}${V.live && s.def0 != null && s.def < s.def0 ? `／${s.def0}（受創，圍城 ${ccSiegeNeed(s)} 週）` : ''}</dd>
       <dt>軌道防禦</dt><dd>${dl.length ? dl.map((d) => `${CAP_UNIT[d.type].name} ${Math.round(d.hp * 100)}%`).join('、') : '沒有'}</dd>
-      <dt>設施</dt><dd>${[s.yard ? '維修船塢（修船、造艦）' : '', s.depot ? '補給站（補飛彈）' : ''].filter(Boolean).join('、') || '沒有'}</dd>
+      <dt>設施</dt><dd>${[V.yard ? '維修船塢（修船、造艦）' : '', V.depot ? '補給站（補飛彈）' : ''].filter(Boolean).join('、') || '沒有'}</dd>`}
       <dt>太空</dt><dd>${CAP_SPACE[s.scene || 'belt'].name}<div class="g-dim" style="font-size:11px">${CAP_SPACE[s.scene || 'belt'].desc}</div></dd>
-      ${s.sg ? (() => { const G = ccGroundScore(S, s, s.sg.f), P = G.p, f1 = (v) => (v >= 0 ? '+' : '') + v.toFixed(1); return `<dt>圍城</dt><dd>${SM_FAC[s.sg.f].name}・第 ${s.sg.w} 週（${ccSiegeNeed(s)} 週投降）</dd><dt>投降評分</dt><dd><b style="color:${G.v < 0 ? '#ff7a6b' : '#3fdf8f'}">${f1(G.v)}</b>${G.v < 0 ? '・下週投降' : '・抵抗'}<br><span class="g-dim">聲望 ${f1(P.fame)}・艦隊 ${f1(P.fleet)}・地面 ${f1(P.ground)}・鄰近艦隊 ${f1(P.near)}（負數就投降）</span></dd>`; })() : ''}
-      ${ccCut(S, s) ? `<dt>補給</dt><dd style="color:#ffb35a">切斷到第 ${s.fx.cut} 週（不補飛彈、只修一半、防禦不重建）</dd>` : ''}
+      ${V.live && s.sg ? (() => { const G = ccGroundScore(S, s, s.sg.f), P = G.p, f1 = (v) => (v >= 0 ? '+' : '') + v.toFixed(1); return `<dt>圍城</dt><dd>${SM_FAC[s.sg.f].name}・第 ${s.sg.w} 週（${ccSiegeNeed(s)} 週投降）</dd><dt>投降評分</dt><dd><b style="color:${G.v < 0 ? '#ff7a6b' : '#3fdf8f'}">${f1(G.v)}</b>${G.v < 0 ? '・下週投降' : '・抵抗'}<br><span class="g-dim">聲望 ${f1(P.fame)}・艦隊 ${f1(P.fleet)}・地面 ${f1(P.ground)}・鄰近艦隊 ${f1(P.near)}（負數就投降）</span></dd>`; })() : ''}
+      ${V.live && ccCut(S, s) ? `<dt>補給</dt><dd style="color:#ffb35a">切斷到第 ${s.fx.cut} 週（不補飛彈、只修一半、防禦不重建）</dd>` : ''}
       ${ccIntel(S, s) ? `<dt>情報</dt><dd style="color:#7fdcff">偵察中，到第 ${s.fx.intel} 週</dd>` : ''}
       ${S.missions.filter((M) => M.state === 'open' && M.sys === s.id).map((M) => `<dt>任務</dt><dd style="color:#c9a7ff">${ccMisName(M)}・剩 ${M.due - S.turn} 週</dd>`).join('')}</dl>
     ${odds}
     ${Q ? `<div class="g-dim" style="font-size:11px;margin-top:6px">下面的命令給：<b style="color:#3fdf8f">${me ? '★' : ''}${who}</b>（在小隊面板換）</div>` : ''}
-    <h4>小隊</h4>${here.length ? here.map((q) => `<div class="cc-sq ${q.pl ? 'pl' : ''}" ${q.pl ? `data-sq="${q.id}" title="選這個小隊下命令"` : ''} ${q === Q ? 'style="border-width:2px"' : ''}><b style="color:${SMU_REL[ccRel(S, q)].col}">${q.id === S.pl.sq ? '★' : ''}${smuEsc(q.name)}</b>${ccSqNote(S, q)}${ccShipRows(q)}</div>`).join('') : '<div class="g-dim">沒有</div>'}
+    <h4>小隊${V.live ? '' : unk ? '（不明）' : `（${V.age} 週前）`}</h4>${here.length ? here.map((q) => `<div class="cc-sq ${q.pl ? 'pl' : ''}" ${q.pl ? `data-sq="${q.id}" title="選這個小隊下命令"` : ''} ${q === Q ? 'style="border-width:2px"' : ''}><b style="color:${SMU_REL[ccRel(S, q)].col}">${q.id === S.pl.sq ? '★' : ''}${smuEsc(q.name)}</b>${ccSqNote(S, q)}${ccShipRows(q)}</div>`).join('') : (unk ? '<div class="g-dim">不明</div>' : '<div class="g-dim">沒有</div>')}
     ${acts.length ? smuActs(acts, 150) : ''}`;
   CC_place(el);
   const on = (id, fn) => { const b = gEl(id); if (b) b.onclick = fn; };
@@ -399,7 +405,7 @@ function ccIco(kind, col, v) {
 function ccTopChips(S, cnt) {
   const fav = ccFavOf(S, S.fac), fame = S.fame || [50, 50, 50, 50];
   const favTip = `好感（${SM_FAC[S.fac].name}對你）${Math.round(fav)}／100：任務完成 +${CC_RULE.fav.ok}、失敗 −${CC_RULE.fav.fail}。新任務的獎勵 ×${ccFavK(S, S.fac).toFixed(2)}`;
-  const fac = (f) => `<span class="sm-chip cc-chip2" title="${SM_FAC[f].name}：擁有 ${cnt[f]} 個星系${f === SM_N ? '' : `・聲望 ${Math.round(fame[f])}／100（佔領、交戰、特戰的成敗會改變；影響地面投降的評分）`}"><i style="background:${SM_FAC[f].col}"></i>${SM_FAC[f].name}<span class="sep"></span>${ccIco('planet', SM_FAC[f].col)}<b>${cnt[f]}</b>${f === SM_N ? '' : `${ccIco('star', '#ffd36a', fame[f] / 100)}<b>${Math.round(fame[f])}</b>`}</span>`;
+  const fac = (f) => `<span class="sm-chip cc-chip2" title="${SM_FAC[f].name}：已知擁有 ${cnt[f]} 個星系（看不到的星系照最後的情報）${f === SM_N ? '' : `・聲望 ${Math.round(fame[f])}／100（佔領、交戰、特戰的成敗會改變；影響地面投降的評分）`}"><i style="background:${SM_FAC[f].col}"></i>${SM_FAC[f].name}<span class="sep"></span>${ccIco('planet', SM_FAC[f].col)}<b>${cnt[f]}</b>${f === SM_N ? '' : `${ccIco('star', '#ffd36a', fame[f] / 100)}<b>${Math.round(fame[f])}</b>`}</span>`;
   return `<span class="sm-chip cc-chip2" title="${favTip}">${ccIco('heart', '#ff7a9a', fav / 100)}<b>${Math.round(fav)}</b><span class="g-dim" style="font-size:11px">好感</span></span>${[SM_A, SM_E, SM_P, SM_N].map(fac).join('')}`;
 }
 // ───── 每週開始（同星海生涯）：上週的戰報 → 每個新任務一張簡報 ─────

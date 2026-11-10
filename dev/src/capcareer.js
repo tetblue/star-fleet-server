@@ -173,6 +173,25 @@ const ccPl = (S) => S.sq.find((q) => q.id === S.pl.sq);
 const ccAt = (S, sid, fac) => S.sq.filter((q) => q.sys === sid && q.ships.length && (fac == null || q.fac === fac));
 const ccHostile = (S, a, b) => a !== b && (a === SM_N || b === SM_N ? true : S.rel[a][b] < 0);   // 中立星系：誰都可以佔
 const ccDefsAlive = (s) => s.defs.filter((d) => d.hp > 0);
+// ───── 星圖的戰爭迷霧（2026-11-11）─────
+// 看得到（即時）：你的勢力擁有的星系、有你的勢力的小隊的星系、你的小隊相鄰的星系、偵察中的星系。
+// 看不到的星系顯示最後一次看到的樣子（S.mem，標「N 週前」）；從沒看過的＝未知（擁有者也不知道）。
+function ccVis(S, s) {
+  if (s.owner === S.fac || ccIntel(S, s)) return true;
+  return S.sq.some((q) => q.ships.length && ((q.fac === S.fac && q.sys === s.id) || (q.pl && S.adj[q.sys].includes(s.id))));
+}
+const ccSnapSq = (q) => ({ id: q.id, name: q.name, fac: q.fac, sys: q.sys, dis: q.dis, ships: q.ships.map((c) => ({ key: c.key, hp: c.hp, sh: c.sh, msl: c.msl })) });
+function ccFogTick(S) {
+  if (!S.mem) S.mem = {};
+  for (const s of S.sys) if (ccVis(S, s)) S.mem[s.id] = { t: S.turn, owner: s.owner, def: s.def, defs: ccDefsAlive(s).map((d) => ({ type: d.type, hp: d.hp })), yard: !!s.yard, depot: !!s.depot, sg: s.sg ? { f: s.sg.f, w: s.sg.w } : null, sq: ccAt(S, s.id).map(ccSnapSq) };
+}
+// 星系「目前所知」的樣子：live＝即時；age＝幾週前的情報（null＝從沒看過，owner＝−1）
+function ccSee(S, s) {
+  if (ccVis(S, s)) return { live: true, age: 0, owner: s.owner, def: s.def, defs: ccDefsAlive(s), yard: s.yard, depot: s.depot, sg: s.sg, sq: ccAt(S, s.id) };
+  const M = S.mem && S.mem[s.id];
+  if (!M) return { live: false, age: null, owner: -1, def: null, defs: [], yard: false, depot: false, sg: null, sq: [] };
+  return { live: false, age: S.turn - M.t, owner: M.owner, def: M.def, defs: M.defs, yard: M.yard, depot: M.depot, sg: M.sg, sq: M.sq };
+}
 // capOdds 的一方：小隊（每隊一組船）＋防禦；diff＝難度（敵方用生涯難度，AI 對 AI 用普通）
 function ccSide(S, squads, defs, diff) {
   return { squads: squads.map((q) => { const m = ccDis(S, q) ? CC_RULE.fx.disHp : 1; return q.ships.map((c) => ({ key: c.key, hp: c.hp * m, sh: c.sh * m, msl: c.msl })); }).filter((q) => q.length), defs: (defs || []).map((d) => ({ type: d.type, hp: d.hp })), diff };
@@ -455,7 +474,7 @@ function ccOpLi(S, s, f) { return Math.min(4, (f === S.fac ? CC_DIFF[S.diff].li 
 function ccOpCalc(S, q, op, s, f) {
   const n = q.ships.length; if (!n) return { p: 0, li: 0, parts: [] };
   const K = CC_OPF, tier = CC_OP_TIER[op] || 'mid', hp = q.ships.reduce((a, c) => a + c.hp, 0) / n, li = ccOpLi(S, s, f);
-  const guard = ccAt(S, s.id).filter((x) => x.fac !== f && ccHostile(S, f, x.fac)).length;   // 目標星系裡有敵方的小隊
+  const guard = (f === S.fac ? ccSee(S, s).sq : ccAt(S, s.id)).filter((x) => x.fac !== f && ccHostile(S, f, x.fac)).length;   // 目標星系裡有敵方的小隊（玩家照所知的情報）
   const intel = f === S.fac ? ccIntel(S, s) : false;
   const parts = [['基準', K.base], [`任務難易（${CC_TIER_NAME[tier]}）`, K.tier[tier]],
     [`戰力（${ccPow([q]).toFixed(1)}，敵方 ${CAP_DIFF[li].pow}）`, Math.round(Math.max(-K.powCap, Math.min(K.powCap, K.pow * (ccPow([q]) - CAP_DIFF[li].pow))))],
