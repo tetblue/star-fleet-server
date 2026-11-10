@@ -17,8 +17,8 @@ Object.assign(CAP_HULLS, {
     desc: '最脆，但船身難被偵測（敵方的偵測距離 ×0.55）。技能：匿蹤（10 秒內完全隱形，敵軍失去你的位置；開火、掃描會解除）。' },
 });
 CAP_HULL_ORDER.push('ew', 'stealth');
-Object.assign(CAP_ODDS.win.f, { ew: 1.3, stealth: 1.4 });      // 暫定：火力係數（突擊艦＝1）
-Object.assign(CAP_ODDS.surv.b, { ew: -1.0, stealth: -2.2 });   // 暫定：存活率的艦種基準
+Object.assign(CAP_ODDS.win.f, { ew: 1.55, stealth: 1.15 });    // 火力係數（突擊艦＝1），2026-11-10 用 538 場 AI 對戰擬合
+Object.assign(CAP_ODDS.surv.b, { ew: -1.95, stealth: -2.95 }); // 存活率的艦種基準，同上
 
 function capCloakOn(s, t) { return t < (s.cloakT || -9); }
 // 技能（capSkill 呼叫）：回傳 true＝處理了
