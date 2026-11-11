@@ -36,7 +36,7 @@ function ccRender() {
     <div class="sm-top"><h2>艦長生涯</h2><span class="sm-chip">第 ${S.turn} 週</span><span class="sm-chip">${CC_ROLES[S.role].name}・${ccRankOf(S).name}</span><span class="sm-chip">資金 ${fmtN(Math.round(S.pl.money))}</span><span class="sm-chip">戰功 ${Math.round(S.pl.merit)}</span>${ccTopChips(S, cnt)}
       <span class="sm-btnbar"><button class="g-btn" id="cc-mis">任務${nMis ? `<span class="sm-badge">${nMis}</span>` : ''}</button><button class="g-btn" id="cc-logb">紀錄</button><button class="g-btn" id="cc-quit">離開</button>${S.fin ? '' : `<button class="g-btn" id="cc-fly" title="回到${smuEsc(ccPl(S) ? S.sys[ccPl(S).sys].name : '')}的太空（${keyText('cap_map')}）">回到星系 ✈</button>`}<button class="g-btn primary" id="cc-end" ${S.fin ? 'disabled' : ''}>結束這一週 →</button></span></div>
     <div class="sm-map" id="cc-map"><canvas id="cc-cv"></canvas>
-      <div class="sm-leg" id="cc-leg" style="cursor:pointer;pointer-events:auto">${CC.leg ? `<div><b>圖例 ▾</b></div>${['own', 'ally', 'enemy', 'neutral'].map((k) => `<div><i style="background:${SMU_REL[k].col}"></i>${k === 'own' ? '你的小隊（★＋光圈＝親自指揮，白框＝選中）' : SMU_REL[k].name}</div>`).join('')}<div>箭頭＝一個小隊：越大船越多（1～5 艘）；停在星系下方，閃爍且在航道上＝這週要移動</div><div class="g-dim">星系的顏色＝擁有的勢力</div><div>! ＝ 你的小隊下週會被進攻</div><div>◆ 軌道防禦・⚓ 維修船塢・✚ 補給站</div><div>虛線圈：圍城中・⚔ 這週會交戰</div><div>箭頭：看得到的預定動向（你的小隊周圍、偵察過的星系）</div><div>藍色虛線大圈：偵察中・亂＝指揮中斷</div><div class="g-dim">點星系看詳情；點相鄰的星系下令移動</div>` : '<div><b>圖例 ▸</b></div>'}</div>
+      <div class="sm-leg" id="cc-leg" style="cursor:pointer;pointer-events:auto">${CC.leg ? `<div><b>圖例 ▾</b></div>${['own', 'ally', 'enemy', 'neutral'].map((k) => `<div><i style="background:${SMU_REL[k].col}"></i>${k === 'own' ? '你的小隊（★＋光圈＝親自指揮，白框＝選中）' : SMU_REL[k].name}</div>`).join('')}<div>箭頭＝一個小隊：越大船越多（1～5 艘）；停在星系下方，閃爍且在航道上＝這週要移動</div><div class="g-dim">星系的顏色＝擁有者跟你的關係：藍＝你的陣營、紅＝敵對、黃＝中立／停戰</div><div>! ＝ 你的小隊下週會被進攻</div><div>◆ 軌道防禦・⚓ 維修船塢・✚ 補給站・白圈＝首都</div><div>虛線圈：圍城中・⚔ 這週會交戰</div><div>箭頭：看得到的預定動向（你的小隊周圍、偵察過的星系）</div><div>藍色虛線大圈：偵察中・亂＝指揮中斷</div><div class="g-dim">點星系看詳情；點相鄰的星系下令移動</div>` : '<div><b>圖例 ▸</b></div>'}</div>
       <div class="sm-dock" id="cc-dock"></div><div class="sm-card" id="cc-card" hidden></div></div></div>`);
   gEl('cc-quit').onclick = () => { ccSave(S); ccIdleStop(); window.removeEventListener('resize', ccResize); GAME.spMode = 'captain'; showSingle(); };
   if (gEl('cc-fly')) gEl('cc-fly').onclick = () => ccFly();
@@ -71,7 +71,7 @@ function ccDraw(ts) {
   const k = Math.min((W - 40) / 100, (H - 140) / 60); CC.view = { k, ox: (W - 100 * k) / 2, oy: Math.max(20, (H - 60 * k) / 2 - 30) };
   g.fillStyle = '#070b12'; g.fillRect(0, 0, W, H);
   const SEE = S.sys.map((s) => ccSee(S, s));
-  for (const s of S.sys) { const o = SEE[s.id].owner; if (o < 0 || o === SM_N) continue; const [x, y] = ccXY(s), r = k * 9, gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, SM_FAC[o].col + (SEE[s.id].live ? '2a' : '14')); gr.addColorStop(1, SM_FAC[o].col + '00'); g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); }
+  for (const s of S.sys) { const o = SEE[s.id].owner; if (o < 0) continue; const fc = ccFacCol(S, o), [x, y] = ccXY(s), r = k * 9, gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, fc + (SEE[s.id].live ? (o === SM_N ? '18' : '2a') : '10')); gr.addColorStop(1, fc + '00'); g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); }
   g.lineWidth = 1.2; g.strokeStyle = '#243247';
   for (const [a, b] of S.edges) { const [x1, y1] = ccXY(S.sys[a]), [x2, y2] = ccXY(S.sys[b]); g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke(); }
   // 你的小隊的移動命令（選中的較粗）
@@ -95,10 +95,10 @@ function ccDraw(ts) {
     else if (mineHere.length) { g.strokeStyle = 'rgba(63,223,143,.6)'; g.lineWidth = 1.5; g.beginPath(); g.arc(x, y, r + 8, 0, 7); g.stroke(); }
     if (Q && S.adj[Q.sys].includes(s.id) && !S.fin) { g.strokeStyle = 'rgba(63,223,143,.25)'; g.lineWidth = 1; g.beginPath(); g.arc(x, y, r + 5, 0, 7); g.stroke(); }
     if (s.id === CC.sel) { g.strokeStyle = '#fff'; g.lineWidth = 2; g.setLineDash([4, 3]); g.beginPath(); g.arc(x, y, r + 14, 0, 7); g.stroke(); g.setLineDash([]); }
-    if (V.sg) { g.strokeStyle = SM_FAC[V.sg.f].col; g.lineWidth = 2; g.setLineDash([3, 3]); g.beginPath(); g.arc(x, y, r + 3, 0, 7); g.stroke(); g.setLineDash([]); }
-    g.globalAlpha = V.live ? 1 : 0.55; g.fillStyle = V.owner < 0 ? '#3a4352' : SM_FAC[V.owner].col; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); g.globalAlpha = 1;
+    if (V.sg) { g.strokeStyle = ccFacCol(S, V.sg.f); g.lineWidth = 2; g.setLineDash([3, 3]); g.beginPath(); g.arc(x, y, r + 3, 0, 7); g.stroke(); g.setLineDash([]); }
+    g.globalAlpha = V.live ? 1 : 0.55; g.fillStyle = V.owner < 0 ? '#3a4352' : ccFacCol(S, V.owner); g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); g.globalAlpha = 1;
     if (V.owner < 0) { g.fillStyle = '#cfd8e3'; g.font = 'bold 11px sans-serif'; g.fillText('?', x, y + 4); }
-    if (s.cap) { g.strokeStyle = '#ffe28a'; g.lineWidth = 1.5; g.beginPath(); g.arc(x, y, r + 1.5, 0, 7); g.stroke(); }
+    if (s.cap) { g.strokeStyle = '#ffffff'; g.lineWidth = 1.5; g.beginPath(); g.arc(x, y, r + 1.5, 0, 7); g.stroke(); }   // 首都：白圈（黃色是中立）
     const dn = V.defs.length;
     g.fillStyle = V.live ? '#cfd8e3' : '#7d8794'; g.font = '12px sans-serif'; g.fillText(`${s.name}${V.yard ? ' ⚓' : ''}${V.depot ? ' ✚' : ''}${V.live || V.age == null ? '' : `（${V.age}週前）`}${s.id === S.pl.base ? '［據點］' : ''}`, x, y - r - 6);
     if (dn) { g.fillStyle = V.live ? '#e8eef8' : '#7d8794'; g.font = 'bold 11px sans-serif'; g.textAlign = 'left'; g.fillText('◆' + dn, x + r + 3, y + 4); g.textAlign = 'center'; }
@@ -221,7 +221,7 @@ function ccCard() {
   }
   const unk = own0 < 0, intelTx = V.live ? '' : unk ? '<dt>情報</dt><dd style="color:#ffb35a">沒有情報：從沒看過這個星系</dd>' : `<dt>情報</dt><dd style="color:#ffb35a">${V.age} 週前（第 ${S.turn - V.age} 週）看到的樣子・小隊靠近（相鄰）或偵察才會更新</dd>`;
   el.hidden = false;
-  el.innerHTML = `<button class="sm-x" id="cc-x">×</button><h3><span style="color:${unk ? '#7d8794' : SM_FAC[own0].col}">●</span> ${s.name}</h3>
+  el.innerHTML = `<button class="sm-x" id="cc-x">×</button><h3><span style="color:${unk ? '#7d8794' : ccFacCol(S, own0)}">●</span> ${s.name}</h3>
     <dl class="sm-kv">${intelTx}<dt>擁有者</dt><dd>${unk ? '不明' : SM_FAC[own0].name}${s.cap && !unk ? '・首都' : ''}${s.id === S.pl.base ? '・<b style="color:#3fdf8f">你的據點</b>' : ''}</dd>${unk ? '' : `<dt>等級</dt><dd>${SM_TIER[s.tier]}・地面防禦 ${V.def}${V.live && s.def0 != null && s.def < s.def0 ? `／${s.def0}（受創，圍城 ${ccSiegeNeed(s)} 週）` : ''}</dd>
       <dt>軌道防禦</dt><dd>${dl.length ? dl.map((d) => `${CAP_UNIT[d.type].name} ${Math.round(d.hp * 100)}%`).join('、') : '沒有'}</dd>
       <dt>設施</dt><dd>${[V.yard ? '維修船塢（修船、造艦）' : '', V.depot ? '補給站（補飛彈）' : ''].filter(Boolean).join('、') || '沒有'}</dd>`}
@@ -440,6 +440,10 @@ function ccMissionList() {
 Object.assign(window.__cap || (window.__cap = {}), { ccNewGame, ccWeekA, ccWeekB, CC_RULE, ccLoad, ccSave, ccShow, ccState: () => CC, ccCard, ccLaunch, ccMissionDone, ccRender, ccPlan, ccTransfer, ccTakeCommand, ccSetTask, ccTaskOdds, ccRunTasks, ccBuild });
 
 // ───── 星圖上的關係：own＝你的小隊、ally＝同勢力、enemy＝敵對、neutral＝其他（顏色同星海生涯的 SMU_REL）─────
+// 星系、勢力的顏色跟小隊一樣照敵我關係（不是勢力的固定色）：你的陣營＝藍、敵對＝紅、中立星系與停戰＝黃
+function ccFacRel(S, f) { return f === S.fac ? 'ally' : f === SM_N ? 'neutral' : ccHostile(S, S.fac, f) ? 'enemy' : 'neutral'; }
+const ccFacCol = (S, f) => SMU_REL[ccFacRel(S, f)].col;
+const ccFacRelName = (S, f) => f === S.fac ? '你的陣營' : f === SM_N ? '中立' : SMU_REL[ccFacRel(S, f)].name;
 function ccRel(S, q) { return q.pl ? 'own' : q.fac === S.fac ? 'ally' : ccHostile(S, S.fac, q.fac) ? 'enemy' : 'neutral'; }
 // ───── 頂端的圖示：填滿的高度＝數值（0～100）─────
 let ccIcoN = 0;
@@ -455,7 +459,7 @@ function ccIco(kind, col, v) {
 function ccTopChips(S, cnt) {
   const fav = ccFavOf(S, S.fac), fame = S.fame || [50, 50, 50, 50];
   const favTip = `好感（${SM_FAC[S.fac].name}對你）${Math.round(fav)}／100：任務完成 +${CC_RULE.fav.ok}、失敗 −${CC_RULE.fav.fail}。新任務的獎勵 ×${ccFavK(S, S.fac).toFixed(2)}`;
-  const fac = (f) => `<span class="sm-chip cc-chip2" title="${SM_FAC[f].name}：已知擁有 ${cnt[f]} 個星系（看不到的星系照最後的情報）${f === SM_N ? '' : `・聲望 ${Math.round(fame[f])}／100（佔領、交戰、特戰的成敗會改變；影響地面投降的評分）`}"><i style="background:${SM_FAC[f].col}"></i>${SM_FAC[f].name}<span class="sep"></span>${ccIco('planet', SM_FAC[f].col)}<b>${cnt[f]}</b>${f === SM_N ? '' : `${ccIco('star', '#ffd36a', fame[f] / 100)}<b>${Math.round(fame[f])}</b>`}</span>`;
+  const fac = (f) => `<span class="sm-chip cc-chip2" title="${SM_FAC[f].name}${f === SM_N ? "" : `（${ccFacRelName(S, f)}）`}：已知擁有 ${cnt[f]} 個星系（看不到的星系照最後的情報）${f === SM_N ? '' : `・聲望 ${Math.round(fame[f])}／100（佔領、交戰、特戰的成敗會改變；影響地面投降的評分）`}"><i style="background:${ccFacCol(S, f)}"></i>${SM_FAC[f].name}<span class="sep"></span>${ccIco('planet', ccFacCol(S, f))}<b>${cnt[f]}</b>${f === SM_N ? '' : `${ccIco('star', '#ffd36a', fame[f] / 100)}<b>${Math.round(fame[f])}</b>`}</span>`;
   return `<span class="sm-chip cc-chip2" title="${favTip}">${ccIco('heart', '#ff7a9a', fav / 100)}<b>${Math.round(fav)}</b><span class="g-dim" style="font-size:11px">好感</span></span>${[SM_A, SM_E, SM_P, SM_N].map(fac).join('')}`;
 }
 // ───── 每週開始（同星海生涯）：上週的戰報 → 每個新任務一張簡報 ─────
@@ -472,7 +476,7 @@ const CC_NPC = {
 function ccBrief(M, again) {
   const S = CC.S; if (!S || !M) return;
   if (M.brief && !again) { if (!gEl('sm-modal') && SMU.q.length) SMU.q.shift()(); return; }   // 同一個任務已經看過（重複排進佇列）
-  const f = M.from != null ? M.from : S.fac, N = CC_NPC[f] || CC_NPC[S.fac], col = SM_FAC[f].col, t = S.sys[M.sys], left = M.due - S.turn;
+  const f = M.from != null ? M.from : S.fac, N = CC_NPC[f] || CC_NPC[S.fac], col = ccFacCol(S, f), t = S.sys[M.sys], left = M.due - S.turn;
   const say = M.type === 'cap' ? [`${t.name} 是下一個目標。`, '先打下軌道，再圍城或地面突襲讓地面投降。']
     : [`${CC_OPFX[M.op].goal(S, M)}。`, `小隊在 ${t.name} 或相鄰的星系就能出擊。`];
   if (M.exam) say.push(`這次是你的升遷考核：完成就升任${M.exam}。`);
@@ -482,7 +486,7 @@ function ccBrief(M, again) {
     <dl class="sm-kv">
       <dt>任務</dt><dd><b>${ccMisName(M)}</b>・${CC_MIS[M.type].desc(S, M)}</dd>
       <dt>時限</dt><dd class="${left <= 2 ? 'sm-bad' : ''}">${left} 週（到第 ${M.due} 週）</dd>
-      <dt>地點</dt><dd><span style="color:${SM_FAC[t.owner].col}">${smuEsc(t.name)}（${SM_FAC[t.owner].name}）</span></dd>
+      <dt>地點</dt><dd><span style="color:${ccFacCol(S, t.owner)}">${smuEsc(t.name)}（${SM_FAC[t.owner].name}）</span></dd>
       ${M.type === 'op' ? `<dt>成功的影響</dt><dd style="color:#c9a7ff">${CC_OPFX[M.op].fx(S, M)}</dd>` : ''}
       <dt>報酬</dt><dd>資金 ${M.reward.money}、戰功 ${M.reward.merit}</dd>
       <dt>失敗</dt><dd class="g-dim">沒有報酬，${SM_FAC[f].name}對你的好感 −${CC_RULE.fav.fail}</dd>
