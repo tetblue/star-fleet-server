@@ -5,7 +5,8 @@
 // 偵測：雷達站與各單位都有偵測範圍，被地形、巨型結構擋住就看不到；貼地飛（離地 lowAGL 內）雷達的範圍打折；開火會暴露一陣子。
 //   被看到一陣子（偵測條滿）＝被發現：敵軍知道你的位置、會開火；發現你的單位 report 秒後回報＝拉警報（先打掉它、或通訊塔已毀＝不會）。
 //   警報：機場派戰機、增援（有限的幾波）陸續趕來；全部打掉也能贏。
-// 火控（X）：禁止開火（潛行）／自衛（只攔飛彈、只打正在攻擊小隊的）／自由開火；主砲、飛彈是手動的，不受火控限制。
+// 火控（X）：不攻擊（潛行）／手動射擊（按住開火鍵才打）／自動射擊。瞄準＝準心停在敵人上就鎖定；武器先打射程內鎖定的目標，沒有就打最近的敵人。
+// 會消耗的彈藥（飛彈、護航機）隨時間補充，不在戰鬥時加倍（CAP_AMMO）。
 // 技術：玩家小隊的每艘船都是一支「單艦分艦隊」（fd.cap），位置由這裡直接決定（main.js 的 capShip 分支）；敵方戰艦用一般的艦隊模擬（射程 ×rangeMul）。
 // 敵方地面單位放在 CAP.G.gts（同王牌飛行員的地面目標：射線、受擊、模型共用），會移動的有 mv。沒有回放（玩家的輸入不進命令紀錄）。
 const CAP_STORE = 'fleet.captain';
@@ -35,11 +36,16 @@ const CAP_RULE = {
 //   操船：速度、加速、轉向都變慢。敵我都用同一套（capFly），AI 不用改。
 const CAP_FEEL = { fov: 55, boostFov: 4, dist: 0.95, up: 0.26, spd: 0.65, acc: 0.55, turn: 0.65, turnAcc: 0.5, shake: 0.35 };
 const capHeavy = () => SETTINGS.capHeavy !== false;
+// 火控（玩家小隊：自己的船＋同小隊的僚艦）。武器挑目標：先打射程內鎖定的目標，射程內沒有就打最近的敵人（敵艦、地面單位、艦載機、飛來的飛彈）
 const CAP_FC = [
-  { key: 'hold', name: '禁止開火', en: 'HOLD FIRE', col: '#8fe39a', desc: '自動武器全部停火（潛行用）；主砲、飛彈照常手動發射，護航機收回' },
-  { key: 'def', name: '自衛', en: 'DEFENSIVE', col: '#ffd36a', desc: '點防禦攔截飛彈與戰機；砲塔只打正在攻擊小隊的敵人' },
-  { key: 'free', name: '自由開火', en: 'FREE FIRE', col: '#ff7a5a', desc: '所有自動武器打射程內看得到的敵人' },
+  { key: 'hold', name: '不攻擊', en: 'HOLD FIRE', col: '#8fe39a', desc: '所有武器停火（潛行用），護航機收回' },
+  { key: 'manual', name: '手動射擊', en: 'MANUAL', col: '#ffd36a', desc: '按住左鍵：主砲、砲塔、點防禦一起開火；右鍵：飛彈；僚艦跟著你開火' },
+  { key: 'auto', name: '自動射擊', en: 'AUTO FIRE', col: '#ff7a5a', desc: '所有武器（含飛彈）自動開火' },
 ];
+// 會消耗的彈藥：戰鬥中隨時間補充，不在戰鬥時（capCalmWhy 沒有理由＝脫離戰鬥）速度 ×calm。以後新增會消耗的武器，都要加在這裡（capAmmoTick）
+//   msl＝飛彈從 0 補滿要幾秒；ftr＝補一架護航機要幾秒
+const CAP_AMMO = { calm: 2, msl: 180, ftr: 30 };
+{ const k = KEY_ACTIONS.findIndex((a) => a[0] === 'cap_fc'); if (k >= 0) KEY_ACTIONS[k][1] = '火控切換：不攻擊／手動射擊／自動射擊'; const j = KEY_ACTIONS.findIndex((a) => a[0] === 'cap_target'); if (j >= 0) KEY_ACTIONS[j][1] = '鎖定準心附近的敵人（準心停在敵人上也會自動鎖定）'; }
 // 切換小隊（同一場戰鬥有兩個我方小隊時）：按鍵表在 main.js，這裡補上
 { const k = KEY_ACTIONS.findIndex((a) => a[0] === 'cap_switch'); if (k >= 0 && !KEY_ACTIONS.some((a) => a[0] === 'cap_squad')) KEY_ACTIONS.splice(k + 1, 0, ['cap_squad', '切換小隊（兩個小隊同場時）', '艦長', 'KeyB']); if (SETTINGS.keys.cap_squad == null) SETTINGS.keys.cap_squad = 'KeyB'; }
 { const k = KEY_ACTIONS.findIndex((a) => a[0] === 'cap_view'); if (k >= 0) KEY_ACTIONS[k][1] = '鏡頭：近景／遠景／俯視'; if (k >= 0 && !KEY_ACTIONS.some((a) => a[0] === 'cap_move')) KEY_ACTIONS.splice(k + 1, 0, ['cap_move', '俯視：移動到游標處（選取的僚艦，沒選＝自己的船）', '艦長', 'KeyR']); if (SETTINGS.keys.cap_move == null) SETTINGS.keys.cap_move = 'KeyR'; }
@@ -141,11 +147,11 @@ function capHubBind() { gEl('sp-ccr').onclick = () => ccShow(); gEl('sp-rand').o
 function capKeyRows() {
   const k = (id) => keyText(id);
   return [
-    ['滑鼠移動', '瞄準（鏡頭跟著轉；主砲砲塔會轉向準心，只能打射界內）'], ['滑鼠左鍵', '主砲'], ['滑鼠右鍵', '飛彈（先鎖定目標，鎖定完成才能發射；按住連射；垂直發射，不必對準）'],
+    ['滑鼠移動', '準心瞄準：停在敵人上＝鎖定（移到別的敵人才換，目標離開畫面＝解除）'], ['滑鼠左鍵', '開火（火控「手動射擊」：主砲、砲塔、點防禦一起打）'], ['滑鼠右鍵', '飛彈（鎖定完成才發射；「自動射擊」會自己發射）'],
     [`${k('cap_left')}／${k('cap_right')}`, '左轉／右轉'], [`${k('cap_thr_up')}／${k('cap_thr_dn')}`, '油門加／減（減到 0 以下＝倒退）'], [k('cap_stop'), '油門歸零'], [`${k('cap_sl')}／${k('cap_sr')}`, '左右平移'], [`${k('cap_up')}／${k('cap_down')}`, '上升／下降'],
-    [k('cap_boost'), `推進加速（能量用完要回充到 ${Math.round(CAP_BOOST_RE * 100)}% 才能再用）`], [k('cap_target'), '鎖定準心附近的敵人（僚艦「集火」也打它）'], [k('cap_fc'), '火控：禁止開火／自衛／自由開火'],
+    [k('cap_boost'), `推進加速（能量用完要回充到 ${Math.round(CAP_BOOST_RE * 100)}% 才能再用）`], [k('cap_target'), '鎖定準心附近的敵人（僚艦「集火」也打它）'], [k('cap_fc'), '火控：不攻擊／手動射擊／自動射擊（武器先打射程內鎖定的目標，沒有就打最近的敵人）'],
     [k('cap_skill'), '艦種技能'], [k('cap_skill2'), '支援艦的護航機出擊／收回'], [k('cap_switch'), '換船（同一個小隊裡接手下一艘）'], [k('cap_squad'), '切換小隊（佔領戰有友軍小隊時；原本的小隊交給 AI）'],
-    [`${k('cap_o1')}～${k('cap_o4')}`, '僚艦：跟隨／集火我的目標／自由交戰／原地防守'], [k('cap_view'), '鏡頭：近景／遠景／俯視'], ['俯視', `游標＝瞄準（停在敵人上＝鎖定，移到別的敵人才換）・左鍵點我方的船＝選取・中鍵或 ${k('cap_move')}＝選取的船移動到游標處（沒選＝自己的船自動航行）`], [k('cap_warp'), `任務完成、脫離戰鬥後：躍遷撤離（充能 ${CAP_RULE.warpT} 秒，被攻擊會中斷）`], ['滾輪', '鏡頭距離'], ['Esc', '暫停'],
+    [`${k('cap_o1')}～${k('cap_o4')}`, '僚艦：跟隨／集火我的目標／自由交戰／原地防守'], [k('cap_view'), '鏡頭：近景／遠景／俯視'], ['俯視', `游標＝準心（停在敵人上＝鎖定，移到別的敵人才換）・左鍵點我方的船＝選取・中鍵或 ${k('cap_move')}＝選取的船移動到游標處（沒選＝自己的船自動航行）`], [k('cap_warp'), `任務完成、脫離戰鬥後：躍遷撤離（充能 ${CAP_RULE.warpT} 秒，被攻擊會中斷）`], ['滾輪', '鏡頭距離'], ['Esc', '暫停'],
   ];
 }
 function showCaptain() {
@@ -370,7 +376,7 @@ function capBegin(C) {
   CAP.byI = new Int16Array(shipCount).fill(-1); CAP.ships = []; CAP.own = []; CAP.foes = []; CAP.pat = []; CAP.air = []; CAP.sqAI = {};
   CAP.tUsed0 = C.resume ? C.resume.tUsed : 0; CAP.tLim = CAP_RULE.time - CAP.tUsed0;   // 任務時限：每次出擊的戰鬥時間累計
   CAP.auto = !!C.auto; CAP.home = C.auto ? -1 : 0; CAP.allSee = !!C.open;   // home＝玩家自己的小隊（全滅＝輸）；AI 對 AI＝整方全滅才算輸
-  CAP.cur = 0; CAP.fc = C.open ? 2 : 0; CAP.order = 'follow'; CAP.esc = false; CAP.tgt = null; CAP.feed = []; CAP.msl = []; CAP.alarm = false; CAP.alarmT = 0; CAP.report = null; CAP.last = null;
+  CAP.cur = 0; CAP.fc = C.open ? 2 : 0; CAP.fxq = []; CAP.calm = false; CAP.aimHit = null; CAP.order = 'follow'; CAP.esc = false; CAP.tgt = null; CAP.feed = []; CAP.msl = []; CAP.alarm = false; CAP.alarmT = 0; CAP.report = null; CAP.last = null;
   CAP.waves = C.waves; CAP.nextWave = 0; CAP.commLost = false; CAP.saved = false; CAP.hits = []; CAP.flash = null; CAP.pop = null;
   CAP.keys.clear(); CAP.fire = [false, false]; CAP.press = [false, false]; CAP.thr = 0.5; CAP.camD = 1; CAP.view = SETTINGS.capView >= 0 && SETTINGS.capView <= 2 ? SETTINGS.capView : 0; CAP.far = CAP.view === 1; CAP.warp = null; CAP.sel = new Set(); CAP.nav = null; CAP.hov = null;
   CAP.stats = { ks: 0, kg: 0, kf: 0, dmg: 0, lost: 0, shots: 0, msl: 0, merit: 0, alarmed: false, kills: [] };
@@ -397,7 +403,7 @@ function capBegin(C) {
         F: [Math.sin(g.to), 0, Math.cos(g.to)], U: [0, 1, 0], Rr: [-Math.cos(g.to), 0, Math.sin(g.to)], spd: 0, agl: 4, boostE: 1, boosting: false, burstT: -9, shieldT: -9,
         mainCd: 0, gY: 0, gP: 0, gOk: false, gAl: false, boostLock: false, ramT: -9, aiMslT: 0, mslN: H.msl ? H.msl.n : 0, mslCd: 0, lockT: 0, tcd: new Array(H.tur.n).fill(0).map((_, m) => m * 0.4), pcd: new Array(H.pd.n).fill(0), skillCd: 0, repE: 1, repOn: false,
         ftrMax: H.ftr || 0, ftrLost: 0, ftrIds: [], escT: 0, seen: 0, seeing: false, knownT: -99, sigT: -99, spot: null, dead: false, crashT: -9, outT: 0, hitT: -9,
-        inp: { yaw: g.to, pitch: 0, thr: 0.5, strafe: 0, vert: 0, boost: false }, aiFire: false, aiMsl: false, aiTgt: null, aiT: 0, holdP: null, thrKeep: 0.5 };
+        inp: { yaw: g.to, pitch: 0, thr: 0.5, strafe: 0, vert: 0, boost: false }, aiFire: false, aiMsl: false, aiTgt: null, aiT: 0, holdP: null, thrKeep: 0.5, wT: null, tT: null, mT: null, mslAcc: 0, ftrAcc: 0 };
       if (st && H.msl) s.mslN = Math.round(H.msl.n * st.msl);
       if (GRD) s.y = Math.max(s.y, terrainHAt(s.x, s.z) + s.L * 0.13 + 2);
       if (foe || C.open) s.knownT = 1e9;   // 正面交戰：雙方一開始就知道彼此（敵方的船永遠「已知」，玩家的艦載機、飛彈才打得到）
@@ -488,6 +494,7 @@ function capInputs(dt, t) {
     I.turn = live ? (capHeld('cap_right') ? 1 : 0) - (capHeld('cap_left') ? 1 : 0) : 0;
     I.strafe = live ? (capHeld('cap_sr') ? 1 : 0) - (capHeld('cap_sl') ? 1 : 0) : 0;
     if (capTop()) capAimTop(c); else capAimPoint();
+    capLockAim();
     I.vert = live ? (capHeld('cap_up') ? 1 : 0) - (capHeld('cap_down') ? 1 : 0) : 0;
     I.boost = live && capHeld('cap_boost');
     if (CAP.nav) capNav(c, I);
@@ -651,12 +658,13 @@ function capNearestEnemy(s, R) {
 // 目標的位置（死了／不見了＝null）
 function capTgtPos(T, out) {
   if (!T) return null;
+  if (T.k === 'm') { if (!misLive[T.i] || misGen[T.i] !== T.g) return null; const u = (U.uTime.value - misT[T.i * 4]) / misT[T.i * 4 + 1]; if (u < 0 || u >= 1) return null; return bezCPU(T.i, u, out); }
   if (T.k === 'f') { if (FT.state[T.i] !== 2 || FT.side[T.i] === CAP.side) return null; out.set(fP[T.i * 3], fP[T.i * 3 + 1], fP[T.i * 3 + 2]); return out; }
   if (T.k === 'g') { const g = CAP.G.gts[T.i]; if (!g || gtDead(g)) return null; out.set(g.x, g.y + g.hh, g.z); return out; }
   if (T.k === 'ms') { const M = CAP.G.ms[T.i], c = capCur(); if (!M || M.dead || !c) return null; return groundMsPoint(T.i, c.x, c.y, c.z, out); }
   if (!ships.alive[T.i]) return null; shipWorldCPU(T.i, out); return out;
 }
-function capTgtName(T) { return !T ? '' : T.k === 'f' ? '敵戰機' : T.k === 'g' ? CAP.G.gts[T.i].name : T.k === 'ms' ? `${CAP.G.ms[T.i].name}（${Math.max(0, Math.round(CAP.G.ms[T.i].hpNow / CAP.G.ms[T.i].hp * 100))}%）` : capShipName(T.i); }
+function capTgtName(T) { return !T ? '' : T.k === 'm' ? '敵飛彈' : T.k === 'f' ? '敵戰機' : T.k === 'g' ? CAP.G.gts[T.i].name : T.k === 'ms' ? `${CAP.G.ms[T.i].name}（${Math.max(0, Math.round(CAP.G.ms[T.i].hpNow / CAP.G.ms[T.i].hp * 100))}%）` : capShipName(T.i); }
 // 敵艦的名字：特製戰艦用小隊裡的名字（例如「敵 A 隊・重砲艦」）
 function capShipName(i) { const k = capShip(i); return k >= 0 ? CAP.ships[k].name : `敵${SHIP_TYPES[ships.type[i]].name}`; }
 
@@ -700,11 +708,122 @@ function capStandoff(g, P, R, ok) {
 }
 
 // ───── 戰鬥（每 tick） ─────
+// ───── 玩家小隊的武器：火控閘門、挑目標 ─────
+function capFcKey() { return CAP_FC[CAP.fc].key; }
+// 開火閘門：不攻擊＝全停；手動＝按住開火鍵才打（僚艦跟著玩家開火）；自動＝有目標就打。k：0＝左鍵（主砲、砲塔、點防禦）、1＝右鍵（飛彈）
+function capTrig(k) { const fc = capFcKey(); return fc === 'auto' || fc === 'manual' && CAP.fire[k] && capIn(); }
+function capSameT(a, b) { return a === b || !!a && !!b && a.k === b.k && a.i === b.i; }
+// 射程 R 內的目標：先回傳鎖定的目標（CAP.tgt），沒有就回傳最近的敵人。kinds：s＝敵艦、g＝地面單位、f＝艦載機、m＝飛來的飛彈；ok＝額外條件（例如主砲射界）
+//   一般建築（不是任務目標）不打；任務目標建築只有鎖定了才打
+function capWpnPick(s, R, kinds, ok) {
+  const dd = (x, y, z) => Math.hypot(x - s.x, y - s.y, z - s.z), T = CAP.tgt;
+  const tp = T && kinds.includes(T.k === 'ms' ? 'g' : T.k) ? capTgtPos(T, _cr) : null;
+  if (tp && dd(tp.x, tp.y, tp.z) <= R && (!ok || ok(tp.x, tp.y, tp.z))) return T;
+  const es = 1 - s.side, t = U.uTime.value; let best = null, bd = R;
+  const test = (o, x, y, z) => { const d = dd(x, y, z); if (d < bd && (!ok || ok(x, y, z))) { bd = d; best = o; } };
+  if (kinds.includes('s')) for (let i = 0; i < shipCount; i++) { if (!ships.alive[i] || ships.side[i] !== es || squadrons[ships.sq[i]].hidden || !capVis(s, i, t)) continue; shipWorldCPU(i, _cp); test({ k: 's', i }, _cp.x, _cp.y, _cp.z); }
+  if (kinds.includes('g')) for (const g of CAP.G.gts) if (g.side === es && !gtDead(g) && CAP.seeG[g.id] && g.kind !== 'bldg') test({ k: 'g', i: g.id }, g.x, g.y + g.hh, g.z);
+  if (kinds.includes('f') || kinds.includes('m')) {
+    airIndex(); const A = AIR.map[es];
+    if (A) for (const arr of A.values()) for (const o of arr) {
+      if (o.a === 1 ? !kinds.includes('f') || FT.kind[o.i] === 1 : !kinds.includes('m')) continue;
+      test(o.a === 1 ? { k: 'f', i: o.i } : { k: 'm', i: o.i, g: o.g }, o.x, o.y, o.z);
+    }
+  }
+  return best;
+}
+// 瞄準點：目標的位置＋提前量（子彈速度 spd）
+const _wp = new THREE.Vector3();
+function capLeadPos(T, s, spd) {
+  const p = capTgtPos(T, _wp); if (!p) return null;
+  let vx = 0, vy = 0, vz = 0;
+  if (T.k === 'f') { vx = fV[T.i * 3]; vy = fV[T.i * 3 + 1]; vz = fV[T.i * 3 + 2]; }
+  else if (T.k === 's') { const k = capShip(T.i); if (k >= 0) { const o = CAP.ships[k]; vx = o.vx; vy = o.vy; vz = o.vz; } }
+  const tt = Math.hypot(p.x - s.x, p.y - s.y, p.z - s.z) / spd;
+  return { x: p.x + vx * tt, y: p.y + vy * tt, z: p.z + vz * tt };
+}
+// 玩家小隊（自己操控的船＋同小隊的僚艦）：火控決定開不開火；目標＝鎖定的優先，射程內沒有就打最近的
+function capSquadWeapons(s, dt, t, ctl) {
+  const H = s.H, M = H.main, fc = capFcKey(), fire0 = capTrig(0), held = CAP.fire[0] && capIn();
+  if (simTick % 3 === s.k % 3) capRam(s, t);
+  // 主砲：射程內、射界內的目標（每 6 tick 重挑；目標還在就一直追著瞄）
+  const arcOk = (x, y, z) => { const [mx, my, mz] = capMuzzle(s), dx = x - mx, dz = z - mz, wy = Math.abs(wrapAngle(Math.atan2(dx, dz) - s.yaw)), wp = Math.atan2(y - my, Math.hypot(dx, dz)); return wy <= M.arc * DEG && wp >= CAP_GUN_PITCH[0] && wp <= CAP_GUN_PITCH[1]; };
+  if (fc === 'hold') s.wT = null;
+  else if (simTick % 6 === s.k % 6 || !s.wT || !capTgtPos(s.wT, _cr)) s.wT = capWpnPick(s, M.range, 'sgfm', arcOk);
+  const wp = s.wT ? capLeadPos(s.wT, s, M.spd) : null;
+  capGunAim(s, dt, wp || (ctl ? CAP.aimPt : null));
+  const want = fc === 'hold' ? false : ctl ? (fc === 'auto' ? !!wp || held : held) : fire0 && !!wp;   // 沒有目標時，自己的船按住開火＝打準心指的地方
+  if (want && s.mainCd <= 0 && s.gOk && s.gAl) { capMain(s, t); if (ctl) CAP.shakeT = performance.now(); }
+  else if (ctl && (CAP.press[0] || CAP.press[1]) && fc === 'hold') capFeed(`火控「不攻擊」：按 ${keyText('cap_fc')} 切換`, 'hint');
+  else if (ctl && CAP.press[0] && s.mainCd <= 0 && !s.gOk && !wp) capFeed('主砲：準心在射界外，先把船轉過去', 'hint');
+  // 飛彈：射程內的敵艦、地面單位（鎖定的優先）；換目標要重新鎖定
+  if (H.msl) {
+    if (fc === 'hold') { s.mT = null; }
+    else if (simTick % 6 === (s.k + 3) % 6 || s.mT && !capTgtPos(s.mT, _cr)) {
+      const n = capWpnPick(s, H.msl.range, 'sg', (x, y, z) => capBlock(s.x, s.y, s.z, x, y + 0.5, z) < 0);
+      if (!capSameT(n, s.mT)) s.lockT = 0; s.mT = n;
+    }
+    s.lockT = s.mT ? Math.min(H.msl.lockT * 1.5, s.lockT + dt) : Math.max(0, s.lockT - dt * 2);
+    const press = ctl && (CAP.press[1] || CAP.fire[1] && capIn()), keep = ctl || s.mslN > H.msl.n * 0.25;   // 僚艦留兩成五備用
+    const go = fc === 'auto' ? press || keep && t > s.aiMslT : fc === 'manual' && (press || !ctl && keep && CAP.fire[1] && capIn() && t > s.aiMslT);
+    if (go) capMissile(s, t, ctl && CAP.press[1]);
+  }
+  // 技能
+  if (H.skill.key === 'repair') { if (ctl) capRepair(s, dt, t, CAP.skillHeld && capIn()); else capRepairAI(s, dt, t); }
+  // 砲塔、點防禦：和主砲一起，照火控開火
+  if (fc !== 'hold' && fire0) { capPD(s, dt, t); capTurretsP(s, dt, t); }
+}
+// 玩家小隊的砲塔：全部打同一個目標（鎖定的優先，沒有就最近的敵艦、地面單位、艦載機）
+function capTurretsP(s, dt, t) {
+  const T = s.H.tur;
+  if (simTick % 6 === (s.k + 1) % 6 || !s.tT || !capTgtPos(s.tT, _cr)) s.tT = capWpnPick(s, T.range, 'sgf');
+  for (let m = 0; m < T.n; m++) {
+    s.tcd[m] -= dt; if (s.tcd[m] > 0) continue;
+    if (!s.tT || !capTgtPos(s.tT, _cr)) { s.tcd[m] = 0.3 + capRnd() * 0.2; continue; }
+    s.tcd[m] = T.cd * (0.85 + capRnd() * 0.3);
+    capTurretShot(s, m, T, s.tT, t);
+  }
+}
+// 彈藥補充（CAP_AMMO）：玩家這邊的船；不在戰鬥時加倍
+function capAmmoTick(dt, t) {
+  if (simTick % 30 === 17) CAP.calm = !capCalmWhy(t);
+  const k = dt * (CAP.calm ? CAP_AMMO.calm : 1);
+  for (const s of CAP.own) {
+    if (s.dead) continue;
+    const M = s.H.msl;
+    if (M && s.mslN < M.n) { s.mslAcc += k * M.n / CAP_AMMO.msl; while (s.mslAcc >= 1 && s.mslN < M.n) { s.mslAcc -= 1; s.mslN++; } } else s.mslAcc = 0;
+    if (s.ftrMax && s.ftrLost > 0) { s.ftrAcc += k / CAP_AMMO.ftr; if (s.ftrAcc >= 1) { s.ftrAcc = 0; s.ftrLost--; } } else s.ftrAcc = 0;
+  }
+}
+// ───── 子彈特效 ─────
+// main.js 的光束：陣營編在整數部分、亮度在小數部分，所以 inten 一定要 < 1（≥ 1 會變成別的陣營顏色、亮度掉下來）
+// capBolt：一發子彈＝中間一條亮的＋旁邊幾條暗一點的（看起來比較粗）；seg＝亮的那一段多長（世界單位），wid＝粗細（世界單位，0＝一條）
+function capBolt(ax, ay, az, bx, by, bz, t, dur, side, inten, seg, wid) {
+  const d = Math.hypot(bx - ax, by - ay, bz - az) || 1, len = Math.min(1, seg / d), fac = SIDE_FAC[side], I = Math.min(0.95, inten);
+  spawnBeam(ax, ay, az, bx, by, bz, t, dur, side, I, len, fac);
+  if (!(wid > 0)) return;
+  let nx = -(bz - az), nz = bx - ax; const nl = Math.hypot(nx, nz) || 1; nx = nx / nl * wid; nz = nz / nl * wid;
+  spawnBeam(ax + nx, ay, az + nz, bx + nx, by, bz + nz, t, dur, side, I * 0.6, len, fac);
+  spawnBeam(ax - nx, ay, az - nz, bx - nx, by, bz - nz, t, dur, side, I * 0.6, len, fac);
+  spawnBeam(ax, ay + wid, az, bx, by + wid, bz, t, dur, side, I * 0.5, len, fac);
+}
+// 命中閃光：子彈飛到的時候才炸（CAP.fxq，capCombat 每一幀處理）
+function capFxAt(t, x, y, z, side, r, heavy) { CAP.fxq.push({ t, x, y, z, side, r, heavy }); }
+function capFxTick(t) {
+  for (let k = CAP.fxq.length - 1; k >= 0; k--) {
+    const e = CAP.fxq[k]; if (e.t > t) continue;
+    spawnFx(e.x, e.y, e.z, e.side, e.r, e.heavy ? 22 : 30);
+    pfxHull(e.x, e.y, e.z, e.r * 0.5, e.heavy);
+    CAP.fxq.splice(k, 1);
+  }
+}
 function capCombat(dt) {
   const t = U.uTime.value;
   airIndex();
   for (const s of CAP.ships) if (!s.dead && ships.alive[s.i]) capShipWeapons(s, dt, t);
   CAP.press[0] = CAP.press[1] = false;
+  capAmmoTick(dt, t);
+  capFxTick(t);
   capMissilesStep(dt, t);
   capUnitsFire(dt, t);
   capEscorts(t);
@@ -719,6 +838,7 @@ function capSig(s, t, k = 1) { s.sigT = Math.max(s.sigT, t + CAP_RULE.sig * k); 
 function capShipWeapons(s, dt, t) {
   const ai = capIsAI(s), ctl = !ai && s.k === CAP.cur, H = s.H;
   s.mainCd -= dt; s.mslCd -= dt; s.skillCd -= dt;
+  if (!ai) { capSquadWeapons(s, dt, t, ctl); return; }
   // 鎖定（飛彈）：目標在射程內、看得到就累積
   const T = ai ? s.aiTgt : ctl || CAP.order === 'focus' ? CAP.tgt : null, tp = T ? capTgtPos(T, _cr) : null;
   if (H.msl && tp && T.k !== 'f' && Math.hypot(tp.x - s.x, tp.y - s.y, tp.z - s.z) <= H.msl.range && !(T.k === 'g' && capBlock(s.x, s.y, s.z, tp.x, tp.y + 0.5, tp.z) >= 0)) s.lockT = Math.min(H.msl.lockT * 1.5, s.lockT + dt);
@@ -733,7 +853,7 @@ function capShipWeapons(s, dt, t) {
   // 技能
   if (ctl && H.skill.key === 'repair') capRepair(s, dt, t, CAP.skillHeld && capIn());
   else if (!ctl && H.skill.key === 'repair') capRepairAI(s, dt, t);
-  // 自動武器（火控；AI 一律自由開火）；僚艦集火：照打指定目標
+  // 自動武器（AI 一律自由開火）
   const fc = ai ? 'free' : CAP_FC[CAP.fc].key;
   if (fc !== 'hold') capPD(s, dt, t);
   if (fc !== 'hold') capTurrets(s, dt, t, fc);
@@ -746,6 +866,15 @@ function capAimPoint() {
   const h = pilotRay(cx, cy, cz, A, 900, { speed: 1e9 }, false, 1 - CAP.side), mh = groundMsRay(cx, cy, cz, A, h.k ? h.s + 0.5 : 900);
   const s = mh ? mh.s : h.k ? h.s : 500;
   CAP.aimPt = { x: cx + A[0] * s, y: cy + A[1] * s, z: cz + A[2] * s, hit: !!(mh || h.k) };
+  const G = h.k === 'g' ? CAP.G.gts[h.i] : null;   // 準心的射線直接打到的敵人（鎖定用）
+  CAP.aimHit = mh ? { k: 'ms', i: mh.id } : h.k === 's' && CAP.seeS[h.i] ? { k: 's', i: h.i } : G && CAP.seeG[G.id] && !(G.kind === 'bldg' && !G.mis) ? { k: 'g', i: G.id } : null;
+}
+// 鎖定（所有視角）：準心（俯視＝游標）停在敵人上＝鎖定它，一直鎖著，直到準心移到另一個敵人上；目標離開畫面＝解除
+function capLockAim() {
+  if (!capIn()) return;
+  if (CAP.tgt) { const tp = capTgtPos(CAP.tgt, _cr); if (tp && !capOnScr(capScr(tp.x, tp.y, tp.z))) { CAP.tgt = null; capFeed('目標離開畫面，解除鎖定', 'hint'); } }
+  const h = capTop() ? capHover(true) : capHover(true, [VW / 2, VH / 2]) || CAP.aimHit;
+  if (h && !capSameT(CAP.tgt, h)) { CAP.tgt = { k: h.k, i: h.i }; capFeed(`鎖定：${capTgtName(h)}`, 'hint'); }
 }
 // 俯視：游標指到的地方。游標停在敵人上＝鎖定它（一直鎖著，直到游標移到另一個敵人上）；瞄準點＝鎖定的目標，沒有目標＝游標在船的高度的平面上
 const _tr = new THREE.Vector3();
@@ -760,8 +889,8 @@ function capMousePlane(y) {
   return { x: o.x + dx * k, y, z: o.z + dz * k };
 }
 // 游標附近（畫面上）的東西：foe＝敵艦、敵方地面單位；否則＝我方的船
-function capHover(foe) {
-  const m = capMouseVW(); if (!m) return null;
+function capHover(foe, at) {
+  const m = at || capMouseVW(); if (!m) return null;
   let best = null, bd = 1e9;
   const test = (o, x, y, z, L) => { const p = capScr(x, y, z); if (!p) return; const q = capScr(x + L * 0.5, y, z), R = Math.max(22, q ? Math.hypot(q[0] - p[0], q[1] - p[1]) * 1.2 : 0), d = Math.hypot(p[0] - m[0], p[1] - m[1]); if (d < R && d < bd) { bd = d; best = o; } };
   if (foe) {
@@ -774,14 +903,10 @@ function capHover(foe) {
 function capOnScr(p) { return !!p && p[0] >= 0 && p[0] <= VW && p[1] >= 0 && p[1] <= VH; }
 function capAimTop(s) {
   if (!capIn()) return;
-  if (CAP.tgt) { const tp = capTgtPos(CAP.tgt, _cr); if (tp && !capOnScr(capScr(tp.x, tp.y, tp.z))) { CAP.tgt = null; capFeed('目標離開畫面，解除鎖定', 'hint'); } }
-  const h = capHover(true);
-  if (h && !(CAP.tgt && CAP.tgt.k === h.k && CAP.tgt.i === h.i)) { CAP.tgt = h; for (const o of CAP.own) o.lockT = 0; capFeed(`鎖定：${capTgtName(h)}`, 'hint'); }
   CAP.hov = capHover(false);
-  const tp = CAP.tgt ? capTgtPos(CAP.tgt, _cr) : null;
-  const P = tp ? { x: tp.x, y: tp.y, z: tp.z, hit: true } : capMousePlane(s.y);
+  const P = capMousePlane(s.y);   // 準心＝游標（鎖定在 capLockAim；砲塔自己轉向目標）
   if (!P) return;
-  P.hit = true; CAP.aimPt = P;
+  P.hit = true; CAP.aimPt = P; CAP.aimHit = null;
   const dx = P.x - s.x, dy = P.y - s.y, dz = P.z - s.z;   // 換回第三人稱時，鏡頭朝著原本瞄的方向
   CAP.yaw = Math.atan2(dx, dz); CAP.pitch = Math.max(-1.2, Math.min(1.0, Math.atan2(dy, Math.hypot(dx, dz))));
 }
@@ -843,9 +968,12 @@ function capMain(s, t) {
   const sd = h.s, tf = sd / M.spd;
   const ex = ox + D[0] * sd, ey = oy + D[1] * sd, ez = oz + D[2] * sd, side = s.side;
   const dmg = M.dmg * s.dm, sdm = s.foe ? dmg / CAP_RULE.gunMul : dmg;   // 敵方特製戰艦打玩家：main.js 會把敵方的砲 ×gunMul（給一般戰艦用），先除掉
-  spawnBeam(ox, oy, oz, ex, ey, ez, t, tf, side, M.dmg >= 50 ? 1.8 : 1.3, Math.min(1, (M.dmg >= 50 ? 24 : 12) / Math.max(1, sd)), SIDE_FAC[side]);
+  const hv = M.dmg >= 50;
+  capBolt(ox, oy, oz, ex, ey, ez, t, tf, side, 0.95, Math.max(s.L * (hv ? 1.6 : 1.1), hv ? 22 : 14), s.L * (hv ? 0.05 : 0.035));
+  spawnBeam(ox, oy, oz, ex, ey, ez, t, tf, side, 0.3, 0.75, SIDE_FAC[side]);   // 淡淡的彈道（看得出從哪裡打到哪裡）
   rigFire(s.i, 'main', t, ex, ey, ez);   // 3D 砲塔轉向、後座
-  spawnFx(ox, oy, oz, side, s.L * (M.dmg >= 50 ? 0.22 : 0.12), 30);
+  spawnFx(ox, oy, oz, side, s.L * (hv ? 0.4 : 0.26), 30);   // 砲口閃光
+  if (h.k) capFxAt(t + tf, ex, ey, ez, side, s.L * (hv ? 0.35 : 0.22), hv);   // 命中閃光
   if (!s.foe) CAP.stats.shots++; capSig(s, t);
   if (h.k === 'f') pending.push({ kind: 'ak', a: 1, t: t + tf, i: h.i, dmg: dmg * 0.5, side });
   else if (h.k === 'm') pending.push({ kind: 'ak', a: 0, t: t + tf, i: h.i, g: h.g, dmg: 1, side });
@@ -858,8 +986,8 @@ function capMissile(s, t, pressed) {
   const M = s.H.msl; if (!M || s.mslCd > 0) return;
   const ctl = s.k === CAP.cur;
   if (s.mslN <= 0) { if (pressed) capFeed('飛彈打完了', 'hint'); return; }
-  const T = capIsAI(s) ? s.aiTgt : CAP.tgt, tp = T ? capTgtPos(T, _cr) : null;
-  if (!tp || T.k === 'f') { if (pressed) capFeed(`飛彈：先按 ${keyText('cap_target')} 鎖定敵艦或地面目標`, 'hint'); return; }
+  const T = capIsAI(s) ? s.aiTgt : s.mT, tp = T ? capTgtPos(T, _cr) : null;
+  if (!tp || T.k === 'f' || T.k === 'm') { if (pressed) capFeed('飛彈：射程內沒有目標（準心停在敵人上＝鎖定）', 'hint'); return; }
   if (s.lockT < M.lockT) { if (pressed) capFeed(Math.hypot(tp.x - s.x, tp.y - s.y, tp.z - s.z) > M.range ? '飛彈：目標在射程外' : '飛彈：鎖定中…', 'hint'); return; }
   s.mslN--; s.mslCd = M.cd; s.aiMslT = t + 2.5; if (!s.foe) CAP.stats.msl++; capSig(s, t);
   const ox = s.x + s.U[0] * s.L * 0.12, oy = s.y + s.U[1] * s.L * 0.12, oz = s.z + s.U[2] * s.L * 0.12;
@@ -906,7 +1034,7 @@ function capPD(s, dt, t) {
     const a = (k / P.n) * TAU, mx = s.x + s.U[0] * s.L * 0.1 + Math.sin(a) * s.L * 0.15, my = s.y + s.U[1] * s.L * 0.1, mz = s.z + s.U[2] * s.L * 0.1 + Math.cos(a) * s.L * 0.15;
     const lead = d / 600, tx = o.x + o.vx * lead + (hit ? 0 : (capRnd() - 0.5) * 6), ty = o.y + o.vy * lead + (hit ? 0 : (capRnd() - 0.5) * 4), tz = o.z + o.vz * lead + (hit ? 0 : (capRnd() - 0.5) * 6);
     const dur = Math.hypot(tx - mx, ty - my, tz - mz) / 600;
-    spawnBeam(mx, my, mz, tx, ty, tz, t, dur, s.side, 0.5, Math.min(0.5, 6 / Math.max(1, d)), SIDE_FAC[s.side]);
+    capBolt(mx, my, mz, tx, ty, tz, t, dur, s.side, 0.8, Math.max(4, s.L * 0.3), 0);
     rigFire(s.i, 'aa', t, tx, ty, tz);
     if (hit) pending.push({ kind: 'ak', t: t + dur, a: o.a, i: o.i, g: o.g, dmg: o.a === 0 ? 1 : P.dmg, side: s.side });
     capSig(s, t, 0.5);
@@ -952,7 +1080,9 @@ function capTurretShot(s, m, T, tg, t) {
   const hit = capRnd() < T.acc * sz * (1 - 0.25 * d / T.range) * (GRD ? Math.sqrt(groundHitMul(my, ty)) : 1);
   if (!hit) { const o = 1.5 + capRnd() * 3; tx += (capRnd() - 0.5) * o * 2; tz += (capRnd() - 0.5) * o * 2; ty += (capRnd() - 0.5) * o; }
   const dur = Math.hypot(tx - mx, ty - my, tz - mz) / 620;
-  spawnBeam(mx, my, mz, tx, ty, tz, t, dur, side, 0.75, Math.min(0.3, 30 / Math.max(1, d)), SIDE_FAC[side]);
+  capBolt(mx, my, mz, tx, ty, tz, t, dur, side, 0.9, Math.max(8, s.L * 0.6), s.L * 0.015);
+  spawnFx(mx, my, mz, side, s.L * 0.07, 34);   // 砲口閃光
+  if (hit) capFxAt(t + dur, tx, ty, tz, side, s.L * 0.1, false);
   rigFire(s.i, 'sec', t, tx, ty, tz);
   capSig(s, t);
   if (!hit) { if (tg.k !== 'f' && GRD) pending.push({ kind: 'sp', t: t + dur, x: tx, y: Math.max(ty, terrainHAt(tx, tz)), z: tz, side, r: 0.15 }); return; }
@@ -1001,7 +1131,7 @@ function capHeal(s, o, amt, t) {
   if (o !== s && simTick % 4 === 0) spawnBeam(s.x, s.y + s.L * 0.1, s.z, o.x, o.y, o.z, t, 0.08, s.side, 0.7, 1, SIDE_FAC[s.side]);
   if (simTick % 12 === 0) spawnFx(o.x, o.y, o.z, fxShield(s.side), o.L * 0.4, 30);
 }
-// 支援艦的護航機（攔截機：在支援艦附近巡邏，攔飛彈、打戰機）；火控「禁止開火」＝全部收回
+// 支援艦的護航機（攔截機：在支援艦附近巡邏，攔飛彈、打戰機）；火控「不攻擊」＝全部收回
 function capEscorts(t) {
   for (const s of CAP.ships) {
     if (!s.ftrMax) continue;
@@ -1536,7 +1666,7 @@ function capKey(e) {
   if (is('cap_target')) capPickTarget();
   if (is('cap_fc')) { CAP.fc = (CAP.fc + 1) % CAP_FC.length; capFeed(`火控：${CAP_FC[CAP.fc].name}　${CAP_FC[CAP.fc].desc}`, CAP.fc === 2 ? 'bad' : 'ok'); }
   if (is('cap_skill')) { const s = capCur(); if (s && s.H.skill.key === 'repair') CAP.skillHeld = true; else if (s) capSkill(s, U.uTime.value); }
-  if (is('cap_skill2')) { if (CAP.own.some((s) => s.ftrMax && !s.dead)) { CAP.esc = !CAP.esc; capFeed(CAP.esc ? (CAP.fc === 0 ? '護航機：火控「禁止開火」時不會出擊' : '護航機出擊') : '護航機收回', 'ok'); } else capFeed('小隊裡沒有支援艦', 'hint'); }
+  if (is('cap_skill2')) { if (CAP.own.some((s) => s.ftrMax && !s.dead)) { CAP.esc = !CAP.esc; capFeed(CAP.esc ? (CAP.fc === 0 ? '護航機：火控「不攻擊」時不會出擊' : '護航機出擊') : '護航機收回', 'ok'); } else capFeed('小隊裡沒有支援艦', 'hint'); }
   if (is('cap_switch')) { if (!capSwitch(e.shiftKey ? -1 : 1, false)) capFeed('這個小隊沒有別的船可以接手', 'hint'); }
   if (is('cap_squad')) capSquadKey();
   for (let n = 0; n < 4; n++) if (is('cap_o' + (n + 1))) capOrder(n);
@@ -1844,10 +1974,11 @@ function capShipHud(g, W, H, cx, s, ca, red, grn, amb, col, t) {
   const row = (k, name, val, ok, sub = '') => { plFont(g, 10, false, true); g.fillStyle = 'rgba(220,230,245,.6)'; g.fillText(k, wx + 10, wy + 14 + row.n * 22); plFont(g, 12, true); g.fillStyle = ok ? '#e8eef8' : 'rgba(220,230,245,.45)'; g.fillText(name, wx + 58, wy + 14 + row.n * 22); g.textAlign = 'right'; plFont(g, 11, false, true); g.fillStyle = ok ? grn : amb; g.fillText(val, wx + 224, wy + 14 + row.n * 22); g.textAlign = 'left'; if (sub) { plFont(g, 10); g.fillStyle = 'rgba(220,230,245,.55)'; g.fillText(sub, wx + 58, wy + 24 + row.n * 22); } row.n++; };
   row.n = 0;
   const M = s.H.main; row('左鍵', M.name, !s.gOk ? '射界外' : s.mainCd > 0 ? `${s.mainCd.toFixed(1)}s` : !s.gAl ? '轉向中' : 'READY', s.mainCd <= 0 && s.gOk && s.gAl);
-  if (s.H.msl) { const tp = CAP.tgt && CAP.tgt.k !== 'f' ? capTgtPos(CAP.tgt, _cr) : null; row('右鍵', `飛彈 ${s.mslN}／${s.H.msl.n}`, !tp ? '無鎖定' : s.lockT >= s.H.msl.lockT ? 'LOCK' : `${Math.round(Math.min(1, s.lockT / s.H.msl.lockT) * 100)}%`, !!tp && s.lockT >= s.H.msl.lockT && s.mslN > 0); }
+  const refill = (v) => { const yy = wy + 14 + (row.n - 1) * 22 + 8; capBar(g, wx + 58, yy, 90, 3, v, amb); };   // 彈藥補充進度
+  if (s.H.msl) { const tp = s.mT ? capTgtPos(s.mT, _cr) : null; row('右鍵', `飛彈 ${s.mslN}／${s.H.msl.n}`, !tp ? '無目標' : s.lockT >= s.H.msl.lockT ? 'LOCK' : `${Math.round(Math.min(1, s.lockT / s.H.msl.lockT) * 100)}%`, !!tp && s.lockT >= s.H.msl.lockT && s.mslN > 0); if (s.mslN < s.H.msl.n) refill(s.mslAcc); }
   else row('右鍵', '（沒有飛彈）', '', false);
   const K = s.H.skill; row(keyLabel(keyOf('cap_skill')), K.name, K.key === 'repair' ? `${Math.round(s.repE * 100)}%` : s.skillCd > 0 ? `${Math.ceil(s.skillCd)}s` : 'READY', K.key === 'repair' ? s.repE > 0.05 : s.skillCd <= 0);
-  if (CAP.own.some((o) => o.ftrMax && !o.dead)) { const sp = CAP.own.find((o) => o.ftrMax && !o.dead), out = sp.ftrIds.length, av = sp.ftrMax - sp.ftrLost; row(keyLabel(keyOf('cap_skill2')), '護航機', `${out}／${av}${CAP.esc ? ' 出擊' : ' 待命'}`, CAP.esc); }
+  if (CAP.own.some((o) => o.ftrMax && !o.dead)) { const sp = CAP.own.find((o) => o.ftrMax && !o.dead), out = sp.ftrIds.length, av = sp.ftrMax - sp.ftrLost; row(keyLabel(keyOf('cap_skill2')), '護航機', `${out}／${av}${CAP.esc ? ' 出擊' : ' 待命'}`, CAP.esc); if (sp.ftrLost > 0) refill(sp.ftrAcc); }
 }
 function capRadar(g, W, H, s, ca, red, grn, amb, col, t) {
   const R = Math.min(92, (H - 300) / 2.6), cx = W - R - 26, cy = H - 136 - R - 18, range = 700, k = R / range, es = 1 - CAP.side;
