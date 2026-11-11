@@ -3,7 +3,8 @@
 // 星圖上：綠＝我的艦隊、藍＝友軍、紅＝敵軍；箭頭＝下一回合的動向（看得到的單位）；⚔＝預計交戰。
 // 結束回合：所有艦隊移動 → 列出有我方艦隊的戰鬥，選擇介入方式（親自指揮／交給艦隊指揮官）→ 計算 → 戰報 → 下一週
 let SMU = { S: null, sel: new Set(), sys: -1, card: null, view: null, scene: null, hits: [], q: [], raf: 0 };
-const SMU_REL = { own: { col: '#3fdf8f', tag: '我', name: '我的艦隊' }, ally: { col: '#4aa8ff', tag: '友', name: '友軍' }, enemy: { col: '#ff4d4d', tag: '敵', name: '敵軍' }, neutral: { col: '#a0a6b0', tag: '中', name: '中立／停戰' } };
+// 深色星圖上要好認：中立用亮黃色（2026-11-12，原本的灰色太暗）
+const SMU_REL = { own: { col: '#3fdf8f', tag: '我', name: '我的艦隊' }, ally: { col: '#4aa8ff', tag: '友', name: '友軍' }, enemy: { col: '#ff4d4d', tag: '敵', name: '敵軍' }, neutral: { col: '#ffd23f', tag: '中', name: '中立／停戰' } };
 const SMU_CSS = `
 .sm-wrap{position:fixed;inset:0;display:flex;flex-direction:column;background:#070b12;color:#dfe6ef;font-size:13px;z-index:5}
 .sm-top{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid #1d2838;background:#0b111b;flex-wrap:wrap}

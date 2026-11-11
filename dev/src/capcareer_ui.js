@@ -36,7 +36,7 @@ function ccRender() {
     <div class="sm-top"><h2>艦長生涯</h2><span class="sm-chip">第 ${S.turn} 週</span><span class="sm-chip">${CC_ROLES[S.role].name}・${ccRankOf(S).name}</span><span class="sm-chip">資金 ${fmtN(Math.round(S.pl.money))}</span><span class="sm-chip">戰功 ${Math.round(S.pl.merit)}</span>${ccTopChips(S, cnt)}
       <span class="sm-btnbar"><button class="g-btn" id="cc-mis">任務${nMis ? `<span class="sm-badge">${nMis}</span>` : ''}</button><button class="g-btn" id="cc-logb">紀錄</button><button class="g-btn" id="cc-quit">離開</button>${S.fin ? '' : `<button class="g-btn" id="cc-fly" title="回到${smuEsc(ccPl(S) ? S.sys[ccPl(S).sys].name : '')}的太空（${keyText('cap_map')}）">回到星系 ✈</button>`}<button class="g-btn primary" id="cc-end" ${S.fin ? 'disabled' : ''}>結束這一週 →</button></span></div>
     <div class="sm-map" id="cc-map"><canvas id="cc-cv"></canvas>
-      <div class="sm-leg" id="cc-leg" style="cursor:pointer;pointer-events:auto">${CC.leg ? `<div><b>圖例 ▾</b></div>${['own', 'ally', 'enemy', 'neutral'].map((k) => `<div><i style="background:${SMU_REL[k].col}"></i>${k === 'own' ? '你的小隊（★＝親自指揮，白框＝選中）' : SMU_REL[k].name}</div>`).join('')}<div>箭頭＝一個小隊：越大船越多（1～5 艘）；停在星系下方，閃爍且在航道上＝這週要移動</div><div class="g-dim">星系的顏色＝擁有的勢力</div><div>! ＝ 你的小隊下週會被進攻</div><div>◆ 軌道防禦・⚓ 維修船塢・✚ 補給站</div><div>虛線圈：圍城中・⚔ 這週會交戰</div><div>箭頭：看得到的預定動向（你的小隊周圍、偵察過的星系）</div><div>藍色虛線大圈：偵察中・亂＝指揮中斷</div><div class="g-dim">點星系看詳情；點相鄰的星系下令移動</div>` : '<div><b>圖例 ▸</b></div>'}</div>
+      <div class="sm-leg" id="cc-leg" style="cursor:pointer;pointer-events:auto">${CC.leg ? `<div><b>圖例 ▾</b></div>${['own', 'ally', 'enemy', 'neutral'].map((k) => `<div><i style="background:${SMU_REL[k].col}"></i>${k === 'own' ? '你的小隊（★＋光圈＝親自指揮，白框＝選中）' : SMU_REL[k].name}</div>`).join('')}<div>箭頭＝一個小隊：越大船越多（1～5 艘）；停在星系下方，閃爍且在航道上＝這週要移動</div><div class="g-dim">星系的顏色＝擁有的勢力</div><div>! ＝ 你的小隊下週會被進攻</div><div>◆ 軌道防禦・⚓ 維修船塢・✚ 補給站</div><div>虛線圈：圍城中・⚔ 這週會交戰</div><div>箭頭：看得到的預定動向（你的小隊周圍、偵察過的星系）</div><div>藍色虛線大圈：偵察中・亂＝指揮中斷</div><div class="g-dim">點星系看詳情；點相鄰的星系下令移動</div>` : '<div><b>圖例 ▸</b></div>'}</div>
       <div class="sm-dock" id="cc-dock"></div><div class="sm-card" id="cc-card" hidden></div></div></div>`);
   gEl('cc-quit').onclick = () => { ccSave(S); ccIdleStop(); window.removeEventListener('resize', ccResize); GAME.spMode = 'captain'; showSingle(); };
   if (gEl('cc-fly')) gEl('cc-fly').onclick = () => ccFly();
@@ -105,7 +105,7 @@ function ccDraw(ts) {
     // 小隊：一隊一個箭頭（不寫數字），越大＝船越多；停著的錯開疊在星系下方，要移動的畫在航道上（迴圈後面畫）
     const stay = [];
     for (const q of here) { if (V.live && q.to != null && (q.pl || ccSeen(S, q))) movers.push({ q, s }); else stay.push(q); }
-    stay.sort((a, b) => (a.pl - b.pl) || (b.ships.length - a.ships.length)).forEach((q, n) => {   // 大的在後、你的在最上面
+    stay.sort((a, b) => (a.pl - b.pl) || ((a.id === S.pl.sq) - (b.id === S.pl.sq)) || (b.ships.length - a.ships.length)).forEach((q, n) => {   // 大的在後、你的在最上面
       const ax = x + (n - (stay.length - 1) / 2) * 11, ay = y + r + 20 + (n % 2) * 4;
       ccSqIco(g, S, q, Q, ax, ay, -Math.PI / 2, 1, V.live ? 1 : 0.5);
     });
@@ -115,10 +115,10 @@ function ccDraw(ts) {
   }
   // 要移動的小隊：在航道中段，指向目的地、閃爍；同一條航道的錯開疊著
   const lanes = new Map(); for (const m of movers) { const kk = m.q.sys + '>' + m.q.to; if (!lanes.has(kk)) lanes.set(kk, []); lanes.get(kk).push(m.q); }
-  const blink = 0.3 + 0.7 * (0.5 + 0.5 * Math.cos(t * 7));
+  const blink = 0.45 + 0.55 * (0.5 + 0.5 * Math.cos(t * 7));   // 最暗也要看得到
   for (const [kk, L] of lanes) {
     const [a, b] = kk.split('>').map(Number), [x1, y1] = ccXY(S.sys[a]), [x2, y2] = ccXY(S.sys[b]), D = Math.hypot(x2 - x1, y2 - y1), ux = (x2 - x1) / D, uy = (y2 - y1) / D, ang = Math.atan2(uy, ux);
-    L.sort((p, q) => (p.pl - q.pl) || (q.ships.length - p.ships.length)).forEach((q, n) => {
+    L.sort((p, q) => (p.pl - q.pl) || ((p.id === S.pl.sq) - (q.id === S.pl.sq)) || (q.ships.length - p.ships.length)).forEach((q, n) => {
       const d = Math.min(D * 0.72, D * 0.4 + (n - (L.length - 1) / 2) * 11);   // 航道中段
       ccSqIco(g, S, q, Q, x1 + ux * d, y1 + uy * d, ang, blink, 1);
     });
@@ -136,9 +136,16 @@ function ccArrowIco(g, x, y, n, col, ang, blink, dim, sel) {
   g.restore();
 }
 // 星圖上的一個小隊：箭頭＋★（親自指揮）＋「亂」（指揮中斷）
+// 親自指揮的小隊要一眼認得出來：脈動的綠色光圈＋白色粗框＋白色 ★（不靠顏色深淺分辨）
 function ccSqIco(g, S, q, Q, x, y, ang, blink, dim) {
-  ccArrowIco(g, x, y, q.ships.length, SMU_REL[ccRel(S, q)].col, ang, blink, dim, q.pl && q === Q ? 2 : q.pl ? 1 : 0);
-  if (q.pl && q.id === S.pl.sq) { g.fillStyle = '#ffe28a'; g.font = 'bold 11px sans-serif'; g.fillText('★', x, y - 17); }
+  const main = q.pl && q.id === S.pl.sq;
+  if (main) {
+    const t = performance.now() / 1000, p = 0.5 + 0.5 * Math.sin(t * 4), R = 15 + Math.min(5, q.ships.length) * 1.8;
+    g.globalAlpha = dim; g.fillStyle = `rgba(63,223,143,${0.16 + 0.12 * p})`; g.beginPath(); g.arc(x, y, R + p * 3, 0, 7); g.fill();
+    g.strokeStyle = `rgba(160,255,200,${0.55 + 0.4 * p})`; g.lineWidth = 2; g.beginPath(); g.arc(x, y, R + p * 3, 0, 7); g.stroke(); g.globalAlpha = 1;
+  }
+  ccArrowIco(g, x, y, q.ships.length, SMU_REL[ccRel(S, q)].col, ang, main ? Math.max(0.55, blink) : blink, dim, main || (q.pl && q === Q) ? 2 : q.pl ? 1 : 0);
+  if (main) { g.font = 'bold 14px sans-serif'; g.lineWidth = 3; g.strokeStyle = '#05080d'; const R = 15 + Math.min(5, q.ships.length) * 1.8 + 9; g.strokeText('★', x + R * 0.75, y + R * 0.75); g.fillStyle = '#ffffff'; g.fillText('★', x + R * 0.75, y + R * 0.75); }   // 光圈右下（上方會被 ⚔／! 蓋住）
   if (dim === 1 && ccDis(S, q)) { g.fillStyle = '#ffb35a'; g.font = 'bold 10px sans-serif'; g.fillText('亂', x + 13, y + 16); }
 }
 function ccWillFight(S, s) {
