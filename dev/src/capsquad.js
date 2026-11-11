@@ -230,6 +230,7 @@ function capSquadAI(s, t, dt) {
     const e = capEdgeE(gx, gy, gz); if (e > 0.82) { const k = 0.82 / e; gx *= k; gy *= k; gz *= k; }
     const h = CAP.sp.hole; if (h) { const hx = gx - h.x, hz = gz - h.z, hd = Math.hypot(hx, hz) || 1, mR = h.hurt * 1.4; if (hd < mR) { gx = h.x + hx / hd * mR; gz = h.z + hz / hd * mR; } }
   } else if (GRD) gy = Math.max(gy, capGroundH(gx, gz) + s.L * 0.13 + 4);
+  if (s.moveP && !s.foe) { const mv = capMoveGoal(s); gx = mv.x; gy = mv.y; gz = mv.z; if (!mv.at) face = null; }   // 俯視：玩家點地移動（守在那裡）
   const ddx = gx - s.x, ddz = gz - s.z, dH = Math.hypot(ddx, ddz);
   I.yaw = face != null ? face : dH > 8 ? Math.atan2(ddx, ddz) : s.yaw;
   const Fh = [Math.sin(s.yaw), Math.cos(s.yaw)], ahead = ddx * Fh[0] + ddz * Fh[1], lat = ddx * -Fh[1] + ddz * Fh[0];
@@ -274,6 +275,6 @@ function capContApply(K) {
   const L = CAP.own.filter((s) => s.sq === 0);
   L.forEach((s, k) => { const v = K.ships[k]; if (!v) return; Object.assign(s, v); });
   if (K.cur >= 0 && K.cur < L.length && !L[K.cur].dead) CAP.cur = L[K.cur].k;
-  CAP.thr = K.thr; CAP.far = K.far; CAP.camD = K.camD;
+  CAP.thr = K.thr; CAP.camD = K.camD;
   capSyncAll();
 }
