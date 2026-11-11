@@ -36,7 +36,7 @@ function ccRender() {
     <div class="sm-top"><h2>艦長生涯</h2><span class="sm-chip">第 ${S.turn} 週</span><span class="sm-chip">${CC_ROLES[S.role].name}・${ccRankOf(S).name}</span><span class="sm-chip">資金 ${fmtN(Math.round(S.pl.money))}</span><span class="sm-chip">戰功 ${Math.round(S.pl.merit)}</span>${ccTopChips(S, cnt)}
       <span class="sm-btnbar"><button class="g-btn" id="cc-mis">任務${nMis ? `<span class="sm-badge">${nMis}</span>` : ''}</button><button class="g-btn" id="cc-logb">紀錄</button><button class="g-btn" id="cc-quit">離開</button>${S.fin ? '' : `<button class="g-btn" id="cc-fly" title="回到${smuEsc(ccPl(S) ? S.sys[ccPl(S).sys].name : '')}的太空（${keyText('cap_map')}）">回到星系 ✈</button>`}<button class="g-btn primary" id="cc-end" ${S.fin ? 'disabled' : ''}>結束這一週 →</button></span></div>
     <div class="sm-map" id="cc-map"><canvas id="cc-cv"></canvas>
-      <div class="sm-leg" id="cc-leg" style="cursor:pointer;pointer-events:auto">${CC.leg ? `<div><b>圖例 ▾</b></div>${['own', 'ally', 'enemy', 'neutral'].map((k) => `<div><i style="background:${SMU_REL[k].col}"></i>${k === 'own' ? '你的小隊（★＝親自指揮，粗框＝選中）' : SMU_REL[k].name}</div>`).join('')}<div class="g-dim">星系的顏色＝擁有的勢力</div><div>! ＝ 你的小隊下週會被進攻</div><div>◆ 軌道防禦・⚓ 維修船塢・✚ 補給站</div><div>虛線圈：圍城中・⚔ 這週會交戰</div><div>箭頭：看得到的預定動向（你的小隊周圍、偵察過的星系）</div><div>藍色虛線大圈：偵察中・亂＝指揮中斷</div><div class="g-dim">點星系看詳情；點相鄰的星系下令移動</div>` : '<div><b>圖例 ▸</b></div>'}</div>
+      <div class="sm-leg" id="cc-leg" style="cursor:pointer;pointer-events:auto">${CC.leg ? `<div><b>圖例 ▾</b></div>${['own', 'ally', 'enemy', 'neutral'].map((k) => `<div><i style="background:${SMU_REL[k].col}"></i>${k === 'own' ? '你的小隊（★＝親自指揮，白框＝選中）' : SMU_REL[k].name}</div>`).join('')}<div>箭頭＝一個小隊：越大船越多（1～5 艘），閃爍＝這週要移動（指向目的地）</div><div class="g-dim">星系的顏色＝擁有的勢力</div><div>! ＝ 你的小隊下週會被進攻</div><div>◆ 軌道防禦・⚓ 維修船塢・✚ 補給站</div><div>虛線圈：圍城中・⚔ 這週會交戰</div><div>箭頭：看得到的預定動向（你的小隊周圍、偵察過的星系）</div><div>藍色虛線大圈：偵察中・亂＝指揮中斷</div><div class="g-dim">點星系看詳情；點相鄰的星系下令移動</div>` : '<div><b>圖例 ▸</b></div>'}</div>
       <div class="sm-dock" id="cc-dock"></div><div class="sm-card" id="cc-card" hidden></div></div></div>`);
   gEl('cc-quit').onclick = () => { ccSave(S); ccIdleStop(); window.removeEventListener('resize', ccResize); GAME.spMode = 'captain'; showSingle(); };
   if (gEl('cc-fly')) gEl('cc-fly').onclick = () => ccFly();
@@ -101,14 +101,16 @@ function ccDraw(ts) {
     const dn = V.defs.length;
     g.fillStyle = V.live ? '#cfd8e3' : '#7d8794'; g.font = '12px sans-serif'; g.fillText(`${s.name}${V.yard ? ' ⚓' : ''}${V.depot ? ' ✚' : ''}${V.live || V.age == null ? '' : `（${V.age}週前）`}${s.id === S.pl.base ? '［據點］' : ''}`, x, y - r - 6);
     if (dn) { g.fillStyle = V.live ? '#e8eef8' : '#7d8794'; g.font = 'bold 11px sans-serif'; g.textAlign = 'left'; g.fillText('◆' + dn, x + r + 3, y + 4); g.textAlign = 'center'; }
-    // 小隊：每個勢力一個標籤（隊數、艘數）；你的小隊單獨一個標籤
-    const groups = []; for (const q of here) { const k = q.pl ? 'pl' : q.fac; let G = groups.find((x) => x.k === k); if (!G) groups.push(G = { k, f: q.fac, L: [] }); G.L.push(q); }
-    groups.sort((a, b) => (a.k === 'pl' ? -1 : b.k === 'pl' ? 1 : 0)).forEach(({ k: gk, f, L }, n) => {
-      const mine = gk === 'pl', rel = SMU_REL[ccRel(S, L[0])], col = rel.col;
-      const tx = mine ? `${L.some((q) => q.id === S.pl.sq) ? '★' : ''}${L.length > 1 ? `你的 ${L.length}隊` : L[0].name} ${L.reduce((a, q) => a + q.ships.length, 0)}艘` : `${rel.tag}・${SM_FAC[f].name} ${L.length > 1 ? L.length + '隊 ' : ''}${L.reduce((a, q) => a + q.ships.length, 0)}艘${L.some((q) => ccDis(S, q)) ? '・亂' : ''}`;
-      g.font = 'bold 11px sans-serif'; const w = g.measureText(tx).width + 12, bx = x - w / 2, by = y + r + 6 + n * 17; g.globalAlpha = V.live ? 1 : 0.5;
-      g.fillStyle = '#0a0f18e6'; smuRRect(g, bx, by, w, 15, 4); g.fill(); g.strokeStyle = col; g.lineWidth = mine && L.includes(Q) ? 2.5 : mine ? 1.5 : 1.3; smuRRect(g, bx, by, w, 15, 4); g.stroke();
-      g.fillStyle = col; g.fillText(tx, x, by + 11.5); g.globalAlpha = 1;
+    // 小隊：一隊一個箭頭（不寫數字）；箭頭越大＝船越多，箭頭的數量＝隊數；要移動的箭頭指向目的地並閃爍
+    const L = here.slice().sort((a, b) => (b.pl - a.pl) || (a.fac - b.fac) || (b.ships.length - a.ships.length));
+    const per = 5, cw = 36;
+    L.forEach((q, n) => {
+      const row = Math.floor(n / per), inRow = Math.min(per, L.length - row * per), col = n - row * per;
+      const ax = x + (col - (inRow - 1) / 2) * cw, ay = y + r + 24 + row * 36;
+      const mv = V.live && q.to != null && (q.pl || ccSeen(S, q));
+      ccArrowIco(g, ax, ay, q.ships.length, SMU_REL[ccRel(S, q)].col, mv ? Math.atan2(S.sys[q.to].y - s.y, S.sys[q.to].x - s.x) : -Math.PI / 2, mv ? 0.25 + 0.75 * (0.5 + 0.5 * Math.cos(t * 7)) : 1, V.live ? 1 : 0.5, q.pl && q === Q ? 2 : q.pl ? 1 : 0);
+      if (q.pl && q.id === S.pl.sq) { g.fillStyle = '#ffe28a'; g.font = 'bold 11px sans-serif'; g.fillText('★', ax, ay - 19); }
+      if (V.live && ccDis(S, q)) { g.fillStyle = '#ffb35a'; g.font = 'bold 10px sans-serif'; g.fillText('亂', ax + 14, ay + 17); }
     });
     let bx = x + r + 12;
     if (ccWillFight(S, s)) { const p = 0.5 + 0.5 * Math.sin(t * 4); g.fillStyle = `rgba(255,179,90,${p > 0.5 ? 1 : 0.7})`; g.beginPath(); g.arc(bx, y - 2, 9, 0, 7); g.fill(); g.fillStyle = '#111'; g.font = 'bold 12px sans-serif'; g.fillText('⚔', bx, y + 2); bx += 20; }
@@ -116,6 +118,16 @@ function ccDraw(ts) {
   }
 }
 // 預計交戰：你的小隊要開進可以進攻的星系，或已經在交戰中的星系
+// 一個小隊的箭頭：n＝船數（越多越大），ang＝指向（不動＝朝上），blink＝閃爍的亮度，sel：2＝選中、1＝你的小隊
+function ccArrowIco(g, x, y, n, col, ang, blink, dim, sel) {
+  const len = 13 + Math.max(1, Math.min(5, n)) * 3.6, wd = len * 0.6;
+  g.save(); g.translate(x, y); g.rotate(ang); g.globalAlpha = dim * blink;
+  g.beginPath(); g.moveTo(len * 0.55, 0); g.lineTo(-len * 0.45, -wd); g.lineTo(-len * 0.2, 0); g.lineTo(-len * 0.45, wd); g.closePath();
+  g.fillStyle = col; g.fill(); g.lineJoin = 'round';
+  g.strokeStyle = sel === 2 ? '#ffffff' : '#05080d'; g.lineWidth = sel === 2 ? 2.5 : 1.5; g.stroke();
+  if (sel === 1) { g.strokeStyle = '#ffffffaa'; g.lineWidth = 1; g.stroke(); }
+  g.restore();
+}
 function ccWillFight(S, s) {
   if (S.fin) return false;
   const V = ccSee(S, s), o = V.owner;   // 照所知的情報（看不到的星系用舊情報）
