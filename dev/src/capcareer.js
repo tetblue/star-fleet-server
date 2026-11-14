@@ -32,7 +32,9 @@ const CC_RULE = {
   salary: 80,               // 玩家每週的薪餉
   repair: 1.2,              // 修理：每點缺少的船體多少資金（要在有維修船塢的己方星系）
   missile: 3,               // 補飛彈：每枚多少資金（有補給站、維修船塢或首都的己方星系）
-  build: { assault: 500, gunship: 900, support: 700, ew: 800, stealth: 850 },   // 新造艦（下週到）
+  build: { assault: 500, gunship: 900, support: 700, ew: 800, stealth: 850 },   // 新造艦的價錢
+  buildW: { assault: 1, gunship: 3, support: 2, ew: 2, stealth: 2 },   // 建造幾週（大船久）；一座船塢一次造一艘
+  yardQ: 4,                 // 一座船塢最多排幾艘
   baseCost: 400,            // 把據點搬到另一個有維修船塢的己方星系
   defEvery: 2,              // 己方星系每幾週補一座防禦（沒有敵人在場時）
   merit: { ship: 40, cap: 300, def: 30 },
@@ -113,7 +115,7 @@ function ccNewGame(o) {
   const R = CC_ROLES[o.role] || CC_ROLES.emp, ST = CC_STARTS[o.start || 0] || CC_STARTS[0];
   const S = { v: 1, r: (o.seed >>> 0) || 1, turn: 1, diff: o.diff != null ? o.diff : 1, role: o.role, fac: R.fac, nextId: 1, sys: [], edges: [], adj: [], sq: [], log: [], missions: [], fin: null, pendB: null,
     rel: [[0, -60, -100, 0], [-60, 0, -100, 0], [-100, -100, 0, 0], [0, 0, 0, 0]], money: [0, 0, 0, 0], fame: [50, 50, 50, 50],
-    pl: { money: 600, merit: CC_RANKS[ST.rank].merit, sq: 0, kills: 0, caps: 0, weekFought: 0, build: [], rank: ST.rank, base: null, start: o.start || 0 } };
+    pl: { money: 600, merit: CC_RANKS[ST.rank].merit, sq: 0, kills: 0, caps: 0, weekFought: 0, build: [], yq: [], res: [], rank: ST.rank, base: null, start: o.start || 0 } };
   smGenMap(S);
   for (const s of S.sys) ccSysInit(S, s);
   // AI 的小隊：聯盟、帝國各 6 隊（首都 2、前線），海盜 3 隊
@@ -266,8 +268,9 @@ function ccWeekB(S) {
   ccEconomy(S);
   ccAiOps(S);
   if (S.fame) for (const f of [SM_A, SM_E, SM_P]) S.fame[f] += (50 - S.fame[f]) * CC_RULE.fame.back;
-  // 玩家新造的船到了
-  for (const b of S.pl.build.splice(0)) {   // 舊存檔：字串＝加入親自指揮的小隊
+  ccYardTick(S);
+  // 舊存檔：以前訂造、下週直接到的船
+  for (const b of S.pl.build.splice(0)) {   // 字串＝加入親自指揮的小隊
     const key = b.key || b, add = capNewShip(key);
     if (b.sq === 'new') { const q = ccNewSquad(S, S.fac, b.sys, [], { pl: true, name: ccOwnName(S) }); q.ships.push(add); ccLog(S, `新造的${CAP_HULLS[key].name}在 ${S.sys[b.sys].name} 成立${q.name}`, 'ok'); continue; }
     const q = S.sq.find((x) => x.id === b.sq && x.ships.length) || ccPl(S);
@@ -438,14 +441,78 @@ function ccCanService(S, kind, P = ccPl(S)) {
 }
 function ccRepair(S, P = ccPl(S)) { const c = ccRepairCost(S, P); if (ccCanService(S, 'repair', P) || S.pl.money < c) return false; S.pl.money -= c; for (const x of P.ships) x.hp = 1; ccLog(S, `在 ${S.sys[P.sys].name} 修好${P.name}（${c} 資金）`, 'ok'); return true; }
 function ccResupply(S, P = ccPl(S)) { const c = ccMissileCost(S, P); if (ccCanService(S, 'missile', P) || S.pl.money < c) return false; S.pl.money -= c; for (const x of P.ships) x.msl = 1; ccLog(S, `${P.name}補滿飛彈（${c} 資金）`, 'ok'); return true; }
-const ccBuildsFor = (S, q) => S.pl.build.filter((b) => (b.sq || S.pl.sq) === q.id).length;
-// 新造艦：加入小隊 P（滿 5 艘就不行），或 asNew＝下週在這裡成立新小隊（要有指揮權）
-function ccBuild(S, key, P = ccPl(S), asNew) {
+// ───── 生產：船塢排隊（研發、生產、改裝的第 2 步，2026-11-15）─────
+// 在有維修船塢的己方星系訂造：一座船塢一次造一艘，排在前面的先造；大船造得久（CC_RULE.buildW）。
+// 造好的船：訂造時指定的小隊還在那個星系、沒滿 → 直接加入；不然停在那座船塢當預備艦（S.pl.res），之後再編進小隊或成立新小隊。
+// 船塢的星系失守、船塢被打掉：排隊暫停（可以取消）；停在那裡的預備艦被俘。
+// S.pl.yq＝[{ id, key, sys, left, tot, to, held }]；S.pl.res＝[{ id, sys, c }]（c＝船的記錄，等級、模組照樣保留）
+const ccYq = (S, sid) => S.pl.yq.filter((o) => o.sys === sid);
+const ccResAt = (S, sid) => S.pl.res.filter((r) => r.sys === sid);
+// 能不能在這裡訂造：己方星系、有船塢、你有小隊在這裡（或是你的據點）
+function ccCanOrder(S, s) {
+  if (s.owner !== S.fac) return '要在己方的星系';
+  if (!s.yard) return '這裡沒有維修船塢';
+  if (!S.sq.some((q) => q.pl && q.ships.length && q.sys === s.id) && S.pl.base !== s.id) return '要有你的小隊在這裡（或是你的據點）';
+  if (ccYq(S, s.id).length >= CC_RULE.yardQ) return `這座船塢已經排了 ${CC_RULE.yardQ} 艘`;
+  return '';
+}
+// 這艘排隊的船還要幾週才好（前面的先造）
+function ccYqEta(S, o) { let w = 0; for (const x of ccYq(S, o.sys)) { w += x.left; if (x === o) break; } return w; }
+function ccOrder(S, key, s, to) {
   const cost = CC_RULE.build[key];
-  if (!ccHullOk(S, key) || ccCanService(S, 'build', P) || S.pl.money < cost) return false;
-  if (asNew ? ccOwnCount(S) >= ccSlots(S) : P.ships.length + ccBuildsFor(S, P) >= CC_RULE.maxShips) return false;
-  S.pl.money -= cost; S.pl.build.push(asNew ? { key, sq: 'new', sys: P.sys } : { key, sq: P.id });
-  ccLog(S, `訂造一艘${CAP_HULLS[key].name}（${cost} 資金），下週${asNew ? `在 ${S.sys[P.sys].name} 成立新的小隊` : `加入${P.name}`}`, 'ok'); return true;
+  if (!ccHullOk(S, key) || ccCanOrder(S, s) || S.pl.money < cost) return false;
+  const w = CC_RULE.buildW[key] || 1;
+  S.pl.money -= cost; S.pl.yid = (S.pl.yid || 0) + 1;
+  const o = { id: S.pl.yid, key, sys: s.id, left: w, tot: w, to: to ?? null }; S.pl.yq.push(o);
+  const q = to != null && ccSqById2(S, to);
+  ccLog(S, `在 ${s.name} 訂造一艘${CAP_HULLS[key].name}（${cost} 資金，${ccYqEta(S, o)} 週後完成${q ? `，加入${q.name}` : '，停在船塢'}）`, 'ok'); return true;
+}
+// 取消：還沒開工全額退費，開工了退一半
+function ccOrderCancel(S, id) {
+  const o = S.pl.yq.find((x) => x.id === id); if (!o) return false;
+  const back = Math.round(CC_RULE.build[o.key] * (o.left === o.tot ? 1 : 0.5));
+  S.pl.yq = S.pl.yq.filter((x) => x !== o); S.pl.money += back;
+  ccLog(S, `取消在 ${S.sys[o.sys].name} 訂造的${CAP_HULLS[o.key].name}（退回 ${back} 資金）`, ''); return true;
+}
+const ccSqById2 = (S, id) => S.sq.find((q) => q.id === id);
+// 每週結束：每座船塢造排第一的那艘；預備艦在船塢裡修好、補滿
+function ccYardTick(S) {
+  const seen = new Set();
+  for (const o of S.pl.yq) {
+    if (seen.has(o.sys)) continue; seen.add(o.sys);
+    const s = S.sys[o.sys];
+    if (s.owner !== S.fac || !s.yard) { if (!o.held) ccLog(S, `${s.name}${s.owner !== S.fac ? '失守' : '的船塢被摧毀'}：${CAP_HULLS[o.key].name}的建造暫停`, 'bad'); o.held = 1; continue; }
+    o.held = 0; if (--o.left > 0) continue;
+    o.fin = true;
+    const c = capNewShip(o.key), q = o.to != null && S.sq.find((x) => x.id === o.to && x.pl && x.ships.length && x.sys === o.sys && x.ships.length < CC_RULE.maxShips);
+    if (q) { q.ships.push(c); ccLog(S, `${s.name} 的船塢造好${CAP_HULLS[o.key].name}，加入${q.name}`, 'ok'); }
+    else { S.pl.yid = (S.pl.yid || 0) + 1; S.pl.res.push({ id: S.pl.yid, sys: o.sys, c }); ccLog(S, `${s.name} 的船塢造好${CAP_HULLS[o.key].name}，停在船塢當預備艦`, 'ok'); }
+  }
+  S.pl.yq = S.pl.yq.filter((o) => !o.fin);
+  S.pl.res = S.pl.res.filter((r) => {
+    const s = S.sys[r.sys];
+    if (s.owner !== S.fac) { ccLog(S, `${s.name} 失守：停在船塢的${CAP_HULLS[r.c.key].name}被俘`, 'bad'); return false; }
+    if (s.yard) { r.c.hp += (1 - r.c.hp) * CAP_REPAIR.yard; r.c.sh = 1; r.c.msl = 1; }
+    return true;
+  });
+}
+// 預備艦編進小隊 to（同一個星系、沒滿）；to＝'new' 成立新小隊（要有指揮權）
+function ccResJoin(S, rid, to) {
+  const r = S.pl.res.find((x) => x.id === rid); if (!r) return '沒有這艘預備艦';
+  let q;
+  if (to === 'new') { if (ccOwnCount(S) >= ccSlots(S)) return `指揮權不夠（${ccRankOf(S).name}最多帶 ${ccSlots(S)} 隊）`; q = ccNewSquad(S, S.fac, r.sys, [], { pl: true, name: ccOwnName(S) }); }
+  else { q = ccSqById2(S, to); if (!q || !q.pl || q.sys !== r.sys) return '要在同一個星系'; if (q.ships.length >= CC_RULE.maxShips) return '那一隊已經滿了'; }
+  q.ships.push(r.c); S.pl.res = S.pl.res.filter((x) => x !== r);
+  ccLog(S, `預備艦${CAP_HULLS[r.c.key].name}編進${q.name}`, 'ok'); return '';
+}
+// 小隊的船停進船塢當預備艦（己方有船塢的星系；親自指揮的小隊至少留一艘）
+function ccResPut(S, q, k) {
+  const s = S.sys[q.sys], c = q.ships[k]; if (!c) return '沒有這艘船';
+  if (s.owner !== S.fac || !s.yard) return '要在己方有船塢的星系';
+  if (q.id === S.pl.sq && q.ships.length <= 1) return '親自指揮的小隊至少要留一艘';
+  q.ships.splice(k, 1); S.pl.yid = (S.pl.yid || 0) + 1; S.pl.res.push({ id: S.pl.yid, sys: q.sys, c });
+  if (!q.ships.length) { S.sq = S.sq.filter((x) => x !== q); for (const o of S.pl.yq) if (o.to === q.id) o.to = null; }
+  ccLog(S, `${q.name}的${CAP_HULLS[c.key].name}停進 ${s.name} 的船塢`, ''); return '';
 }
 // 換船：同一個星系的我方小隊之間，不花時間。to＝'new' 分出新小隊（要有指揮權）
 function ccTransfer(S, a, k, to) {
@@ -455,7 +522,7 @@ function ccTransfer(S, a, k, to) {
   if (to === 'new') { if (ccOwnCount(S) >= ccSlots(S)) return `指揮權不夠（${ccRankOf(S).name}最多帶 ${ccSlots(S)} 隊，升遷才能多帶）`; b = ccNewSquad(S, S.fac, a.sys, [], { pl: true, name: ccOwnName(S) }); }
   else { b = S.sq.find((q) => q.id === to); if (!b || !b.pl || b.sys !== a.sys) return '要在同一個星系'; if (b.ships.length >= CC_RULE.maxShips) return '那一隊已經滿了'; }
   b.ships.push(a.ships.splice(k, 1)[0]); b.to = b.to ?? null;
-  if (!a.ships.length) { S.sq = S.sq.filter((q) => q !== a); for (const x of S.pl.build) if (x.sq === a.id) x.sq = b.id; }
+  if (!a.ships.length) { S.sq = S.sq.filter((q) => q !== a); for (const x of S.pl.build) if (x.sq === a.id) x.sq = b.id; for (const o of S.pl.yq) if (o.to === a.id) o.to = b.id; }
   return '';
 }
 // 親自指揮換到另一隊：要和現在指揮的小隊在同一個星系（艦長換船）
@@ -667,5 +734,6 @@ function ccMissionDone(S, M, ok) {
 function ccSave(S) { try { STORE.setItem(CC_STORE, JSON.stringify(S)); return true; } catch (e) { return false; } }
 function ccLoad() { try { const t = STORE.getItem(CC_STORE); const S = t ? JSON.parse(t) : null; if (!S || S.v !== 1) return null; for (const s of S.sys) { if (s.def0 == null) s.def0 = s.def; if (!s.fx) s.fx = {}; if (!s.scene) s.scene = ccSceneFor(S, s); }
     for (const q of S.sq) q.ships.forEach(capShipFix);   // 舊存檔：船補上等級、模組
+    if (!S.pl.yq) S.pl.yq = []; if (!S.pl.res) S.pl.res = [];   // 舊存檔：船塢排隊、預備艦
     if (S.pl.rank == null) S.pl.rank = S.pl.merit >= 2000 ? 2 : S.pl.merit >= 800 ? 1 : 0;   // 舊存檔：照以前的指揮權換算軍階
     return S; } catch (e) { return null; } }
