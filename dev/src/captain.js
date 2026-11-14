@@ -379,7 +379,7 @@ function capBegin(C) {
   CAP.cur = 0; CAP.fc = C.open ? 2 : 0; CAP.fxq = []; CAP.calm = false; CAP.aimHit = null; CAP.order = 'follow'; CAP.esc = false; CAP.tgt = null; CAP.feed = []; CAP.msl = []; CAP.alarm = false; CAP.alarmT = 0; CAP.report = null; CAP.last = null;
   CAP.waves = C.waves; CAP.nextWave = 0; CAP.commLost = false; CAP.saved = false; CAP.hits = []; CAP.flash = null; CAP.pop = null;
   CAP.keys.clear(); CAP.fire = [false, false]; CAP.press = [false, false]; CAP.thr = 0.5; CAP.camD = 1; CAP.view = SETTINGS.capView >= 0 && SETTINGS.capView <= 2 ? SETTINGS.capView : 0; CAP.far = CAP.view === 1; CAP.warp = null; CAP.sel = new Set(); CAP.nav = null; CAP.hov = null;
-  CAP.stats = { ks: 0, kg: 0, kf: 0, dmg: 0, lost: 0, shots: 0, msl: 0, merit: 0, alarmed: false, kills: [] };
+  CAP.by = {}; CAP.stats = { ks: 0, kg: 0, kf: 0, dmg: 0, lost: 0, shots: 0, msl: 0, merit: 0, alarmed: false, kills: [] };
   CAP.ext = C.ext ? { x: C.ext.x, z: C.ext.z } : { x: C.S.x, z: C.S.z };
   const sc = shipGeo.getAttribute('aScale').array, aL = shipGeo.getAttribute('aLocal'), aL2 = shipGeo.getAttribute('aLocal2');
   for (let i = 0; i < shipCount; i++) sc[i] = TYPE_W[ships.type[i]] * capSizeK(i) * CAP.sc.ship * (0.96 + hash01(i * 7.3 + 1) * 0.08);
@@ -390,7 +390,7 @@ function capBegin(C) {
     const g = q.group;
     if (f.capRole === 'player' || f.capRole === 'foe') {
       const fd = SIM.m.fleets[f.id] || {}, foe = f.side !== CAP.side;
-      const i = q.list[0], key = fd.capHull || C.hulls[hk], H = CAP_HULLS[key], k = CAP.ships.length; if (!fd.capHull) hk++;
+      const i = q.list[0], key = fd.capHull || C.hulls[hk], H = capHullMod(CAP_HULLS[key], fd.capSt),   /* 艦長生涯：模組與 Mk（caphulls.js） */ k = CAP.ships.length; if (!fd.capHull) hk++;
       const t = ships.type[i], hm = foe ? CAP.Df.hp : 1, st = fd.capSt || null;   // 敵方：難度的耐久倍率；capSt＝帶傷開戰（船體、護盾、飛彈剩下的比例）
       const hm2 = foe ? hm : fd.capHm || 1, sm2 = foe ? hm : fd.capShm || 1;   // 艦長生涯：陣營科技（船體、護盾）
       ships.hpCap[i] = H.hp * hm2 / SHIP_TYPES[t].hp; ships.hp[i] = H.hp * hm2 * (st ? st.hp : 1); ships.shMax[i] = H.sh * sm2; ships.sh[i] = H.sh * sm2 * (st ? st.sh : 1);
@@ -977,7 +977,7 @@ function capMain(s, t) {
   if (!s.foe) CAP.stats.shots++; capSig(s, t);
   if (h.k === 'f') pending.push({ kind: 'ak', a: 1, t: t + tf, i: h.i, dmg: dmg * 0.5, side });
   else if (h.k === 'm') pending.push({ kind: 'ak', a: 0, t: t + tf, i: h.i, g: h.g, dmg: 1, side });
-  else if (h.k === 's') { const g = h.i, asp = hitAspect(g, ox, oz, ex, ez, oy, ey); pending.push({ src: 0, gk: 'main', nd: dmg, t: t + tf, target: g, side, asp, dmg: sdm, hm: hitMul(asp, s.q, squadrons[ships.sq[g]]), fx: true, dirIdx: dirIndexOf(ex - ox, ez - oz), x: ex, y: ey, z: ez }); }
+  else if (h.k === 's') { const g = h.i; capBy(s, g); const asp = hitAspect(g, ox, oz, ex, ez, oy, ey); pending.push({ src: 0, gk: 'main', nd: dmg, t: t + tf, target: g, side, asp, dmg: sdm, hm: hitMul(asp, s.q, squadrons[ships.sq[g]]), fx: true, dirIdx: dirIndexOf(ex - ox, ez - oz), x: ex, y: ey, z: ez }); }
   else if (h.k === 'g') pending.push({ kind: 'gt', t: t + tf, gi: h.i, dmg, side, x: ex, y: ey, z: ez });
   else if (h.k === 'ms') pending.push({ kind: 'ms', t: t + tf, id: h.i, dmg, side, x: ex, y: ey, z: ez });
   else if (h.k) pending.push({ kind: 'sp', t: t + tf, x: ex, y: ey, z: ez, side, r: h.k === 'r' ? -1 : M.dmg >= 50 ? 0.8 : 0.4, bi: h.k === 'b' ? h.i : null });
@@ -992,7 +992,7 @@ function capMissile(s, t, pressed) {
   s.mslN--; s.mslCd = M.cd; s.aiMslT = t + 2.5; if (!s.foe) CAP.stats.msl++; capSig(s, t);
   const ox = s.x + s.U[0] * s.L * 0.12, oy = s.y + s.U[1] * s.L * 0.12, oz = s.z + s.U[2] * s.L * 0.12;
   rigFire(s.i, 'msl', t, tp.x, tp.y, tp.z);
-  if (T.k === 's') launchMissileAt(ox, oy, oz, s.side, s.q, T.i, M.dmg * s.dm, t, 1, 1.2);
+  if (T.k === 's') capBy(s, T.i), launchMissileAt(ox, oy, oz, s.side, s.q, T.i, M.dmg * s.dm, t, 1, 1.2);
   else CAP.msl.push({ x: ox, y: oy, z: oz, vx: s.vx * 0.5, vy: 9, vz: s.vz * 0.5, gi: T.k === 'g' ? T.i : -1, ms: T.k === 'ms' ? T.i : -1, dmg: M.dmg, life: 22, age: 0, n: 0 });
   if (ctl && (pressed || s.mslN % 4 === 0)) capFeed(`飛彈發射 → ${capTgtName(T)}（剩 ${s.mslN} 枚）`, 'ok');
 }
@@ -1089,7 +1089,7 @@ function capTurretShot(s, m, T, tg, t) {
   if (tg.k === 'ms') pending.push({ kind: 'ms', t: t + dur, id: tg.i, dmg, side, x: tx, y: ty, z: tz });
   else if (tg.k === 'f') pending.push({ kind: 'ak', a: 1, t: t + dur, i: tg.i, dmg: dmg * 0.6, side });
   else if (tg.k === 'g') pending.push({ kind: 'gt', t: t + dur, gi: tg.i, dmg, side, x: tx, y: ty, z: tz });
-  else { const asp = hitAspect(tg.i, mx, mz, tx, tz, my, ty); pending.push({ gk: 'sec', nd: dmg, t: t + dur, target: tg.i, side, asp, dmg: s.foe ? dmg / CAP_RULE.gunMul : dmg, hm: hitMul(asp, s.q, squadrons[ships.sq[tg.i]]), fx: capRnd() < 0.3, dirIdx: dirIndexOf(tx - mx, tz - mz), x: tx, y: ty, z: tz }); }
+  else { capBy(s, tg.i); const asp = hitAspect(tg.i, mx, mz, tx, tz, my, ty); pending.push({ gk: 'sec', nd: dmg, t: t + dur, target: tg.i, side, asp, dmg: s.foe ? dmg / CAP_RULE.gunMul : dmg, hm: hitMul(asp, s.q, squadrons[ships.sq[tg.i]]), fx: capRnd() < 0.3, dirIdx: dirIndexOf(tx - mx, tz - mz), x: tx, y: ty, z: tz }); }
 }
 // ───── 技能 ─────
 function capSkill(s, t) {
@@ -1382,6 +1382,8 @@ function capHurt(ti, e, shD, hullD) {
   if (!e.crash) { s.hitT = t; if (!capCloakOn(s, t)) s.knownT = Math.max(s.knownT, t + 3); }
   if (t < s.shieldT && ships.alive[ti]) { ships.hp[ti] = Math.min(maxHp(ti), ships.hp[ti] + hullD * 0.5); ships.sh[ti] = Math.min(ships.shMax[ti], ships.sh[ti] + shD * 0.5); }
   capJamRefund(s, ti, shD, hullD, t);   // 電子干擾（caphulls.js）
+  capReactRefund(s, ti, e, hullD);   // 反應裝甲
+  if (e.kill) capByKill(ti);   // 敵艦擊沉你的船：經驗算給它
   if (k === CAP.cur) {
     const now = performance.now(); CAP.flash = { t: now, hull: hullD > 0 };
     if (e.sx != null) { CAP.hits.push({ t: now, x: e.sx, z: e.sz, hull: hullD > 0 }); if (CAP.hits.length > 8) CAP.hits.shift(); }
@@ -1393,6 +1395,7 @@ function capCreditShip(ti, dmg, kill) {
   const S = CAP.stats; if (!S) return;
   S.dmg += dmg;
   if (!kill) return;
+  capByKill(ti);   // 船的經驗（caphulls.js）
   S.ks++; S.merit += CAP_MERIT.ship * (ships.type[ti] <= 2 ? 2 : 1); const ck = capShip(ti); S.kills.push(ck >= 0 ? CAP.ships[ck].H.name : SHIP_TYPES[ships.type[ti]].name);
   const nm = capShipName(ti); capFeed(`擊沉${nm}！`, 'kill'); CAP.pop = { t: performance.now(), txt: 'DESTROYED', sub: `擊沉 ${nm.replace(/^敵/, '')}` };
   if (CAP.mis && CAP.mis.ship === ti) capFeed('指揮艦被擊沉！', 'kill');

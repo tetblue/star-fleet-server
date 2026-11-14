@@ -165,8 +165,15 @@ function ccDefBase0(s) {
 }
 function ccRandHulls(S, n) { return Array.from({ length: n }, () => { const r = smRnd(S); return r < 0.4 ? 'assault' : r < 0.7 ? 'gunship' : 'support'; }); }
 function ccNewSquad(S, fac, sys, hulls, o = {}) {
-  const q = { id: S.nextId++, fac, sys, prev: sys, to: null, name: o.name || `${SM_FAC[fac].name}第${S.nextId - 1}小隊`, pl: !!o.pl, ships: hulls.map((key) => ({ key, hp: 1, sh: 1, msl: 1 })) };
+  const q = { id: S.nextId++, fac, sys, prev: sys, to: null, name: o.name || `${SM_FAC[fac].name}第${S.nextId - 1}小隊`, pl: !!o.pl, ships: hulls.map(capNewShip) };
   S.sq.push(q); return q;
+}
+// 船的經驗（參戰、存活、擊沉）：升級時記在紀錄裡（只記你的小隊）
+function ccXp(S, q, c, n) {
+  capShipFix(c); c.xp += Math.round(n); const lv = capLvOf(c.xp);
+  if (lv <= c.lv) return;
+  const up = capMkCapLv(lv) > capMkCapLv(c.lv); c.lv = lv;
+  if (q.pl) ccLog(S, `${q.name}的${CAP_HULLS[c.key].name}升到 Lv${lv}${up ? `（等級上限可以裝到 ${CAP_MK_NAME[capMkCapLv(lv)]}）` : ''}`, 'ok');
 }
 function ccLog(S, t, c) { S.log.push({ turn: S.turn, t, c: c || '' }); if (S.log.length > 300) S.log.splice(0, S.log.length - 300); }
 const ccPl = (S) => S.sq.find((q) => q.id === S.pl.sq);
@@ -180,7 +187,7 @@ function ccVis(S, s) {
   if (s.owner === S.fac || ccIntel(S, s)) return true;
   return S.sq.some((q) => q.ships.length && ((q.fac === S.fac && q.sys === s.id) || (q.pl && S.adj[q.sys].includes(s.id))));
 }
-const ccSnapSq = (q) => ({ id: q.id, name: q.name, fac: q.fac, sys: q.sys, dis: q.dis, ships: q.ships.map((c) => ({ key: c.key, hp: c.hp, sh: c.sh, msl: c.msl })) });
+const ccSnapSq = (q) => ({ id: q.id, name: q.name, fac: q.fac, sys: q.sys, dis: q.dis, ships: q.ships.map((c) => ({ key: c.key, hp: c.hp, sh: c.sh, msl: c.msl, lv: c.lv })) });
 function ccFogTick(S) {
   if (!S.mem) S.mem = {};
   for (const s of S.sys) if (ccVis(S, s)) S.mem[s.id] = { t: S.turn, owner: s.owner, def: s.def, defs: ccDefsAlive(s).map((d) => ({ type: d.type, hp: d.hp })), yard: !!s.yard, depot: !!s.depot, sg: s.sg ? { f: s.sg.f, w: s.sg.w } : null, sq: ccAt(S, s.id).map(ccSnapSq) };
@@ -261,7 +268,7 @@ function ccWeekB(S) {
   if (S.fame) for (const f of [SM_A, SM_E, SM_P]) S.fame[f] += (50 - S.fame[f]) * CC_RULE.fame.back;
   // 玩家新造的船到了
   for (const b of S.pl.build.splice(0)) {   // 舊存檔：字串＝加入親自指揮的小隊
-    const key = b.key || b, add = { key, hp: 1, sh: 1, msl: 1 };
+    const key = b.key || b, add = capNewShip(key);
     if (b.sq === 'new') { const q = ccNewSquad(S, S.fac, b.sys, [], { pl: true, name: ccOwnName(S) }); q.ships.push(add); ccLog(S, `新造的${CAP_HULLS[key].name}在 ${S.sys[b.sys].name} 成立${q.name}`, 'ok'); continue; }
     const q = S.sq.find((x) => x.id === b.sq && x.ships.length) || ccPl(S);
     if (q && q.ships.length < CC_RULE.maxShips) { q.ships.push(add); ccLog(S, `新造的${CAP_HULLS[key].name}加入${q.name}`, 'ok'); }
@@ -308,6 +315,9 @@ function ccFightCalc(S, s, B) {
   const lost = aWin ? B.D : B.A; for (const q of lost) ccFlee(S, q);
   if (B.A[0] && B.D[0]) { ccFame(S, (aWin ? B.A : B.D)[0].fac, CC_RULE.fame.battle); ccFame(S, (aWin ? B.D : B.A)[0].fac, -CC_RULE.fame.battle); }
   const lA = nA - B.A.reduce((a, q) => a + q.ships.length, 0), lD = nD - B.D.reduce((a, q) => a + q.ships.length, 0);
+  // 經驗：活下來的船＝參戰＋存活，再平分對方的損失（計算的戰鬥不知道誰擊沉的）
+  const xpSide = (L, foeLost) => { const live = L.flatMap((q) => q.ships.map((c) => [q, c])), kx = live.length ? foeLost * CAP_XP.calc / live.length : 0; for (const [q, c] of live) ccXp(S, q, c, CAP_XP.fight + CAP_XP.live + kx); };
+  xpSide(B.A, lD); xpSide(B.D, lA);
   const fa = B.A[0] ? B.A[0].fac : -1, fd = B.D[0] ? B.D[0].fac : s.owner;
   const mine = fa === S.fac || fd === S.fac || s.owner === S.fac;
   ccLog(S, `${s.name}：${SM_FAC[fa].name}進攻${fd >= 0 ? SM_FAC[fd].name : ''}${B.defs.length ? `（軌道防禦 ${B.defs.length} 座）` : ''}，${aWin ? SM_FAC[fa].name : SM_FAC[fd].name}獲勝（預測勝率 ${Math.round(O.win * 100)}%）・損失 ${lA}／${lD} 艘`, mine ? (aWin === (fa === S.fac) ? 'ok' : 'bad') : '');
@@ -400,7 +410,7 @@ function ccEconomy(S) {
       const atYard = S.sq.filter((q) => q.fac === f && !q.pl && q.ships.length && q.ships.length < CC_RULE.maxShips && S.sys[q.sys].owner === f && S.sys[q.sys].yard).sort((a, b) => a.ships.length - b.ships.length);
       const weak = atYard.find((q) => q.ships.length < 3) || (S.money[f] > 1500 ? atYard[0] : null);   // 先補不到 3 艘的隊；錢多就補到 5 艘
       const nSq = S.sq.filter((q) => q.fac === f && q.ships.length).length;
-      if (weak) { weak.ships.push({ key, hp: 1, sh: 1, msl: 1 }); S.money[f] -= cost; }
+      if (weak) { weak.ships.push(capNewShip(key)); S.money[f] -= cost; }
       else if (nSq < Math.max(4, Math.ceil(own.length * 0.7))) { const y = yards.find((s) => ccAt(S, s.id, f).length < CC_RULE.maxSq); if (!y) break; ccNewSquad(S, f, y.id, [key]); S.money[f] -= cost; }
       else break;
     }
@@ -508,6 +518,7 @@ function ccRunTasks(S) {
     if (!ccTaskOk(S, q, t)) { ccLog(S, `${q.name}的${name}取消（情況改變了）`, ''); continue; }
     const O = ccTaskOdds(S, q, t), ok = smRnd(S) < O.p, n0 = q.ships.length;
     q.ships = q.ships.filter((c, k) => { if (smRnd(S) >= O.surv[k]) return false; c.hp = Math.max(0.05, c.hp * (0.65 + 0.3 * smRnd(S))); c.msl *= 0.5; return true; });
+    for (const c of q.ships) ccXp(S, q, c, CAP_XP.fight + CAP_XP.live);
     ccLog(S, `${q.name}在 ${s.name} 執行${name}（計算，成功率 ${Math.round(O.p * 100)}%）：${ok ? '成功' : '失敗'}${n0 > q.ships.length ? `，損失 ${n0 - q.ships.length} 艘` : ''}${q.ships.length ? '' : '（全滅）'}`, ok ? 'ok' : 'bad');
     if (!ok) continue;
     S.pl.merit += 40;
@@ -535,6 +546,7 @@ function ccAiOps(S) {
     const { q, M } = L[Math.floor(smRnd(S) * L.length)], s = S.sys[M.sys];
     const p = ccOpP(S, q, M.op, s, f), li = ccOpLi(S, s, f), ok = smRnd(S) < p, n0 = q.ships.length;
     q.ships = q.ships.filter((c) => { if (smRnd(S) >= ccOpSurv(c, p, li)) return false; c.hp = Math.max(0.05, c.hp * (0.65 + 0.3 * smRnd(S))); c.msl *= 0.5; return true; });
+    for (const c of q.ships) ccXp(S, q, c, CAP_XP.fight + CAP_XP.live);
     const vs = M.vs, me = vs === S.fac;
     let res = '';
     if (ok) { res = CC_OPFX[M.op].apply(S, M); ccFame(S, f, CC_RULE.fame.op); ccFame(S, vs, -CC_RULE.fame.op); }
@@ -654,5 +666,6 @@ function ccMissionDone(S, M, ok) {
 
 function ccSave(S) { try { STORE.setItem(CC_STORE, JSON.stringify(S)); return true; } catch (e) { return false; } }
 function ccLoad() { try { const t = STORE.getItem(CC_STORE); const S = t ? JSON.parse(t) : null; if (!S || S.v !== 1) return null; for (const s of S.sys) { if (s.def0 == null) s.def0 = s.def; if (!s.fx) s.fx = {}; if (!s.scene) s.scene = ccSceneFor(S, s); }
+    for (const q of S.sq) q.ships.forEach(capShipFix);   // 舊存檔：船補上等級、模組
     if (S.pl.rank == null) S.pl.rank = S.pl.merit >= 2000 ? 2 : S.pl.merit >= 800 ? 1 : 0;   // 舊存檔：照以前的指揮權換算軍階
     return S; } catch (e) { return null; } }

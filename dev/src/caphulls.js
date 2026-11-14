@@ -62,3 +62,73 @@ function capHullAI(s, t) {
   if (K.key === 'cloak' && ships.hp[s.i] < maxHp(s.i) * 0.45 && t - s.hitT < 2) capSkill(s, t);
   if (K.key === 'jam' && t - s.hitT < 3) capSkill(s, t);
 }
+
+// ═══════════════════════ 艦長生涯：船的等級與模組（研發、改裝的第 1 步，2026-11-14） ═══════════════════════
+// 每艘船（生涯存檔的 ship 記錄）：lv＝等級 1～5、xp＝戰鬥經驗、mod＝各槽位裝的模組（沒寫＝原廠）、mk＝各槽位的 Mk 等級（沒寫＝Mk I）。
+// 等級來自那艘船自己的戰鬥（參戰、存活、擊沉），船沉了就沒了。等級決定 Mk 上限（之後再跟研發到的 Mk 取低的）。
+// 模組各有取捨；主砲模組換的是砲的「型式」，每秒傷害照船型原廠主砲（各船型原本就差不多），所以不會因為換砲變成另一個船型。
+const CAP_SLOTS = [['main', '主砲'], ['tur', '副砲'], ['msl', '飛彈艙／機庫'], ['def', '防禦'], ['eng', '引擎']];
+const CAP_MODS = {
+  main: {
+    rail: { name: '磁軌砲', desc: '射得快、單發輕，射界左右各 45°', p: { cd: 2.2, k: 1, range: 240, spd: 260, arc: 45, trav: 60 } },
+    heavy: { name: '重粒子砲', desc: '一發重、射得慢、射程遠；砲塔轉得慢，射界左右各 30°', p: { cd: 6, k: 0.95, range: 320, spd: 200, arc: 30, trav: 25 } },
+    rapid: { name: '速射砲', desc: '射界幾乎全方位，單發輕、射程短', p: { cd: 0.9, k: 0.85, range: 200, spd: 280, arc: 150, trav: 90 } },
+    beam: { name: '光束砲', desc: '持續照射、每秒傷害最高，射程最短', p: { cd: 0.35, k: 1.1, range: 170, spd: 600, arc: 60, trav: 70 }, res: true },
+  },
+  tur: {
+    heavy: { name: '重型砲塔', desc: '傷害高、射得慢、比較不準', tur: { dmg: 1.8, cd: 1.5, acc: 0.9, range: 1.1 } },
+    aa: { name: '防空砲塔', desc: '對艦傷害低；點防禦多 2 座、攔截距離遠，專打飛彈與艦載機', tur: { dmg: 0.6 }, pdN: 2, pd: { far: 1.25 } },
+  },
+  msl: {
+    heavy: { name: '重飛彈', desc: '數量少、一發傷害高，鎖定比較久', msl: { n: 0.4, dmg: 2.2, lockT: 1.3 } },
+    swarm: { name: '蜂群飛彈', desc: '數量多、一發傷害低，鎖定快', msl: { n: 2, dmg: 0.45, lockT: 0.7 } },
+    hangar: { name: '機庫', desc: '帶 6 架護航機，飛彈只剩三分之一', msl: { n: 0.35 }, ftr: 6 },
+  },
+  def: {
+    armor: { name: '重裝甲', desc: '船體多 25%，護盾少 10%、速度慢 10%', hull: { hp: 1.25, sh: 0.9, cruise: 0.9, max: 0.9 } },
+    shield: { name: '強化護盾', desc: '護盾多 35%，船體少 15%', hull: { sh: 1.35, hp: 0.85 } },
+    react: { name: '反應裝甲', desc: '船體多 5%，飛彈對船體的傷害少 30%', hull: { hp: 1.05 }, mslCut: 0.3, res: true },
+  },
+  eng: {
+    cruise: { name: '巡航引擎', desc: '均衡：巡航速度、加速都快一點', hull: { cruise: 1.1, acc: 1.05 } },
+    sprint: { name: '衝刺引擎', desc: '最高速度快 20%，轉向慢 20%', hull: { max: 1.2, cruise: 1.1, acc: 1.15, turn: 0.8 } },
+    agile: { name: '機動引擎', desc: '轉向快 30%、側移快，最高速度慢 10%', hull: { turn: 1.3, strafe: 1.25, climb: 1.2, max: 0.9 } },
+  },
+};
+const CAP_MK = [1, 1, 1.1, 1.2];   // Mk I／II／III：那個槽位的主要數值倍率
+const CAP_XP = { fight: 10, live: 10, lv: [0, 30, 80, 160, 300], kill: { assault: 15, stealth: 15, ew: 20, support: 20, gunship: 30 }, big: 25, small: 10, calc: 18 };
+const CAP_MK_NAME = ['', 'Mk I', 'Mk II', 'Mk III'];
+// 原廠模組的名字
+function capModBase(H, slot) { return slot === 'main' ? H.main.name : slot === 'tur' ? '標準砲塔' : slot === 'msl' ? (H.msl ? (H.ftr ? `飛彈＋護航機 ${H.ftr} 架` : '標準飛彈') : '沒有') : slot === 'def' ? '標準裝甲' : '標準引擎'; }
+function capModName(H, slot, id) { const M = id && CAP_MODS[slot][id]; return M ? M.name : capModBase(H, slot); }
+const capLvOf = (xp) => CAP_XP.lv.reduce((a, v, k) => (xp >= v ? k + 1 : a), 1);
+const capMkCapLv = (lv) => (lv >= 5 ? 3 : lv >= 3 ? 2 : 1);   // 船的等級能裝到的 Mk（研發的上限之後再加）
+// 新船、舊存檔的船：補上等級、模組的欄位
+function capShipFix(c) { if (c.lv == null) c.lv = 1; if (c.xp == null) c.xp = 0; if (!c.mod) c.mod = {}; if (!c.mk) c.mk = {}; return c; }
+const capNewShip = (key) => capShipFix({ key, hp: 1, sh: 1, msl: 1 });
+// 照模組與 Mk 算出這艘船實際的數值（o＝{ mod, mk }；都是原廠就直接回傳原本的船型）
+function capHullMod(H0, o) {
+  const mod = (o && o.mod) || {}, mk = (o && o.mk) || {};
+  if (!CAP_SLOTS.some(([k]) => mod[k] || (mk[k] || 1) > 1)) return H0;
+  const H = { ...H0, main: { ...H0.main }, tur: { ...H0.tur }, pd: { ...H0.pd }, msl: H0.msl ? { ...H0.msl } : null, mod, mk };
+  const mul = (T, m) => { if (T && m) for (const k in m) T[k] = T[k] * m[k]; };
+  const M = (slot) => mod[slot] && CAP_MODS[slot][mod[slot]];
+  const mm = M('main');
+  if (mm) { const dps = H0.main.dmg / H0.main.cd, p = mm.p; Object.assign(H.main, { name: mm.name, cd: p.cd, dmg: Math.round(dps * p.k * p.cd * 10) / 10, range: p.range, spd: p.spd, arc: p.arc, trav: p.trav, mod: mod.main }); }
+  const mt = M('tur'); if (mt) { mul(H.tur, mt.tur); mul(H.pd, mt.pd); H.pd.n += mt.pdN || 0; }
+  const ms = M('msl'); if (ms && H.msl) { mul(H.msl, ms.msl); H.msl.n = Math.max(2, Math.round(H.msl.n)); H.ftr = ms.ftr || 0; }
+  for (const slot of ['def', 'eng']) { const m = M(slot); if (m) mul(H, m.hull); }
+  const md = M('def'); if (md && md.mslCut) H.mslCut = md.mslCut;
+  // Mk：主砲、副砲、飛彈＝傷害；防禦＝船體與護盾；引擎＝最高速度與加速
+  const K = (slot) => CAP_MK[mk[slot] || 1];
+  H.main.dmg *= K('main'); H.tur.dmg *= K('tur'); if (H.msl) H.msl.dmg *= K('msl');
+  H.hp *= K('def'); H.sh *= K('def'); H.max *= K('eng'); H.acc *= K('eng');
+  return H;
+}
+// 擊沉的經驗（ti＝被擊沉的船）：艦長戰場的船照船型，其他照大小
+function capKillXp(ti) { const k = capShip(ti); return k >= 0 ? CAP_XP.kill[CAP.ships[k].key] || 15 : ships.type[ti] <= 2 ? CAP_XP.big : CAP_XP.small; }
+// 記下最後一艘朝 ti 開火的船（擊沉的經驗算給它）
+function capBy(s, ti) { if (CAP.by && ti >= 0) CAP.by[ti] = s.k; }
+function capByKill(ti) { const k = CAP.by && CAP.by[ti]; const s = k != null && CAP.ships[k]; if (s) s.kxp = (s.kxp || 0) + capKillXp(ti); }
+// 反應裝甲（capHurt 呼叫）：飛彈打到船體的傷害退回一部分
+function capReactRefund(s, ti, e, hullD) { if (s.H.mslCut && e.kind === 'mh' && hullD > 0 && ships.alive[ti]) ships.hp[ti] = Math.min(maxHp(ti), ships.hp[ti] + hullD * s.H.mslCut); }

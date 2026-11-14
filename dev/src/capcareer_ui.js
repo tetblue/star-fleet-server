@@ -56,7 +56,10 @@ const CC_CSS = `.cc-ico{width:15px;height:15px;vertical-align:-3px;margin-right:
 .cc-bar{height:4px;background:#1a2433;border-radius:2px;overflow:hidden}.cc-bar i{display:block;height:100%}
 .cc-sq{border:1px solid #1d2838;border-radius:6px;padding:5px 8px;margin:5px 0}.cc-sq.pl{border-color:#3fdf8f}
 .cc-odds{font-size:20px;font-weight:700}.cc-tabs{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px}.cc-tab{background:#121c2b;border:1px solid #2a3a50;color:#aab7c8;border-radius:5px;padding:2px 7px;font-size:12px;cursor:pointer}.cc-tab.on{border-color:#3fdf8f;color:#3fdf8f;background:#123024}
-.cc-sq[data-sq]{cursor:pointer}.cc-sw{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}.cc-sw .cc-ship{grid-template-columns:auto 1fr auto}.cc-sw button{font-size:11px;padding:1px 6px;margin-left:3px}.cc-dock{background:#0d1522ee;border:2px solid #3fdf8f;border-radius:8px;padding:6px 10px;min-width:260px}`;
+.cc-sq[data-sq]{cursor:pointer}.cc-sw{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}.cc-sw .cc-ship{grid-template-columns:auto 1fr auto}.cc-sw button{font-size:11px;padding:1px 6px;margin-left:3px}.cc-dock{background:#0d1522ee;border:2px solid #3fdf8f;border-radius:8px;padding:6px 10px;min-width:260px}
+.cc-lv{font-size:10px;font-weight:700;color:#8a96a8;border:1px solid #3a4658;border-radius:3px;padding:0 3px;margin-left:2px}.cc-lv.up{color:#c9a7ff;border-color:#7a5fb0}.cc-shipnm{cursor:pointer;text-decoration:underline dotted #3fdf8f88}
+.cc-mods{width:100%;border-collapse:collapse;font-size:12px;margin:6px 0}.cc-mods td{padding:3px 6px;border-top:1px solid #1d2838;vertical-align:top}.cc-mods td:first-child{color:#8a96a8;white-space:nowrap}.cc-mods td:nth-child(2){white-space:nowrap}
+.cc-xp{height:6px;background:#1a2433;border-radius:3px;overflow:hidden;margin:3px 0 8px}.cc-xp i{display:block;height:100%;background:#c9a7ff}`;
 function ccResize() { ccDraw(); const el = gEl('cc-card'); if (el && !el.hidden) CC_place(el); }
 function ccLoop(ts) { if (!gEl('cc-cv') || !CC.S) { CC.raf = 0; return; } ccDraw(ts); CC.raf = requestAnimationFrame(ccLoop); }
 const ccXY = (s) => { const V = CC.view; return [V.ox + s.x * V.k, V.oy + s.y * V.k]; };
@@ -156,11 +159,37 @@ function ccWillFight(S, s) {
 const ccBar = (v, col) => `<div class="cc-bar"><i style="width:${Math.round(Math.max(0, Math.min(1, v)) * 100)}%;background:${col}"></i></div>`;
 const ccOddCol = (v) => v >= 0.6 ? '#5fd39a' : v >= 0.4 ? '#ffd36a' : '#ff6a5a';
 function ccShipBars(c) { return `<div>${ccBar(c.hp, c.hp < 0.35 ? '#ff6a5a' : '#5fd39a')}${ccBar(c.sh, '#7cc4ff')}${CAP_HULLS[c.key].msl ? ccBar(c.msl, '#ffd36a') : ''}</div>`; }
-function ccShipRows(q) {
-  return q.ships.map((c) => `<div class="cc-ship"><b>${CAP_HULLS[c.key].name}</b>${ccShipBars(c)}</div>`).join('') || '<div class="g-dim">（全滅）</div>';
+// 船名＋等級（舊情報沒有等級就不顯示）
+const ccShipNm = (c) => `${CAP_HULLS[c.key].name}${c.lv ? ` <span class="cc-lv${c.lv > 1 ? ' up' : ''}">Lv${c.lv}</span>` : ''}`;
+// own＝你的小隊：點船名看那艘船的等級、模組、數值
+function ccShipRows(q, own) {
+  return q.ships.map((c, k) => `<div class="cc-ship"><b${own ? ` class="cc-shipnm" data-ship="${q.id}:${k}" title="看這艘船的等級與模組"` : ''}>${ccShipNm(c)}</b>${ccShipBars(c)}</div>`).join('') || '<div class="g-dim">（全滅）</div>';
 }
 const ccPartsTx = (P) => P.map(([k, v]) => `${k} ${v >= 0 ? '+' : '−'}${Math.abs(v)}`).join('、');   // 成功率的組成（百分點）
 const ccSurvTx = (q, sv) => q.ships.map((c, k) => `${CAP_HULLS[c.key].name} ${Math.round((sv[k] ?? 0) * 100)}%`).join('、');
+// 一艘船的等級、經驗、模組與實際數值（研發、改裝的第 1 步：先能看，改裝之後開放）
+function ccShipView(q, k) {
+  const c = q && q.ships[k]; if (!c) return;
+  capShipFix(c);
+  const H0 = CAP_HULLS[c.key], H = capHullMod(H0, c), L = CAP_XP.lv, lv = c.lv, cap = capMkCapLv(lv);
+  const lo = L[lv - 1], hi = L[lv], xpTx = hi == null ? `經驗 ${c.xp}（已經是最高等級）` : `經驗 ${c.xp}／${hi}（升到 Lv${lv + 1}${capMkCapLv(lv + 1) > cap ? `，可以裝到 ${CAP_MK_NAME[capMkCapLv(lv + 1)]}` : ''}）`;
+  const pct = hi == null ? 1 : (c.xp - lo) / (hi - lo);
+  const rows = CAP_SLOTS.map(([slot, nm]) => { const id = c.mod[slot], M = id && CAP_MODS[slot][id];
+    return `<tr><td>${nm}</td><td><b>${capModName(H0, slot, id)}</b> ${CAP_MK_NAME[c.mk[slot] || 1]}</td><td class="g-dim">${M ? M.desc : '原廠'}</td></tr>`; }).join('');
+  const f1 = (v) => Math.round(v * 10) / 10;
+  const st = [['船體', Math.round(H.hp)], ['護盾', Math.round(H.sh)], ['主砲', `${H.main.name} ${f1(H.main.dmg)} 傷害／${H.main.cd} 秒（每秒 ${f1(H.main.dmg / H.main.cd)}）・射程 ${H.main.range}・射界左右各 ${H.main.arc}°`],
+    ['副砲', `砲塔 ${H.tur.n} 座・${f1(H.tur.dmg)} 傷害／${f1(H.tur.cd)} 秒・點防禦 ${H.pd.n} 座`],
+    ['飛彈', H.msl ? `${H.msl.n} 枚・每枚 ${f1(H.msl.dmg)}・鎖定 ${f1(H.msl.lockT)} 秒${H.ftr ? `・護航機 ${H.ftr} 架` : ''}` : '沒有'],
+    ['機動', `最高速度 ${f1(H.max)}・轉向 ${Math.round(H.turn)}°／秒`], ['技能', `${H0.skill.name}（船型固定）`]];
+  smuModal(`<h3>${smuEsc(q.name)}・${H0.name} <span class="cc-lv${lv > 1 ? ' up' : ''}" style="font-size:13px">Lv${lv}</span></h3>
+    <div class="g-dim">${xpTx}</div><div class="cc-xp"><i style="width:${Math.round(pct * 100)}%"></i></div>
+    <div>Mk 上限：<b>${CAP_MK_NAME[cap]}</b> <span class="g-dim">（船的等級 Lv1～2＝Mk I、Lv3～4＝Mk II、Lv5＝Mk III；之後還要研發到才能裝）</span></div>
+    <table class="cc-mods">${rows}</table>
+    <dl class="sm-kv">${st.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join('')}</dl>
+    <p class="g-dim" style="font-size:12px">經驗：參戰 +${CAP_XP.fight}、活下來 +${CAP_XP.live}、擊沉 +10～30（看船型）。船沉了，等級也跟著沒了。改裝與 Mk 升級之後會在有船塢的星系開放。</p>
+    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`);
+  gEl('cc-close').onclick = smuCloseModal;
+}
 // 小隊面板：你的每個小隊一個分頁；選中的小隊＝星系卡片上命令的對象
 function ccDock() {
   const S = CC.S, P = ccPl(S), Q = ccCur(S), el = gEl('cc-dock'); if (!el || !Q) return;
@@ -170,10 +199,11 @@ function ccDock() {
   const blds = S.pl.build.filter((b) => (b.sq || S.pl.sq) === Q.id).map((b) => CAP_HULLS[b.key || b].name);
   el.innerHTML = `<div class="cc-dock">${own.length > 1 || slots > 1 ? `<div class="cc-tabs">${own.map((q) => `<button class="cc-tab ${q === Q ? 'on' : ''}" data-sq="${q.id}">${q === P ? '★' : ''}${smuEsc(q.name)} ${q.ships.length}艘${q.to == null && ccThreatA(S, q, q.sys).length ? ' ⚠' : ''}</button>`).join('')}</div>` : ''}
     <div style="display:flex;justify-content:space-between;gap:8px"><b style="color:#3fdf8f">${Q === P ? '★ ' : ''}${smuEsc(Q.name)}・${Q.ships.length} 艘${Q === P ? '（親自指揮）' : ''}</b><span class="g-dim">在 ${s.name}${Q.to != null ? ` → ${S.sys[Q.to].name}` : ''}</span></div>
-    ${ccShipRows(Q)}${tk}${ccThreat(S, Q)}
+    ${ccShipRows(Q, true)}${tk}${ccThreat(S, Q)}
     ${Q !== P || mates.length || slots > own.length ? `<div style="display:flex;gap:6px;margin:4px 0">${Q !== P ? `<button class="g-btn" id="cc-cmd" ${P && P.ships.length && P.sys !== Q.sys ? 'disabled title="要和現在指揮的小隊在同一個星系"' : ''}>改為親自指揮</button>` : ''}${mates.length || (slots > ccOwnCount(S) && Q.ships.length > 1) ? '<button class="g-btn" id="cc-swap">換船／分隊</button>' : ''}</div>` : ''}
     <div class="g-dim" style="font-size:11px">綠＝船體・藍＝護盾・黃＝飛彈・${ccRankOf(S).name}・指揮權 ${ccOwnCount(S)}／${slots} 隊${next ? `・戰功 ${next.merit} 升遷考核（${next.name}）` : ''}${blds.length ? `・下週到：${blds.join('、')}` : ''}${Q === P && S.pl.weekFought ? '・這週已經打過一場' : ''}</div></div>`;
   el.querySelectorAll('[data-sq]').forEach((b) => (b.onclick = () => { CC.cur = +b.dataset.sq; ccDock(); ccCard(); }));
+  el.querySelectorAll('[data-ship]').forEach((b) => (b.onclick = () => { const [qi, k] = b.dataset.ship.split(':').map(Number); ccShipView(ccSqById(qi), k); }));
   const on = (id, fn) => { const b = gEl(id); if (b) b.onclick = fn; };
   on('cc-cmd', () => { if (ccTakeCommand(S, Q)) return; ccSave(S); ccRender(); });
   on('cc-swap', () => ccSwapView(Q));
@@ -254,7 +284,7 @@ function ccCard() {
 function ccSwapView(Q) {
   const S = CC.S, L = S.sq.filter((q) => q.pl && q.ships.length && q.sys === Q.sys), canNew = ccOwnCount(S) < ccSlots(S);
   smuModal(`<h3>換船／分隊：${S.sys[Q.sys].name}</h3><p class="g-dim">同一個星系的小隊之間可以換船，不花時間。每隊最多 ${CC_RULE.maxShips} 艘；親自指揮的小隊至少留一艘。${canNew ? '「分出」＝用這艘船成立新的小隊。' : `指揮權 ${ccOwnCount(S)}／${ccSlots(S)} 隊${CC_RULE.sqMerit[ccSlots(S)] ? `（戰功 ${CC_RULE.sqMerit[ccSlots(S)]} 可以多帶一隊）` : ''}。`}</p>
-    <div class="cc-sw">${L.map((q) => `<div class="cc-sq pl"><b style="color:#3fdf8f">${q.id === S.pl.sq ? '★' : ''}${smuEsc(q.name)}</b>${q.ships.map((c, k) => `<div class="cc-ship"><b>${CAP_HULLS[c.key].name}</b>${ccShipBars(c)}<span>${L.filter((o) => o !== q).map((o) => `<button class="g-btn" data-mv="${q.id}:${k}:${o.id}">→${smuEsc(o.name)}</button>`).join('')}${canNew && q.ships.length > 1 ? `<button class="g-btn" data-mv="${q.id}:${k}:new">分出</button>` : ''}</span></div>`).join('')}</div>`).join('')}</div>
+    <div class="cc-sw">${L.map((q) => `<div class="cc-sq pl"><b style="color:#3fdf8f">${q.id === S.pl.sq ? '★' : ''}${smuEsc(q.name)}</b>${q.ships.map((c, k) => `<div class="cc-ship"><b>${ccShipNm(c)}</b>${ccShipBars(c)}<span>${L.filter((o) => o !== q).map((o) => `<button class="g-btn" data-mv="${q.id}:${k}:${o.id}">→${smuEsc(o.name)}</button>`).join('')}${canNew && q.ships.length > 1 ? `<button class="g-btn" data-mv="${q.id}:${k}:new">分出</button>` : ''}</span></div>`).join('')}</div>`).join('')}</div>
     <div id="cc-swmsg" style="color:#ff8a7a;min-height:16px"></div><div class="sm-btns"><button class="g-btn primary" id="cc-close">完成</button></div>`);
   document.querySelectorAll('[data-mv]').forEach((b) => (b.onclick = () => {
     const [a, k, to] = b.dataset.mv.split(':'), q = S.sq.find((x) => x.id === +a), w = ccTransfer(S, q, +k, to === 'new' ? 'new' : +to);
@@ -335,7 +365,7 @@ function ccSkipPlayerBattle(S, why) {
 }
 
 // ───── 親自打：佔領戰（軌道）、地面突襲、特戰任務 ─────
-function ccShipSt(c) { return { hp: c.hp, sh: c.sh, msl: c.msl }; }
+function ccShipSt(c) { return { hp: c.hp, sh: c.sh, msl: c.msl, mod: c.mod, mk: c.mk }; }   // mod、mk：模組與 Mk（capHullMod）
 function ccLaunch(S, kind, o) {
   const s = S.sys[o.sys], P = ccPl(S), R = CC_ROLES[S.role], li = CC_DIFF[S.diff].li, fac = SM_FAC[S.fac].game === 0 ? 0 : 1;
   const seed = ccSeedOf(S, s);
@@ -384,7 +414,7 @@ function ccBattleDone() {
   const R = GAME.result || {}, s = S.sys[I.sys], st = CAP.stats || { ks: 0, merit: 0 };
   const put = (ids, L) => {
     const sqs = ids.map(ccSqById);
-    for (const x of L) { const q = sqs[x.sq], c = q && q.ships[x.slot]; if (!c) continue; if (x.dead || !ships.alive[x.i]) { c.dead = true; continue; } c.hp = Math.max(0.02, ships.hp[x.i] / maxHp(x.i)); c.sh = ships.shMax[x.i] ? ships.sh[x.i] / ships.shMax[x.i] : 0; c.msl = x.H.msl ? x.mslN / x.H.msl.n : 0; }
+    for (const x of L) { const q = sqs[x.sq], c = q && q.ships[x.slot]; if (!c) continue; if (x.dead || !ships.alive[x.i]) { c.dead = true; continue; } c.hp = Math.max(0.02, ships.hp[x.i] / maxHp(x.i)); c.sh = ships.shMax[x.i] ? ships.sh[x.i] / ships.shMax[x.i] : 0; c.msl = x.H.msl ? x.mslN / x.H.msl.n : 0; if (q) ccXp(S, q, c, (I.kind === 'idle' ? 0 : CAP_XP.fight + CAP_XP.live) + (x.kxp || 0)); }
     for (const q of sqs) if (q) q.ships = q.ships.filter((c) => !c.dead);
   };
   put(I.own, CAP.own); put(I.foe, CAP.foes);
