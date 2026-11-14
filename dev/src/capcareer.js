@@ -34,7 +34,8 @@ const CC_RULE = {
   missile: 3,               // 補飛彈：每枚多少資金（有補給站、維修船塢或首都的己方星系）
   build: { assault: 500, gunship: 900, support: 700, ew: 800, stealth: 850 },   // 新造艦的價錢
   buildW: { assault: 1, gunship: 3, support: 2, ew: 2, stealth: 2 },   // 建造幾週（大船久）；一座船塢一次造一艘
-  yardQ: 4,                 // 一座船塢最多排幾艘
+  yardQ: 4,                 // 一座船塢最多排幾艘（造船、改裝一起算）
+  fit: { base: 50, mod: { main: 300, tur: 150, msl: 200, def: 220, eng: 160 }, stock: 0.5, mk: [0, 0, 250, 450] },   // 改裝：工錢＋換模組（換回原廠半價）＋每升一級 Mk
   baseCost: 400,            // 把據點搬到另一個有維修船塢的己方星系
   defEvery: 2,              // 己方星系每幾週補一座防禦（沒有敵人在場時）
   merit: { ship: 40, cap: 300, def: 30 },
@@ -468,22 +469,27 @@ function ccOrder(S, key, s, to) {
   ccLog(S, `在 ${s.name} 訂造一艘${CAP_HULLS[key].name}（${cost} 資金，${ccYqEta(S, o)} 週後完成${q ? `，加入${q.name}` : '，停在船塢'}）`, 'ok'); return true;
 }
 // 取消：還沒開工全額退費，開工了退一半
+const ccYqCost = (o) => (o.cost != null ? o.cost : CC_RULE.build[o.key]);
+const ccYqBack = (o) => Math.round(ccYqCost(o) * (o.left === o.tot ? 1 : 0.5));
 function ccOrderCancel(S, id) {
   const o = S.pl.yq.find((x) => x.id === id); if (!o) return false;
-  const back = Math.round(CC_RULE.build[o.key] * (o.left === o.tot ? 1 : 0.5));
+  const back = ccYqBack(o);
   S.pl.yq = S.pl.yq.filter((x) => x !== o); S.pl.money += back;
+  if (o.kind === 'fit') { const q = ccFitBack(S, o, o.c); ccLog(S, `取消${CAP_HULLS[o.key].name}的改裝（退回 ${back} 資金），${q ? `船回到${q.name}` : '船停在船塢'}`, ''); return true; }
   ccLog(S, `取消在 ${S.sys[o.sys].name} 訂造的${CAP_HULLS[o.key].name}（退回 ${back} 資金）`, ''); return true;
 }
 const ccSqById2 = (S, id) => S.sq.find((q) => q.id === id);
 // 每週結束：每座船塢造排第一的那艘；預備艦在船塢裡修好、補滿
 function ccYardTick(S) {
+  S.pl.yq = S.pl.yq.filter((o) => { if (o.kind !== 'fit' || S.sys[o.sys].owner === S.fac) return true; ccLog(S, `${S.sys[o.sys].name} 失守：在船塢改裝的${CAP_HULLS[o.key].name}被俘`, 'bad'); return false; });
   const seen = new Set();
   for (const o of S.pl.yq) {
     if (seen.has(o.sys)) continue; seen.add(o.sys);
     const s = S.sys[o.sys];
-    if (s.owner !== S.fac || !s.yard) { if (!o.held) ccLog(S, `${s.name}${s.owner !== S.fac ? '失守' : '的船塢被摧毀'}：${CAP_HULLS[o.key].name}的建造暫停`, 'bad'); o.held = 1; continue; }
+    if (s.owner !== S.fac || !s.yard) { if (!o.held) ccLog(S, `${s.name}${s.owner !== S.fac ? '失守' : '的船塢被摧毀'}：${CAP_HULLS[o.key].name}的${o.kind === 'fit' ? '改裝' : '建造'}暫停`, 'bad'); o.held = 1; continue; }
     o.held = 0; if (--o.left > 0) continue;
     o.fin = true;
+    if (o.kind === 'fit') { const c = o.c; c.mod = { ...o.fit.mod }; c.mk = { ...o.fit.mk }; const q = ccFitBack(S, o, c); ccLog(S, `${s.name} 的船塢改裝好${CAP_HULLS[o.key].name}（${ccFitTx(o.fit, CAP_HULLS[o.key])}），${q ? `回到${q.name}` : '停在船塢當預備艦'}`, 'ok'); continue; }
     const c = capNewShip(o.key), q = o.to != null && S.sq.find((x) => x.id === o.to && x.pl && x.ships.length && x.sys === o.sys && x.ships.length < CC_RULE.maxShips);
     if (q) { q.ships.push(c); ccLog(S, `${s.name} 的船塢造好${CAP_HULLS[o.key].name}，加入${q.name}`, 'ok'); }
     else { S.pl.yid = (S.pl.yid || 0) + 1; S.pl.res.push({ id: S.pl.yid, sys: o.sys, c }); ccLog(S, `${s.name} 的船塢造好${CAP_HULLS[o.key].name}，停在船塢當預備艦`, 'ok'); }
@@ -513,6 +519,85 @@ function ccResPut(S, q, k) {
   q.ships.splice(k, 1); S.pl.yid = (S.pl.yid || 0) + 1; S.pl.res.push({ id: S.pl.yid, sys: q.sys, c });
   if (!q.ships.length) { S.sq = S.sq.filter((x) => x !== q); for (const o of S.pl.yq) if (o.to === q.id) o.to = null; }
   ccLog(S, `${q.name}的${CAP_HULLS[c.key].name}停進 ${s.name} 的船塢`, ''); return '';
+}
+// ───── 改裝、Mk 升級（研發、生產、改裝的第 3 步，2026-11-15）─────
+// 在己方有船塢的星系，把船送進船塢換模組、升 Mk。一次改裝佔用船塢一週，跟造船排同一個隊（插在還沒開工的造船前面）。
+// 改裝中的船離開小隊（不能出戰）；好了回到原本的小隊（還在那個星系、沒滿），不然停在船塢當預備艦。星系失守＝改裝中的船被俘。
+// 換模組＝那個槽位回到 Mk I；Mk 不能降。Mk 上限＝船的等級（capMkCapLv；研發的上限第 4 步再加）。標「研發」的模組要等研發樹。
+// 排隊的記錄：{ id, kind: 'fit', key, sys, left, tot, to, c, fit: { mod, mk }, cost }
+function ccFitOk(H0, slot, id) {
+  const M = id && CAP_MODS[slot][id]; if (!M) return '';
+  if (M.res) return '要先研發（研發樹還沒開放）';
+  if (slot === 'msl' && id === 'hangar' && H0.ftr) return '這個船型本來就有機庫';
+  return '';
+}
+function ccFitCost(c, fit) {
+  const R = CC_RULE.fit; let n = 0;
+  for (const [slot] of CAP_SLOTS) {
+    const a = c.mod[slot] || '', b = fit.mod[slot] || '', kb = fit.mk[slot] || 1, from = a !== b ? 1 : c.mk[slot] || 1;
+    if (a !== b) n += Math.round(R.mod[slot] * (b ? 1 : R.stock));
+    for (let k = from + 1; k <= kb; k++) n += R.mk[k];
+  }
+  return n ? n + R.base : 0;
+}
+// 改了什麼（給紀錄、排隊用）
+function ccFitTx(fit, H0, c) {
+  const a = [];
+  for (const [slot, nm] of CAP_SLOTS) {
+    const b = fit.mod[slot] || '', kb = fit.mk[slot] || 1, a0 = c ? c.mod[slot] || '' : null, k0 = c ? c.mk[slot] || 1 : 1;
+    if (c && a0 === b && k0 === kb) continue;
+    if (!c && !b && kb === 1) continue;
+    a.push(`${nm}${capModName(H0, slot, b)}${kb > 1 ? ' ' + CAP_MK_NAME[kb] : ''}`);
+  }
+  return a.join('、') || '原廠';
+}
+// 這份改裝能不能裝：模組可用、Mk 不超過上限、沒換模組的槽位 Mk 不能降
+function ccFitBad(c, fit) {
+  const H0 = CAP_HULLS[c.key], cap = capMkCapLv(c.lv);
+  for (const [slot, nm] of CAP_SLOTS) {
+    const b = fit.mod[slot] || '', kb = fit.mk[slot] || 1, why = ccFitOk(H0, slot, b);
+    if (why) return `${nm}：${why}`;
+    if (kb > cap) return `${nm}：船的等級只能裝到 ${CAP_MK_NAME[cap]}`;
+    if ((c.mod[slot] || '') === b && kb < (c.mk[slot] || 1)) return `${nm}：Mk 不能降`;
+  }
+  return '';
+}
+// 這座船塢能不能接改裝
+function ccFitWhy(S, s) {
+  if (s.owner !== S.fac) return '要在己方的星系';
+  if (!s.yard) return '這裡沒有維修船塢';
+  if (ccYq(S, s.id).length >= CC_RULE.yardQ) return `這座船塢已經排了 ${CC_RULE.yardQ} 件`;
+  return '';
+}
+// 改裝插在哪裡：還沒開工的造船前面（已經開工的、排在前面的改裝照舊）
+function ccFitAt(S, sid) { const k = S.pl.yq.findIndex((o) => o.sys === sid && o.kind !== 'fit' && o.left === o.tot); return k < 0 ? S.pl.yq.length : k; }
+function ccFitEta(S, sid) { const at = ccFitAt(S, sid); return S.pl.yq.slice(0, at).filter((o) => o.sys === sid).reduce((a, o) => a + o.left, 0) + 1; }
+// 改裝的船從哪裡來：src＝{ q: 小隊 id, k: 第幾艘 } 或 { rid: 預備艦 id }
+function ccFitSrc(S, src) {
+  if (src.rid != null) { const r = S.pl.res.find((x) => x.id === src.rid); return r ? { c: r.c, sys: r.sys, r } : null; }
+  const q = ccSqById2(S, src.q), c = q && q.ships[src.k]; return c ? { c, sys: q.sys, q } : null;
+}
+function ccFitOrder(S, src, fit) {
+  const F = ccFitSrc(S, src); if (!F) return '沒有這艘船';
+  const c = capShipFix(F.c), s = S.sys[F.sys], why = ccFitWhy(S, s) || ccFitBad(c, fit); if (why) return why;
+  const cost = ccFitCost(c, fit); if (!cost) return '沒有要改的地方';
+  if (S.pl.money < cost) return `資金不夠（要 ${cost}）`;
+  let to = null;
+  if (F.q) {
+    const q = F.q; if (q.id === S.pl.sq && q.ships.length <= 1) return '親自指揮的小隊至少要留一艘（先從別隊調一艘過來，或把預備艦編進來）';
+    q.ships.splice(src.k, 1); to = q.id;
+    if (!q.ships.length) { S.sq = S.sq.filter((x) => x !== q); for (const o of S.pl.yq) if (o.to === q.id) o.to = null; to = null; }
+  } else S.pl.res = S.pl.res.filter((x) => x !== F.r);
+  S.pl.money -= cost; S.pl.yid = (S.pl.yid || 0) + 1;
+  const o = { id: S.pl.yid, kind: 'fit', key: c.key, sys: s.id, left: 1, tot: 1, to, c, fit: { mod: { ...fit.mod }, mk: { ...fit.mk } }, cost };
+  S.pl.yq.splice(ccFitAt(S, s.id), 0, o);
+  ccLog(S, `${CAP_HULLS[c.key].name}送進 ${s.name} 的船塢改裝：${ccFitTx(fit, CAP_HULLS[c.key], c)}（${cost} 資金，${ccYqEta(S, o)} 週後好）`, 'ok'); return '';
+}
+// 改裝好、取消：回到原本的小隊（還在那個星系、沒滿），不然停在船塢
+function ccFitBack(S, o, c) {
+  const q = o.to != null && S.sq.find((x) => x.id === o.to && x.pl && x.ships.length && x.sys === o.sys && x.ships.length < CC_RULE.maxShips);
+  if (q) { q.ships.push(c); return q; }
+  S.pl.yid = (S.pl.yid || 0) + 1; S.pl.res.push({ id: S.pl.yid, sys: o.sys, c }); return null;
 }
 // 換船：同一個星系的我方小隊之間，不花時間。to＝'new' 分出新小隊（要有指揮權）
 function ccTransfer(S, a, k, to) {
@@ -735,5 +820,6 @@ function ccSave(S) { try { STORE.setItem(CC_STORE, JSON.stringify(S)); return tr
 function ccLoad() { try { const t = STORE.getItem(CC_STORE); const S = t ? JSON.parse(t) : null; if (!S || S.v !== 1) return null; for (const s of S.sys) { if (s.def0 == null) s.def0 = s.def; if (!s.fx) s.fx = {}; if (!s.scene) s.scene = ccSceneFor(S, s); }
     for (const q of S.sq) q.ships.forEach(capShipFix);   // 舊存檔：船補上等級、模組
     if (!S.pl.yq) S.pl.yq = []; if (!S.pl.res) S.pl.res = [];   // 舊存檔：船塢排隊、預備艦
+    for (const r of S.pl.res) capShipFix(r.c); for (const o of S.pl.yq) if (o.c) capShipFix(o.c);
     if (S.pl.rank == null) S.pl.rank = S.pl.merit >= 2000 ? 2 : S.pl.merit >= 800 ? 1 : 0;   // 舊存檔：照以前的指揮權換算軍階
     return S; } catch (e) { return null; } }

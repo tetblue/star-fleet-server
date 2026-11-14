@@ -968,12 +968,15 @@ function capMain(s, t) {
   const sd = h.s, tf = sd / M.spd;
   const ex = ox + D[0] * sd, ey = oy + D[1] * sd, ez = oz + D[2] * sd, side = s.side;
   const dmg = M.dmg * s.dm, sdm = s.foe ? dmg / CAP_RULE.gunMul : dmg;   // 敵方特製戰艦打玩家：main.js 會把敵方的砲 ×gunMul（給一般戰艦用），先除掉
-  const hv = M.dmg >= 50;
-  capBolt(ox, oy, oz, ex, ey, ez, t, tf, side, 0.95, Math.max(s.L * (hv ? 1.6 : 1.1), hv ? 22 : 14), s.L * (hv ? 0.05 : 0.035));
-  spawnBeam(ox, oy, oz, ex, ey, ez, t, tf, side, 0.3, 0.75, SIDE_FAC[side]);   // 淡淡的彈道（看得出從哪裡打到哪裡）
+  const F = M.fx, hv = F ? !!F.hv : M.dmg >= 50;   // F＝改裝的主砲模組的外觀（caphulls.js CAP_MODS）
+  if (F && F.beam) capBolt(ox, oy, oz, ex, ey, ez, t, 0.3, side, 0.95, sd + 1, s.L * F.wid);   // 光束：整條一起亮
+  else {
+    capBolt(ox, oy, oz, ex, ey, ez, t, tf, side, 0.95, F ? Math.max(s.L * F.seg, 8) : Math.max(s.L * (hv ? 1.6 : 1.1), hv ? 22 : 14), s.L * (F ? F.wid : hv ? 0.05 : 0.035));
+    spawnBeam(ox, oy, oz, ex, ey, ez, t, tf, side, F && F.trail ? F.trail : 0.3, 0.75, SIDE_FAC[side]);   // 淡淡的彈道（看得出從哪裡打到哪裡）
+  }
   rigFire(s.i, 'main', t, ex, ey, ez);   // 3D 砲塔轉向、後座
-  spawnFx(ox, oy, oz, side, s.L * (hv ? 0.4 : 0.26), 30);   // 砲口閃光
-  if (h.k) capFxAt(t + tf, ex, ey, ez, side, s.L * (hv ? 0.35 : 0.22), hv);   // 命中閃光
+  spawnFx(ox, oy, oz, side, s.L * (F ? F.fl : hv ? 0.4 : 0.26), 30);   // 砲口閃光
+  if (h.k) capFxAt(t + tf, ex, ey, ez, side, s.L * (F ? F.hit : hv ? 0.35 : 0.22), hv);   // 命中閃光
   if (!s.foe) CAP.stats.shots++; capSig(s, t);
   if (h.k === 'f') pending.push({ kind: 'ak', a: 1, t: t + tf, i: h.i, dmg: dmg * 0.5, side });
   else if (h.k === 'm') pending.push({ kind: 'ak', a: 0, t: t + tf, i: h.i, g: h.g, dmg: 1, side });
@@ -989,11 +992,15 @@ function capMissile(s, t, pressed) {
   const T = capIsAI(s) ? s.aiTgt : s.mT, tp = T ? capTgtPos(T, _cr) : null;
   if (!tp || T.k === 'f' || T.k === 'm') { if (pressed) capFeed('飛彈：射程內沒有目標（準心停在敵人上＝鎖定）', 'hint'); return; }
   if (s.lockT < M.lockT) { if (pressed) capFeed(Math.hypot(tp.x - s.x, tp.y - s.y, tp.z - s.z) > M.range ? '飛彈：目標在射程外' : '飛彈：鎖定中…', 'hint'); return; }
-  s.mslN--; s.mslCd = M.cd; s.aiMslT = t + 2.5; if (!s.foe) CAP.stats.msl++; capSig(s, t);
-  const ox = s.x + s.U[0] * s.L * 0.12, oy = s.y + s.U[1] * s.L * 0.12, oz = s.z + s.U[2] * s.L * 0.12;
+  const nS = Math.min(M.salvo || 1, s.mslN);   // 蜂群飛彈：一次齊射幾枚
+  s.mslN -= nS; s.mslCd = M.cd * (M.salvo || 1); s.aiMslT = t + 2.5; if (!s.foe) CAP.stats.msl += nS; capSig(s, t);
   rigFire(s.i, 'msl', t, tp.x, tp.y, tp.z);
-  if (T.k === 's') capBy(s, T.i), launchMissileAt(ox, oy, oz, s.side, s.q, T.i, M.dmg * s.dm, t, 1, 1.2);
-  else CAP.msl.push({ x: ox, y: oy, z: oz, vx: s.vx * 0.5, vy: 9, vz: s.vz * 0.5, gi: T.k === 'g' ? T.i : -1, ms: T.k === 'ms' ? T.i : -1, dmg: M.dmg, life: 22, age: 0, n: 0 });
+  for (let j = 0; j < nS; j++) {
+    const sp = nS > 1 ? (j - (nS - 1) / 2) * s.L * 0.12 : 0;
+    const ox = s.x + s.U[0] * s.L * 0.12 + s.Rr[0] * sp, oy = s.y + s.U[1] * s.L * 0.12, oz = s.z + s.U[2] * s.L * 0.12 + s.Rr[2] * sp;
+    if (T.k === 's') capBy(s, T.i), launchMissileAt(ox, oy, oz, s.side, s.q, T.i, M.dmg * s.dm, t + j * 0.08, 1, 1.2);
+    else CAP.msl.push({ x: ox, y: oy, z: oz, vx: s.vx * 0.5 + (j - (nS - 1) / 2) * 4, vy: 9, vz: s.vz * 0.5, gi: T.k === 'g' ? T.i : -1, ms: T.k === 'ms' ? T.i : -1, dmg: M.dmg, life: 22, age: 0, n: 0 });
+  }
   if (ctl && (pressed || s.mslN % 4 === 0)) capFeed(`飛彈發射 → ${capTgtName(T)}（剩 ${s.mslN} 枚）`, 'ok');
 }
 // 打地面目標的飛彈：先往上彈出，再導向目標
@@ -1080,9 +1087,10 @@ function capTurretShot(s, m, T, tg, t) {
   const hit = capRnd() < T.acc * sz * (1 - 0.25 * d / T.range) * (GRD ? Math.sqrt(groundHitMul(my, ty)) : 1);
   if (!hit) { const o = 1.5 + capRnd() * 3; tx += (capRnd() - 0.5) * o * 2; tz += (capRnd() - 0.5) * o * 2; ty += (capRnd() - 0.5) * o; }
   const dur = Math.hypot(tx - mx, ty - my, tz - mz) / 620;
-  capBolt(mx, my, mz, tx, ty, tz, t, dur, side, 0.9, Math.max(8, s.L * 0.6), s.L * 0.015);
-  spawnFx(mx, my, mz, side, s.L * 0.07, 34);   // 砲口閃光
-  if (hit) capFxAt(t + dur, tx, ty, tz, side, s.L * 0.1, false);
+  const F = T.fx;   // 改裝的副砲模組的外觀
+  capBolt(mx, my, mz, tx, ty, tz, t, dur, side, 0.9, Math.max(F ? 4 : 8, s.L * (F ? F.seg : 0.6)), s.L * (F ? F.wid : 0.015));
+  spawnFx(mx, my, mz, side, s.L * (F ? F.fl : 0.07), 34);   // 砲口閃光
+  if (hit) capFxAt(t + dur, tx, ty, tz, side, s.L * (F ? F.hit : 0.1), false);
   rigFire(s.i, 'sec', t, tx, ty, tz);
   capSig(s, t);
   if (!hit) { if (tg.k !== 'f' && GRD) pending.push({ kind: 'sp', t: t + dur, x: tx, y: Math.max(ty, terrainHAt(tx, tz)), z: tz, side, r: 0.15 }); return; }

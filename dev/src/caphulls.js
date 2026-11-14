@@ -70,18 +70,18 @@ function capHullAI(s, t) {
 const CAP_SLOTS = [['main', '主砲'], ['tur', '副砲'], ['msl', '飛彈艙／機庫'], ['def', '防禦'], ['eng', '引擎']];
 const CAP_MODS = {
   main: {
-    rail: { name: '磁軌砲', desc: '射得快、單發輕，射界左右各 45°', p: { cd: 2.2, k: 1, range: 240, spd: 260, arc: 45, trav: 60 } },
-    heavy: { name: '重粒子砲', desc: '一發重、射得慢、射程遠；砲塔轉得慢，射界左右各 30°', p: { cd: 6, k: 0.95, range: 320, spd: 200, arc: 30, trav: 25 } },
-    rapid: { name: '速射砲', desc: '射界幾乎全方位，單發輕、射程短', p: { cd: 0.9, k: 0.85, range: 200, spd: 280, arc: 150, trav: 90 } },
-    beam: { name: '光束砲', desc: '持續照射、每秒傷害最高，射程最短', p: { cd: 0.35, k: 1.1, range: 170, spd: 600, arc: 60, trav: 70 }, res: true },
+    rail: { name: '磁軌砲', desc: '射得快、單發輕，射界左右各 45°', p: { cd: 2.2, k: 1, range: 240, spd: 260, arc: 45, trav: 60 }, fx: { seg: 2.4, wid: 0.018, fl: 0.2, hit: 0.2, trail: 0.6 } },
+    heavy: { name: '重粒子砲', desc: '一發重、射得慢、射程遠；砲塔轉得慢，射界左右各 30°', p: { cd: 6, k: 0.95, range: 320, spd: 200, arc: 30, trav: 25 }, fx: { seg: 1.9, wid: 0.085, fl: 0.6, hit: 0.5, hv: 1 } },
+    rapid: { name: '速射砲', desc: '射界幾乎全方位，單發輕、射程短', p: { cd: 0.9, k: 0.85, range: 200, spd: 280, arc: 150, trav: 90 }, fx: { seg: 0.5, wid: 0.014, fl: 0.13, hit: 0.13 } },
+    beam: { name: '光束砲', desc: '持續照射、每秒傷害最高，射程最短', p: { cd: 0.35, k: 1.1, range: 170, spd: 600, arc: 60, trav: 70 }, fx: { beam: 1, wid: 0.03, fl: 0.1, hit: 0.14 }, res: true },
   },
   tur: {
-    heavy: { name: '重型砲塔', desc: '傷害高、射得慢、比較不準', tur: { dmg: 1.8, cd: 1.5, acc: 0.9, range: 1.1 } },
-    aa: { name: '防空砲塔', desc: '對艦傷害低；點防禦多 2 座、攔截距離遠，專打飛彈與艦載機', tur: { dmg: 0.6 }, pdN: 2, pd: { far: 1.25 } },
+    heavy: { name: '重型砲塔', desc: '傷害高、射得慢、比較不準', tur: { dmg: 1.8, cd: 1.5, acc: 0.9, range: 1.1 }, fx: { seg: 0.9, wid: 0.03, fl: 0.13, hit: 0.18 } },
+    aa: { name: '防空砲塔', desc: '對艦傷害低；點防禦多 2 座、攔截距離遠，專打飛彈與艦載機', tur: { dmg: 0.6 }, pdN: 2, pd: { far: 1.25 }, fx: { seg: 0.35, wid: 0, fl: 0.05, hit: 0.07 } },
   },
   msl: {
     heavy: { name: '重飛彈', desc: '數量少、一發傷害高，鎖定比較久', msl: { n: 0.4, dmg: 2.2, lockT: 1.3 } },
-    swarm: { name: '蜂群飛彈', desc: '數量多、一發傷害低，鎖定快', msl: { n: 2, dmg: 0.45, lockT: 0.7 } },
+    swarm: { name: '蜂群飛彈', desc: '數量多、一發傷害低，鎖定快', msl: { n: 2, dmg: 0.45, lockT: 0.7 }, salvo: 3 },
     hangar: { name: '機庫', desc: '帶 6 架護航機，飛彈只剩三分之一', msl: { n: 0.35 }, ftr: 6 },
   },
   def: {
@@ -114,9 +114,9 @@ function capHullMod(H0, o) {
   const mul = (T, m) => { if (T && m) for (const k in m) T[k] = T[k] * m[k]; };
   const M = (slot) => mod[slot] && CAP_MODS[slot][mod[slot]];
   const mm = M('main');
-  if (mm) { const dps = H0.main.dmg / H0.main.cd, p = mm.p; Object.assign(H.main, { name: mm.name, cd: p.cd, dmg: Math.round(dps * p.k * p.cd * 10) / 10, range: p.range, spd: p.spd, arc: p.arc, trav: p.trav, mod: mod.main }); }
-  const mt = M('tur'); if (mt) { mul(H.tur, mt.tur); mul(H.pd, mt.pd); H.pd.n += mt.pdN || 0; }
-  const ms = M('msl'); if (ms && H.msl) { mul(H.msl, ms.msl); H.msl.n = Math.max(2, Math.round(H.msl.n)); H.ftr = ms.ftr || 0; }
+  if (mm) { const dps = H0.main.dmg / H0.main.cd, p = mm.p; Object.assign(H.main, { name: mm.name, cd: p.cd, dmg: Math.round(dps * p.k * p.cd * 10) / 10, range: p.range, spd: p.spd, arc: p.arc, trav: p.trav, mod: mod.main, fx: mm.fx }); }
+  const mt = M('tur'); if (mt) { mul(H.tur, mt.tur); H.tur.fx = mt.fx; mul(H.pd, mt.pd); H.pd.n += mt.pdN || 0; }
+  const ms = M('msl'); if (ms && H.msl) { mul(H.msl, ms.msl); H.msl.n = Math.max(2, Math.round(H.msl.n)); H.ftr = ms.ftr || 0; if (ms.salvo) H.msl.salvo = ms.salvo; }
   for (const slot of ['def', 'eng']) { const m = M(slot); if (m) mul(H, m.hull); }
   const md = M('def'); if (md && md.mslCut) H.mslCut = md.mslCut;
   // Mk：主砲、副砲、飛彈＝傷害；防禦＝船體與護盾；引擎＝最高速度與加速
