@@ -62,8 +62,9 @@ function cbBuildSite() {
   g.rotation.x = -Math.PI / 2; g.position.z = 40; S.add(g);
 }
 // ── 一座機庫 ──
-function cbBuildHangar(k) {
-  const S = CB.scene, M = HG.mats, H = CB_HALL, G = new THREE.Group(); G.position.x = cbX(k); S.add(G);
+// H＝機庫的尺寸（整修庫比較大）
+function cbBuildHangar(k, H = CB_HALL) {
+  const S = CB.scene, M = HG.mats, G = new THREE.Group(); G.position.x = cbX(k); S.add(G);
   const white = new THREE.MeshStandardMaterial({ color: 0xdfe4ea, metalness: 0.25, roughness: 0.55 }), navy = new THREE.MeshStandardMaterial({ color: 0x24375e, metalness: 0.3, roughness: 0.5 });
   const frameM = new THREE.MeshStandardMaterial({ color: 0x5d6675, metalness: 0.45, roughness: 0.45 }), floorM = new THREE.MeshStandardMaterial({ color: 0x4a515c, metalness: 0.3, roughness: 0.7 });
   const box = (w, h, d, x, y, z, m) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.position.set(x, y, z); G.add(o); return o; };
@@ -78,7 +79,7 @@ function cbBuildHangar(k) {
     hgChevron(g, w / 2, 545, 40, '#e8ecf2');
     g.fillStyle = 'rgba(232,236,242,.85)'; g.font = 'bold 54px sans-serif'; g.textAlign = 'center'; g.fillText(`0${k + 1}`, w - 70, 455);
   });
-  const base = new THREE.Mesh(new THREE.BoxGeometry(50, Y0, 70), [floorM, floorM, new THREE.MeshStandardMaterial({ map: pad, metalness: 0.25, roughness: 0.7 }), floorM, floorM, floorM]); base.position.set(0, Y0 / 2, 1); G.add(base);
+  const base = new THREE.Mesh(new THREE.BoxGeometry(H.hw * 2 + 12, Y0, L + 24), [floorM, floorM, new THREE.MeshStandardMaterial({ map: pad, metalness: 0.25, roughness: 0.7 }), floorM, floorM, floorM]); base.position.set(0, Y0 / 2, (H.z0 + H.z1) / 2 + 8); G.add(base);
   // 機庫內地板：深一點的鋼板＋托架區的白框
   const inner = hgTex(256, 512, (g, w, h) => { g.fillStyle = '#3c434d'; g.fillRect(0, 0, w, h); g.strokeStyle = 'rgba(232,236,242,.7)'; g.lineWidth = 4; g.strokeRect(40, 70, w - 80, h - 120); g.strokeStyle = '#d6a21e'; g.lineWidth = 3; g.beginPath(); g.moveTo(20, h - 24); g.lineTo(w - 20, h - 24); g.stroke(); });
   const fl = new THREE.Mesh(new THREE.PlaneGeometry(H.hw * 2, L), new THREE.MeshStandardMaterial({ map: inner, metalness: 0.3, roughness: 0.6 })); fl.rotation.x = -Math.PI / 2; fl.position.set(0, Y0 + 0.02, zc); G.add(fl);
@@ -104,7 +105,7 @@ function cbBuildHangar(k) {
   for (const sd of [-1, 1]) { const p = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 10, 10), frameM); p.position.set(sd * (H.hw - 1), -3, 9); p.rotation.x = 0.55; hg.add(p); }   // 液壓桿
   // 機庫內的燈：屋頂下的燈條＋後方的藍光
   for (const z of [H.z0 + 6, zc + 4]) box(H.hw * 1.6, 0.4, 1, 0, H.h - 0.5, z, M.glow(0xdfe8ff, 1.4));
-  const li = new THREE.PointLight(0xe8f0ff, 900, 70, 1.6); li.position.set(0, H.h - 3, zc); G.add(li);
+  const li = new THREE.PointLight(0xe8f0ff, 900, 70 * H.hw / 19, 1.6); li.position.set(0, H.h - 3, zc); G.add(li);
   const blue = new THREE.PointLight(0x5aa8ff, 500, 40, 1.6); blue.position.set(0, 8, H.z0 + 6); G.add(blue);
   if (CB.glowTex) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: CB.glowTex, color: 0x5aa8ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false })); s.scale.setScalar(16); s.position.set(0, 8, H.z0 + 4); G.add(s); }
   for (const sd of [-1, 1]) hgLamp(G, sd * (H.hw + 4), H.h + 5, H.z1 + 2, 0xff5a3a, 30, 20);   // 門口兩側的警示燈

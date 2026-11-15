@@ -1,6 +1,7 @@
 // ═══════════════════════ 艦長模式：改裝的外觀（2026-11-15） ═══════════════════════
 // 船的 3D 模型在 main.js 畫（實例化）；這裡在每艘特製戰艦上再疊一層，照它裝的模組與 Mk 改變外觀：
-//   塗裝層（同一個船體模型，沿法線外推一點）：Mk 識別條紋（Mk II 一條、Mk III 兩條）、重裝甲＝面板接縫、反應裝甲＝磚塊與引信燈
+//   塗裝層（同一個船體模型，沿法線外推一點）：每個模組一種塗裝樣式（主砲＝船頭、副砲＝船腰、飛彈艙＝甲板、引擎＝船尾、防禦＝全船）、
+//     Mk 識別條紋（Mk II 一條、Mk III 兩條）、重裝甲＝面板接縫、反應裝甲＝磚塊與引信燈
 //   護盾殼（強化護盾）：平常淡淡一層，被打到時亮起；其他船只有被打到護盾的瞬間閃一下
 //   尾焰：原廠短而淡；巡航＝細長穩定；衝刺＝粗、閃爍，加速時拉長；機動＝主焰短＋四角姿態噴口，轉向、側移時噴
 // 位置與方向照 main.js update3D 的艦長分支（前 s.F、上 s.U、長度 scale × TYPE_LEN3），所以會完全貼合。
@@ -20,13 +21,13 @@ const CFX = { group: null, list: [], geo: {} };
 
 // 塗裝層：模型座標（船頭＋z）；bmin／bmax＝船體外框
 const capFxPaintMat = () => new THREE.ShaderMaterial({
-  uniforms: { uBmin: { value: new THREE.Vector3() }, uBmax: { value: new THREE.Vector3() }, uCol: { value: new THREE.Color() }, uMk: { value: 1 }, uArm: { value: 0 }, uTime: U.uTime, uPush: { value: CAP_FX.push }, uCut: { value: 2 }, uDmg: { value: 0 }, uSt: { value: new THREE.Vector3(...CAP_FX.stripe) } },
+  uniforms: { uBmin: { value: new THREE.Vector3() }, uBmax: { value: new THREE.Vector3() }, uCol: { value: new THREE.Color() }, uMk: { value: 1 }, uArm: { value: 0 }, uLv: { value: new THREE.Vector4() }, uEng: { value: 0 }, uTime: U.uTime, uPush: { value: CAP_FX.push }, uCut: { value: 2 }, uDmg: { value: 0 }, uSt: { value: new THREE.Vector3(...CAP_FX.stripe) } },
   transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
   vertexShader: /* glsl */`
     uniform float uPush; varying vec3 vP; varying vec3 vN;
     void main(){ vP = position; vN = normalize(normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position + normal * uPush, 1.); }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uBmin; uniform vec3 uBmax; uniform vec3 uCol; uniform float uMk; uniform float uArm; uniform float uTime; uniform vec3 uSt; uniform float uCut; uniform float uDmg;
+    uniform vec3 uBmin; uniform vec3 uBmax; uniform vec3 uCol; uniform float uMk; uniform float uArm; uniform vec4 uLv; uniform float uEng; uniform float uTime; uniform vec3 uSt; uniform float uCut; uniform float uDmg;
     varying vec3 vP; varying vec3 vN;
     float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
     float h31(vec3 p){ return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
@@ -42,6 +43,64 @@ const capFxPaintMat = () => new THREE.ShaderMaterial({
     void main(){
       vec3 n = normalize(cross(dFdx(vP), dFdy(vP))); float L = uBmax.z - uBmin.z, zN = (vP.z - uBmin.z) / L;
       vec4 c = vec4(0.);
+      vec3 q = vP / L; float hw = max(1e-4, (uBmax.x - uBmin.x) * 0.5), xN = (vP.x - (uBmax.x + uBmin.x) * 0.5) / hw, yN = (vP.y - uBmin.y) / max(1e-4, uBmax.y - uBmin.y);
+      float side = smoothstep(0.35, 0.6, abs(n.x)), top = smoothstep(0.3, 0.6, n.y), body = 1. - smoothstep(0.7, 0.85, abs(n.z));
+      // ── 塗裝樣式：每個槽位的模組在自己的區域畫一種花紋（主砲＝船頭、副砲＝船腰一圈、飛彈艙＝甲板、引擎＝船尾、防禦＝全船）──
+      // 防禦：重裝甲＝碎片迷彩（兩組斜格子疊出來的深色塊）；強化護盾＝甲板與側面的六角格（微微發光）
+      if (uLv.w > 0.5 && uLv.w < 1.5) {
+        vec2 uv = vec2(vP.z, vP.y + vP.x) / L; mat2 r1 = mat2(0.8, 0.6, -0.6, 0.8), r2 = mat2(0.5, -0.87, 0.87, 0.5);
+        float sp = h21(floor(r1 * uv * 7.)) + h21(floor(r2 * uv * 5. + 3.1));
+        c = mix(c, vec4(0.09, 0.1, 0.11, 0.62), step(1.1, sp));
+      }
+      if (uLv.w > 2.5) {
+        vec3 a = abs(n); vec2 uv = (a.x > a.y && a.x > a.z ? q.zy : a.y > a.z ? q.xz : q.xy) * 26.; uv.x += mod(floor(uv.y), 2.) * 0.5;
+        vec2 f = abs(fract(uv) - 0.5); float hx = smoothstep(0.43, 0.48, max(f.x * 1.15, f.y));
+        c = mix(c, vec4(vec3(0.35, 0.85, 1.3) * (0.8 + 0.2 * sin(uTime * 2. + zN * 20.)), 0.38), hx * max(top, side) * body);
+      }
+      // 引擎（船尾，側面）：巡航＝三條往前收尖的藍色速度線；衝刺＝火焰；機動＝白色箭頭
+      if (uEng > 0.5 && zN < 0.34) {
+        if (uEng < 1.5) {
+          float m = 0.; for (int k = 0; k < 3; k++) { float yc = 0.32 + 0.16 * float(k), w = 0.07 * (1. - zN / 0.3); m = max(m, (1. - smoothstep(w * 0.8, w, abs(yN - yc))) * step(0.02, zN) * step(zN, 0.3)); }
+          c = mix(c, vec4(0.5, 0.78, 1.0, 0.95), m * side);
+        } else if (uEng < 2.5) {
+          float k = floor(yN * 4.), tg = 0.07 + 0.22 * pow(0.5 + 0.5 * cos(yN * 6.2832 * 2. + 0.8), 1.6) * (0.55 + 0.45 * h21(vec2(k, 3.)));
+          float m = 1. - smoothstep(tg - 0.004, tg, zN), e = m * smoothstep(tg - 0.02, tg - 0.006, zN);
+          vec3 fc = mix(vec3(0.85, 0.1, 0.03), vec3(1.0, 0.78, 0.12), clamp(zN / tg, 0., 1.));
+          c = mix(c, vec4(fc, 0.96), m * side); c = mix(c, vec4(0.05, 0.03, 0.02, 0.95), e * side);
+        } else {
+          float ch = step(fract(zN * 20. + abs(yN - 0.5) * 2.6), 0.38) * step(0.05, zN) * step(zN, 0.27) * (1. - smoothstep(0.32, 0.38, abs(yN - 0.5)));
+          c = mix(c, vec4(0.92, 0.94, 0.96, 0.95), ch * side);
+        }
+      }
+      // 飛彈艙（甲板中段）：重飛彈＝黃黑箭頭；蜂群＝橘色點陣；機庫＝飛行甲板標線（白色虛線中線＋黃邊線）
+      if (uLv.z > 0.5 && zN > 0.26 && zN < 0.64) {
+        float m = 0., ok = top * body; vec4 col = vec4(0.);
+        if (uLv.z < 1.5) { float cz = step(abs(xN), 0.24); float st = step(fract(zN * 28. - abs(xN) * 3.), 0.5); col = mix(vec4(0.06, 0.06, 0.05, 0.95), vec4(0.98, 0.78, 0.08, 0.95), st); m = cz; }
+        else if (uLv.z < 2.5) { vec2 g = vec2(zN * 70., xN * 9.); float d = length(fract(g) - 0.5); m = (1. - smoothstep(0.22, 0.28, d)) * step(abs(xN), 0.7); col = vec4(1.0, 0.45, 0.08, 0.95); }
+        else { float cl = step(abs(xN), 0.025) * step(fract(zN * 26.), 0.55), ed = step(abs(abs(xN) - 0.5), 0.022); m = max(cl, ed); col = mix(vec4(0.95, 0.95, 0.92, 0.95), vec4(0.98, 0.78, 0.1, 0.95), ed); }
+        c = mix(c, col, m * ok);
+      }
+      // 副砲（船腰一圈，前後面不畫）：重型砲塔＝深灰寬帶＋白色細邊；防空砲塔＝黑白棋盤
+      if (uLv.y > 0.5) {
+        if (uLv.y < 1.5) { float b = step(abs(zN - 0.54), 0.04), e = step(abs(abs(zN - 0.54) - 0.043), 0.004); c = mix(c, vec4(0.16, 0.18, 0.21, 0.95), b * body); c = mix(c, vec4(0.95, 0.95, 0.95, 0.95), e * body); }
+        else { float b = step(abs(zN - 0.545), 0.028), ck = mod(floor(zN * 140.) + floor((yN + xN) * 10.), 2.); c = mix(c, mix(vec4(0.05, 0.05, 0.05, 0.95), vec4(0.95, 0.95, 0.95, 0.95), ck), b * body); }
+      }
+      // 主砲（船頭）：磁軌砲＝甲板上兩條電藍色長條（有光點往前跑）；重粒子砲＝紅色船頭＋鋸齒邊；速射砲＝黃黑警示環；光束砲＝發光的電路紋
+      if (uLv.x > 0.5) {
+        if (uLv.x < 1.5) {
+          float m = (1. - smoothstep(0.045, 0.06, abs(abs(xN) - 0.2))) * step(0.42, zN) * step(zN, 0.97) * top;
+          c = mix(c, vec4(vec3(0.2, 0.55, 1.0) * (1. + 0.6 * step(0.8, fract(zN * 10. - uTime * 1.2))), 0.95), m);
+        } else if (uLv.x < 2.5) {
+          float ed = 0.84 + 0.03 * abs(fract(yN * 5. + abs(xN) * 3.) - 0.5) * 2., m = smoothstep(ed, ed + 0.003, zN), o = step(abs(zN - ed - 0.008), 0.006);
+          c = mix(c, vec4(0.62, 0.05, 0.04, 0.96), m); c = mix(c, vec4(0.04, 0.03, 0.03, 0.96), o);
+        } else if (uLv.x < 3.5) {
+          float b = step(abs(zN - 0.83), 0.03), st = step(0.5, fract(zN * 45. + yN * 3. + xN * 1.5));
+          c = mix(c, mix(vec4(0.05, 0.05, 0.04, 0.95), vec4(0.98, 0.78, 0.08, 0.95), st), b * body);
+        } else if (zN > 0.7) {
+          vec2 cell; vec2 g = tri(q, n, 34., 0.07, cell); float on = step(0.45, h21(cell + 11.)) * g.x * smoothstep(0.7, 0.8, zN);
+          c = mix(c, vec4(vec3(0.5, 1.3, 1.6) * (0.7 + 0.5 * sin(uTime * 3. - zN * 40.)), 0.9), on);
+        }
+      }
       // 裝甲：重裝甲＝細的面板接縫＋每塊明暗不同；反應裝甲＝大一點的磚塊＋中間的引信燈
       if (uArm > 0.5) {
         vec2 cell; float rx = uArm > 1.5 ? 1. : 0.;
@@ -117,11 +176,15 @@ function mergeGeos(list) {
   for (const g of list) { const p = g.attributes.position.array, u = g.attributes.uv.array; pos.push(...p); uv.push(...u); for (const i of g.index.array) idx.push(i + off); off += p.length / 3; }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); return g;
 }
+// 塗裝樣式的編號（給塗裝層的 uLv＝主砲、副砲、飛彈艙、防禦；uEng＝引擎）；0＝原廠、沒有花紋
+const CAP_LIVERY = { main: ['rail', 'heavy', 'rapid', 'beam'], tur: ['heavy', 'aa'], msl: ['heavy', 'swarm', 'hangar'], def: ['armor', 'react', 'shield'], eng: ['cruise', 'sprint', 'agile'] };
+function capFxLv(mod) { const id = (k) => CAP_LIVERY[k].indexOf((mod || {})[k]) + 1; return { v: [id('main'), id('tur'), id('msl'), id('def')], eng: id('eng') }; }
+function capFxSetPaint(m, mod, mk, def) { const L = capFxLv(mod); m.uniforms.uLv.value.set(...L.v); m.uniforms.uEng.value = L.eng; m.uniforms.uMk.value = mk; m.uniforms.uArm.value = def === 'armor' ? 1 : def === 'react' ? 2 : 0; }
 // 這艘船的外觀設定：模組、Mk（取最高的槽位）
 function capFxSpec(s) {
   const mod = (s.H && s.H.mod) || {}, mk = (s.H && s.H.mk) || {};
   let m = 1; for (const k in mk) m = Math.max(m, mk[k] || 1);
-  return { eng: mod.eng || 'std', def: mod.def || '', mk: m };
+  return { eng: mod.eng || 'std', def: mod.def || '', mk: m, mod, lv: CAP_SLOTS.some(([k]) => mod[k]) };
 }
 function capFxBuild() {
   capFxClear();
@@ -133,9 +196,9 @@ function capFxBuild() {
     const bb = geo.boundingBox, sp = capFxSpec(s), fac = FACTION[shipFac(s.i)] || FACTION[0];
     const root = new THREE.Group(); root.matrixAutoUpdate = false; CFX.group.add(root);
     const o = { s, root, sp, bb, paint: null, shell: null, flames: [] };
-    if (sp.mk > 1 || sp.def === 'armor' || sp.def === 'react') {
+    if (sp.mk > 1 || sp.lv) {
       if (!geo.attributes.normal) geo.computeVertexNormals();
-      const m = capFxPaintMat(); m.uniforms.uBmin.value.copy(bb.min); m.uniforms.uBmax.value.copy(bb.max); m.uniforms.uCol.value.set(fac.ui); m.uniforms.uMk.value = sp.mk; m.uniforms.uArm.value = sp.def === 'armor' ? 1 : sp.def === 'react' ? 2 : 0;
+      const m = capFxPaintMat(); m.uniforms.uBmin.value.copy(bb.min); m.uniforms.uBmax.value.copy(bb.max); m.uniforms.uCol.value.set(fac.ui); capFxSetPaint(m, sp.mod, sp.mk, sp.def);
       o.paint = new THREE.Mesh(geo, m); o.paint.renderOrder = 3; root.add(o.paint);
     }
     { // 護盾殼（每艘都有；平常只有強化護盾看得到）
@@ -281,4 +344,4 @@ function capFxCam() {
   camPersp.position.set(_fxa.x + Math.sin(a) * Math.cos(V.el) * d, _fxa.y + Math.sin(V.el) * d, _fxa.z + Math.cos(a) * Math.cos(V.el) * d);
   camPersp.lookAt(_fxa.x, _fxa.y, _fxa.z); camPersp.updateMatrixWorld();
 }
-Object.assign(window.__cap || (window.__cap = {}), { CAP_FX, CFX, capFxBuild, CAP_WLOOK, capWKey });
+Object.assign(window.__cap || (window.__cap = {}), { CAP_FX, CFX, capFxBuild, CAP_WLOOK, capWKey, CAP_LIVERY });
