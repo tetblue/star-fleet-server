@@ -57,7 +57,7 @@ const CC_RANKS = [
   { name: '特戰司令', merit: 3200, sq: 4, hulls: ['assault', 'gunship', 'support', 'ew', 'stealth'], mis: 6, base: 2, desc: '帶四個小隊・據點多一座軌道防禦站' },
 ];
 const ccRankOf = (S) => CC_RANKS[S.pl.rank || 0];
-const ccHullOk = (S, k) => ccRankOf(S).hulls.includes(k);
+const ccHullOk = (S, k) => ccRankOf(S).hulls.includes(k) && !CC_TECH_ORDER.some((id) => CC_TECH[id].hull === k && !ccHas(S, id));   // 軍階＋研發
 const ccMaxMis = (S) => ccRankOf(S).mis;
 // 周目：跨局的紀錄（最高軍階、局數）；開局身分照最高軍階解鎖
 const CC_META = 'fleet.capcareer.meta';
@@ -140,6 +140,7 @@ function ccNewGame(o) {
   ccLog(S, `${ST.rank ? `開局身分：${CC_RANKS[ST.rank].name}。` : ''}你是${R.name}，帶著小隊（${R.hulls.map((k) => CAP_HULLS[k].name).join('、')}）駐守前線的 ${front.name}。開局科技：${R.techName}`, 'ev');
   ccGenMissions(S);
   ccPlan(S);
+  ccT(S);   // 研發：開局軍階已經能造的船型算研究好了
   return S;
 }
 // 星系的軌道防禦與後勤設施（依擁有者、等級）
@@ -175,7 +176,7 @@ function ccNewSquad(S, fac, sys, hulls, o = {}) {
 function ccXp(S, q, c, n) {
   capShipFix(c); c.xp += Math.round(n); const lv = capLvOf(c.xp);
   if (lv <= c.lv) return;
-  const up = capMkCapLv(lv) > capMkCapLv(c.lv); c.lv = lv;
+  const up = capMkCapLv(lv) > capMkCapLv(c.lv) && capMkCapLv(lv) <= ccMkRes(S); c.lv = lv;
   if (q.pl) ccLog(S, `${q.name}的${CAP_HULLS[c.key].name}升到 Lv${lv}${up ? `（等級上限可以裝到 ${CAP_MK_NAME[capMkCapLv(lv)]}）` : ''}`, 'ok');
 }
 function ccLog(S, t, c) { S.log.push({ turn: S.turn, t, c: c || '' }); if (S.log.length > 300) S.log.splice(0, S.log.length - 300); }
@@ -269,6 +270,7 @@ function ccWeekB(S) {
   ccEconomy(S);
   ccAiOps(S);
   if (S.fame) for (const f of [SM_A, SM_E, SM_P]) S.fame[f] += (50 - S.fame[f]) * CC_RULE.fame.back;
+  ccTechTick(S);
   ccYardTick(S);
   // 舊存檔：以前訂造、下週直接到的船
   for (const b of S.pl.build.splice(0)) {   // 字串＝加入親自指揮的小隊
@@ -322,6 +324,7 @@ function ccFightCalc(S, s, B) {
   // 經驗：活下來的船＝參戰＋存活，再平分對方的損失（計算的戰鬥不知道誰擊沉的）
   const xpSide = (L, foeLost) => { const live = L.flatMap((q) => q.ships.map((c) => [q, c])), kx = live.length ? foeLost * CAP_XP.calc / live.length : 0; for (const [q, c] of live) ccXp(S, q, c, CAP_XP.fight + CAP_XP.live + kx); };
   xpSide(B.A, lD); xpSide(B.D, lA);
+  { const pA = B.A.some((q) => q.pl), pD = B.D.some((q) => q.pl); if ((pA && aWin) || (pD && !aWin)) ccRpGain(S, (pA ? lD : lA) * CC_RP.calc, `打撈 ${s.name} 的殘骸`); }
   const fa = B.A[0] ? B.A[0].fac : -1, fd = B.D[0] ? B.D[0].fac : s.owner;
   const mine = fa === S.fac || fd === S.fac || s.owner === S.fac;
   ccLog(S, `${s.name}：${SM_FAC[fa].name}進攻${fd >= 0 ? SM_FAC[fd].name : ''}${B.defs.length ? `（軌道防禦 ${B.defs.length} 座）` : ''}，${aWin ? SM_FAC[fa].name : SM_FAC[fd].name}獲勝（預測勝率 ${Math.round(O.win * 100)}%）・損失 ${lA}／${lD} 艘`, mine ? (aWin === (fa === S.fac) ? 'ok' : 'bad') : '');
@@ -442,6 +445,63 @@ function ccCanService(S, kind, P = ccPl(S)) {
 }
 function ccRepair(S, P = ccPl(S)) { const c = ccRepairCost(S, P); if (ccCanService(S, 'repair', P) || S.pl.money < c) return false; S.pl.money -= c; for (const x of P.ships) x.hp = 1; ccLog(S, `在 ${S.sys[P.sys].name} 修好${P.name}（${c} 資金）`, 'ok'); return true; }
 function ccResupply(S, P = ccPl(S)) { const c = ccMissileCost(S, P); if (ccCanService(S, 'missile', P) || S.pl.money < c) return false; S.pl.money -= c; for (const x of P.ships) x.msl = 1; ccLog(S, `${P.name}補滿飛彈（${c} 資金）`, 'ok'); return true; }
+// ───── 研發（研發、生產、改裝的第 4 步，2026-11-15）─────
+// 研究點數（S.pl.rp）：任務完成（戰功的 1/10）、打贏後打撈殘骸（實戰每擊沉一艘 4 點、計算的戰鬥每艘 3 點）、據點的研究所（每週 8 點）。
+// 一次研究一項：開始時付點數，要幾週完成（S.pl.tech.cur）。每個陣營一棵樹：同一套項目，自己陣營擅長的便宜 20%。
+// 船型要軍階＋研發都到；Mk 上限＝船的等級與研發到的 Mk 取低的；標「研發」的模組要研究到才能裝。
+const CC_TECH = {
+  mk2: { g: '工藝', name: 'Mk II 工藝', rp: 60, w: 2, desc: '模組可以升到 Mk II（船也要 Lv3）' },
+  mk3: { g: '工藝', name: 'Mk III 工藝', rp: 150, w: 4, need: ['mk2'], desc: '模組可以升到 Mk III（船也要 Lv5）' },
+  beam: { g: '模組', name: '光束砲', rp: 90, w: 3, need: ['mk2'], mod: ['main', 'beam'], good: SM_A, desc: '主砲模組：持續照射、每秒傷害最高、射程最短' },
+  react: { g: '模組', name: '反應裝甲', rp: 80, w: 3, mod: ['def', 'react'], good: SM_E, desc: '防禦模組：飛彈打到船體的傷害少 30%' },
+  ew: { g: '船型', name: '電戰艦設計', rp: 60, w: 2, hull: 'ew', good: SM_A, desc: '可以建造電戰艦（還要小隊長軍階）' },
+  stealth: { g: '船型', name: '匿蹤艦設計', rp: 110, w: 3, need: ['ew'], hull: 'stealth', good: SM_E, desc: '可以建造匿蹤艦（還要特戰隊長軍階）' },
+  lab: { g: '設施', name: '研究所', rp: 50, w: 2, desc: '據點每週 +8 研究點數（要有據點：特戰隊長）' },
+  yard1: { g: '設施', name: '船塢自動化', rp: 100, w: 3, desc: '所有船型的建造週數 −1（最少 1 週）' },
+  yard2: { g: '設施', name: '第二條船台', rp: 180, w: 4, need: ['yard1'], desc: '每座船塢同時處理兩件（造船、改裝）' },
+};
+const CC_TECH_ORDER = ['mk2', 'mk3', 'beam', 'react', 'ew', 'stealth', 'lab', 'yard1', 'yard2'];
+const CC_RP = { misK: 0.1, kill: 4, calc: 3, lab: 8 };
+// 研發的狀態（舊存檔、新局都在第一次用到時補上：軍階已經能造的船型算研究好了）
+function ccT(S) {
+  if (!S.pl.tech) { S.pl.tech = { done: {}, cur: null }; for (const id of CC_TECH_ORDER) { const T = CC_TECH[id]; if (T.hull && ccRankOf(S).hulls.includes(T.hull)) S.pl.tech.done[id] = 1; } }
+  if (S.pl.rp == null) S.pl.rp = 0;
+  return S.pl.tech;
+}
+const ccHas = (S, id) => !!ccT(S).done[id];
+const ccTechCost = (S, id) => Math.round(CC_TECH[id].rp * (CC_TECH[id].good === S.fac ? 0.8 : 1));
+function ccTechWhy(S, id) {
+  const T = CC_TECH[id], X = ccT(S);
+  if (X.done[id]) return '已經研究好';
+  if (X.cur) return X.cur.id === id ? '研究中' : '一次只能研究一項';
+  const n = (T.need || []).find((k) => !X.done[k]); if (n) return `要先研究${CC_TECH[n].name}`;
+  if (S.pl.rp < ccTechCost(S, id)) return `研究點數不夠（要 ${ccTechCost(S, id)}）`;
+  return '';
+}
+function ccTechStart(S, id) {
+  const why = ccTechWhy(S, id); if (why) return why;
+  const c = ccTechCost(S, id); S.pl.rp -= c; ccT(S).cur = { id, left: CC_TECH[id].w, tot: CC_TECH[id].w };
+  ccLog(S, `開始研究${CC_TECH[id].name}（${c} 點，${CC_TECH[id].w} 週）`, 'ok'); return '';
+}
+// 每週：研究所的點數、研究進度
+function ccTechTick(S) {
+  const X = ccT(S);
+  if (X.done.lab && S.pl.base != null && S.sys[S.pl.base] && S.sys[S.pl.base].owner === S.fac) S.pl.rp += CC_RP.lab;
+  if (X.cur && --X.cur.left <= 0) { X.done[X.cur.id] = 1; ccLog(S, `研究完成：${CC_TECH[X.cur.id].name}（${CC_TECH[X.cur.id].desc}）`, 'ok'); X.cur = null; }
+}
+function ccRpGain(S, n, why) { n = Math.round(n); if (n <= 0) return; ccT(S); S.pl.rp += n; ccLog(S, `研究點數 +${n}（${why}）`, ''); }
+const ccMkRes = (S) => (ccHas(S, 'mk3') ? 3 : ccHas(S, 'mk2') ? 2 : 1);
+const ccMkCap = (S, c) => Math.min(capMkCapLv(c.lv), ccMkRes(S));
+const ccBuildW = (S, key) => Math.max(1, (CC_RULE.buildW[key] || 1) - (ccHas(S, 'yard1') ? 1 : 0));
+const ccLines = (S) => (ccHas(S, 'yard2') ? 2 : 1);
+// 排隊的預計完成週數：每條船台輪流接下一件（ins＝在第 at 個位置插一件 w 週的，回傳它的週數）
+function ccYqSim(S, sid, ins) {
+  const L = S.pl.yq.filter((o) => o.sys === sid).map((o) => ({ o, left: o.left }));
+  if (ins) L.splice(ins.at, 0, { o: ins, left: ins.w });
+  const free = new Array(ccLines(S)).fill(0), eta = new Map();
+  for (const x of L) { let k = 0; for (let j = 1; j < free.length; j++) if (free[j] < free[k]) k = j; free[k] += x.left; eta.set(x.o, free[k]); }
+  return eta;
+}
 // ───── 生產：船塢排隊（研發、生產、改裝的第 2 步，2026-11-15）─────
 // 在有維修船塢的己方星系訂造：一座船塢一次造一艘，排在前面的先造；大船造得久（CC_RULE.buildW）。
 // 造好的船：訂造時指定的小隊還在那個星系、沒滿 → 直接加入；不然停在那座船塢當預備艦（S.pl.res），之後再編進小隊或成立新小隊。
@@ -458,11 +518,11 @@ function ccCanOrder(S, s) {
   return '';
 }
 // 這艘排隊的船還要幾週才好（前面的先造）
-function ccYqEta(S, o) { let w = 0; for (const x of ccYq(S, o.sys)) { w += x.left; if (x === o) break; } return w; }
+function ccYqEta(S, o) { return ccYqSim(S, o.sys).get(o) || o.left; }
 function ccOrder(S, key, s, to) {
   const cost = CC_RULE.build[key];
   if (!ccHullOk(S, key) || ccCanOrder(S, s) || S.pl.money < cost) return false;
-  const w = CC_RULE.buildW[key] || 1;
+  const w = ccBuildW(S, key);
   S.pl.money -= cost; S.pl.yid = (S.pl.yid || 0) + 1;
   const o = { id: S.pl.yid, key, sys: s.id, left: w, tot: w, to: to ?? null }; S.pl.yq.push(o);
   const q = to != null && ccSqById2(S, to);
@@ -482,9 +542,9 @@ const ccSqById2 = (S, id) => S.sq.find((q) => q.id === id);
 // 每週結束：每座船塢造排第一的那艘；預備艦在船塢裡修好、補滿
 function ccYardTick(S) {
   S.pl.yq = S.pl.yq.filter((o) => { if (o.kind !== 'fit' || S.sys[o.sys].owner === S.fac) return true; ccLog(S, `${S.sys[o.sys].name} 失守：在船塢改裝的${CAP_HULLS[o.key].name}被俘`, 'bad'); return false; });
-  const seen = new Set();
+  const seen = {};
   for (const o of S.pl.yq) {
-    if (seen.has(o.sys)) continue; seen.add(o.sys);
+    if ((seen[o.sys] = (seen[o.sys] || 0) + 1) > ccLines(S)) continue;   // 每條船台一件
     const s = S.sys[o.sys];
     if (s.owner !== S.fac || !s.yard) { if (!o.held) ccLog(S, `${s.name}${s.owner !== S.fac ? '失守' : '的船塢被摧毀'}：${CAP_HULLS[o.key].name}的${o.kind === 'fit' ? '改裝' : '建造'}暫停`, 'bad'); o.held = 1; continue; }
     o.held = 0; if (--o.left > 0) continue;
@@ -523,11 +583,12 @@ function ccResPut(S, q, k) {
 // ───── 改裝、Mk 升級（研發、生產、改裝的第 3 步，2026-11-15）─────
 // 在己方有船塢的星系，把船送進船塢換模組、升 Mk。一次改裝佔用船塢一週，跟造船排同一個隊（插在還沒開工的造船前面）。
 // 改裝中的船離開小隊（不能出戰）；好了回到原本的小隊（還在那個星系、沒滿），不然停在船塢當預備艦。星系失守＝改裝中的船被俘。
-// 換模組＝那個槽位回到 Mk I；Mk 不能降。Mk 上限＝船的等級（capMkCapLv；研發的上限第 4 步再加）。標「研發」的模組要等研發樹。
+// 換模組＝那個槽位回到 Mk I；Mk 不能降。Mk 上限＝船的等級與研發取低的（ccMkCap）。標「研發」的模組要研究到（CC_TECH 的 mod）。
 // 排隊的記錄：{ id, kind: 'fit', key, sys, left, tot, to, c, fit: { mod, mk }, cost }
-function ccFitOk(H0, slot, id) {
+function ccFitOk(S, H0, slot, id) {
   const M = id && CAP_MODS[slot][id]; if (!M) return '';
-  if (M.res) return '要先研發（研發樹還沒開放）';
+  const T = CC_TECH_ORDER.find((k) => CC_TECH[k].mod && CC_TECH[k].mod[0] === slot && CC_TECH[k].mod[1] === id);
+  if (M.res && !(T && ccHas(S, T))) return `要先研究${T ? CC_TECH[T].name : ''}`;
   if (slot === 'msl' && id === 'hangar' && H0.ftr) return '這個船型本來就有機庫';
   return '';
 }
@@ -552,12 +613,12 @@ function ccFitTx(fit, H0, c) {
   return a.join('、') || '原廠';
 }
 // 這份改裝能不能裝：模組可用、Mk 不超過上限、沒換模組的槽位 Mk 不能降
-function ccFitBad(c, fit) {
-  const H0 = CAP_HULLS[c.key], cap = capMkCapLv(c.lv);
+function ccFitBad(S, c, fit) {
+  const H0 = CAP_HULLS[c.key], cap = ccMkCap(S, c);
   for (const [slot, nm] of CAP_SLOTS) {
-    const b = fit.mod[slot] || '', kb = fit.mk[slot] || 1, why = ccFitOk(H0, slot, b);
+    const b = fit.mod[slot] || '', kb = fit.mk[slot] || 1, why = ccFitOk(S, H0, slot, b);
     if (why) return `${nm}：${why}`;
-    if (kb > cap) return `${nm}：船的等級只能裝到 ${CAP_MK_NAME[cap]}`;
+    if (kb > cap) return `${nm}：${capMkCapLv(c.lv) < kb ? '船的等級' : '研發'}只能到 ${CAP_MK_NAME[cap]}`;
     if ((c.mod[slot] || '') === b && kb < (c.mk[slot] || 1)) return `${nm}：Mk 不能降`;
   }
   return '';
@@ -571,7 +632,7 @@ function ccFitWhy(S, s) {
 }
 // 改裝插在哪裡：還沒開工的造船前面（已經開工的、排在前面的改裝照舊）
 function ccFitAt(S, sid) { const k = S.pl.yq.findIndex((o) => o.sys === sid && o.kind !== 'fit' && o.left === o.tot); return k < 0 ? S.pl.yq.length : k; }
-function ccFitEta(S, sid) { const at = ccFitAt(S, sid); return S.pl.yq.slice(0, at).filter((o) => o.sys === sid).reduce((a, o) => a + o.left, 0) + 1; }
+function ccFitEta(S, sid) { const ins = { at: S.pl.yq.slice(0, ccFitAt(S, sid)).filter((o) => o.sys === sid).length, w: 1 }; return ccYqSim(S, sid, ins).get(ins); }
 // 改裝的船從哪裡來：src＝{ q: 小隊 id, k: 第幾艘 } 或 { rid: 預備艦 id }
 function ccFitSrc(S, src) {
   if (src.rid != null) { const r = S.pl.res.find((x) => x.id === src.rid); return r ? { c: r.c, sys: r.sys, r } : null; }
@@ -579,7 +640,7 @@ function ccFitSrc(S, src) {
 }
 function ccFitOrder(S, src, fit) {
   const F = ccFitSrc(S, src); if (!F) return '沒有這艘船';
-  const c = capShipFix(F.c), s = S.sys[F.sys], why = ccFitWhy(S, s) || ccFitBad(c, fit); if (why) return why;
+  const c = capShipFix(F.c), s = S.sys[F.sys], why = ccFitWhy(S, s) || ccFitBad(S, c, fit); if (why) return why;
   const cost = ccFitCost(c, fit); if (!cost) return '沒有要改的地方';
   if (S.pl.money < cost) return `資金不夠（要 ${cost}）`;
   let to = null;
@@ -811,6 +872,7 @@ function ccMissionDone(S, M, ok) {
   if (!ok) { ccMisFail(S, M, '任務沒有完成'); return; }
   M.state = 'done'; ccFav(S, M.from != null ? M.from : S.fac, CC_RULE.fav.ok); ccFame(S, S.fac, CC_RULE.fame.op);
   S.pl.money += M.reward.money; S.pl.merit += M.reward.merit;
+  ccRpGain(S, M.reward.merit * CC_RP.misK, '任務完成');
   ccLog(S, `任務完成：${ccMisName(M)}・${M.type === 'op' ? CC_OPFX[M.op].goal(S, M) : CC_MIS[M.type].desc(S, M)}（資金 +${M.reward.money}、戰功 +${M.reward.merit}）`, 'ok');
   if (M.type === 'op') { const t = CC_OPFX[M.op].apply(S, M); M.res = t; ccLog(S, `任務的影響：${t}`, 'ok'); }
   if (M.exam) ccPromote(S);
@@ -822,4 +884,5 @@ function ccLoad() { try { const t = STORE.getItem(CC_STORE); const S = t ? JSON.
     if (!S.pl.yq) S.pl.yq = []; if (!S.pl.res) S.pl.res = [];   // 舊存檔：船塢排隊、預備艦
     for (const r of S.pl.res) capShipFix(r.c); for (const o of S.pl.yq) if (o.c) capShipFix(o.c);
     if (S.pl.rank == null) S.pl.rank = S.pl.merit >= 2000 ? 2 : S.pl.merit >= 800 ? 1 : 0;   // 舊存檔：照以前的指揮權換算軍階
+    ccT(S);   // 舊存檔：研發
     return S; } catch (e) { return null; } }

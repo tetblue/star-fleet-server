@@ -34,7 +34,7 @@ function ccRender() {
   const nMis = S.missions.filter((M) => M.state === 'open').length;
   overlay(`<style>${SMU_CSS}${CC_CSS}</style><div class="sm-wrap">
     <div class="sm-top"><h2>艦長生涯</h2><span class="sm-chip">第 ${S.turn} 週</span><span class="sm-chip">${CC_ROLES[S.role].name}・${ccRankOf(S).name}</span><span class="sm-chip">資金 ${fmtN(Math.round(S.pl.money))}</span><span class="sm-chip">戰功 ${Math.round(S.pl.merit)}</span>${ccTopChips(S, cnt)}
-      <span class="sm-btnbar"><button class="g-btn" id="cc-mis">任務${nMis ? `<span class="sm-badge">${nMis}</span>` : ''}</button><button class="g-btn" id="cc-logb">紀錄</button><button class="g-btn" id="cc-quit">離開</button>${S.fin ? '' : `<button class="g-btn" id="cc-fly" title="回到${smuEsc(ccPl(S) ? S.sys[ccPl(S).sys].name : '')}的太空（${keyText('cap_map')}）">回到星系 ✈</button>`}<button class="g-btn primary" id="cc-end" ${S.fin ? 'disabled' : ''}>結束這一週 →</button></span></div>
+      <span class="sm-btnbar"><button class="g-btn" id="cc-mis">任務${nMis ? `<span class="sm-badge">${nMis}</span>` : ''}</button><button class="g-btn" id="cc-tech" title="研究點數與研發樹">研發 <span class="g-dim">${ccT(S) && S.pl.rp}</span>${ccT(S).cur ? '<span class="sm-badge">…</span>' : ''}</button><button class="g-btn" id="cc-logb">紀錄</button><button class="g-btn" id="cc-quit">離開</button>${S.fin ? '' : `<button class="g-btn" id="cc-fly" title="回到${smuEsc(ccPl(S) ? S.sys[ccPl(S).sys].name : '')}的太空（${keyText('cap_map')}）">回到星系 ✈</button>`}<button class="g-btn primary" id="cc-end" ${S.fin ? 'disabled' : ''}>結束這一週 →</button></span></div>
     <div class="sm-map" id="cc-map"><canvas id="cc-cv"></canvas>
       <div class="sm-leg" id="cc-leg" style="cursor:pointer;pointer-events:auto">${CC.leg ? `<div><b>圖例 ▾</b></div>${['own', 'ally', 'enemy', 'neutral'].map((k) => `<div><i style="background:${SMU_REL[k].col}"></i>${k === 'own' ? '你的小隊（★＋光圈＝親自指揮，白框＝選中）' : SMU_REL[k].name}</div>`).join('')}<div>箭頭＝一個小隊：越大船越多（1～5 艘）；停在星系下方，閃爍且在航道上＝這週要移動</div><div class="g-dim">星系的顏色＝擁有者跟你的關係：藍＝你的陣營、紅＝敵對、黃＝中立／停戰</div><div>! ＝ 你的小隊下週會被進攻</div><div>◆ 軌道防禦・⚓ 維修船塢・✚ 補給站・白圈＝首都</div><div>虛線圈：圍城中・⚔ 這週會交戰</div><div>箭頭：看得到的預定動向（你的小隊周圍、偵察過的星系）</div><div>藍色虛線大圈：偵察中・亂＝指揮中斷</div><div class="g-dim">點星系看詳情；點相鄰的星系下令移動</div>` : '<div><b>圖例 ▸</b></div>'}</div>
       <div class="sm-dock" id="cc-dock"></div><div class="sm-card" id="cc-card" hidden></div></div></div>`);
@@ -43,6 +43,7 @@ function ccRender() {
   gEl('cc-end').onclick = () => ccEndWeek();
   gEl('cc-mis').onclick = ccMissionList;
   gEl('cc-leg').onclick = () => { CC.leg = !CC.leg; ccRender(); };
+  gEl('cc-tech').onclick = ccTechView;
   gEl('cc-logb').onclick = () => ccLogView(S.log.slice(-60).reverse(), '紀錄');
   const cv = gEl('cc-cv');
   cv.onclick = (e) => { const r = cv.getBoundingClientRect(), id = ccHit(e.clientX - r.left, e.clientY - r.top); CC.sel = id; ccCard(); };
@@ -174,8 +175,8 @@ const ccSurvTx = (q, sv) => q.ships.map((c, k) => `${CAP_HULLS[c.key].name} ${Ma
 function ccShipView(q, k) {
   const c = q && q.ships[k]; if (!c) return;
   capShipFix(c);
-  const H0 = CAP_HULLS[c.key], H = capHullMod(H0, c), L = CAP_XP.lv, lv = c.lv, cap = capMkCapLv(lv);
-  const lo = L[lv - 1], hi = L[lv], xpTx = hi == null ? `經驗 ${c.xp}（已經是最高等級）` : `經驗 ${c.xp}／${hi}（升到 Lv${lv + 1}${capMkCapLv(lv + 1) > cap ? `，可以裝到 ${CAP_MK_NAME[capMkCapLv(lv + 1)]}` : ''}）`;
+  const H0 = CAP_HULLS[c.key], H = capHullMod(H0, c), L = CAP_XP.lv, lv = c.lv, cap = ccMkCap(CC.S, c);
+  const lo = L[lv - 1], hi = L[lv], xpTx = hi == null ? `經驗 ${c.xp}（已經是最高等級）` : `經驗 ${c.xp}／${hi}（升到 Lv${lv + 1}${capMkCapLv(lv + 1) > capMkCapLv(lv) ? `，等級上限 ${CAP_MK_NAME[capMkCapLv(lv + 1)]}` : ''}）`;
   const pct = hi == null ? 1 : (c.xp - lo) / (hi - lo);
   const rows = CAP_SLOTS.map(([slot, nm]) => { const id = c.mod[slot], M = id && CAP_MODS[slot][id];
     return `<tr><td>${nm}</td><td><b>${capModName(H0, slot, id)}</b> ${CAP_MK_NAME[c.mk[slot] || 1]}</td><td class="g-dim">${M ? M.desc : '原廠'}</td></tr>`; }).join('');
@@ -186,7 +187,7 @@ function ccShipView(q, k) {
     ['機動', `最高速度 ${f1(H.max)}・轉向 ${Math.round(H.turn)}°／秒`], ['技能', `${H0.skill.name}（船型固定）`]];
   smuModal(`<h3>${smuEsc(q.name)}・${H0.name} <span class="cc-lv${lv > 1 ? ' up' : ''}" style="font-size:13px">Lv${lv}</span></h3>
     <div class="g-dim">${xpTx}</div><div class="cc-xp"><i style="width:${Math.round(pct * 100)}%"></i></div>
-    <div>Mk 上限：<b>${CAP_MK_NAME[cap]}</b> <span class="g-dim">（船的等級 Lv1～2＝Mk I、Lv3～4＝Mk II、Lv5＝Mk III；之後還要研發到才能裝）</span></div>
+    <div>Mk 上限：<b>${CAP_MK_NAME[cap]}</b> <span class="g-dim">（船的等級 Lv1～2＝Mk I、Lv3～4＝Mk II、Lv5＝Mk III，再跟研發到的 ${CAP_MK_NAME[ccMkRes(CC.S)]} 取低的）</span></div>
     <table class="cc-mods">${rows}</table>
     <dl class="sm-kv">${st.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join('')}</dl>
     <p class="g-dim" style="font-size:12px">經驗：參戰 +${CAP_XP.fight}、活下來 +${CAP_XP.live}、擊沉 +10～30（看船型）。船沉了，等級也跟著沒了。改裝與 Mk 升級：在己方有船塢的星系，佔用船塢一週。</p>
@@ -284,6 +285,23 @@ function ccCard() {
   on('cc-tcancel', () => { Q.task = null; re(); });
   for (const M of S.missions) { on('cc-op-' + M.id, () => ccLaunch(S, 'op', { sys: s.id, mis: M.id })); on('cc-top-' + M.id, () => { ccSetTask(S, Q, { kind: 'op', sys: s.id, mis: M.id }); re(); }); }
 }
+// 研發（第 4 步）：研究點數、目前的研究、研發樹
+function ccTechView() {
+  const S = CC.S, X = ccT(S), cur = X.cur;
+  const curTx = cur ? `<div>研究中：<b>${CC_TECH[cur.id].name}</b>（剩 ${cur.left} 週）</div>${ccBar(1 - cur.left / cur.tot, '#c9a7ff')}` : '<div class="g-dim">目前沒有在研究。</div>';
+  const groups = [...new Set(CC_TECH_ORDER.map((id) => CC_TECH[id].g))];
+  const body = groups.map((g) => `<h4 style="margin:10px 0 4px">${g}</h4>` + CC_TECH_ORDER.filter((id) => CC_TECH[id].g === g).map((id) => {
+    const T = CC_TECH[id], why = ccTechWhy(S, id), done = X.done[id], on = cur && cur.id === id, c = ccTechCost(S, id);
+    const tag = done ? '<span style="color:#3fdf8f">✓ 已完成</span>' : on ? '<span style="color:#c9a7ff">研究中</span>' : '';
+    return `<div class="cc-ship cc-yq" style="grid-template-columns:1fr auto"><span><b>${T.name}</b> ${tag}${T.good === S.fac && !done ? ' <span class="g-dim">（你的陣營擅長，便宜 20%）</span>' : ''}<br><span class="g-dim">${T.desc}${T.need ? `・前置：${T.need.map((k) => CC_TECH[k].name).join('、')}` : ''}</span></span>${done || on ? '' : `<button class="g-btn" data-tech="${id}" ${why ? `disabled title="${smuEsc(why)}"` : ''}>研究（${c} 點・${T.w} 週）</button>`}</div>`;
+  }).join('')).join('');
+  smuModal(`<h3>研發 <span class="g-dim" style="font-size:14px">研究點數 ${S.pl.rp}</span></h3>
+    <div class="g-dim" style="font-size:12px">研究點數來源：任務完成（戰功的 1/10）、打贏後打撈殘骸（親自打的每擊沉一艘 ${CC_RP.kill} 點、計算的戰鬥每艘 ${CC_RP.calc} 點）、據點的研究所（每週 ${CC_RP.lab} 點）。一次研究一項，開始時付點數。船型要軍階＋研發都到；Mk 上限＝船的等級與研發取低的。</div>
+    <div style="margin:8px 0">${curTx}</div>${body}
+    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`);
+  gEl('cc-close').onclick = () => { smuCloseModal(); ccRender(); };
+  document.querySelectorAll('[data-tech]').forEach((b) => (b.onclick = () => { const err = ccTechStart(S, b.dataset.tech); if (err) { toast(err, 'warn'); return; } ccSave(S); ccRender(); ccTechView(); }));
+}
 // 船塢的摘要：建造中、排隊、預備艦
 function ccYardSum(S, s) {
   const Y = ccYq(S, s.id), R = ccResAt(S, s.id), a = [];
@@ -297,11 +315,11 @@ function ccYardView(s) {
   const canNew = ccOwnCount(S) < ccSlots(S), yardOk = s.owner === S.fac && s.yard;
   const dest = CC.yto != null && here.some((q) => q.id === CC.yto) ? CC.yto : 'res';
   const hulls = CAP_HULL_ORDER.filter((k) => ccHullOk(S, k));
-  const wq = Y.reduce((a, o) => a + o.left, 0);
+  const etaNew = (k) => { const ins = { at: Y.length, w: ccBuildW(S, k) }; return ccYqSim(S, s.id, ins).get(ins); };
   const order = why ? `<p class="g-dim">不能訂造：${why}</p>` : `
     <div class="g-dim" style="font-size:12px;margin-bottom:4px">造好後：</div>
     <div class="sm-seg" id="cc-yto" data-val="${dest}">${here.map((q) => `<button data-v="${q.id}" class="${dest === q.id ? 'on' : ''}">加入${smuEsc(q.name)}</button>`).join('')}<button data-v="res" class="${dest === 'res' ? 'on' : ''}">停在船塢（預備艦）</button></div>
-    ${smuActs(hulls.map((k) => ({ id: 'cc-o-' + k, name: `訂造${CAP_HULLS[k].name}`, desc: `${CC_RULE.build[k]} 資金・建造 ${CC_RULE.buildW[k]} 週・${wq + CC_RULE.buildW[k]} 週後完成`, off: S.pl.money < CC_RULE.build[k] })), 150)}`;
+    ${smuActs(hulls.map((k) => ({ id: 'cc-o-' + k, name: `訂造${CAP_HULLS[k].name}`, desc: `${CC_RULE.build[k]} 資金・建造 ${ccBuildW(S, k)} 週・${etaNew(k)} 週後完成`, off: S.pl.money < CC_RULE.build[k] })), 150)}`;
   const queue = Y.length ? Y.map((o, n) => { const q = o.to != null && S.sq.find((x) => x.id === o.to);
     return `<div class="cc-ship cc-yq" style="grid-template-columns:1fr auto"><span><b>${n ? `${n + 1}.` : o.kind === 'fit' ? '改裝中' : '建造中'} ${o.kind === 'fit' ? '改裝' : ''}${o.kind === 'fit' ? ccShipNm(o.c) : CAP_HULLS[o.key].name}</b> <span class="g-dim">${o.held ? '<span style="color:#ff8a7a">暫停</span>' : `${ccYqEta(S, o)} 週後${o.kind === 'fit' ? '好' : '完成'}`}・${o.kind === 'fit' ? `${ccFitTx(o.fit, CAP_HULLS[o.key], o.c)}・` : ''}${q ? `${o.kind === 'fit' ? '回到' : '加入'}${smuEsc(q.name)}` : '停在船塢'}</span>${ccBar(1 - o.left / o.tot, '#c9a7ff')}</span><button class="g-btn" data-ycan="${o.id}">取消（退 ${ccYqBack(o)}）</button></div>`; }).join('') : '<div class="g-dim">沒有。</div>';
   const res = R.length ? R.map((x) => `<div class="cc-ship cc-yq" style="grid-template-columns:auto 1fr auto"><b>${ccShipNm(x.c)}</b>${ccShipBars(x.c)}<span>${here.map((q) => `<button class="g-btn" data-rj="${x.id}:${q.id}" ${q.ships.length >= CC_RULE.maxShips ? 'disabled title="那一隊已經滿了"' : ''}>→${smuEsc(q.name)}</button>`).join('')}<button class="g-btn" data-rf="${x.id}" ${yardOk ? '' : 'disabled'}>改裝</button><button class="g-btn" data-rj="${x.id}:new" ${canNew ? '' : `disabled title="指揮權不夠（${ccRankOf(S).name}最多帶 ${ccSlots(S)} 隊）"`}>成立新小隊</button></span></div>`).join('') : '<div class="g-dim">沒有。</div>';
@@ -326,12 +344,12 @@ function ccYardView(s) {
 // 改裝、Mk 升級（第 3 步）：src＝{ q: 小隊 id, k: 第幾艘 } 或 { rid: 預備艦 id }；D＝還沒送出的改裝（每點一下重畫）
 function ccFitView(src, D) {
   const S = CC.S, F = ccFitSrc(S, src); if (!F) { smuCloseModal(); return; }
-  const c = capShipFix(F.c), H0 = CAP_HULLS[c.key], s = S.sys[F.sys], cap = capMkCapLv(c.lv);
+  const c = capShipFix(F.c), H0 = CAP_HULLS[c.key], s = S.sys[F.sys], cap = ccMkCap(S, c), capL = capMkCapLv(c.lv);
   D = D || { mod: { ...c.mod }, mk: { ...c.mk } };
   const rows = CAP_SLOTS.map(([slot, nm]) => {
     const cur = D.mod[slot] || '', same = cur === (c.mod[slot] || ''), k0 = same ? c.mk[slot] || 1 : 1, kc = D.mk[slot] || 1;
-    const opts = [['', capModBase(H0, slot)], ...Object.entries(CAP_MODS[slot]).map(([id, M]) => { const w = ccFitOk(H0, slot, id); return [id, M.name + (w ? '🔒' : ''), !!w, w || M.desc]; })];
-    const mks = [1, 2, 3].map((k) => [k, CAP_MK_NAME[k], k > cap || k < k0, k > cap ? `船要 Lv${k === 2 ? 3 : 5}` : k < k0 ? 'Mk 不能降' : `主要數值 ×${CAP_MK[k]}`]);
+    const opts = [['', capModBase(H0, slot)], ...Object.entries(CAP_MODS[slot]).map(([id, M]) => { const w = ccFitOk(S, H0, slot, id); return [id, M.name + (w ? '🔒' : ''), !!w, w || M.desc]; })];
+    const mks = [1, 2, 3].map((k) => [k, CAP_MK_NAME[k], k > cap || k < k0, k > cap ? (k > capL ? `船要 Lv${k === 2 ? 3 : 5}` : `要先研究 Mk ${k === 2 ? 'II' : 'III'} 工藝`) : k < k0 ? 'Mk 不能降' : `主要數值 ×${CAP_MK[k]}`]);
     const M = cur && CAP_MODS[slot][cur], chg = !same || kc !== (c.mk[slot] || 1);
     return `<tr${chg ? ' class="chg"' : ''}><td>${nm}</td><td>${smuSeg('cc-fm-' + slot, opts, cur)}<div class="g-dim" style="font-size:11px;margin-top:2px">${M ? M.desc : '原廠'}${!same && (c.mk[slot] || 1) > 1 ? `（換模組＝回到 Mk I）` : ''}</div></td><td>${smuSeg('cc-fk-' + slot, mks, kc)}</td></tr>`;
   }).join('');
@@ -341,12 +359,12 @@ function ccFitView(src, D) {
   const st = cmp('船體', A.hp, B.hp, Math.round) + cmp('護盾', A.sh, B.sh, Math.round) + cmp('主砲每秒傷害', dps(A), dps(B)) + cmp('主砲射程', A.main.range, B.main.range, Math.round) + cmp('主砲射界（左右各）', A.main.arc, B.main.arc, Math.round)
     + cmp('副砲每秒傷害', tdps(A), tdps(B)) + cmp('點防禦', A.pd.n, B.pd.n, Math.round) + cmp('飛彈總傷害', mt(A), mt(B), Math.round) + cmp('護航機', A.ftr || 0, B.ftr || 0, Math.round)
     + cmp('最高速度', A.max, B.max) + cmp('轉向（°／秒）', A.turn, B.turn, Math.round);
-  const cost = ccFitCost(c, D), bad = ccFitBad(c, D), why = ccFitWhy(S, s), eta = ccFitEta(S, s.id);
+  const cost = ccFitCost(c, D), bad = ccFitBad(S, c, D), why = ccFitWhy(S, s), eta = ccFitEta(S, s.id);
   const last = F.q && F.q.id === S.pl.sq && F.q.ships.length <= 1;
   const stop = why || bad || (last ? '親自指揮的小隊至少要留一艘（先把預備艦編進來，或從別隊調一艘）' : '') || (!cost ? '還沒選要改的地方' : '') || (S.pl.money < cost ? `資金不夠（要 ${cost}，有 ${S.pl.money}）` : '');
   const back = F.q ? `好了回到${smuEsc(F.q.name)}（那時還在 ${s.name}、沒滿的話；不然停在船塢）` : '好了停回船塢（預備艦）';
   smuModal(`<h3>改裝：${F.q ? smuEsc(F.q.name) + '・' : '預備艦・'}${H0.name} <span class="cc-lv${c.lv > 1 ? ' up' : ''}" style="font-size:13px">Lv${c.lv}</span></h3>
-    <div class="g-dim" style="font-size:12px">在 ${s.name} 的船塢改裝：佔用船塢一週，跟造船排同一個隊（排在還沒開工的造船前面）。改裝中的船離開小隊、不能出戰；${back}。Mk 上限 <b>${CAP_MK_NAME[cap]}</b>（照船的等級）。資金 ${S.pl.money}</div>
+    <div class="g-dim" style="font-size:12px">在 ${s.name} 的船塢改裝：佔用船塢一週，跟造船排同一個隊（排在還沒開工的造船前面）。改裝中的船離開小隊、不能出戰；${back}。Mk 上限 <b>${CAP_MK_NAME[cap]}</b>（船的等級與研發取低的）。資金 ${S.pl.money}</div>
     <table class="cc-mods cc-fit"><tr><td></td><td class="g-dim">模組</td><td class="g-dim">Mk</td></tr>${rows}</table>
     <dl class="cc-cmp">${st}</dl>
     <div class="g-dim" style="font-size:12px">價錢：工錢 ${CC_RULE.fit.base}・換模組 ${CC_RULE.fit.mod.main}／${CC_RULE.fit.mod.tur}／${CC_RULE.fit.mod.msl}／${CC_RULE.fit.mod.def}／${CC_RULE.fit.mod.eng}（主砲／副砲／飛彈艙／防禦／引擎，換回原廠半價）・Mk II ${CC_RULE.fit.mk[2]}、Mk III 再 ${CC_RULE.fit.mk[3]}（每個槽位）</div>
@@ -507,6 +525,7 @@ function ccBattleDone() {
   (I.ownDefIdx || []).forEach((di, k) => { const g = CAP.G.gts.find((u) => u.def && u.side === CAP.side && u.di === k); const d = s.defs[di]; if (d) d.hp = !g || gtDead(g) ? 0 : g.hp / g.max; });
   I.defIdx.forEach((di, k) => { const g = CAP.G.gts.find((u) => u.def && u.side !== CAP.side && u.di === k); const d = s.defs[di]; if (d) d.hp = !g || gtDead(g) ? 0 : g.hp / g.max; });
   for (const g of CAP.G.gts) { if (!gtDead(g)) continue; if (g.cu === 'yard') s.yard = false; if (g.cu === 'depot') s.depot = false; }
+  if (R.capOk && st.ks) ccRpGain(S, st.ks * CC_RP.kill, `打撈 ${s.name} 的殘骸`);
   S.pl.kills += st.ks; S.pl.merit += st.merit; S.pl.money += Math.round(st.merit * 0.5); S.pl.weekFought = 1;
   const P = ccPl(S), ok = !!R.capOk, ret = !!R.retreat || R.why === '超過任務時限';
   if (!P || !P.ships.length) { S.fin = { why: `你的小隊在 ${s.name} 全滅`, turn: S.turn }; ccLog(S, S.fin.why, 'bad'); }
@@ -548,7 +567,7 @@ function ccMissionList() {
   gEl('cc-close').onclick = smuCloseModal;
   document.querySelectorAll('[data-goto]').forEach((b) => (b.onclick = () => { smuCloseModal(); CC.sel = +b.dataset.goto; ccCard(); }));
 }
-Object.assign(window.__cap || (window.__cap = {}), { ccNewGame, ccWeekA, ccWeekB, CC_RULE, ccLoad, ccSave, ccShow, ccState: () => CC, ccCard, ccLaunch, ccMissionDone, ccRender, ccPlan, ccTransfer, ccTakeCommand, ccSetTask, ccTaskOdds, ccRunTasks, ccOrder, ccOrderCancel, ccResJoin, ccResPut, ccYardView, ccFitView, ccFitOrder, ccFitCost });
+Object.assign(window.__cap || (window.__cap = {}), { ccNewGame, ccWeekA, ccWeekB, CC_RULE, ccLoad, ccSave, ccShow, ccState: () => CC, ccCard, ccLaunch, ccMissionDone, ccRender, ccPlan, ccTransfer, ccTakeCommand, ccSetTask, ccTaskOdds, ccRunTasks, ccOrder, ccOrderCancel, ccResJoin, ccResPut, ccYardView, ccFitView, ccFitOrder, ccFitCost, ccTechView, ccTechStart, ccT });
 
 // ───── 星圖上的關係：own＝你的小隊、ally＝同勢力、enemy＝敵對、neutral＝其他（顏色同星海生涯的 SMU_REL）─────
 // 星系、勢力的顏色跟小隊一樣照敵我關係（不是勢力的固定色）：你的陣營＝藍、敵對＝紅、中立星系與停戰＝黃
