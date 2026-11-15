@@ -249,6 +249,7 @@ function crWeapon(m, slot, mod) {
   return getModel(key) ? { key, m: { ...m, hk: key[0] + m.hk.slice(1), w: +key.slice(2), s: (m.s || 0.1) * L.k } } : { key: st + 'w' + m.w, m };
 }
 function crMakeShip(c, D, fac) {
+  if (!CAP_FX.look) D = { mod: {}, mk: {} };   // 升級的外觀關著：整修庫也照原廠的樣子
   const H = CAP_HULLS[c.key]; if (!H) return null;
   const g = cbMakeShip(c.key, fac); if (!g) return null;
   const body = g.children[0], fk = FAC_KEY[fac] || 'e', key = (getModel(fk + H.look) ? fk : 'e') + H.look, M = getModel(key);

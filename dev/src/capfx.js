@@ -7,6 +7,9 @@
 // 位置與方向照 main.js update3D 的艦長分支（前 s.F、上 s.U、長度 scale × TYPE_LEN3），所以會完全貼合。
 const CAP_FX = {
   on: true,
+  // 升級的外觀（塗裝樣式、Mk 條紋、裝甲花紋、換武器模型、各種引擎的尾焰、強化護盾的殼）：先關掉，升級目前只改數值（2026-11-15 使用者決定，計劃保留）
+  // 關掉時每艘船都照原廠的樣子；被打到護盾閃一下、尾焰還是有。改成 true 就全部回來
+  look: false,
   push: 0.004,                        // 塗裝層沿法線外推（船長的比例）
   stripe: [0.30, 0.03, 0.06],        // Mk 條紋：從船尾算起的位置、寬、兩條的間距（船長的比例）
   shell: 1.32, shellMin: 0.22,        // 護盾殼：船體外框半徑 ×，最小（船長的比例）
@@ -182,6 +185,7 @@ function capFxLv(mod) { const id = (k) => CAP_LIVERY[k].indexOf((mod || {})[k]) 
 function capFxSetPaint(m, mod, mk, def) { const L = capFxLv(mod); m.uniforms.uLv.value.set(...L.v); m.uniforms.uEng.value = L.eng; m.uniforms.uMk.value = mk; m.uniforms.uArm.value = def === 'armor' ? 1 : def === 'react' ? 2 : 0; }
 // 這艘船的外觀設定：模組、Mk（取最高的槽位）
 function capFxSpec(s) {
+  if (!CAP_FX.look) return { eng: 'std', def: '', mk: 1, mod: {}, lv: false };
   const mod = (s.H && s.H.mod) || {}, mk = (s.H && s.H.mk) || {};
   let m = 1; for (const k in mk) m = Math.max(m, mk[k] || 1);
   return { eng: mod.eng || 'std', def: mod.def || '', mk: m, mod, lv: CAP_SLOTS.some(([k]) => mod[k]) };
@@ -316,7 +320,7 @@ function capMountRaw(tk) {
   if (!own) list = list.filter((m) => mountMatrix(m).wk.endsWith('w3'));
   return list;
 }
-function capShipMods(i) { const k = CAP.byI && i < CAP.byI.length ? CAP.byI[i] : -1, s = k >= 0 ? CAP.ships[k] : null, mod = s && s.H && s.H.mod; return mod && (mod.main || mod.tur) ? { s, mod } : null; }
+function capShipMods(i) { if (!CAP_FX.look) return null; const k = CAP.byI && i < CAP.byI.length ? CAP.byI[i] : -1, s = k >= 0 ? CAP.ships[k] : null, mod = s && s.H && s.H.mod; return mod && (mod.main || mod.tur) ? { s, mod } : null; }
 // main.js rebuild3D：多留換上去的武器模型的容量
 function capMountCap(cap) {
   for (const s of CAP.ships) {
