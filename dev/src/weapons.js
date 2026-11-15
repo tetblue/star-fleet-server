@@ -174,6 +174,7 @@ function openWeaponEditor(back) {
 }
 function closeWeaponEditor() {
   if (!WE.open) return;
+  if (typeof wpStop === 'function') wpStop();
   WE.open = false; WE.el.hidden = true; cancelAnimationFrame(WE.raf); WE.raf = 0;
   scheduleWeaponAtlas();
   const b = WE.back; WE.back = null; if (b) b();
@@ -192,7 +193,7 @@ function buildWeaponEditor() {
       <div class="wed-view" id="wed-view"><canvas id="wed-c"></canvas>
         <div class="wed-cams"><button class="g-btn sm" data-cam="iso">斜視</button><button class="g-btn sm" data-cam="top">俯視</button><button class="g-btn sm" data-cam="side">側視</button><button class="g-btn sm" data-cam="front">正面</button><button class="g-btn sm" data-cam="game">遊戲角度</button></div>
         <div class="wed-hint" id="wed-hint"></div></div>
-      <div class="wed-side">
+      <div class="wed-side">${typeof wpBar === 'function' ? wpBar() : ''}
         <h4>主題色 <small id="wed-thn"></small></h4><div class="wed-theme" id="wed-theme"></div>
         <h4>新增武器 <small>點選後在船身上點一下放置；按住 Shift 可連續放</small></h4><div class="wed-pal" id="wed-pal"></div>
         <h4>掛點 <small id="wed-n"></small></h4><div class="wed-list" id="wed-list"></div>
@@ -251,6 +252,7 @@ function buildWeaponEditor() {
   cv.addEventListener('pointerup', wePointerUp); cv.addEventListener('pointercancel', wePointerUp);
   cv.addEventListener('pointerleave', () => { WE.ghost.visible = false; });
   cv.addEventListener('wheel', (e) => { e.preventDefault(); WE.orb.dist = Math.min(6, Math.max(0.25, WE.orb.dist * Math.exp(e.deltaY * 0.0012))); }, { passive: false });
+  if (typeof wpBind === 'function') wpBind(el);   // 表現預覽（weprev.js）
   addEventListener('keydown', weKey);
   addEventListener('resize', () => { if (WE.open) weResize(); });
 }
@@ -285,7 +287,7 @@ function weLoadHull() {
   if (!M) { if (hk !== 'e1') { WE.hk = 'e1'; weLoadHull(); } return; }   // 這個模型沒放進 models/：退回帝國戰列艦
   WE.hullMesh.geometry = M.lods[0]; WE.hullMesh.material = M.mat;
   if (has2D) Promise.all(need.map((k) => getModel(k) && getModel(k).ready)).then(() => weDraw2D());
-  weSync(); weUI(); if (!WE.raf) weLoop();
+  weSync(); weUI(); if (typeof wpRefresh === 'function') wpRefresh(); if (!WE.raf) weLoop();
 }
 function weMounts() { return MOUNTS[WE.hk] || (MOUNTS[WE.hk] = []); }
 // 3D 場景跟著資料重建
@@ -301,7 +303,7 @@ function weSync() {
   WE.box.visible = !!s; if (s) { s.updateMatrixWorld(true); WE.box.setFromObject(s); }
 }
 function weChanged(all) {
-  weSync(); weUI(); weDraw2DSoon();
+  weSync(); if (typeof wpRefresh === 'function') wpRefresh(); weUI(); weDraw2DSoon();
   saveMounts(); R3.version = -1; scheduleWeaponAtlas(all ? null : WE.hk);
 }
 function weSnap() { WE.undo.push(JSON.stringify(MOUNTS)); if (WE.undo.length > 80) WE.undo.shift(); WE.redo = []; }
@@ -394,6 +396,7 @@ function wePointerDown(e) {
   WE.cv.setPointerCapture(e.pointerId);
   const d = WE.drag = { x: e.clientX, y: e.clientY, btn: e.button, moved: false, mode: 'orbit' };
   if (e.button === 2 || e.button === 1) { d.mode = 'pan'; return; }
+  if (WP.on) return;   // 表現預覽中：左鍵只轉鏡頭
   if (WE.place >= 0) { d.mode = 'place'; return; }
   const hw = weRayAt(e, WE.wGroup.children);
   if (hw) { WE.sel = hw.object.userData.i; d.mode = 'move'; d.snapped = false; d.partner = wePartner(WE.sel); weUI(); weSync(); }
@@ -461,6 +464,7 @@ function weLoop() {
   WE.cam.position.set(o.tx + Math.sin(o.yaw) * cp * o.dist, o.ty + Math.sin(o.pitch) * o.dist, o.tz + Math.cos(o.yaw) * cp * o.dist);
   WE.cam.lookAt(o.tx, o.ty, o.tz);
   const s = WE.wGroup.children[WE.sel]; if (s) { s.updateMatrixWorld(true); WE.box.setFromObject(s); }
+  if (typeof wpFrame === 'function') wpFrame();   // 表現預覽
   WE.r.render(WE.scene, WE.cam);
   WE.raf = requestAnimationFrame(weLoop);
 }

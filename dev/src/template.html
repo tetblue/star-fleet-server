@@ -870,6 +870,9 @@
   .wed-body { display: grid; grid-template-columns: 1fr calc(320px * var(--ui)); min-height: 0; }
   .wed-view { position: relative; min-height: 0; overflow: hidden; }
   .wed-cams { position: absolute; left: 10px; top: 10px; display: flex; gap: calc(6px * var(--sp)); flex-wrap: wrap; }
+  .wed-fx { display: flex; flex-direction: column; gap: calc(4px * var(--sp)); padding-bottom: calc(8px * var(--sp)); margin-bottom: calc(4px * var(--sp)); border-bottom: 1px solid var(--line); font-size: calc(12px * var(--ui)); }
+  .wed-fx h4 { margin: 0 0 calc(2px * var(--sp)); } .wed-fx.on h4 { color: #ffd27a; }
+  .wed-fxr { display: flex; gap: calc(4px * var(--sp)); align-items: center; flex-wrap: wrap; } .wed-fxr > span { width: 2.6em; color: var(--dim); } .wed-fxr [hidden] { display: none; }
   .wed-hint { position: absolute; left: 10px; bottom: 8px; right: 10px; color: var(--dim); font-size: calc(12px * var(--ui)); pointer-events: none; text-shadow: 0 1px 2px #000; }
   .wed-side { border-left: 1px solid var(--line); background: rgba(10,15,28,.85); padding: calc(10px * var(--sp)) calc(12px * var(--sp)); overflow: auto; min-height: 0; }
   .wed-side h4 { margin: calc(12px * var(--sp)) 0 calc(6px * var(--sp)); font-size: calc(12px * var(--ui)); letter-spacing: .12em; color: var(--dim); font-weight: 600; }
