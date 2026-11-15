@@ -249,14 +249,15 @@ function crWeapon(m, slot, mod) {
   return getModel(key) ? { key, m: { ...m, hk: key[0] + m.hk.slice(1), w: +key.slice(2), s: (m.s || 0.1) * L.k } } : { key: st + 'w' + m.w, m };
 }
 function crMakeShip(c, D, fac) {
-  if (!CAP_FX.look) D = { mod: {}, mk: {} };   // 升級的外觀關著：整修庫也照原廠的樣子
+  const W0 = CAP_FX.wpn ? { main: (D.mod || {}).main, tur: (D.mod || {}).tur } : {};   // 武器模型照配置換（CAP_FX.wpn）
+  if (!CAP_FX.look) D = { mod: {}, mk: {} };   // 其他升級的外觀關著：塗裝、尾焰、護盾殼照原廠的樣子
   const H = CAP_HULLS[c.key]; if (!H) return null;
   const g = cbMakeShip(c.key, fac); if (!g) return null;
   const body = g.children[0], fk = FAC_KEY[fac] || 'e', key = (getModel(fk + H.look) ? fk : 'e') + H.look, M = getModel(key);
   while (body.children.length > 1) body.remove(body.children[body.children.length - 1]);   // 原廠武器拿掉，照模組重新裝
   const raw = mountsOf(key).filter((m) => getModel(m.hk[0] + 'w' + m.w)), slots = capMountSlots(raw), mounts = [];
   raw.forEach((m0, j) => {
-    const sl = slots[j], W = crWeapon(m0, sl, D.mod), Wm = getModel(W.key); if (!Wm) return;
+    const sl = slots[j], W = crWeapon(m0, sl, CAP_FX.look ? D.mod : W0), Wm = getModel(W.key); if (!Wm) return;
     const o = new THREE.Mesh(Wm.lods[Math.min(1, Wm.lods.length - 1)], Wm.mat); setMountObj(o, W.m); body.add(o);
     const gk = (WEAPON_GK['eamcrib'.indexOf(m0.hk[0])] || '')[m0.w]; mounts.push({ o, slot: sl || (gk === 'x' ? 'msl' : null), key: W.key, home: o.position.clone() });
   });

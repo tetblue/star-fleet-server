@@ -7,9 +7,11 @@
 // 位置與方向照 main.js update3D 的艦長分支（前 s.F、上 s.U、長度 scale × TYPE_LEN3），所以會完全貼合。
 const CAP_FX = {
   on: true,
-  // 升級的外觀（塗裝樣式、Mk 條紋、裝甲花紋、換武器模型、各種引擎的尾焰、強化護盾的殼）：先關掉，升級目前只改數值（2026-11-15 使用者決定，計劃保留）
+  // 升級的外觀（塗裝樣式、Mk 條紋、裝甲花紋、各種引擎的尾焰、強化護盾的殼）：先關掉，升級目前只改數值（2026-11-15 使用者決定，計劃保留）
   // 關掉時每艘船都照原廠的樣子；被打到護盾閃一下、尾焰還是有。改成 true 就全部回來
   look: false,
+  // 換武器（主砲、副砲模組）真的換武器模型：戰鬥中、整修庫都照玩家配置的武器（2026-11-15 使用者決定，跟 look 分開）
+  wpn: true,
   push: 0.004,                        // 塗裝層沿法線外推（船長的比例）
   stripe: [0.30, 0.03, 0.06],        // Mk 條紋：從船尾算起的位置、寬、兩條的間距（船長的比例）
   shell: 1.32, shellMin: 0.22,        // 護盾殼：船體外框半徑 ×，最小（船長的比例）
@@ -320,7 +322,7 @@ function capMountRaw(tk) {
   if (!own) list = list.filter((m) => mountMatrix(m).wk.endsWith('w3'));
   return list;
 }
-function capShipMods(i) { if (!CAP_FX.look) return null; const k = CAP.byI && i < CAP.byI.length ? CAP.byI[i] : -1, s = k >= 0 ? CAP.ships[k] : null, mod = s && s.H && s.H.mod; return mod && (mod.main || mod.tur) ? { s, mod } : null; }
+function capShipMods(i) { if (!CAP_FX.wpn) return null; const k = CAP.byI && i < CAP.byI.length ? CAP.byI[i] : -1, s = k >= 0 ? CAP.ships[k] : null, mod = s && s.H && s.H.mod; return mod && (mod.main || mod.tur) ? { s, mod } : null; }
 // main.js rebuild3D：多留換上去的武器模型的容量
 function capMountCap(cap) {
   for (const s of CAP.ships) {
@@ -334,10 +336,70 @@ function capMountList(i, hk) {
   const X = capShipMods(i); if (!X) return null;
   const s = X.s; if (s.mountV === R3.version && s.mountK === hk) return s.mounts;
   s.mountV = R3.version; s.mountK = hk; s.mounts = null;
-  const raw = capMountRaw(hk), base = R3.mounts[hk]; if (!raw || !base || raw.length !== base.length) return null;
+  const raw = capMountRaw(hk), base = R3.mounts && R3.mounts[hk]; if (!raw || !base || raw.length !== base.length) return null;
   const sl = capMountSlots(raw);
   s.mounts = base.map((mm, j) => { const n = capSwapMount(raw[j], mm, X.mod, sl[j]); return n && R3.meshByKey[n.wk] ? n : mm; });
   return s.mounts;
+}
+
+// ───── 每門武器自己的發射點 ─────
+// 武器模型座標裡的砲口：分件模型＝每根砲管（aPart 2+k）最前端的中心；沒分件＝整座最前端（+z）的中心；飛彈發射器＝頂面中心
+// 回傳 { tips: [{ p, piv }]（piv＝砲管的仰角軸心，沒分件＝null）, yc: 轉塔的方位軸心 [x, z], turn: 會不會轉 }
+function capMuzLocal(wk) {
+  const C = CFX.muz || (CFX.muz = {}); if (C[wk]) return C[wk];
+  const src = MODEL_SRC[wk], g = src && src.lods[0]; if (!g) return (C[wk] = { tips: [{ p: [0, 0, 0], piv: null }], yc: [0, 0], turn: false });
+  const P = g.attributes.position, pa = g.attributes.aPart, pv = g.attributes.aPiv, n = P.count, sp = rigSpec(wk);
+  let yc = [0, 0], ycOk = false;
+  const front = (ids) => {   // 一群頂點的最前端：最前面 8% 長度內的頂點取平均
+    let z0 = Infinity, z1 = -Infinity; for (const i of ids) { const z = P.getZ(i); if (z < z0) z0 = z; if (z > z1) z1 = z; }
+    const cut = z1 - Math.max(1e-4, (z1 - z0) * 0.08); let x = 0, y = 0, c = 0;
+    for (const i of ids) if (P.getZ(i) >= cut) { x += P.getX(i); y += P.getY(i); c++; }
+    return [x / c, y / c, z1];
+  };
+  const all = Array.from({ length: n }, (_, i) => i), tips = [];
+  if (sp.mode === 'l' || sp.g === 3) {   // 飛彈：從頂面出去
+    let y1 = -Infinity; for (const i of all) y1 = Math.max(y1, P.getY(i));
+    let x = 0, z = 0, c = 0; for (const i of all) if (P.getY(i) >= y1 - 1e-3 - 0.05 * Math.abs(y1)) { x += P.getX(i); z += P.getZ(i); c++; }
+    tips.push({ p: [x / c, y1, z / c], piv: null });
+  } else {
+    const parts = new Map();
+    if (pa) for (let i = 0; i < n; i++) { const k = Math.round(pa.getX(i)); if (k === 1 && !ycOk) { yc = [pv.getX(i), pv.getZ(i)]; ycOk = true; } if (k >= 2 && k < 10) (parts.get(k) || parts.set(k, []).get(k)).push(i); }
+    for (const k of [...parts.keys()].sort((a, b) => a - b)) { const ids = parts.get(k); tips.push({ p: front(ids), piv: [pv.getX(ids[0]), pv.getY(ids[0]), pv.getZ(ids[0])] }); }
+    if (!tips.length) tips.push({ p: front(all), piv: null });
+  }
+  return (C[wk] = { tips, yc, turn: sp.mode === 't' || sp.mode === 'f' });
+}
+// 這艘船每一類武器（main 主砲、sec 副砲、aa 防空、msl 飛彈）有哪些砲口：[[掛點 j, 砲管 b], …]
+function capMuzGroups(s) {
+  const hk = typeKey(s.i), list = (CAP.on && capMountList(s.i, hk)) || (R3.mounts && R3.mounts[hk]);
+  if (s.muzG && s.muzG.list === list && s.muzG.v === R3.version) return s.muzG;
+  const G = { list, v: R3.version, main: [], sec: [], aa: [], msl: [] };
+  if (list && list.length) {
+    const raw = capMountRaw(hk), sl = raw && raw.length === list.length ? capMountSlots(raw) : null;
+    list.forEach((m, j) => {
+      if (!MODEL_SRC[m.wk]) return;
+      const g = m.rig.g, k = sl && sl[j] === 'main' ? 'main' : g === 3 ? 'msl' : g === 2 ? 'aa' : g === 0 && !sl ? 'main' : 'sec';
+      const T = capMuzLocal(m.wk); T.tips.forEach((_, b) => G[k].push([j, b]));
+    });
+    if (!G.sec.length) G.sec = G.aa.length ? G.aa : G.main;
+    if (!G.aa.length) G.aa = G.sec;
+    if (!G.main.length) G.main = G.sec;
+  }
+  return (s.muzG = G);
+}
+// 第 n 個砲口的世界座標（砲塔現在的方位、砲管仰角都算進去）；這艘船沒有這類武器的模型＝null
+function capMuzzleAt(s, kind, n, out = []) {
+  const G = capMuzGroups(s), L = G[kind]; if (!L || !L.length || !G.list) return null;
+  const [j, b] = L[((n % L.length) + L.length) % L.length], m = G.list[j], T = capMuzLocal(m.wk), tip = T.tips[b % T.tips.length];
+  let x = tip.p[0], y = tip.p[1], z = tip.p[2];
+  const ok = RIG.ver === fleetVersion && s.i < RIG.n && j < RIG_M, r = s.i * RIG_M + j, yaw = ok ? RIG.yaw[r] : 0, pit = ok ? RIG.pit[r] : 0;
+  if (tip.piv && pit) { const [px, py, pz] = tip.piv, dy = y - py, dz = z - pz, c = Math.cos(pit), sn = Math.sin(pit); y = py + dy * c + dz * sn; z = pz - dy * sn + dz * c; }
+  if (T.turn && yaw) { const [cx, cz] = T.yc, dx = x - cx, dz = z - cz, c = Math.cos(yaw), sn = Math.sin(yaw); x = cx + dx * c + dz * sn; z = cz - dx * sn + dz * c; }
+  const q = m.q, o = m.o;
+  const hx = o[0] + x * q[0] + y * q[3] + z * q[6], hy = o[1] + x * q[1] + y * q[4] + z * q[7], hz = o[2] + x * q[2] + y * q[5] + z * q[8];
+  const F = s.F, U = s.U, R = [U[1] * F[2] - U[2] * F[1], U[2] * F[0] - U[0] * F[2], U[0] * F[1] - U[1] * F[0]], Ls = s.L;
+  out[0] = s.x + (R[0] * hx + U[0] * hy + F[0] * hz) * Ls; out[1] = s.y + (R[1] * hx + U[1] * hy + F[1] * hz) * Ls; out[2] = s.z + (R[2] * hx + U[2] * hy + F[2] * hz) * Ls;
+  return out;
 }
 
 // 環繞鏡頭（測試、截圖用；之後的整修庫也會用）：CAP_FX.cam＝{ k: CAP.ships 的索引, yaw: 相對船頭的方位（弧度）, el: 仰角, d: 距離（船長的倍數） }
@@ -348,4 +410,4 @@ function capFxCam() {
   camPersp.position.set(_fxa.x + Math.sin(a) * Math.cos(V.el) * d, _fxa.y + Math.sin(V.el) * d, _fxa.z + Math.cos(a) * Math.cos(V.el) * d);
   camPersp.lookAt(_fxa.x, _fxa.y, _fxa.z); camPersp.updateMatrixWorld();
 }
-Object.assign(window.__cap || (window.__cap = {}), { CAP_FX, CFX, capFxBuild, CAP_WLOOK, capWKey, CAP_LIVERY });
+Object.assign(window.__cap || (window.__cap = {}), { CAP_FX, CFX, capFxBuild, CAP_WLOOK, capWKey, CAP_LIVERY, capMuzGroups, capMuzzleAt, cam: () => camPersp });
