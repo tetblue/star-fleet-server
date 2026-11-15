@@ -423,6 +423,7 @@ function capBegin(C) {
   aL.needsUpdate = true; aL2.needsUpdate = true;
   CAP.ships = CAP.own.concat(CAP.foes); CAP.ships.forEach((s, k) => { s.k = k; s.q.capK = k; CAP.byI[s.i] = k; });   // 我方的船排在前面（CAP.cur 同時是 CAP.own 的索引）
   if (C.open) { CAP.alarm = true; CAP.waves = 0; }
+  R3.version = -1;   // 3D 實例重建一次：改裝換上去的武器模型要有容量（capfx.js capMountCap）
   // 地面單位
   const hpM = CAP.Df.hp;
   CAP.G.gts = C.units.map((u, id) => capMakeUnit(u, id, hpM));

@@ -4419,6 +4419,7 @@ function rebuild3D() {
   }
   for (const k of FAC_KEY) if (R3.models[k + 'f1']) cap[k + 'f1'] = FTR_MAX;   // 飛彈攻擊機（帝國導彈機）
   if (R3.models.am) cap.am = MIS_MODEL_MAX;   // 聯盟飛彈
+  if (CAP.on && typeof capMountCap === 'function') capMountCap(cap);   // 艦長：改裝換掉的武器模型（capfx.js）
   for (const key in cap) {
     const M = R3.models[key]; if (!M) continue;
     const rig = M.weapon && rigSpec(key).mode !== 'n';   // 有動畫的武器：另外的材質與幾何
@@ -4445,7 +4446,7 @@ const _fr = new THREE.Frustum(), _pv = new THREE.Matrix4(), _sph = new THREE.Sph
 const _WB = new Float64Array(6);
 // 船上的武器：船的基底 × 掛點矩陣（船畫到第 2 級細節以內才畫武器，武器用同一級；第 2 級只畫大的）
 function writeMounts(hk, lod, wl, x, y, z, fx, fy, fz, L, si = -1) {   // si：哪一艘船（武器動畫用）
-  const list = R3.mounts[hk]; if (!list || !list.length) return;
+  const list = (si >= 0 && CAP.on && typeof capMountList === 'function' && capMountList(si, hk)) || R3.mounts[hk]; if (!list || !list.length) return;   // 艦長：每艘船照改裝換武器模型
   const rx = _WB[0], ry = _WB[1], rz = _WB[2], ux = _WB[3], uy = _WB[4], uz = _WB[5];
   for (let j = 0; j < list.length; j++) {
     const m = list[j];
