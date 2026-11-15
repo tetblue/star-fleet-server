@@ -141,6 +141,7 @@ function ccNewGame(o) {
   ccGenMissions(S);
   ccPlan(S);
   ccT(S);   // 研發：開局軍階已經能造的船型算研究好了
+  ccShopInit(S);   // 商店
   return S;
 }
 // 星系的軌道防禦與後勤設施（依擁有者、等級）
@@ -324,7 +325,7 @@ function ccFightCalc(S, s, B) {
   // 經驗：活下來的船＝參戰＋存活，再平分對方的損失（計算的戰鬥不知道誰擊沉的）
   const xpSide = (L, foeLost) => { const live = L.flatMap((q) => q.ships.map((c) => [q, c])), kx = live.length ? foeLost * CAP_XP.calc / live.length : 0; for (const [q, c] of live) ccXp(S, q, c, CAP_XP.fight + CAP_XP.live + kx); };
   xpSide(B.A, lD); xpSide(B.D, lA);
-  { const pA = B.A.some((q) => q.pl), pD = B.D.some((q) => q.pl); if ((pA && aWin) || (pD && !aWin)) ccRpGain(S, (pA ? lD : lA) * CC_RP.calc, `打撈 ${s.name} 的殘骸`); }
+  { const pA = B.A.some((q) => q.pl), pD = B.D.some((q) => q.pl); if ((pA && aWin) || (pD && !aWin)) { ccRpGain(S, (pA ? lD : lA) * CC_RP.calc, `打撈 ${s.name} 的殘骸`); const fo = (pA ? B.D : B.A)[0]; ccBpDrop(S, fo ? fo.fac : s.owner, pA ? lD : lA, CC_BP.calc, `打撈 ${s.name} 的殘骸`); } }
   const fa = B.A[0] ? B.A[0].fac : -1, fd = B.D[0] ? B.D[0].fac : s.owner;
   const mine = fa === S.fac || fd === S.fac || s.owner === S.fac;
   ccLog(S, `${s.name}：${SM_FAC[fa].name}進攻${fd >= 0 ? SM_FAC[fd].name : ''}${B.defs.length ? `（軌道防禦 ${B.defs.length} 座）` : ''}，${aWin ? SM_FAC[fa].name : SM_FAC[fd].name}獲勝（預測勝率 ${Math.round(O.win * 100)}%）・損失 ${lA}／${lD} 艘`, mine ? (aWin === (fa === S.fac) ? 'ok' : 'bad') : '');
@@ -473,6 +474,9 @@ const ccTechCost = (S, id) => Math.round(CC_TECH[id].rp * (CC_TECH[id].good === 
 function ccTechWhy(S, id) {
   const T = CC_TECH[id], X = ccT(S);
   if (X.done[id]) return '已經研究好';
+  const bk = ccBpKey(T);
+  if (T.cp && !ccForeignK(S, bk)) return '你的陣營本來就有';
+  if (ccForeignK(S, bk) && !ccHasBp(S, bk)) return `${SM_FAC[CC_ORG[bk]].name}的技術：要先拿到藍圖`;
   if (X.cur) return X.cur.id === id ? '研究中' : '一次只能研究一項';
   const n = (T.need || []).find((k) => !X.done[k]); if (n) return `要先研究${CC_TECH[n].name}`;
   if (S.pl.rp < ccTechCost(S, id)) return `研究點數不夠（要 ${ccTechCost(S, id)}）`;
@@ -587,8 +591,10 @@ function ccResPut(S, q, k) {
 // 排隊的記錄：{ id, kind: 'fit', key, sys, left, tot, to, c, fit: { mod, mk }, cost }
 function ccFitOk(S, H0, slot, id) {
   const M = id && CAP_MODS[slot][id]; if (!M) return '';
-  const T = CC_TECH_ORDER.find((k) => CC_TECH[k].mod && CC_TECH[k].mod[0] === slot && CC_TECH[k].mod[1] === id);
-  if (M.res && !(T && ccHas(S, T))) return `要先研究${T ? CC_TECH[T].name : ''}`;
+  const T = CC_TECH_ORDER.find((k) => CC_TECH[k].mod && CC_TECH[k].mod[0] === slot && CC_TECH[k].mod[1] === id && !(M.res && CC_TECH[k].cp));
+  const bk = slot + ':' + id, fo = ccForeignK(S, bk);   // 別的陣營的技術：要藍圖＋研究
+  if (fo && !ccHasBp(S, bk)) return `${SM_FAC[CC_ORG[bk]].name}的技術：要先拿到藍圖`;
+  if ((M.res || fo) && !(T && ccHas(S, T))) return `要先研究${T ? CC_TECH[T].name : ''}`;
   if (slot === 'msl' && id === 'hangar' && H0.ftr) return '這個船型本來就有機庫';
   return '';
 }
@@ -659,6 +665,89 @@ function ccFitBack(S, o, c) {
   const q = o.to != null && S.sq.find((x) => x.id === o.to && x.pl && x.ships.length && x.sys === o.sys && x.ships.length < CC_RULE.maxShips);
   if (q) { q.ships.push(c); return q; }
   S.pl.yid = (S.pl.yid || 0) + 1; S.pl.res.push({ id: S.pl.yid, sys: o.sys, c }); return null;
+}
+// ───── 藍圖、商店、艦長熟練度（研發、生產、改裝的第 5 步，2026-11-15）─────
+// 各陣營的招牌模組（CC_ORG）：用別的陣營的模組要先拿到藍圖（S.pl.bp），再研究（仿製，或那個模組本來的研發項目）。
+// 藍圖：打贏後打撈，擊沉的那個陣營的船有機會掉（實戰每艘 12%、計算的戰鬥每艘 8%）；也可以在商店買。
+const CC_ORG = { 'main:heavy': SM_E, 'def:react': SM_E, 'main:beam': SM_A, 'msl:hangar': SM_A, 'main:rapid': SM_P, 'eng:sprint': SM_P };
+Object.assign(CC_TECH, {
+  cp_heavy: { g: '仿製', name: '仿製：重粒子砲', rp: 40, w: 2, mod: ['main', 'heavy'], cp: 1, desc: '帝國的主砲模組（要藍圖）' },
+  cp_hangar: { g: '仿製', name: '仿製：機庫', rp: 40, w: 2, mod: ['msl', 'hangar'], cp: 1, desc: '聯盟的飛彈艙模組（要藍圖）' },
+  cp_rapid: { g: '仿製', name: '仿製：速射砲', rp: 30, w: 1, mod: ['main', 'rapid'], cp: 1, desc: '海盜的主砲模組（要藍圖）' },
+  cp_sprint: { g: '仿製', name: '仿製：衝刺引擎', rp: 30, w: 1, mod: ['eng', 'sprint'], cp: 1, desc: '海盜的引擎模組（要藍圖）' },
+});
+CC_TECH_ORDER.push('cp_heavy', 'cp_hangar', 'cp_rapid', 'cp_sprint');
+const CC_BP = { kill: 0.12, calc: 0.08 };
+const ccBpKey = (T) => T.mod && T.mod.join(':');
+const ccForeignK = (S, k) => k && CC_ORG[k] != null && CC_ORG[k] !== S.fac;
+const ccHasBp = (S, k) => !!(S.pl.bp && S.pl.bp[k]);
+const ccBpName = (k) => { const [a, b] = k.split(':'); return CAP_MODS[a][b].name; };
+function ccBpGet(S, k, where) {
+  if (!S.pl.bp) S.pl.bp = {}; if (S.pl.bp[k]) return;
+  S.pl.bp[k] = 1; ccLog(S, `取得藍圖：${ccBpName(k)}（${SM_FAC[CC_ORG[k]].name}的技術，${where}）・到「研發」研究之後就能裝`, 'ok');
+}
+// 打贏後打撈：對方是陣營 fac，擊沉 n 艘，每艘機率 p
+function ccBpDrop(S, fac, n, p, where) {
+  const pool = Object.keys(CC_ORG).filter((k) => CC_ORG[k] === fac && ccForeignK(S, k) && !ccHasBp(S, k));
+  for (let i = 0; i < n && pool.length; i++) if (smRnd(S) < p) ccBpGet(S, pool.splice(Math.floor(smRnd(S) * pool.length), 1)[0], where);
+}
+
+// 商店：中立星系的貿易站、海盜星系的黑市（開局時挑幾個，s.shop）。小隊要開過去；貨每週換；價格看好感度與聲望。
+// 貿易站：那個星系的擁有者跟你交戰中就不賣（中立的照賣）；黑市誰都賣，但貴 30%。
+const CC_SHOP = { trade: { name: '貿易站', n: 2, k: 1, fav: SM_N }, black: { name: '海盜黑市', n: 2, k: 1.3, fav: SM_P }, bp: 450, rp: [[40, 320], [70, 480]], xp: [25, 350] };
+function ccShopInit(S) {
+  if (S.shopInit) return; S.shopInit = 1;
+  const nt = S.sys.filter((s) => s.owner === SM_N && !s.cap), np = S.sys.filter((s) => s.owner === SM_P && !s.cap);
+  const take = (L, n, k) => { L = L.slice(); for (let i = 0; i < n && L.length; i++) L.splice(Math.floor(smRnd(S) * L.length), 1)[0].shop = k; };
+  take(nt.length ? nt : S.sys.filter((s) => !s.cap && s.owner !== S.fac), CC_SHOP.trade.n, 'trade'); take(np, CC_SHOP.black.n, 'black');
+}
+// 這週的貨（同一週、同一個商店固定）
+function ccShopStock(S, s) {
+  let x = ((S.turn * 2654435761) ^ (s.id * 40503) ^ 0x9e3779b9) >>> 0;
+  const rnd = () => { x = (x + 0x6D2B79F5) >>> 0; let t = Math.imul(x ^ (x >>> 15), x | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const black = s.shop === 'black', out = [];
+  const pool = Object.keys(CC_ORG).filter((k) => ccForeignK(S, k) && (black || CC_ORG[k] !== SM_P));
+  for (let i = 0; i < 2 && pool.length; i++) if (rnd() < (black ? 0.8 : 0.6)) out.push({ kind: 'bp', k: pool.splice(Math.floor(rnd() * pool.length), 1)[0], p: CC_SHOP.bp });
+  const R = CC_SHOP.rp[black ? 1 : 0]; out.push({ kind: 'rp', n: R[0], p: R[1] });
+  if (!black || rnd() < 0.5) out.push({ kind: 'xp', n: CC_SHOP.xp[0], p: CC_SHOP.xp[1] });
+  const K = ccShopK(S, s); for (const it of out) it.p = Math.round(it.p * K / 10) * 10;
+  return out;
+}
+// 價格倍率：好感度（貿易站＝中立、黑市＝海盜）與你的陣營的聲望
+function ccShopK(S, s) { const T = CC_SHOP[s.shop], fav = ccFavOf(S, T.fav), fame = S.fame ? S.fame[S.fac] : 50; return T.k * (1.2 - fav / 250) * (1.1 - fame / 500); }
+const ccShopItemName = (it) => (it.kind === 'bp' ? `藍圖：${ccBpName(it.k)}（${SM_FAC[CC_ORG[it.k]].name}）` : it.kind === 'rp' ? `研究資料（研究點數 +${it.n}）` : `教官訓練（在場你的小隊每艘 +${it.n} 經驗）`);
+function ccShopWhy(S, s) {
+  if (!s.shop) return '這裡沒有商店';
+  if (!S.sq.some((q) => q.pl && q.ships.length && q.sys === s.id)) return '要有你的小隊在這裡';
+  if (s.shop === 'trade' && s.owner !== S.fac && s.owner !== SM_N && ccHostile(S, S.fac, s.owner)) return `${SM_FAC[s.owner].name}跟你交戰中，貿易站不賣你`;
+  return '';
+}
+const ccShopBought = (S, s, i) => !!(S.pl.shopB && S.pl.shopB[`${S.turn}:${s.id}:${i}`]);
+function ccShopBuy(S, s, i) {
+  const why = ccShopWhy(S, s); if (why) return why;
+  const it = ccShopStock(S, s)[i]; if (!it) return '沒有這樣東西';
+  if (ccShopBought(S, s, i)) return '這週已經買過了';
+  if (it.kind === 'bp' && ccHasBp(S, it.k)) return '已經有這張藍圖';
+  if (S.pl.money < it.p) return `資金不夠（要 ${it.p}）`;
+  S.pl.money -= it.p; if (!S.pl.shopB) S.pl.shopB = {}; S.pl.shopB[`${S.turn}:${s.id}:${i}`] = 1;
+  for (const k in S.pl.shopB) if (+k.split(':')[0] < S.turn) delete S.pl.shopB[k];
+  if (it.kind === 'bp') ccBpGet(S, it.k, `在 ${s.name} 的${CC_SHOP[s.shop].name}買的`);
+  else if (it.kind === 'rp') ccRpGain(S, it.n, `在 ${s.name} 買研究資料`);
+  else for (const q of S.sq.filter((x) => x.pl && x.sys === s.id)) for (const c of q.ships) ccXp(S, q, c, it.n);
+  ccLog(S, `在 ${s.name} 的${CC_SHOP[s.shop].name}花了 ${it.p} 資金：${ccShopItemName(it)}`, ''); return '';
+}
+
+// 艦長熟練度（暫定：經驗只從你親自開的船累積，效果套用到你所有小隊）。每一種裝備（槽位＋模組）一條，表格在 caphulls.js（CAP_PROF）。
+// L＝[[mod, 親自開的秒數, 擊沉的經驗]]：照親自開的時間分配這一場的熟練度
+function ccProfGain(S, L) {
+  const tot = L.reduce((a, x) => a + x[1], 0); if (!tot) return;
+  if (!S.pl.prof) S.pl.prof = {};
+  const add = {};
+  for (const [mod, ft, kx] of L) { const n = (CAP_PROF.fight + kx * CAP_PROF.kill) * ft / tot; for (const [slot] of CAP_SLOTS) { const k = capProfKey(slot, (mod || {})[slot]); add[k] = (add[k] || 0) + n; } }
+  for (const k in add) {
+    const a = S.pl.prof[k] || 0, b = a + Math.round(add[k]), la = capProfLv(a), lb = capProfLv(b); S.pl.prof[k] = b;
+    if (lb > la) ccLog(S, `艦長熟練度：${capProfName(k)} 升到 Lv${lb}${lb >= CAP_PROF.lv.length - 1 ? `（練滿：${CAP_PROF_FX[k.split(':')[0]].trait}）` : ''}`, 'ok');
+  }
 }
 // 換船：同一個星系的我方小隊之間，不花時間。to＝'new' 分出新小隊（要有指揮權）
 function ccTransfer(S, a, k, to) {
@@ -884,5 +973,5 @@ function ccLoad() { try { const t = STORE.getItem(CC_STORE); const S = t ? JSON.
     if (!S.pl.yq) S.pl.yq = []; if (!S.pl.res) S.pl.res = [];   // 舊存檔：船塢排隊、預備艦
     for (const r of S.pl.res) capShipFix(r.c); for (const o of S.pl.yq) if (o.c) capShipFix(o.c);
     if (S.pl.rank == null) S.pl.rank = S.pl.merit >= 2000 ? 2 : S.pl.merit >= 800 ? 1 : 0;   // 舊存檔：照以前的指揮權換算軍階
-    ccT(S);   // 舊存檔：研發
+    ccT(S); ccShopInit(S);   // 舊存檔：研發、商店
     return S; } catch (e) { return null; } }

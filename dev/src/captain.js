@@ -390,7 +390,7 @@ function capBegin(C) {
     const g = q.group;
     if (f.capRole === 'player' || f.capRole === 'foe') {
       const fd = SIM.m.fleets[f.id] || {}, foe = f.side !== CAP.side;
-      const i = q.list[0], key = fd.capHull || C.hulls[hk], H = capHullMod(CAP_HULLS[key], fd.capSt),   /* 艦長生涯：模組與 Mk（caphulls.js） */ k = CAP.ships.length; if (!fd.capHull) hk++;
+      const i = q.list[0], key = fd.capHull || C.hulls[hk], H = capProfMod(capHullMod(CAP_HULLS[key], fd.capSt), fd.capSt && fd.capSt.mod, fd.capSt && fd.capSt.prof),   /* 艦長生涯：模組與 Mk（caphulls.js） */ k = CAP.ships.length; if (!fd.capHull) hk++;
       const t = ships.type[i], hm = foe ? CAP.Df.hp : 1, st = fd.capSt || null;   // 敵方：難度的耐久倍率；capSt＝帶傷開戰（船體、護盾、飛彈剩下的比例）
       const hm2 = foe ? hm : fd.capHm || 1, sm2 = foe ? hm : fd.capShm || 1;   // 艦長生涯：陣營科技（船體、護盾）
       ships.hpCap[i] = H.hp * hm2 / SHIP_TYPES[t].hp; ships.hp[i] = H.hp * hm2 * (st ? st.hp : 1); ships.shMax[i] = H.sh * sm2; ships.sh[i] = H.sh * sm2 * (st ? st.sh : 1);
@@ -837,6 +837,7 @@ function capCombat(dt) {
 function capSig(s, t, k = 1) { s.sigT = Math.max(s.sigT, t + CAP_RULE.sig * k); capCloakBreak(s, t); }
 function capShipWeapons(s, dt, t) {
   const ai = capIsAI(s), ctl = !ai && s.k === CAP.cur, H = s.H;
+  if (ctl) s.flyT = (s.flyT || 0) + dt;   // 艦長熟練度：親自開的時間
   s.mainCd -= dt; s.mslCd -= dt; s.skillCd -= dt;
   if (!ai) { capSquadWeapons(s, dt, t, ctl); return; }
   // 鎖定（飛彈）：目標在射程內、看得到就累積

@@ -132,3 +132,31 @@ function capBy(s, ti) { if (CAP.by && ti >= 0) CAP.by[ti] = s.k; }
 function capByKill(ti) { const k = CAP.by && CAP.by[ti]; const s = k != null && CAP.ships[k]; if (s) s.kxp = (s.kxp || 0) + capKillXp(ti); }
 // 反應裝甲（capHurt 呼叫）：飛彈打到船體的傷害退回一部分
 function capReactRefund(s, ti, e, hullD) { if (s.H.mslCut && e.kind === 'mh' && hullD > 0 && ships.alive[ti]) ships.hp[ti] = Math.min(maxHp(ti), ships.hp[ti] + hullD * s.H.mslCut); }
+
+// ═══════════════════════ 艦長生涯：艦長熟練度（研發、改裝的第 5 步，2026-11-15） ═══════════════════════
+// 記在玩家身上，每一種裝備（槽位＋模組，原廠＝std）一條；經驗只從你親自開的船累積，效果套用到你所有小隊的船。
+// 每級手感 +3%（練到 Lv5＝15%），練滿再解鎖那個槽位的特性。
+const CAP_PROF = { lv: [0, 40, 100, 200, 350, 550], per: 0.03, fight: 12, kill: 0.3 };
+const CAP_PROF_FX = {
+  main: { name: '主砲裝填', trait: '精準射擊：主砲射程 +10%' },
+  tur: { name: '副砲命中', trait: '連射：副砲裝填 −10%' },
+  msl: { name: '飛彈鎖定', trait: '加大彈艙：飛彈 +20%' },
+  def: { name: '護盾', trait: '損管：船體 +5%' },
+  eng: { name: '轉向', trait: '急轉：側移 +15%' },
+};
+const capProfKey = (slot, id) => slot + ':' + (id || 'std');
+const capProfLv = (xp) => CAP_PROF.lv.reduce((a, v, k) => (xp >= v ? k : a), 0);
+function capProfName(k) { const [slot, id] = k.split(':'), nm = CAP_SLOTS.find((x) => x[0] === slot)[1]; return id === 'std' ? `原廠${nm}` : CAP_MODS[slot][id].name; }
+// 照熟練度調整數值（mod＝這艘船的模組，prof＝S.pl.prof；沒有熟練度就回傳原本的）
+function capProfMod(H, mod, prof) {
+  if (!prof) return H;
+  const l = CAP_SLOTS.map(([s]) => capProfLv(prof[capProfKey(s, (mod || {})[s])] || 0)); if (!l.some(Boolean)) return H;
+  H = { ...H, main: { ...H.main }, tur: { ...H.tur }, pd: { ...H.pd }, msl: H.msl ? { ...H.msl } : null };
+  const p = CAP_PROF.per, mx = CAP_PROF.lv.length - 1, [a, b, c, d, e] = l;
+  H.main.cd *= 1 - p * a; if (a >= mx) H.main.range *= 1.1;
+  H.tur.acc = Math.min(0.98, H.tur.acc * (1 + p * b)); if (b >= mx) H.tur.cd *= 0.9;
+  if (H.msl) { H.msl.lockT *= 1 - p * c; if (c >= mx) H.msl.n = Math.round(H.msl.n * 1.2); }
+  H.sh *= 1 + p * d; if (d >= mx) H.hp *= 1.05;
+  H.turn *= 1 + p * e; if (e >= mx) H.strafe *= 1.15;
+  return H;
+}
