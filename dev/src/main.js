@@ -4192,6 +4192,7 @@ async function loadOneModel(key, m, loader, onBytes) {
       }
       g0.applyMatrix4(mesh.matrixWorld); g0.applyMatrix4(new THREE.Matrix4().fromArray(m.orient));
       if (!g0.attributes.normal) g0.computeVertexNormals();
+      if (m.kind === 'weapon' && typeof wAutoRig === 'function') { const A = wAutoRig(g0, key); if (A) (MODEL_LOAD.auto || (MODEL_LOAD.auto = {}))[key] = A; }   // 沒分件的武器：自動切成底座／轉塔／砲管（weapons.js）
       g0.computeBoundingSphere();
       const tex = mesh.material && mesh.material.map;
       if (tex) { tex.anisotropy = 4; tex.colorSpace = THREE.SRGBColorSpace; }

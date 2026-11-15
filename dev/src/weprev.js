@@ -478,4 +478,4 @@ function wpUI() {
   el.querySelector('[data-fx="end"]').hidden = !WP.on; el.querySelector('[data-fx="reset"]').hidden = !WP.on;
   el.classList.toggle('on', WP.on);
 }
-Object.assign(window.__cap || (window.__cap = {}), { WE, openWeaponEditor, WP, wpFire, wpEngine, wpWarp, wpDamage, wpDestroy, wpRepair, wpStop, wpStart });
+Object.assign(window.__cap || (window.__cap = {}), { autoRig: () => MODEL_LOAD.auto, WE, openWeaponEditor, WP, wpFire, wpEngine, wpWarp, wpDamage, wpDestroy, wpRepair, wpStop, wpStart });

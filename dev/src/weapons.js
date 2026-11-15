@@ -163,6 +163,61 @@ function scheduleWeaponAtlas(hk) {
   }, WA.rt ? 120 : 30);
 }
 
+// ═════ 沒分件的武器模型：載入時自動切成底座／轉塔／砲管 ═════
+// 戰鬥的砲塔動畫要分件（aPart：0 底座不動、1 轉塔、2+k 第 k 根砲管）才會只有砲管後座、底座不跟著轉；
+// 原本只有 TRIPO 匯入的 aw0、aw2 有分件，其他整座一起動。這裡照模型形狀自動切（2026-11-15）：
+//   砲管＝從最前面往後，寬度一直很窄的那一段，依 (x, y) 位置分成一根一根；砲耳（仰角軸）在那一段的後端
+//   底座＝下半部寬度變化最大的地方以下；找不到明顯的砲管就不切（照舊整座動）
+// skip：切壞的模型列在這裡就不切
+const WEAPON_AUTORIG = { on: true, skip: [], facs: 'eamcri' };
+function wAutoRig(g, key) {
+  if (!WEAPON_AUTORIG.on || g.attributes.aPart || WEAPON_AUTORIG.skip.includes(key) || !WEAPON_AUTORIG.facs.includes(baseKey(key)[0])) return null;
+  const sp = rigSpec(key); if (sp.mode !== 't' && sp.mode !== 'f') return null;
+  const P = g.attributes.position, n = P.count; g.computeBoundingBox();
+  const bb = g.boundingBox, sx = bb.max.x - bb.min.x, sy = bb.max.y - bb.min.y, sz = bb.max.z - bb.min.z;
+  // 1. 前後的寬度剖面：每一段 z 裡，頂點佔了幾格 x
+  const NZ = 64, NX = 48, occ = new Uint8Array(NZ * NX);
+  const zi = (z) => Math.min(NZ - 1, Math.floor((z - bb.min.z) / sz * NZ)), xi = (x) => Math.min(NX - 1, Math.floor((x - bb.min.x) / sx * NX));
+  for (let i = 0; i < n; i++) occ[zi(P.getZ(i)) * NX + xi(P.getX(i))] = 1;
+  const wid = Array.from({ length: NZ }, (_, s) => { let c = 0; for (let x = 0; x < NX; x++) c += occ[s * NX + x]; return c / NX; });
+  const wMax = Math.max(...wid);
+  let s0 = NZ - 1; while (s0 > 0 && wid[s0] < wMax * 0.42) s0--;   // 從前面往後，第一段變寬的地方＝砲身前緣
+  const zf = bb.min.z + (s0 + 1) / NZ * sz;
+  if (bb.max.z - zf < sz * 0.12) return null;   // 前面沒有夠長的細長段：不是砲管
+  // 2. 砲管：前段的頂點依 (x, y) 分群（相鄰格子連在一起）
+  const cs = Math.max(sx, sy) * 0.025, cells = new Map(), key2 = (x, y) => Math.floor((x - bb.min.x) / cs) + ',' + Math.floor((y - bb.min.y) / cs);
+  for (let i = 0; i < n; i++) if (P.getZ(i) > zf) { const k = key2(P.getX(i), P.getY(i)); (cells.get(k) || cells.set(k, []).get(k)).push(i); }
+  const lab = new Map(); let nl = 0;
+  for (const k of cells.keys()) {
+    if (lab.has(k)) continue; const st = [k]; lab.set(k, nl);
+    while (st.length) { const [a, b] = st.pop().split(',').map(Number); for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) { const q = (a + dx) + ',' + (b + dy); if (cells.has(q) && !lab.has(q)) { lab.set(q, nl); st.push(q); } } }
+    nl++;
+  }
+  let grp = Array.from({ length: nl }, () => ({ ids: [], x: 0, y: 0 }));
+  for (const [k, ids] of cells) { const G = grp[lab.get(k)]; for (const i of ids) { G.ids.push(i); G.x += P.getX(i); G.y += P.getY(i); } }
+  const fl = bb.max.z - zf;   // 前段長度
+  grp = grp.filter((G) => G.ids.length).map((G) => { let z0 = Infinity, z1 = -Infinity; for (const i of G.ids) { const z = P.getZ(i); if (z < z0) z0 = z; if (z > z1) z1 = z; } return { ...G, x: G.x / G.ids.length, y: G.y / G.ids.length, z0, z1 }; });
+  // 砲管要細長、伸到接近最前面；其他（底座前緣、砲盾突出的一角）留在轉塔／底座
+  const big = grp.filter((G) => G.ids.length >= 6 && G.z1 >= zf + fl * 0.7 && G.z1 - G.z0 >= fl * 0.35).sort((a, b) => a.x - b.x || a.y - b.y).slice(0, 8);
+  if (!big.length) return null;
+  for (const G of grp) if (!big.includes(G) && G.z1 >= zf + fl * 0.7) { let best = big[0]; for (const B of big) if (Math.hypot(B.x - G.x, B.y - G.y) < Math.hypot(best.x - G.x, best.y - G.y)) best = B; if (Math.hypot(best.x - G.x, best.y - G.y) < Math.max(sx, sy) * 0.08) best.ids.push(...G.ids); }   // 砲口的小零件（制退器）併進最近的砲管
+  // 3. 底座：轉塔中心＝最下面 10% 的頂點中心；下半部（4%～45% 高）寬度變化最大的地方以下＝底座
+  let cx = 0, cz = 0, cn = 0; for (let i = 0; i < n; i++) if (P.getY(i) < bb.min.y + sy * 0.1) { cx += P.getX(i); cz += P.getZ(i); cn++; }
+  cx = cn ? cx / cn : (bb.min.x + bb.max.x) / 2; cz = cn ? cz / cn : (bb.min.z + bb.max.z) / 2;
+  const NY = 40, r = new Float32Array(NY).fill(-1);
+  for (let i = 0; i < n; i++) { if (P.getZ(i) > zf) continue; const s = Math.min(NY - 1, Math.floor((P.getY(i) - bb.min.y) / sy * NY)); r[s] = Math.max(r[s], Math.hypot(P.getX(i) - cx, P.getZ(i) - cz)); }
+  for (let s = 1; s < NY; s++) if (r[s] < 0) r[s] = r[s - 1];
+  const rMax = Math.max(...r); let cut = -1, jump = rMax * 0.08;
+  for (let s = Math.max(2, Math.floor(NY * 0.04)); s <= Math.floor(NY * 0.45); s++) { const d = Math.abs(r[s] - r[s - 1]); if (d > jump) { jump = d; cut = s; } }
+  const yCut = cut > 0 ? bb.min.y + cut / NY * sy : -Infinity;
+  // 4. 寫分件
+  const part = new Float32Array(n), piv = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { part[i] = P.getY(i) < yCut ? 0 : 1; piv[i * 3] = cx; piv[i * 3 + 2] = cz; }
+  big.forEach((G, k) => { let ys = 0; for (const i of G.ids) ys += P.getY(i); const py = ys / G.ids.length; for (const i of G.ids) { part[i] = 2 + k; piv[i * 3] = G.x; piv[i * 3 + 1] = py; piv[i * 3 + 2] = zf; } });
+  g.setAttribute('aPart', new THREE.BufferAttribute(part, 1)); g.setAttribute('aPiv', new THREE.BufferAttribute(piv, 3));
+  return { barrels: big.length, zf: +((zf - bb.min.z) / sz).toFixed(2), base: cut > 0 ? +(cut / NY).toFixed(2) : 0 };
+}
+
 // ═════ 武器配置編輯器 ═════
 const WE = { el: null, open: false, hk: 'e1', sel: -1, place: -1, undo: [], redo: [], back: null };
 function weaponEditorOpen() { return WE.open; }
