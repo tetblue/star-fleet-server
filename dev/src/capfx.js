@@ -199,20 +199,35 @@ function capFxFrame() {
   }
 }
 // ───── B：換武器模型（主砲、副砲照模組換成別的砲塔模型；位置、方向照原本的掛點）─────
-// 模組 → 武器模型：w＝同一個風格的第幾號（WEAPON_NAMES）；風格字母開頭的鍵（例如 'rw0'）＝指定模型（e／a／m 各自、all＝所有風格）；k＝尺寸倍率
+// 模組 → 武器模型。戰艦可以裝別的陣營的武器（藍圖＋仿製，CC_ORG），所以模型照「武器的風格」選，不是照船：
+//   org＝這個模組是哪個陣營的技術（跟 capcareer.js 的 CC_ORG 一致）：不管裝在誰的船上都用那個陣營的模型；沒有 org＝通用模組，用船自己的風格
+//   e／a／m／c／r／i／b＝那個風格指定的模型鍵；w＝帝國、聯盟、傭兵的第幾號武器（WEAPON_NAMES）；
+//   其他風格（將來擄獲的外星船）沒有指定時，照 role 找那個風格的同類武器（m 主砲、s 副砲、a 防空）；k＝尺寸倍率
 // 之後有專屬的武器模型，改這張表就好
 const CAP_WLOOK = {
   main: {
-    heavy: { w: 0, k: 1.12 },                          // 重粒子砲：三聯裝主砲塔，大一點
-    rail: { e: 'ew5', a: 'aw5', m: 'mw1', k: 1 },      // 磁軌砲：帝國衝角砲、聯盟貫穿式主砲、傭兵臨時加裝軌道砲（都是長砲管）
-    rapid: { w: 3, k: 1.35 },                          // 速射砲：防空／雙管機砲塔放大
-    beam: { all: 'rw0', k: 1 },                        // 光束砲：借機械智慧族的稜形激光砲塔
+    heavy: { org: 'e', w: 0, role: 'm', k: 1.12 },     // 重粒子砲（帝國）：三聯裝巨砲塔，大一點
+    rail: { e: 'ew5', a: 'aw5', m: 'mw1', c: 'cw3', r: 'rw2', i: 'iw2', b: 'bw2', role: 'm', k: 1 },   // 磁軌砲（通用）：各風格的長砲管主砲
+    rapid: { org: 'm', w: 3, role: 'a', k: 1.35 },     // 速射砲（海盜）：傭兵的雙管機砲塔放大
+    beam: { org: 'a', a: 'rw0', role: 'm', k: 1 },     // 光束砲（聯盟）：聯盟沒有光束砲模型，借機械智慧族的稜形激光砲塔
   },
   tur: {
-    heavy: { w: 1, k: 1.25 },                          // 重型副砲：雙聯裝砲塔放大
-    aa: { w: 3, k: 1 },                                // 防空副砲：防空砲塔
+    heavy: { w: 1, role: 's', k: 1.25 },               // 重型副砲（通用）：雙聯裝砲塔放大
+    aa: { w: 3, role: 'a', k: 1 },                     // 防空副砲（通用）：防空砲塔
   },
 };
+// 某個風格的某類武器（role）是第幾號：先找會轉的砲塔，沒有就找固定砲；那個風格沒有這一類＝主砲
+function capRoleW(st, role) {
+  const fi = 'eamcrib'.indexOf(st), gk = WEAPON_GK[fi] || '', rig = WEAPON_RIG[fi] || '';
+  for (const want of ['t', 'f']) for (let w = 0; w < 6; w++) if (gk[w] === role && rig[w] === want) return w;
+  return role === 'm' ? 0 : capRoleW(st, 'm');
+}
+// 模組在某個風格的船上用哪個武器模型（null＝表裡沒有，照原本的）
+function capWKey(st, slot, mod) {
+  const L = slot && mod && mod[slot] && CAP_WLOOK[slot] && CAP_WLOOK[slot][mod[slot]]; if (!L) return null;
+  const ws = L.org || st;
+  return { L, key: L[ws] || (L.w != null && 'eam'.includes(ws) ? ws + 'w' + L.w : ws + 'w' + capRoleW(ws, L.role || 'm')) };
+}
 // 每個掛點屬於哪個槽位：主砲＝跟主砲開火的掛點；船型沒有主砲掛點（例如支援艦全是防空砲塔）＝最大的那一座當主砲
 function capMountSlots(raw) {
   const gkOf = (m) => { const fi = 'eamcrib'.indexOf(m.hk[0]); return fi < 0 ? '' : WEAPON_GK[fi][m.w]; };
@@ -223,8 +238,8 @@ function capMountSlots(raw) {
 // 換成的武器鍵與新掛點（不用換＝null）；m＝原始掛點資料（mountsOf），mm＝main.js 算好的掛點，slot＝capMountSlots 給的槽位
 function capSwapMount(m, mm, mod, slot) {
   const st = m.hk[0]; if ('eamcrib'.indexOf(st) < 0) return null;
-  const L = slot && mod[slot] && CAP_WLOOK[slot][mod[slot]]; if (!L) return null;
-  const key = L.all || L[st] || (L.w != null ? st + 'w' + L.w : null);
+  const X = capWKey(st, slot, mod); if (!X) return null;
+  const { L, key } = X;
   if (!key || (key === mm.wk && L.k === 1) || !R3.models[key]) return null;   // 同一個模型：只有要放大才換
   const n = mountMatrix({ ...m, hk: key[0] + m.hk.slice(1), w: +key.slice(2), s: (m.s || 0.1) * L.k });
   n.rig = { ...n.rig, g: mm.rig.g };   // 開火動畫照原本槽位的砲（換成防空砲塔的主砲也跟主砲開火）
@@ -266,4 +281,4 @@ function capFxCam() {
   camPersp.position.set(_fxa.x + Math.sin(a) * Math.cos(V.el) * d, _fxa.y + Math.sin(V.el) * d, _fxa.z + Math.cos(a) * Math.cos(V.el) * d);
   camPersp.lookAt(_fxa.x, _fxa.y, _fxa.z); camPersp.updateMatrixWorld();
 }
-Object.assign(window.__cap || (window.__cap = {}), { CAP_FX, CFX, capFxBuild, CAP_WLOOK });
+Object.assign(window.__cap || (window.__cap = {}), { CAP_FX, CFX, capFxBuild, CAP_WLOOK, capWKey });

@@ -3,7 +3,7 @@
 // 改裝：改裝視窗靠右，背景是整修庫；玩家每選一個零件，鏡頭飛到那個位置，天車吊走舊砲塔、放下新的，焊接火花；
 //   防禦模組、Mk＝從船尾掃到船頭刷上新塗裝；引擎＝鏡頭到船尾試車；飛彈艙＝天車吊一箱飛彈下來裝進去。沒在播動畫時鏡頭慢慢繞著船。
 // 維修：修理後播（設定可以關，播的時候點一下畫面略過）：每艘船的燒焦痕跡一路退掉、機械臂焊接火花、船體百分比跑上去。
-const CR = { on: false, mode: '', built: false, ship: null, sig: '', A: null, cam: null, look: null, t0: 0, raf: 0, cap: null, sparks: null, crane: null, rep: null, done: null };
+const CR = { on: false, mode: '', built: false, ship: null, sig: '', A: null, cam: null, look: null, t0: 0, raf: 0, cap: null, sparks: null, crane: null, arms: [], rep: null, done: null };
 const CR_K = 5;                                      // 第 6 座機庫
 const CR_DUR = { main: 2.8, tur: 2.8, msl: 2.6, def: 2.3, eng: 2.4, mk: 2.0 };   // 各種安裝動畫的秒數
 const CR_REP = 2.4;                                  // 維修動畫：每艘船幾秒
@@ -25,19 +25,82 @@ function crHost(on) {
 }
 const crEase = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
 
+// 整修庫的擺設（全部是 models/機庫 的現成模型）：[名稱, x（相對機庫中線）, z, 轉向, 縮放, 離地, y 縮放]
+// 機庫裡：兩側牆邊升降工作台（上面各一座軌道機械臂）、照明塔、加工站、登艦梯、備用的推進器艙、砲塔、飛彈架；外面沿用戰艦庫的擺設
+const CR_PROP_SET = [
+  ['10_升降工作台', -16, -12, Math.PI / 2, 70, 0.6], ['10_升降工作台', 16, -9, -Math.PI / 2, 70, 0.6],
+  ['08_軌道機械臂', -15.5, -12, Math.PI, 70, 8.0], ['08_軌道機械臂', 15.5, -9, 0, 70, 8.0],
+  ['13_照明塔A', -17, -27, 0.7, 60, 0.6], ['14_照明塔B', 17, -27, -0.7, 60, 0.6], ['13_照明塔A', 17, 13.5, -2.4, 60, 0.6], ['14_照明塔B', -17, 13.5, 2.4, 60, 0.6],
+  ['11_加工站', -14.5, -24, 0.5, 60, 0.6], ['20_小型機械爪', -9.5, -27.5, 0.3, 45, 0.6], ['22_登艦梯', 13.5, -21, Math.PI, 50, 0.6],
+  ['12_雙推進器艙', 14, 2.5, -Math.PI / 2, 55, 0.6], ['16_雙管砲塔', 13.5, 9.5, -2.2, 50, 0.6], ['04_飛彈架', -13.5, 4, Math.PI / 2, 75, 0.6], ['15_氣瓶組', -16.5, 10, 0, 70, 0.6],
+  ['02_天車', 0, -26.5, 0, 96, 21.7 - 0.133 * 96 * 0.6, 0.6],   // 停在後面的另一台天車（y 縮成 0.6）
+];
+// 模型上的一點（原始單位）：pick(頂點陣列) 回傳一個點；模型載入後才算得出來
+function crPropPt(name, pick) {
+  return hgProp(name).then((src) => {
+    const v = [], p = new THREE.Vector3(); src.updateMatrixWorld(true);
+    src.traverse((o) => { if (!o.isMesh) return; const P = o.geometry.attributes.position; for (let i = 0; i < P.count; i += 3) { p.fromBufferAttribute(P, i).applyMatrix4(o.matrixWorld); v.push(p.clone()); } });
+    return pick(v);
+  });
+}
+const crMean = (a) => a.reduce((s, p) => s.add(p), new THREE.Vector3()).multiplyScalar(1 / Math.max(1, a.length));
+// 機械臂工作車：剪式升降車（17）上站一座機械臂（06／07）；整台沿著船邊開到要裝的位置，升降車撐高，臂尖對準
+const CR_ARM = { lift: 70, arm: 85, deck: 0.071 };   // 縮放、升降車平台的高度（原始單位）
+function crArmUnit(name, side, z) {
+  const U = new THREE.Group(), cx = cbX(CR_K); U.position.set(cx + side * 11, 0.6, z); CB.scene.add(U);
+  const lift = new THREE.Group(); lift.scale.setScalar(CR_ARM.lift); U.add(lift);
+  hgProp('17_剪式升降車').then((s) => lift.add(s.clone(true))).catch(() => {});
+  const arm = new THREE.Group(); arm.scale.setScalar(CR_ARM.arm); arm.rotation.y = side < 0 ? 0 : Math.PI; U.add(arm);   // 模型的 +x＝手臂伸出去的方向：朝船
+  hgProp(name).then((s) => arm.add(s.clone(true))).catch(() => {});
+  const A = { U, lift, arm, side, home: U.position.clone(), tip: new THREE.Vector3(0.04, 0.045, 0), ys: 1, goal: null, ysGoal: 1 };
+  crPropPt(name, (v) => { const mx = Math.max(...v.map((p) => p.x)); return crMean(v.filter((p) => p.x > mx - 0.008)); }).then((p) => { A.tip.copy(p); }).catch(() => {});
+  CR.arms.push(A); return A;
+}
+// 臂尖的世界座標
+function crArmTip(A, out = new THREE.Vector3()) { A.arm.updateWorldMatrix(true, false); return out.copy(A.tip).applyMatrix4(A.arm.matrixWorld); }
+// 讓工作車把臂尖送到 P（世界座標）；P＝null＝回原位
+function crArmGo(A, P) {
+  if (!P) { A.goal = A.home.clone(); A.ysGoal = 1; return; }
+  const u = CR.ship && CR.ship.userData.cr, cx = cbX(CR_K), hw = u ? ((u.bb.max.x - u.bb.min.x) * u.L) / 2 : 5;
+  const reach = A.tip.x * CR_ARM.arm, deck = CR_ARM.deck * CR_ARM.lift;
+  const x = A.side < 0 ? Math.min(cx - hw - 2.2, P.x - reach) : Math.max(cx + hw + 2.2, P.x + reach);
+  A.goal = new THREE.Vector3(Math.max(cx - CB_HALL.hw + 3, Math.min(cx + CB_HALL.hw - 3, x)), 0.6, Math.max(CB_HALL.z0 + 5, Math.min(CB_HALL.z1 - 4, P.z)));
+  A.ysGoal = Math.max(0.35, Math.min(2.8, (P.y - 0.6 - A.tip.y * CR_ARM.arm) / deck));
+}
+function crArmsStep(dt) {
+  const k = 1 - Math.exp(-dt * 2.4), deck = CR_ARM.deck * CR_ARM.lift;
+  if (!CR.A && CR.crane) crCrane(cbX(CR_K), CR.crane.userData.hookY - 0.4, CB_HALL.z0 + 10, 1 - Math.exp(-dt * 0.8));   // 天車沒事就開回後面停著
+  for (const A of CR.arms) {
+    if (A.goal) A.U.position.lerp(A.goal, k);
+    A.ys += (A.ysGoal - A.ys) * k;
+    A.lift.scale.y = CR_ARM.lift * A.ys; A.arm.position.y = deck * A.ys;
+    A.arm.rotation.z = A.busy ? Math.sin(crNow() * 3 + A.side) * 0.03 : 0;   // 焊接時手臂微微晃
+  }
+}
+// 焊接火花：從臂尖噴
+function crArmSpark(A, n = 6) { const p = crArmTip(A); crSpark(p.x, p.y, p.z, n); }
+
 function crEnsure() {
   cbInit();
   if (CR.built) return;
   CR.built = true;
   cbBuildHangar(CR_K);
-  for (const [name, x, z, ry, s, y = 0] of CB_PROP_SET) hgPlaceProps(CB.scene, [[name, cbX(CR_K) + x, z, ry, 1, y]], s);
-  // 天車的吊鉤：鋼索＋吊具（位置每幀照動畫擺）
-  const g = CR.crane = new THREE.Group(), steel = new THREE.MeshStandardMaterial({ color: 0x2a2f38, metalness: 0.7, roughness: 0.4 }), yel = new THREE.MeshStandardMaterial({ color: 0xf2b322, metalness: 0.3, roughness: 0.5 });
-  const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1, 6), steel); cable.geometry.translate(0, 0.5, 0); g.add(cable); g.userData.cable = cable;
-  const block = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.9, 1.6), yel); block.position.y = 0.45; g.add(block);
-  for (const sx of [-1, 1]) { const arm = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.2, 0.18), steel); arm.position.set(sx * 0.6, -0.4, 0); g.add(arm); }
-  const crate = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.2, 3.2), new THREE.MeshStandardMaterial({ color: 0x4d5a3a, metalness: 0.4, roughness: 0.6 })); crate.position.y = -1.6; crate.visible = false; g.add(crate); g.userData.crate = crate;
-  g.visible = false; CB.scene.add(g);
+  const cx = cbX(CR_K);
+  for (const [name, x, z, ry, s, y = 0, sy] of CR_PROP_SET) { const [h] = hgPlaceProps(CB.scene, [[name, cx + x, z, ry, 1, y]], s); if (sy) h.scale.y *= sy; }
+  for (const it of CB_PROP_SET) if (it[2] > CB_HALL.z1 || Math.abs(it[1]) > CB_HALL.hw) hgPlaceProps(CB.scene, [[it[0], cx + it[1], it[2], it[3], 1, it[5] || 0]], it[4]);   // 機庫外面的
+  crArmUnit('06_機械臂A', -1, -2); crArmUnit('07_機械臂B', 1, -14);
+  // 天車（02）：橫跨機庫、掛在屋頂下，沿 z 開到要裝的位置；吊鉤下面一條鋼索吊著砲塔（舊的、新的）或飛彈架
+  const g = CR.crane = new THREE.Group(), KY = 0.6, K = 96;
+  const cr = new THREE.Group(); cr.scale.set(K, K * KY, K); cr.position.y = CB_HALL.h - 0.3 - 0.133 * K * KY; g.add(cr);
+  hgProp('02_天車').then((s) => cr.add(s.clone(true))).catch(() => {});
+  g.userData.hookY = cr.position.y; g.userData.cr = cr;
+  crPropPt('02_天車', (v) => { const c = v.filter((p) => Math.abs(p.x) < 0.04); const my = Math.min(...c.map((p) => p.y)); return crMean(c.filter((p) => p.y < my + 0.006)); })
+    .then((p) => { cr.position.x = -p.x * K; cr.position.z = -p.z * K; g.userData.hookY = cr.position.y + p.y * K * KY; }).catch(() => {});
+  const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1, 6), new THREE.MeshStandardMaterial({ color: 0x2a2f38, metalness: 0.7, roughness: 0.4 }));
+  cable.geometry.translate(0, 0.5, 0); cable.visible = false; g.add(cable); g.userData.cable = cable;
+  const crate = new THREE.Group(); crate.scale.setScalar(75); crate.visible = false; g.add(crate); g.userData.crate = crate;
+  hgProp('04_飛彈架').then((s) => crate.add(s.clone(true))).catch(() => {});
+  g.position.set(cx, 0, CB_HALL.z0 + 10); CB.scene.add(g);
   // 焊接火花：一池點（位置、速度在 JS 算）
   const N = 260, pos = new Float32Array(N * 3), col = new Float32Array(N * 3), geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
@@ -70,9 +133,9 @@ function crSparksStep(dt) {
 // ───── 船：船體＋照模組換的武器＋塗裝層（Mk 條紋、裝甲、燒焦）＋護盾殼＋尾焰 ─────
 // 武器模型的鍵與尺寸（同 capfx.js 的 CAP_WLOOK；整修庫不經過 main.js，自己算）
 function crWeapon(m, slot, mod) {
-  const st = m.hk[0], L = slot && mod[slot] && CAP_WLOOK[slot][mod[slot]];
-  if (!L) return { key: st + 'w' + m.w, m };
-  const key = L.all || L[st] || (L.w != null ? st + 'w' + L.w : st + 'w' + m.w);
+  const st = m.hk[0], X = capWKey(st, slot, mod);
+  if (!X) return { key: st + 'w' + m.w, m };
+  const { L, key } = X;
   return getModel(key) ? { key, m: { ...m, hk: key[0] + m.hk.slice(1), w: +key.slice(2), s: (m.s || 0.1) * L.k } } : { key: st + 'w' + m.w, m };
 }
 function crMakeShip(c, D, fac) {
@@ -135,8 +198,15 @@ function crHide() {
   if (!CR.on) return;
   CR.on = false; CR.A = null; document.body.classList.remove('cr-on'); crHost(false);
   if (CB.wrap && !document.querySelector('.cb-screen')) CB.wrap.hidden = true;
-  if (CR.crane) CR.crane.visible = false;
+  for (const B of CR.arms) { B.busy = false; crArmGo(B, null); }
   crCaption('');
+}
+// 天車：開到 (x, z)（k＝這一幀走多少），吊的東西（鋼索下端）在高度 y；天車本身一直看得到
+function crCrane(x, y, z, k = 1) {
+  const C = CR.crane; if (!C) return;
+  C.position.x += (x - C.position.x) * k; C.position.z += (z - C.position.z) * k;
+  const top = C.userData.hookY, cb = C.userData.cable; cb.position.y = y; cb.scale.y = Math.max(0.05, top - y); cb.visible = top - y > 0.3;
+  C.userData.crate.position.y = y - 0.028 * 75;
 }
 function crCaption(t) {
   if (!CR.cap) { CR.cap = document.createElement('div'); CR.cap.className = 'cr-cap'; document.body.appendChild(CR.cap); }
@@ -169,29 +239,39 @@ function crAnimStep(t, dt) {
   const x = (t - A.t0) / A.dur, C = CR.crane, L = u.L;
   if (A.kind === 'main' || A.kind === 'tur') {
     // 0～.25 吊鉤下來；.25～.45 舊的吊上去；.45～.75 新的放下來；.75～ 焊接
-    const top = 30, hookY = (y) => { C.position.set(A.focus.x, y, A.focus.z); C.userData.cable.scale.y = Math.max(0.1, top - y); };
-    C.visible = x < 0.8; C.userData.crate.visible = false;
-    const seat = A.focus.y + 1.2;
-    if (x < 0.25) hookY(top - (top - seat) * crEase(x / 0.25));
-    else if (x < 0.45) { const k = crEase((x - 0.25) / 0.2); hookY(seat + k * 22); for (const o of A.gone) o.position.y = (o.userData.y0 ??= o.position.y) + (k * 22) / L; }
-    else if (x < 0.75) { if (A.old) { crDrop(A.old); A.old = null; } const k = crEase((x - 0.45) / 0.3); hookY(seat + (1 - k) * 18); for (const m of A.neu) { m.o.visible = true; m.o.position.copy(m.home); m.o.position.y += ((1 - k) * 18) / L; } }
-    else { for (const m of A.neu) { m.o.visible = true; m.o.position.copy(m.home); } hookY(seat + crEase((x - 0.75) / 0.25) * 25); if (t - A.sp > 0.09 && x < 0.97) { A.sp = t; for (const p of A.pts) crSpark(p.x + (Math.random() - 0.5) * 1.5, p.y + 0.3, p.z + (Math.random() - 0.5) * 1.5, 8); } }
+    // 天車開過來（0～.12），鋼索放下來勾住舊砲塔（～.25），吊上去（～.45），換新的放下來（～.75），機械臂焊接（.75～）
+    const top = C.userData.hookY, seat = A.focus.y + 1.2, up = Math.min(top - 1, seat + 9);
+    C.userData.crate.visible = false;
+    if (x < 0.12) crCrane(A.focus.x, top - 0.4, A.focus.z, crEase(x / 0.12));
+    else if (x < 0.25) crCrane(A.focus.x, top - (top - seat) * crEase((x - 0.12) / 0.13), A.focus.z);
+    else if (x < 0.45) { const k = crEase((x - 0.25) / 0.2); crCrane(A.focus.x, seat + k * (up - seat), A.focus.z); for (const o of A.gone) o.position.y = (o.userData.y0 ??= o.position.y) + (k * (up - seat)) / L; }
+    else if (x < 0.75) { if (A.old) { crDrop(A.old); A.old = null; } const k = crEase((x - 0.45) / 0.3); crCrane(A.focus.x, seat + (1 - k) * (up - seat), A.focus.z); for (const m of A.neu) { m.o.visible = true; m.o.position.copy(m.home); m.o.position.y += ((1 - k) * (up - seat)) / L; } }
+    else {
+      for (const m of A.neu) { m.o.visible = true; m.o.position.copy(m.home); }
+      crCrane(A.focus.x, seat + crEase((x - 0.75) / 0.25) * (top - seat), A.focus.z);
+      if (t - A.sp > 0.08 && x < 0.97) { A.sp = t; for (const B of CR.arms) if (B.busy) crArmSpark(B, 7); }
+    }
+    if (!A.armSet) { A.armSet = 1; const p0 = A.pts[0], p1 = A.pts[A.pts.length - 1]; CR.arms.forEach((B) => { B.busy = true; crArmGo(B, B.side < 0 ? p0 : p1); }); }
   } else if (A.kind === 'def' || A.kind === 'mk') {
     const k = crEase(Math.min(1, x / 0.85)); u.paint.material.uniforms.uCut.value = k < 1 ? k * 1.02 : 2;
-    if (k < 1 && t - A.sp > 0.06) { A.sp = t; const p = crShipPt(k, 0.85 + Math.random() * 0.15); crSpark(p.x + (Math.random() - 0.5) * u.bb.max.x * L, p.y, p.z, 6); }
+    // 兩台機械臂沿著船身跟著刷新的那條線走，臂尖噴火花
+    for (const B of CR.arms) { B.busy = true; crArmGo(B, crShipPt(Math.min(1, k + 0.04), 0.75)); }
+    if (k < 1 && t - A.sp > 0.06) { A.sp = t; for (const B of CR.arms) crArmSpark(B, 5); }
     if (A.kind === 'def' && u.sp.def === 'shield') { u.shell.visible = true; u.shell.material.uniforms.uI.value = 0.1 + Math.max(0, 1 - Math.abs(x - 0.9) * 4) * 0.6; }
   } else if (A.kind === 'eng') {
     // 試車：點火、拉到最大、收回
     const E = u.E, f = u.flame, k = x < 0.2 ? 0 : x < 0.55 ? crEase((x - 0.2) / 0.35) : x < 0.8 ? 1 : 1 - crEase((x - 0.8) / 0.2);
     f.visible = k > 0.01; f.scale.set(E.wid * 1.2, E.wid * 1.2, E.len * 2.2 * k * (1 + Math.sin(t * 40) * E.fl * 0.5)); f.material.uniforms.uI.value = E.I * k;
-    if (x < 0.25 && t - A.sp > 0.08) { A.sp = t; crSpark(A.focus.x, A.focus.y, A.focus.z, 10); }
+    if (!A.armSet) { A.armSet = 1; for (const B of CR.arms) { B.busy = false; crArmGo(B, null); } }
   } else if (A.kind === 'msl') {
-    const top = 30, seat = A.focus.y + 2.6, cr = C.userData.crate; C.visible = x < 0.9; cr.visible = x < 0.6;
-    const y = x < 0.4 ? top - (top - seat) * crEase(x / 0.4) : x < 0.6 ? seat - crEase((x - 0.4) / 0.2) * 1.2 : seat + crEase((x - 0.6) / 0.3) * 25;
-    C.position.set(A.focus.x, y, A.focus.z); C.userData.cable.scale.y = Math.max(0.1, top - y);
-    if (x > 0.45 && x < 0.75 && t - A.sp > 0.1) { A.sp = t; crSpark(A.focus.x, A.focus.y + 0.5, A.focus.z, 10); }
+    // 天車吊一座飛彈架下來，放到飛彈艙上；機械臂接住、裝進去
+    const top = C.userData.hookY, seat = A.focus.y + 2.4, cr = C.userData.crate; cr.visible = x < 0.62;
+    const y = x < 0.4 ? top - 2 - (top - 2 - seat) * crEase(x / 0.4) : x < 0.6 ? seat - crEase((x - 0.4) / 0.2) * 1.2 : seat + crEase((x - 0.6) / 0.3) * (top - seat);
+    crCrane(A.focus.x, y, A.focus.z, x < 0.15 ? crEase(x / 0.15) : 1);
+    if (!A.armSet) { A.armSet = 1; CR.arms.forEach((B) => { B.busy = true; crArmGo(B, A.focus); }); }
+    if (x > 0.45 && x < 0.8 && t - A.sp > 0.1) { A.sp = t; for (const B of CR.arms) crArmSpark(B, 6); }
   }
-  if (x >= 1) { if (A.old) crDrop(A.old); C.visible = false; u.flame.visible = false; if (u.paint.material.uniforms.uCut.value < 1.5) u.paint.material.uniforms.uCut.value = 2; CR.A = null; CR.idleT = t; }
+  if (x >= 1) { if (A.old) crDrop(A.old); C.userData.crate.visible = false; crCrane(C.position.x, C.userData.hookY - 0.4, C.position.z); for (const B of CR.arms) { B.busy = false; crArmGo(B, null); } u.flame.visible = false; if (u.paint.material.uniforms.uCut.value < 1.5) u.paint.material.uniforms.uCut.value = 2; CR.A = null; CR.idleT = t; }
 }
 
 // ───── 維修：修理後播 ─────
@@ -219,7 +299,9 @@ function crRepairStep(t) {
   const R = CR.rep, it = R && R.list[R.k], u = CR.ship && CR.ship.userData.cr; if (!it || !u) return;
   const x = (t - R.t0) / CR_REP, k = crEase(Math.min(1, Math.max(0, (x - 0.15) / 0.7))), hp = it.hp + (1 - it.hp) * k;
   u.paint.material.uniforms.uDmg.value = (1 - it.hp) * (1 - k);
-  if (x > 0.12 && x < 0.88 && t - R.sp > 0.05) { R.sp = t; for (let n = 0; n < 2; n++) { const p = crShipPt(Math.random(), 0.4 + Math.random() * 0.6); crSpark(p.x + (Math.random() - 0.5) * 2, p.y, p.z, 6); } }
+  // 兩台機械臂各負責一側，從船尾往船頭修，火花從臂尖噴
+  CR.arms.forEach((B, j) => { B.busy = x > 0.1 && x < 0.9; crArmGo(B, B.busy ? crShipPt(Math.min(1, 0.1 + 0.8 * crEase((x - 0.1) / 0.8) + j * 0.05), 0.7) : null); });
+  if (x > 0.12 && x < 0.88 && t - R.sp > 0.05) { R.sp = t; for (const B of CR.arms) crArmSpark(B, 6); const p = crShipPt(Math.random(), 0.5 + Math.random() * 0.5); crSpark(p.x, p.y, p.z, 4); }
   crCaption(`<b>修理中</b>　${R.k + 1}／${R.list.length}　${ccShipNm ? ccShipNm(it.c) : CAP_HULLS[it.c.key].name}<br>船體 <b>${Math.round(hp * 100)}%</b><span class="g-dim">　點一下畫面略過</span>`);
   if (x >= 1) crRepairNext();
 }
@@ -245,15 +327,15 @@ function crFrame() {
   const t = crNow(), dt = Math.min(0.1, t - (CR.tp || t)); CR.tp = t;
   if (!CB.W) cbSize();
   if (CR.mode === 'rep') crRepairStep(t); else crAnimStep(t, dt);
-  crSparksStep(dt);
+  crSparksStep(dt); crArmsStep(dt);
   const sh = CR.ship, u = sh && sh.userData.cr, C = CB.cam; if (!u) return;
   const hl = sh.userData.hl || 15, mid = (sh.userData.bot + sh.userData.top) / 2, cx = cbX(CR_K);
   // 鏡頭：動畫中＝飛到那個位置（從船外側、斜上方看）；平常＝慢慢繞著船
   if (CR.A && CR.A.focus) {
     // 動畫：從前上方看那個位置（引擎＝從側前方看船尾）
     const f = CR.A.focus, K = CR.A.kind, sx = f.x >= cx ? 1 : -1;
-    const dir = K === 'eng' ? new THREE.Vector3(sx, 0.55, 0.35) : K === 'def' || K === 'mk' ? new THREE.Vector3(0.35, 0.5, 1) : new THREE.Vector3(0.45 * sx, 0.75, 1);
-    const d = K === 'eng' ? hl * 0.7 + 8 : K === 'def' || K === 'mk' ? hl * 1.5 + 10 : hl * 0.5 + 10;
+    const dir = K === 'eng' ? new THREE.Vector3(sx, 0.55, 0.35) : K === 'def' || K === 'mk' ? new THREE.Vector3(0.35, 0.5, 1) : new THREE.Vector3(sx, 0.75, 0.3);   // 砲塔：從側上方看（從前面看會被艦橋擋住）
+    const d = K === 'eng' ? hl * 0.7 + 8 : K === 'def' || K === 'mk' ? hl * 1.5 + 10 : hl * 0.45 + 12;
     dir.normalize(); _crP.set(f.x + dir.x * d, f.y + dir.y * d, f.z + dir.z * d); _crL.copy(f);
   } else {
     // 平常：在機庫開口前方左右慢慢擺
@@ -263,6 +345,9 @@ function crFrame() {
   crClamp(_crP, cx);
   const k = 1 - Math.exp(-dt * 2.6);
   if (!CR.cam) { CR.cam = _crP.clone(); CR.look = _crL.clone(); } else { CR.cam.lerp(_crP, k); CR.look.lerp(_crL, k); }
+  // 飛過去的路上不穿過船：在船的範圍裡就抬到船頂上面
+  const sd = sh.userData, top = sh.position.y + sd.top + 2.5;
+  if (Math.abs(CR.cam.x - cx) < (sd.hw || 6) + 2 && Math.abs(CR.cam.z - CB_SHIP_Z) < hl + 2 && CR.cam.y < top) CR.cam.y = top;
   C.fov = 40; C.near = 0.2;
   C.position.copy(CR.cam); C.lookAt(CR.look);
   const ox = CR.mode === 'fit' ? -CB.W * 0.2 : 0;   // 改裝視窗在右邊：船往左挪
