@@ -799,7 +799,8 @@ function pilotRay(ox, oy, oz, D, R, W, lead, es = 1 - PL.side) {   // es：要�
     for (const i of sq.list) {
       if (!ships.alive[i]) continue;
       shipWorldCPU(i, _pa);
-      const r = sc[i] * TYPE_LEN3 * 0.3, qx = _pa.x - ox, qy = _pa.y - oy, qz = _pa.z - oz, s = qx * D[0] + qy * D[1] + qz * D[2];
+      const kc = CAP.on && CAP_RULE.hitNom && CAP.byI ? CAP.byI[i] : -1;   // 艦長模式：特製戰艦照船型的受彈範圍
+      const r = kc >= 0 ? CAP.ships[kc].hitR : sc[i] * TYPE_LEN3 * 0.3, qx = _pa.x - ox, qy = _pa.y - oy, qz = _pa.z - oz, s = qx * D[0] + qy * D[1] + qz * D[2];
       if (s < -r || s - r > best) continue;
       const p2 = qx * qx + qy * qy + qz * qz - s * s; if (p2 > r * r) continue;
       const sh = s - Math.sqrt(r * r - p2); if (sh > 0 && sh < best) { best = sh; k = 's'; hi = i; }

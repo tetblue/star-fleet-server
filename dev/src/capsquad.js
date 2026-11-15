@@ -125,7 +125,7 @@ function capLayoutCapture(p, key, o) {
     const H = CAP_HULLS[hk], off = k - (q.length - 1) / 2, dir = side ? 1 : -1, qx = (qi - (list.length - 1) / 2) * 110;
     const st = D && D.st ? (D.st[side] || [])[qi] && D.st[side][qi][k] : null;
     fleets.push(fleet({ side, name: side ? `敵${'AB'[qi]}隊・${H.name}` : `${qi ? 'B隊・' : ''}${'一二三四五'[k]}號艦・${H.name}`, capRole: side ? 'foe' : 'player', capSq: qi, capSlot: k, capHull: hk, capSt: st || null, capGuard: side ? guard : null, capHm: !side && D ? D.hm : null, capShm: !side && D ? D.shm : null,
-      comp: comp1(H.look), x: pos.x + qx + off * 18, z: pos.z - dir * Math.abs(off) * 9, y: (side ? 10 : 0) + (qi ? 12 : 0), h: side ? 0 : Math.PI }));
+      comp: comp1(H.look), x: pos.x + (qx + off * 18) * (side ? -1 : 1), z: pos.z - dir * Math.abs(off) * 9, y: 5 + (qi ? 12 : 0), h: side ? 0 : Math.PI }));   // 雙方點對稱（同樣的編成＝同樣的位置關係）
   }));
   put(0, ours, posA); put(1, theirs, posB);
   const space = { key, R: CAP_EDGE.R, Ry: CAP_EDGE.Ry, hole, edge: key === 'nebula' ? 'ion' : 'part' };
@@ -264,7 +264,7 @@ function capSquadAI(s, t, dt) {
 // ───── AI 對 AI 實測（校正公式）─────
 // cfg＝{ a: [[艦種…], [艦種…]]（我方 1～2 隊）, b: 敵方, st: [[[{ hp, sh, msl }…]…], …]（帶傷開戰，可省略）, li: 敵方難度, seed, def: 有沒有軌道防禦 }
 function capDuel(cfg) {
-  const p = { ...capLoad(), slots: cfg.a[0].slice(), ally: '', diff: cfg.li != null ? cfg.li : 1, env: GROUND_KEYS.length + 1 + (cfg.hole ? 1 : 0), mis: 'capture', seed: cfg.seed || randSeed(), noDef: !cfg.def, auto: true, duel: cfg };
+  const p = { ...capLoad(), ...(cfg.fac != null ? { fac: cfg.fac } : {}), slots: cfg.a[0].slice(), ally: '', diff: cfg.li != null ? cfg.li : 1, env: GROUND_KEYS.length + 1 + (cfg.hole ? 1 : 0), mis: 'capture', seed: cfg.seed || randSeed(), noDef: !cfg.def, auto: true, duel: cfg };
   simEndMid(); overlay(null); CAP.duelRow = null;
   SIM.m = capLayout(p); SIM.sel = null; camAnim = null;
   simStart();

@@ -13,6 +13,7 @@ const CAP_STORE = 'fleet.captain';
 const DEG = Math.PI / 180;
 const CAP_RULE = {
   rangeMul: 0.3,               // 敵方戰艦的武器射程倍率（小規模戰場）
+  hitNom: true,                // 受彈範圍照船型（不照模型）：雙方同艦種＝同樣好打
   gunMul: 3, ftrMul: 1.5,      // 敵方戰艦的砲、戰機打玩家小隊的傷害倍率（艦隊戰的數值是給大軍用的）
   ftrSpd: 0.3, misSpd: 0.3,    // 艦載機、飛彈的速度倍率（main.js 的 FTR_SPD、MIS_SPD）
   misFuel: 1.8,                // 飛彈追船：速度固定，船跑開就要飛更久；超過「原本飛行時間 × misFuel」燃料用完、自爆（不造成傷害）
@@ -405,6 +406,7 @@ function capBegin(C) {
         ftrMax: H.ftr || 0, ftrLost: 0, ftrIds: [], escT: 0, seen: 0, seeing: false, knownT: -99, sigT: -99, spot: null, dead: false, crashT: -9, outT: 0, hitT: -9,
         inp: { yaw: g.to, pitch: 0, thr: 0.5, strafe: 0, vert: 0, boost: false }, aiFire: false, aiMsl: false, aiTgt: null, aiT: 0, holdP: null, thrKeep: 0.5, wT: null, tT: null, mT: null, mslAcc: 0, ftrAcc: 0 };
       if (st && H.msl) s.mslN = Math.round(H.msl.n * st.msl);
+      s.hitR = TYPE_W[t] * CAP.sc.ship * TYPE_LEN3 * 0.33;   // 受彈範圍：照船型的標準大小（各陣營的模型大小不同，不能讓模型大的比較容易被打中）
       if (GRD) s.y = Math.max(s.y, terrainHAt(s.x, s.z) + s.L * 0.13 + 2);
       if (foe || C.open) s.knownT = 1e9;   // 正面交戰：雙方一開始就知道彼此（敵方的船永遠「已知」，玩家的艦載機、飛彈才打得到）
       (foe ? CAP.foes : CAP.own).push(s); CAP.ships.push(s);
@@ -784,11 +786,11 @@ function capTurretsP(s, dt, t) {
     capTurretShot(s, m, T, s.tT, t);
   }
 }
-// 彈藥補充（CAP_AMMO）：玩家這邊的船；不在戰鬥時加倍
+// 彈藥補充（CAP_AMMO）：雙方的特製戰艦都會補（只補我方＝對等的交戰我方佔便宜）；不在戰鬥時加倍
 function capAmmoTick(dt, t) {
   if (simTick % 30 === 17) CAP.calm = !capCalmWhy(t);
   const k = dt * (CAP.calm ? CAP_AMMO.calm : 1);
-  for (const s of CAP.own) {
+  for (const s of CAP.ships) {
     if (s.dead) continue;
     const M = s.H.msl;
     if (M && s.mslN < M.n) { s.mslAcc += k * M.n / CAP_AMMO.msl; while (s.mslAcc >= 1 && s.mslN < M.n) { s.mslAcc -= 1; s.mslN++; } } else s.mslAcc = 0;
@@ -999,7 +1001,7 @@ function capMissile(s, t, pressed) {
   for (let j = 0; j < nS; j++) {
     const sp = nS > 1 ? (j - (nS - 1) / 2) * s.L * 0.12 : 0;
     const ox = s.x + s.U[0] * s.L * 0.12 + s.Rr[0] * sp, oy = s.y + s.U[1] * s.L * 0.12, oz = s.z + s.U[2] * s.L * 0.12 + s.Rr[2] * sp;
-    if (T.k === 's') capBy(s, T.i), launchMissileAt(ox, oy, oz, s.side, s.q, T.i, M.dmg * s.dm, t + j * 0.08, 1, 1.2);
+    if (T.k === 's') { capBy(s, T.i); const n0 = pending.length; if (launchMissileAt(ox, oy, oz, s.side, s.q, T.i, M.dmg * s.dm, t + j * 0.08, 1, 1.2) && pending.length > n0) pending[pending.length - 1].rt = 0; }   // 艦長模式不用艦隊戰的陣營特性（聯盟飛彈換目標）：陣營差異改由招牌模組表現
     else CAP.msl.push({ x: ox, y: oy, z: oz, vx: s.vx * 0.5 + (j - (nS - 1) / 2) * 4, vy: 9, vz: s.vz * 0.5, gi: T.k === 'g' ? T.i : -1, ms: T.k === 'ms' ? T.i : -1, dmg: M.dmg, life: 22, age: 0, n: 0 });
   }
   if (ctl && (pressed || s.mslN % 4 === 0)) capFeed(`飛彈發射 → ${capTgtName(T)}（剩 ${s.mslN} 枚）`, 'ok');
