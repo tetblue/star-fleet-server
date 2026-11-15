@@ -164,7 +164,9 @@ const ccBar = (v, col) => `<div class="cc-bar"><i style="width:${Math.round(Math
 const ccOddCol = (v) => v >= 0.6 ? '#5fd39a' : v >= 0.4 ? '#ffd36a' : '#ff6a5a';
 function ccShipBars(c) { return `<div>${ccBar(c.hp, c.hp < 0.35 ? '#ff6a5a' : '#5fd39a')}${ccBar(c.sh, '#7cc4ff')}${CAP_HULLS[c.key].msl ? ccBar(c.msl, '#ffd36a') : ''}</div>`; }
 // 船名＋等級（舊情報沒有等級就不顯示）
-const ccShipNm = (c) => `${CAP_HULLS[c.key].name}${c.lv ? ` <span class="cc-lv${c.lv > 1 ? ' up' : ''}">Lv${c.lv}</span>` : ''}`;
+const ccShipNm = (c) => `${CAP_HULLS[c.key].name}${c.lv ? ` <span class="cc-lv${c.lv > 1 ? ' up' : ''}">Lv${c.lv}</span>` : ''}${ccMkTag(c)}`;
+// 裝備的最高 Mk（看得出敵方的研發）
+const ccMkTag = (c) => { const m = Math.max(1, ...Object.values(c.mk || {})); return m > 1 ? ` <span class="cc-lv up" title="裝備等級">${CAP_MK_NAME[m]}</span>` : ''; };
 // own＝你的小隊：點船名看那艘船的等級、模組、數值
 function ccShipRows(q, own) {
   return q.ships.map((c, k) => `<div class="cc-ship"><b${own ? ` class="cc-shipnm" data-ship="${q.id}:${k}" title="看這艘船的等級與模組"` : ''}>${ccShipNm(c)}</b>${ccShipBars(c)}</div>`).join('') || '<div class="g-dim">（全滅）</div>';

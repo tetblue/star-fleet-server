@@ -22,15 +22,34 @@ CAP_MIS.capture = { name: '佔領戰', at: 's', text: (M) => M.idle ? `巡航待
 //   f＝艦種基本火力、alpha＝護盾的耐久價值、lambda＝飛彈齊射、gamma＝耐久的指數、delta＝分成兩隊的懲罰、k＝斜率；def＝軌道防禦每座的火力、耐久
 // surv：用遊戲裡的實戰重新擬合（無頭模擬高估了突擊艦的存活）；b＝艦種基準、c1＝勝率、c2＝自己剩下的耐久、c3＝船數比
 const CAP_ODDS = {
-  win: { f: { assault: 1, gunship: 2.5208, support: 1.7546 }, alpha: 0.1229, gamma: 0.284, delta: 0.0893, k: 7.763, lambda: 0.0438, def: { orb: { F: 0, E: 4 }, plat: { F: 0, E: 1.5 } } },   // def：217 場有軌道防禦的實戰擬合（耐久≈每 100 點船體 0.28；火力的影響量不出來）
+  win: { fk: 1.5, f: { assault: 1, gunship: 2.5208, support: 1.7546 }, alpha: 0.1229, gamma: 0.284, delta: 0.0893, k: 7.763, lambda: 0.0438, def: { orb: { F: 0, E: 4 }, plat: { F: 0, E: 1.5 } } },   // def：217 場有軌道防禦的實戰擬合（耐久≈每 100 點船體 0.28；火力的影響量不出來）
   surv: { b: { assault: -3.3628, gunship: -0.2404, support: -1.247 }, c1: 0.4301, c2: 0.8858, c3: 2.828 },
 };
 // sides＝[{ squads: [[{ key, hp, sh, msl }]], diff }, 對方]（hp、sh、msl＝剩下的比例）；回傳我方（sides[0]）的勝率與每艘船的存活率
+// 一艘船的實際數值（c.H＝戰場上的；不然照 mod、mk、prof 算，記下來重複用）
+const CAP_SHIPH = new Map();
+function capShipH(c) {
+  if (c.H) return c.H;
+  const H0 = CAP_HULLS[c.key]; if (!c.mod && !c.prof) return H0;
+  const k = c.key + JSON.stringify([c.mod, c.mk, c.prof]); let H = CAP_SHIPH.get(k);
+  if (!H) { H = capProfMod(capHullMod(H0, c), c.mod, c.prof); if (CAP_SHIPH.size > 2000) CAP_SHIPH.clear(); CAP_SHIPH.set(k, H); }
+  return H;
+}
+// 火力倍率：只算主砲、副砲的 Mk 與主砲的熟練度（照原廠主砲、副砲每秒傷害的比例加權）；e＝指數。
+// 2026-11-15 用 77 場遊戲裡 AI 對 AI 的實戰校正：換砲的型式（磁軌、重粒子、速射…）對勝負幾乎沒影響，
+// 用「改裝後的每秒傷害 ÷ 原廠」反而預測變差（log loss 0.62～0.71）；只算 Mk＝0.545（舊公式 0.693）。船體、護盾、飛彈照改裝後的實際數值。
+function capFireK(c, e = 1) {
+  const H0 = CAP_HULLS[c.key], mk = c.mk || (c.H && c.H.mk) || {}, mod = c.mod || (c.H && c.H.mod) || {};
+  const pm = c.prof ? 1 / (1 - CAP_PROF.per * capProfLv(c.prof[capProfKey('main', mod.main)] || 0)) : 1;
+  const dm = H0.main.dmg / H0.main.cd, dt = (H0.tur.n * H0.tur.dmg * H0.tur.acc) / H0.tur.cd;
+  const k = (dm * CAP_MK[mk.main || 1] * pm + dt * CAP_MK[mk.tur || 1]) / (dm + dt);
+  return k === 1 ? 1 : Math.pow(k, e);
+}
 function capOdds(sides, P = CAP_ODDS) {
   const W = P.win, sig = (z) => 1 / (1 + Math.exp(-z));
   const fem = (S) => {
     let F = 0, E = 0, Mm = 0; const D = CAP_DIFF[S.diff] || CAP_DIFF[1];
-    for (const q of S.squads) for (const c of q) { const H = CAP_HULLS[c.key]; F += D.dmg * W.f[c.key]; E += D.hp * (H.hp * c.hp + W.alpha * H.sh * c.sh) / 100; if (H.msl) Mm += D.dmg * H.msl.n * c.msl * H.msl.dmg / 100; }
+    for (const q of S.squads) for (const c of q) { const H = capShipH(c); F += D.dmg * W.f[c.key] * capFireK(c, W.fk); E += D.hp * (H.hp * c.hp + W.alpha * H.sh * c.sh) / 100; if (H.msl) Mm += D.dmg * H.msl.n * c.msl * H.msl.dmg / 100; }   // H＝模組、Mk、熟練度之後的實際數值
     // 軌道防禦：每座的火力、耐久（和船同一個單位）；d＝種類，或 { type, hp: 剩下的比例 }
     if (S.defs && W.def) for (const d of S.defs) { const k = d.type || d, h = d.hp != null ? d.hp : 1, V = W.def[k]; if (V && h > 0) { F += D.dmg * V.F; E += D.hp * V.E * h; } }
     return { F, E, M: Mm };
@@ -42,7 +61,7 @@ function capOdds(sides, P = CAP_ODDS) {
     const p = si ? 1 - pw : pw, lp = Math.max(-8, Math.min(8, Math.log(Math.max(1e-9, p) / Math.max(1e-9, 1 - p))));
     const nOwn = S.squads.flat().length, nFoe = Math.max(1, sides[1 - si].squads.flat().length);
     return S.squads.map((q) => q.map((c) => {
-      const H = CAP_HULLS[c.key], fr = (H.hp * c.hp + W.alpha * H.sh * c.sh) / (H.hp + W.alpha * H.sh);
+      const H = capShipH(c), fr = (H.hp * c.hp + W.alpha * H.sh * c.sh) / (H.hp + W.alpha * H.sh);
       return sig(P.surv.b[c.key] + P.surv.c1 * lp + P.surv.c2 * Math.log(Math.max(0.05, fr)) + P.surv.c3 * Math.log(nOwn / nFoe));
     }));
   });
@@ -52,7 +71,7 @@ function capOdds(sides, P = CAP_ODDS) {
 function capOddsNow() {
   const side = (L, diff) => {
     const m = new Map();
-    for (const s of L) { if (s.dead) continue; const r = { key: s.key, hp: ships.hp[s.i] / maxHp(s.i), sh: ships.shMax[s.i] ? ships.sh[s.i] / ships.shMax[s.i] : 0, msl: s.H.msl ? s.mslN / s.H.msl.n : 0 }; if (!m.has(s.sq)) m.set(s.sq, []); m.get(s.sq).push(r); }
+    for (const s of L) { if (s.dead) continue; const r = { key: s.key, H: s.H, hp: ships.hp[s.i] / maxHp(s.i), sh: ships.shMax[s.i] ? ships.sh[s.i] / ships.shMax[s.i] : 0, msl: s.H.msl ? s.mslN / s.H.msl.n : 0 }; if (!m.has(s.sq)) m.set(s.sq, []); m.get(s.sq).push(r); }
     return { squads: [...m.values()], diff };
   };
   const A = side(CAP.own, 1), B = side(CAP.foes, CAP.li), dl = (own) => CAP.G.gts.filter((g) => g.def && !gtDead(g) && (g.side === CAP.side) === own).map((g) => ({ type: g.cu, hp: g.hp / g.max }));
@@ -260,7 +279,7 @@ function capDuelRow() {
   const win = !own ? 1 : !foe ? 0 : R && R.capOk ? 0 : -1;   // -1＝時間到、撤退
   return { sides, r: { win, t: Math.round(U.uTime.value), ships: CAP.ships.map((s) => ({ side: s.side, sq: s.side * 10 + s.sq, key: s.key, alive: !s.dead, hp: s.dead ? 0 : ships.hp[s.i] / maxHp(s.i) })) } };
 }
-Object.assign(window.__cap || (window.__cap = {}), { capDuel, capDuelRow, capOdds, capOddsNow, CAP_ODDS });
+Object.assign(window.__cap || (window.__cap = {}), { capDuel, capDuelRow, capOdds, capOddsNow, CAP_ODDS, capFireK, capShipH });
 
 // ───── 艦長生涯：巡航 → 迎擊戰的接續 ─────
 // 巡航時記下我方每艘船的位置、方向、速度（capContSnap）；同一個星系、同一週開打的迎擊戰把船放回原處（capContApply），

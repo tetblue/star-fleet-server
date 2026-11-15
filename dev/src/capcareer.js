@@ -206,7 +206,7 @@ function ccSee(S, s) {
 }
 // capOdds 的一方：小隊（每隊一組船）＋防禦；diff＝難度（敵方用生涯難度，AI 對 AI 用普通）
 function ccSide(S, squads, defs, diff) {
-  return { squads: squads.map((q) => { const m = ccDis(S, q) ? CC_RULE.fx.disHp : 1; return q.ships.map((c) => ({ key: c.key, hp: c.hp * m, sh: c.sh * m, msl: c.msl })); }).filter((q) => q.length), defs: (defs || []).map((d) => ({ type: d.type, hp: d.hp })), diff };
+  return { squads: squads.map((q) => { const m = ccDis(S, q) ? CC_RULE.fx.disHp : 1; return q.ships.map((c) => ({ key: c.key, hp: c.hp * m, sh: c.sh * m, msl: c.msl, mod: c.mod, mk: c.mk, prof: q.pl ? S.pl.prof : null })); }).filter((q) => q.length), defs: (defs || []).map((d) => ({ type: d.type, hp: d.hp })), diff };
 }
 const ccDis = (S, q) => (q.dis || 0) > S.turn;              // 斬首任務：指揮中斷
 const ccCut = (S, s) => ((s.fx && s.fx.cut) || 0) > S.turn;  // 攔截任務：補給線切斷
@@ -309,7 +309,7 @@ function ccBattleAt(S, s) {
   for (const a of others) for (const b of others) if (a < b && ccHostile(S, a, b) && a !== SM_N && b !== SM_N) return { A: here.filter((q) => q.fac === a).slice(0, CC_RULE.maxSq), D: here.filter((q) => q.fac === b).slice(0, CC_RULE.maxSq), defs: [], owner: -1 };
   return null;
 }
-const ccPow = (L) => L.reduce((a, q) => a + q.ships.reduce((b, c) => b + CAP_ODDS.win.f[c.key] * (0.4 + 0.6 * c.hp), 0), 0);
+const ccPow = (L) => L.reduce((a, q) => a + q.ships.reduce((b, c) => b + CAP_ODDS.win.f[c.key] * capFireK(c) * (0.4 + 0.6 * c.hp), 0), 0);
 // 計算的戰鬥：照 capOdds 擲勝負與每艘船的存活；活下來的船受傷；輸的一方撤到相鄰的己方星系（沒有就全滅）
 function ccFightCalc(S, s, B) {
   const O = ccOdds(S, B.A, B.D, B.defs, B.A.some((q) => q.pl) ? 0 : B.D.some((q) => q.pl) ? 1 : -1), aWin = smRnd(S) < O.win;
@@ -408,20 +408,66 @@ function ccAi(S, f) {
   }
 }
 // 收入與造艦：星系收入（等級）→ 有維修船塢的星系補船（不滿 3 艘的隊先補）、小隊太少就成立新隊
+// ───── AI 陣營的研發與造船（研發、生產、改裝的第 6 步，2026-11-15）─────
+// 研發：每個陣營（含你的陣營的 AI 小隊）每週累積研究點數（基本 2＋每個星系 0.6，敵方再乘難度的積極度；普通難度大約第 10 週 Mk II、第 30 週 Mk III），到門檻就升 Mk、解鎖電戰艦、匿蹤艦。
+// 難度決定敵方的 Mk 上限：簡單 Mk II、其他 Mk III；地獄開局就有 Mk II。AI 的船不受船的等級限制（照陣營的研發）。
+// 新船照陣營的 Mk，有機會裝那個陣營的招牌模組（CC_ORG）；在己方船塢的小隊每週把裝備升到陣營的 Mk。
+// 造船：跟玩家一樣在船塢排隊（每座一件，週數 CC_RULE.buildW），造好交給那個星系的小隊或成立新小隊；船塢失守、被打掉＝訂單作廢。
+const CC_AI = { rp0: 2, rpSys: 0.6, mk: [0, 0, 120, 360], mkMax: [2, 3, 3, 3], hell: 120, ew: 80, stealth: 200, modP: 0.35 };
+function ccAiR(S, f) {
+  if (!S.ai) S.ai = {};
+  if (!S.ai[f]) S.ai[f] = { rp: S.diff >= 3 && f !== S.fac ? CC_AI.hell : 0, q: [], mk: 1 };
+  return S.ai[f];
+}
+function ccAiMk(S, f) { const A = ccAiR(S, f), m = A.rp >= CC_AI.mk[3] ? 3 : A.rp >= CC_AI.mk[2] ? 2 : 1; return f === S.fac ? m : Math.min(m, CC_AI.mkMax[S.diff] || 3); }
+function ccAiHull(S, f) {
+  const A = ccAiR(S, f), r = smRnd(S);
+  if (r > 0.9 && A.rp >= CC_AI.stealth) return 'stealth';
+  if (r > 0.78 && A.rp >= CC_AI.ew) return 'ew';
+  return ccRandHulls(S, 1)[0];
+}
+function ccAiShip(S, f, key) {
+  const c = capNewShip(key), mk = ccAiMk(S, f);
+  if (mk > 1) for (const [slot] of CAP_SLOTS) c.mk[slot] = mk;
+  const sig = Object.keys(CC_ORG).filter((k) => { const [slot, id] = k.split(':'); return CC_ORG[k] === f && !(id === 'hangar' && CAP_HULLS[key].ftr) && !(CAP_MODS[slot][id].res && mk < 2); });
+  if (sig.length && smRnd(S) < CC_AI.modP) { const [slot, id] = sig[Math.floor(smRnd(S) * sig.length)].split(':'); c.mod[slot] = id; }
+  return c;
+}
+function ccAiTech(S, f, nSys) {
+  const A = ccAiR(S, f), m0 = ccAiMk(S, f);
+  A.rp += (CC_AI.rp0 + nSys * CC_AI.rpSys) * (f === S.fac ? 1 : CC_DIFF[S.diff].aggr);
+  const m1 = ccAiMk(S, f);
+  if (m1 > m0 && f !== S.fac) ccLog(S, `情報：${SM_FAC[f].name}的艦隊開始配備 ${CAP_MK_NAME[m1]} 裝備`, 'ev');
+  // 在己方船塢的小隊：裝備升到陣營的 Mk
+  for (const q of S.sq) if (q.fac === f && !q.pl && S.sys[q.sys].owner === f && S.sys[q.sys].yard) for (const c of q.ships) for (const [slot] of CAP_SLOTS) if (m1 > 1 && (c.mk[slot] || 1) < m1) c.mk[slot] = m1;
+}
+function ccAiYard(S, f, own) {
+  const A = ccAiR(S, f);
+  A.q = A.q.filter((o) => {
+    const y = S.sys[o.sys]; if (y.owner !== f || !y.yard) return false;
+    if (o.left > 0) o.left--; if (o.left > 0) return true;
+    const c = ccAiShip(S, f, o.key);
+    const q = S.sq.filter((x) => x.fac === f && !x.pl && x.ships.length && x.sys === o.sys && x.ships.length < CC_RULE.maxShips).sort((a, b) => a.ships.length - b.ships.length)[0];
+    if (q) { q.ships.push(c); return false; }
+    if (ccAt(S, o.sys, f).length < CC_RULE.maxSq) { ccNewSquad(S, f, o.sys, []).ships.push(c); return false; }
+    return true;   // 沒地方放：等下週
+  });
+  const nSq = S.sq.filter((q) => q.fac === f && q.ships.length).length;
+  for (const y of own.filter((s) => s.yard)) {
+    if (A.q.some((o) => o.sys === y.id)) continue;
+    const weak = S.sq.some((q) => q.fac === f && !q.pl && q.ships.length && q.ships.length < 3 && q.sys === y.id);
+    const wantNew = nSq + A.q.length < Math.max(4, Math.ceil(own.length * 0.7));
+    if (!weak && !wantNew && S.money[f] <= 1500) continue;
+    const key = ccAiHull(S, f), cost = CC_RULE.build[key]; if (S.money[f] < cost) break;
+    S.money[f] -= cost; A.q.push({ key, sys: y.id, left: CC_RULE.buildW[key] || 1 });
+  }
+}
 function ccEconomy(S) {
   for (const f of [SM_A, SM_E, SM_P]) {
     const own = S.sys.filter((s) => s.owner === f); if (!own.length) continue;
     S.money[f] += own.reduce((a, s) => a + 30 + s.tier * 25, 0) * (f === S.fac ? 1 : CC_DIFF[S.diff].aggr);
-    const yards = own.filter((s) => s.yard);
-    for (let guard = 0; guard < 10 && yards.length; guard++) {
-      const key = ccRandHulls(S, 1)[0], cost = CC_RULE.build[key]; if (S.money[f] < cost) break;
-      const atYard = S.sq.filter((q) => q.fac === f && !q.pl && q.ships.length && q.ships.length < CC_RULE.maxShips && S.sys[q.sys].owner === f && S.sys[q.sys].yard).sort((a, b) => a.ships.length - b.ships.length);
-      const weak = atYard.find((q) => q.ships.length < 3) || (S.money[f] > 1500 ? atYard[0] : null);   // 先補不到 3 艘的隊；錢多就補到 5 艘
-      const nSq = S.sq.filter((q) => q.fac === f && q.ships.length).length;
-      if (weak) { weak.ships.push(capNewShip(key)); S.money[f] -= cost; }
-      else if (nSq < Math.max(4, Math.ceil(own.length * 0.7))) { const y = yards.find((s) => ccAt(S, s.id, f).length < CC_RULE.maxSq); if (!y) break; ccNewSquad(S, f, y.id, [key]); S.money[f] -= cost; }
-      else break;
-    }
+    ccAiTech(S, f, own.length);   // 研發（第 6 步）
+    ccAiYard(S, f, own);          // 船塢排隊造船（第 6 步）
   }
 }
 
