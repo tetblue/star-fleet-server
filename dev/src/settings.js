@@ -54,6 +54,7 @@ function renderSettings() {
       <label class="set-row set-chk"><span>打開戰術面板時自動暫停<br><small class="g-dim">只限單人模式</small></span><input type="checkbox" id="set-tacpause" ${SETTINGS.tacPause ? 'checked' : ''}></label>
       <label class="set-row set-chk"><span>過場動畫<br><small class="g-dim">開戰、勝利／敗北／平手、戰鬥回放時的文字切入（APNG）</small></span><input type="checkbox" id="set-cutin" ${SETTINGS.cutin !== false ? 'checked' : ''}></label>
       <label class="set-row set-chk"><span>開戰運鏡<br><small class="g-dim">開戰時鏡頭從敵軍掃過戰場、經過我軍，再回到指揮視角（約 5 秒，戰鬥暫停；任何按鍵或點擊略過）</small></span><input type="checkbox" id="set-introcam" ${SETTINGS.introCam !== false ? 'checked' : ''}></label>
+      <label class="set-row set-chk"><span>維修動畫（艦長生涯）<br><small class="g-dim">在船塢修理後，整修庫播每艘船修好的過程（播放中點一下畫面或按 Esc 略過）</small></span><input type="checkbox" id="set-repanim" ${SETTINGS.capRepAnim !== false ? 'checked' : ''}></label>
       <div class="set-row"><span>過場動畫工坊<br><small class="g-dim">自己打字做切入動畫，預覽並下載成 APNG</small></span><button class="g-btn sm" id="set-cutstudio">工坊…</button></div>
       <div class="set-h">指揮官視角（艦橋，${keyText('bridge')}）</div>
       <label class="set-row set-chk"><span>低頭看戰術台時自動暫停<br><small class="g-dim">只限單人模式；預設不暫停，邊看戰場邊下令</small></span><input type="checkbox" id="set-brpause" ${SETTINGS.bridgePause ? 'checked' : ''}></label>
@@ -99,6 +100,7 @@ function renderSettings() {
   qa('[data-tab]').forEach((b) => (b.onclick = () => { SET.tab = b.dataset.tab; SET.capture = null; SET.msg = ''; renderSettings(); }));
   qa('.set-key').forEach((b) => (b.onclick = () => { SET.capture = b.dataset.k; SET.msg = ''; renderSettings(); }));
   if (q('#set-introcam')) q('#set-introcam').onchange = (e) => { SETTINGS.introCam = e.target.checked; saveSettings(); };
+  if (q('#set-repanim')) q('#set-repanim').onchange = (e) => { SETTINGS.capRepAnim = e.target.checked; saveSettings(); };
   if (q('#set-pfx')) q('#set-pfx').onchange = (e) => { SETTINGS.particles = e.target.value; saveSettings(); };
   if (q('#set-shake')) q('#set-shake').onchange = (e) => { SETTINGS.shake = e.target.checked; saveSettings(); };
   for (const [k, f] of [['m', 'on'], ['s', 'sOn'], ['u', 'uOn'], ['b', 'bOn']]) if (q('#set-snd-' + k + 'on')) q('#set-snd-' + k + 'on').onchange = (e) => { SETTINGS.audio[f] = e.target.checked; saveSettings(); SND.setVol(); renderSettings(); };

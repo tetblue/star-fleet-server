@@ -20,15 +20,19 @@ const CFX = { group: null, list: [], geo: {} };
 
 // 塗裝層：模型座標（船頭＋z）；bmin／bmax＝船體外框
 const capFxPaintMat = () => new THREE.ShaderMaterial({
-  uniforms: { uBmin: { value: new THREE.Vector3() }, uBmax: { value: new THREE.Vector3() }, uCol: { value: new THREE.Color() }, uMk: { value: 1 }, uArm: { value: 0 }, uTime: U.uTime, uPush: { value: CAP_FX.push }, uSt: { value: new THREE.Vector3(...CAP_FX.stripe) } },
+  uniforms: { uBmin: { value: new THREE.Vector3() }, uBmax: { value: new THREE.Vector3() }, uCol: { value: new THREE.Color() }, uMk: { value: 1 }, uArm: { value: 0 }, uTime: U.uTime, uPush: { value: CAP_FX.push }, uCut: { value: 2 }, uDmg: { value: 0 }, uSt: { value: new THREE.Vector3(...CAP_FX.stripe) } },
   transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
   vertexShader: /* glsl */`
     uniform float uPush; varying vec3 vP; varying vec3 vN;
     void main(){ vP = position; vN = normalize(normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position + normal * uPush, 1.); }`,
   fragmentShader: /* glsl */`
-    uniform vec3 uBmin; uniform vec3 uBmax; uniform vec3 uCol; uniform float uMk; uniform float uArm; uniform float uTime; uniform vec3 uSt;
+    uniform vec3 uBmin; uniform vec3 uBmax; uniform vec3 uCol; uniform float uMk; uniform float uArm; uniform float uTime; uniform vec3 uSt; uniform float uCut; uniform float uDmg;
     varying vec3 vP; varying vec3 vN;
     float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    float h31(vec3 p){ return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+    float vn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
+      return mix(mix(mix(h31(i), h31(i + vec3(1,0,0)), f.x), mix(h31(i + vec3(0,1,0)), h31(i + vec3(1,1,0)), f.x), f.y),
+                 mix(mix(h31(i + vec3(0,0,1)), h31(i + vec3(1,0,1)), f.x), mix(h31(i + vec3(0,1,1)), h31(i + vec3(1,1,1)), f.x), f.y), f.z); }
     // 三向投影的格線：k＝每單位幾格，w＝線寬（格的比例）；回傳 0～1（1＝在線上）
     vec2 tri(vec3 p, vec3 n, float k, float w, out vec2 cell){
       vec3 a = abs(n); vec2 uv = a.x > a.y && a.x > a.z ? p.zy : a.y > a.z ? p.xz : p.xy;
@@ -51,6 +55,17 @@ const capFxPaintMat = () => new THREE.ShaderMaterial({
         float s = 0.;
         for (int k = 0; k < 2; k++) { if (float(k) > uMk - 1.5 - 0.5) break; float z0 = uSt.x + float(k) * uSt.z; s = max(s, 1. - smoothstep(uSt.y * 0.4, uSt.y * 0.5, abs(zN - z0))); }
         c = mix(c, vec4(uCol * 1.35, 0.95), s);
+      }
+      // uCut: the new paint is only shown up to this point from the stern (refit sweep)
+      if (zN > uCut) c = vec4(0.);
+      float sweep = 1. - smoothstep(0., 0.012, abs(zN - uCut));
+      if (uCut < 1.5) c = mix(c, vec4(0.6, 0.9, 1.4, 0.9), sweep);
+      // uDmg: burn marks (repair)
+      if (uDmg > 0.001) {
+        float nz = vn(vP / L * 14.) * 0.65 + vn(vP / L * 41.) * 0.35, b = uDmg * 0.75;
+        float burn = 1. - smoothstep(b - 0.015, b, nz), edge = burn * smoothstep(b - 0.07, b - 0.015, nz);
+        c = mix(c, vec4(0.03, 0.025, 0.02, 0.88), burn);
+        c = mix(c, vec4(1.5, 0.55, 0.12, 1.), edge * (0.6 + 0.4 * sin(uTime * 6. + nz * 40.)));
       }
       if (c.a < 0.01) discard;
       gl_FragColor = c;

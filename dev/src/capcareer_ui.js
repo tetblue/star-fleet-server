@@ -279,7 +279,7 @@ function ccCard() {
   on('cc-x', () => { CC.sel = -1; ccCard(); });
   on('cc-go', () => { if (!ccCanMove(S, s.id, Q)) { Q.to = s.id; Q.task = null; re(); } });
   on('cc-cancel', () => { Q.to = null; re(); });
-  on('cc-repair', () => { ccRepair(S, Q); ccSave(S); ccRender(); });
+  on('cc-repair', () => { const before = Q.ships.filter((c) => c.hp < 0.999).map((c) => ({ c, hp: c.hp })); if (!ccRepair(S, Q)) { ccRender(); return; } ccSave(S); crRepair(before, SM_FAC[S.fac].game, () => ccRender()); });
   on('cc-msl', () => { ccResupply(S, Q); ccSave(S); ccRender(); });
   on('cc-yard', () => ccYardView(s));
   on('cc-shop', () => ccShopView(s));
@@ -378,7 +378,7 @@ function ccFitView(src, D) {
     return `<tr${chg ? ' class="chg"' : ''}><td>${nm}</td><td>${smuSeg('cc-fm-' + slot, opts, cur)}<div class="g-dim" style="font-size:11px;margin-top:2px">${M ? M.desc : '原廠'}${!same && (c.mk[slot] || 1) > 1 ? `（換模組＝回到 Mk I）` : ''}</div></td><td>${smuSeg('cc-fk-' + slot, mks, kc)}</td></tr>`;
   }).join('');
   const A = capProfMod(capHullMod(H0, c), c.mod, S.pl.prof), B = capProfMod(capHullMod(H0, D), D.mod, S.pl.prof), f1 = (v) => Math.round(v * 10) / 10;
-  const cmp = (nm, a, b, fmt = f1, hi = 1) => { const x = fmt(a), y = fmt(b), d = b - a, col = Math.abs(d) < 1e-6 ? '' : (d > 0) === (hi > 0) ? '#3fdf8f' : '#ff8a7a'; return `<dt>${nm}</dt><dd>${x}${col ? ` → <b style="color:${col}">${y}</b>` : ''}</dd>`; };
+  const chg = [], cmp = (nm, a, b, fmt = f1, hi = 1) => { const x = fmt(a), y = fmt(b), d = b - a, col = Math.abs(d) < 1e-6 ? '' : (d > 0) === (hi > 0) ? '#3fdf8f' : '#ff8a7a'; if (col) chg.push(`${nm} ${x} → <b style="color:${col}">${y}</b>`); return `<dt>${nm}</dt><dd>${x}${col ? ` → <b style="color:${col}">${y}</b>` : ''}</dd>`; };
   const dps = (H) => H.main.dmg / H.main.cd, tdps = (H) => (H.tur.n * H.tur.dmg) / H.tur.cd, mt = (H) => (H.msl ? H.msl.n * H.msl.dmg : 0);
   const st = cmp('船體', A.hp, B.hp, Math.round) + cmp('護盾', A.sh, B.sh, Math.round) + cmp('主砲每秒傷害', dps(A), dps(B)) + cmp('主砲射程', A.main.range, B.main.range, Math.round) + cmp('主砲射界（左右各）', A.main.arc, B.main.arc, Math.round)
     + cmp('副砲每秒傷害', tdps(A), tdps(B)) + cmp('點防禦', A.pd.n, B.pd.n, Math.round) + cmp('飛彈總傷害', mt(A), mt(B), Math.round) + cmp('護航機', A.ftr || 0, B.ftr || 0, Math.round)
@@ -393,11 +393,15 @@ function ccFitView(src, D) {
     <dl class="cc-cmp">${st}</dl>
     <div class="g-dim" style="font-size:12px">價錢：工錢 ${CC_RULE.fit.base}・換模組 ${CC_RULE.fit.mod.main}／${CC_RULE.fit.mod.tur}／${CC_RULE.fit.mod.msl}／${CC_RULE.fit.mod.def}／${CC_RULE.fit.mod.eng}（主砲／副砲／飛彈艙／防禦／引擎，換回原廠半價）・Mk II ${CC_RULE.fit.mk[2]}、Mk III 再 ${CC_RULE.fit.mk[3]}（每個槽位）</div>
     ${stop && cost ? `<div style="color:#ff8a7a;margin-top:6px">${stop}</div>` : ''}
-    <div class="sm-btns"><button class="g-btn" id="cc-fit-no">${F.q ? '回到船的資料' : '回到船塢'}</button><button class="g-btn" id="cc-fit-rs" ${cost ? '' : 'disabled'}>重選</button><button class="g-btn primary" id="cc-fit-ok" ${stop ? 'disabled' : ''}>${cost ? `送進船塢（${cost} 資金・${eta} 週後好）` : '送進船塢'}</button></div>`, 'sm-wide');
+    <div class="sm-btns"><button class="g-btn" id="cc-fit-no">${F.q ? '回到船的資料' : '回到船塢'}</button><button class="g-btn" id="cc-fit-rs" ${cost ? '' : 'disabled'}>重選</button><button class="g-btn primary" id="cc-fit-ok" ${stop ? 'disabled' : ''}>${cost ? `送進船塢（${cost} 資金・${eta} 週後好）` : '送進船塢'}</button></div>`, 'sm-wide cr-side');
   const redo = () => ccFitView(src, D);
+  // 整修庫（caprefit.js）：背景照現在的設定擺船；剛選的零件播安裝動畫，下方說明這次的數值變化
+  { const ls = D._last, sl = ls && (ls.startsWith('mk:') ? ls.slice(3) : ls), nm = sl && (CAP_SLOTS.find(([k]) => k === sl) || [])[1], md = sl && D.mod[sl] && CAP_MODS[sl][D.mod[sl]];
+    const head = nm ? `<b>${nm}：${md ? md.name : '原廠'}${(D.mk[sl] || 1) > 1 ? ' ' + CAP_MK_NAME[D.mk[sl]] : ''}</b>` : `<b>${H0.name}</b>　整修庫`;
+    crShow({ c, D, fac: SM_FAC[S.fac].game, last: ls, cap: `${head}${chg.length ? '<br>' + chg.join('<br>') : '<br><span class="g-dim">在右邊選零件：船上會裝給你看</span>'}` }); D._last = null; }
   for (const [slot] of CAP_SLOTS) {
-    const g1 = gEl('cc-fm-' + slot); if (g1) g1.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { if (b.disabled) return; const v = b.dataset.v; if (v) D.mod[slot] = v; else delete D.mod[slot]; if ((D.mod[slot] || '') === (c.mod[slot] || '')) D.mk[slot] = c.mk[slot] || 1; else delete D.mk[slot]; redo(); }));
-    const g2 = gEl('cc-fk-' + slot); if (g2) g2.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { if (b.disabled) return; const k = +b.dataset.v; if (k > 1) D.mk[slot] = k; else delete D.mk[slot]; redo(); }));
+    const g1 = gEl('cc-fm-' + slot); if (g1) g1.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { if (b.disabled) return; const v = b.dataset.v; if (v) D.mod[slot] = v; else delete D.mod[slot]; D._last = slot; if ((D.mod[slot] || '') === (c.mod[slot] || '')) D.mk[slot] = c.mk[slot] || 1; else delete D.mk[slot]; redo(); }));
+    const g2 = gEl('cc-fk-' + slot); if (g2) g2.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { if (b.disabled) return; const k = +b.dataset.v; if (k > 1) D.mk[slot] = k; else delete D.mk[slot]; D._last = 'mk:' + slot; redo(); }));
   }
   gEl('cc-fit-rs').onclick = () => ccFitView(src);
   gEl('cc-fit-no').onclick = () => { if (F.q) ccShipView(F.q, F.q.ships.indexOf(c)); else ccYardView(s); };
