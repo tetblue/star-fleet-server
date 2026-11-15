@@ -370,7 +370,7 @@ function capBlock(ax, ay, az, bx, by, bz) { return SOLID ? rockBlock(ax, ay, az,
 // 地面高度；太空＝基準面下 16（敵艦的高度＝這個 +16）
 function capGY(x, z) { return GRD ? terrainHAt(x, z) : -16; }
 function capBegin(C) {
-  CAP.on = true; CAP.side = 0; CAP.cfg = C; capSpaceBegin(C); CAP.li = C.li; CAP.Df = CAP_DIFF[C.li];
+  CAP.on = true; CAP.side = 0; CAP.cfg = C; capFxClear(); capSpaceBegin(C); CAP.li = C.li; CAP.Df = CAP_DIFF[C.li];
   CAP.rng = (battleSeed ^ 0x2545f491) >>> 0 || 1;
   CAP.sc = capScaleSet(); capRangeScale(CAP.sc.rng);
   CAP.saveRange = opts.rangeMul; opts.rangeMul = CAP_RULE.rangeMul * CAP.sc.rng; MIS_SPD = CAP_RULE.misSpd;
@@ -454,7 +454,7 @@ function capMakeUnit(u, id, hpM) {
 }
 function capEnd() {
   if (!CAP.on) return;
-  capSpaceEnd();
+  capSpaceEnd(); capFxClear();
   CAP.on = false; opts.rangeMul = CAP.saveRange != null ? CAP.saveRange : 1; MIS_SPD = 1; capRangeScale(1);
   if (document.pointerLockElement) document.exitPointerLock();
   document.body.classList.remove('pilot-on', 'cap-on');
@@ -1634,7 +1634,8 @@ function capCamTop(s) {
   renderPass.camera = camera;
   view.target.set(s.x, 0, s.z); view.height = 160;
 }
-function capCamera() {
+function capCamera() { capFxFrame(); capCamera0(); capFxCam(); }   // 改裝的外觀、展示鏡頭（capfx.js）
+function capCamera0() {
   const s = capCur(); if (!s) return;
   if (capTop()) return capCamTop(s);
   const A = capAim(), Wu = v3.norm([-A[0] * A[1], 1 - A[1] * A[1], -A[2] * A[1]]);
