@@ -870,6 +870,9 @@
   .wed-body { display: grid; grid-template-columns: 1fr calc(320px * var(--ui)); min-height: 0; }
   .wed-view { position: relative; min-height: 0; overflow: hidden; }
   .wed-cams { position: absolute; left: 10px; top: 10px; display: flex; gap: calc(6px * var(--sp)); flex-wrap: wrap; }
+  .wed-fx { display: flex; flex-direction: column; gap: calc(4px * var(--sp)); padding-bottom: calc(8px * var(--sp)); margin-bottom: calc(4px * var(--sp)); border-bottom: 1px solid var(--line); font-size: calc(12px * var(--ui)); }
+  .wed-fx h4 { margin: 0 0 calc(2px * var(--sp)); } .wed-fx.on h4 { color: #ffd27a; }
+  .wed-fxr { display: flex; gap: calc(4px * var(--sp)); align-items: center; flex-wrap: wrap; } .wed-fxr > span { width: 2.6em; color: var(--dim); } .wed-fxr [hidden] { display: none; }
   .wed-hint { position: absolute; left: 10px; bottom: 8px; right: 10px; color: var(--dim); font-size: calc(12px * var(--ui)); pointer-events: none; text-shadow: 0 1px 2px #000; }
   .wed-side { border-left: 1px solid var(--line); background: rgba(10,15,28,.85); padding: calc(10px * var(--sp)) calc(12px * var(--sp)); overflow: auto; min-height: 0; }
   .wed-side h4 { margin: calc(12px * var(--sp)) 0 calc(6px * var(--sp)); font-size: calc(12px * var(--ui)); letter-spacing: .12em; color: var(--dim); font-weight: 600; }
@@ -1269,7 +1272,7 @@
 
 <div id="boot"><div class="boot-card"><h1>星海艦隊戰</h1><div class="sub">FLEET TACTICS · 內網伺服器</div><div id="boot-body"><p class="boot-st">連線中…</p></div></div></div>
 <div id="save-badge" hidden>⚠ 存檔還沒同步到伺服器，重試中…</div>
-<script>window.__BUILD = "20261110153748"; window.__ASSETS = { ships: "assets/ships.webp", fx: "assets/fx.webp", fighters: "assets/fighters.webp" };</script>
+<script>window.__BUILD = "20261117211943"; window.__ASSETS = { ships: "assets/ships.webp", fx: "assets/fx.webp", fighters: "assets/fighters.webp" };</script>
 <script>// ═══ 啟動前：登入伺服器、取得存檔、提供 STORE（取代 localStorage，寫入會自動同步到伺服器）═══
 (() => {
   'use strict';

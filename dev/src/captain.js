@@ -451,7 +451,7 @@ function capSizeK(i) {
 function capMakeUnit(u, id, hpM) {
   const T = CAP_UNIT[u.type], y = !GRD && u.y != null ? u.y : T.sea ? GROUND_Y : terrainHAt(u.x, u.z), hp = Math.round(T.hp * (u.own ? 1 : hpM));
   return { id, cu: u.type, kind: T.kind, sub: T.sub, name: T.name, x: u.x, y, z: u.z, hd: u.hd || 0, hp: u.hpf != null ? Math.max(1, Math.round(hp * u.hpf)) : hp, max: hp, di: u.di, r: T.r, hh: T.hh, aa: null, side: u.own ? CAP.side : 1 - CAP.side, deadT: -1,
-    mv: !!T.mv, mis: !!u.mis, def: !!u.def, air: u.air, st: 'idle', tx: u.x, tz: u.z, fcd: 3 + capRnd() * 6, fireT: -99, gcd: 0, moveT: 0, home: { x: u.x, z: u.z }, wp: null };
+    mv: !!T.mv, mis: !!u.mis, def: !!u.def, air: u.air, mark: !!u.mark, pv: !!u.pv, st: 'idle', tx: u.x, tz: u.z, fcd: 3 + capRnd() * 6, fireT: -99, gcd: 0, moveT: 0, home: { x: u.x, z: u.z }, wp: null };
 }
 function capEnd() {
   if (!CAP.on) return;

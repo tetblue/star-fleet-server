@@ -377,7 +377,7 @@ function capSpaceBuild() {
       add(new THREE.SphereGeometry(0.25, 8, 6), red, 0, 4.9);
     } else if (!capUnitGeo(g, add, V.mats)) add(new THREE.BoxGeometry(g.r, g.r, g.r), hull);
     group.add(o); V.meshes[g.id] = o;
-    capStationModel(o, g);   // 換成專案的太空站模型（capstate.js）
+    capMarkBeacon(o, g); capStationModel(o, g);   // 換成專案的太空站模型（capstate.js）
   }
 }
 function capSpaceFrame() {

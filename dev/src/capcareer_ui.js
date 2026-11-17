@@ -249,6 +249,7 @@ function ccCard() {
   if (Q && !S.fin) for (const M of S.missions) if (M.sys === s.id && ccCanOp(S, M, Q)) acts.push(me ? { id: 'cc-op-' + M.id, name: `執行任務：${CC_OPFX[M.op].name}`, desc: busy ? '這週已經打過一場' : `${qAt ? '' : '從相鄰的星系滲透出擊・'}成功：${CC_OPFX[M.op].fx(S, M)}`, off: busy, cls: 'go' } : taskAct('cc-top-' + M.id, CC_OPFX[M.op].name, { kind: 'op', sys: s.id, mis: M.id }, CC_OPFX[M.op].fx(S, M)));
   if (!S.fin && s.shop) acts.push({ id: 'cc-shop', name: `${CC_SHOP[s.shop].name}：買藍圖、研究資料`, desc: ccShopWhy(S, s) || '貨每週換', cls: ccShopWhy(S, s) ? '' : 'go' });
   if (!S.fin && V.live && s.owner === S.fac && (s.yard || ccYq(S, s.id).length || ccResAt(S, s.id).length)) acts.push({ id: 'cc-yard', name: '船塢：訂造、預備艦', desc: ccYardSum(S, s) || (ccCanOrder(S, s) ? `訂造：${ccCanOrder(S, s)}` : '在這裡訂造新船（排隊建造，大船比較久）'), cls: 'go' });
+  if (!S.fin && s.bd && (V.live || (s.pv || []).length)) acts.push({ id: 'cc-planet', name: '星球：建設、投資', desc: cpMineSum(S, s) || (s.owner === S.fac ? '強化勢力的建築、蓋你自己的建築' : s.owner === SM_N ? '在中立星系蓋你的建築（看中立好感度）' : '看建築與收入'), cls: (s.owner === S.fac || s.owner === SM_N) ? 'go' : '' });
   if (!S.fin && ccRankOf(S).base && s.owner === S.fac && s.yard && S.pl.base !== s.id) acts.push({ id: 'cc-base', name: '設為據點', desc: `${CC_RULE.baseCost} 資金・在據點修理、補飛彈半價，軌道防禦每週重建`, off: S.pl.money < CC_RULE.baseCost });
   // 進攻這裡的勝率（選中的小隊＋同一週也要開進來的你的其他小隊 對 守軍＋防禦）
   let odds = '';
@@ -260,7 +261,7 @@ function ccCard() {
   const unk = own0 < 0, intelTx = V.live ? '' : unk ? '<dt>情報</dt><dd style="color:#ffb35a">沒有情報：從沒看過這個星系</dd>' : `<dt>情報</dt><dd style="color:#ffb35a">${V.age} 週前（第 ${S.turn - V.age} 週）看到的樣子・小隊靠近（相鄰）或偵察才會更新</dd>`;
   el.hidden = false;
   el.innerHTML = `<button class="sm-x" id="cc-x">×</button><h3><span style="color:${unk ? '#7d8794' : ccFacCol(S, own0)}">●</span> ${s.name}</h3>
-    <dl class="sm-kv">${intelTx}<dt>擁有者</dt><dd>${unk ? '不明' : SM_FAC[own0].name}${s.cap && !unk ? '・首都' : ''}${s.id === S.pl.base ? '・<b style="color:#3fdf8f">你的據點</b>' : ''}</dd>${unk ? '' : `<dt>等級</dt><dd>${SM_TIER[s.tier]}・地面防禦 ${V.def}${V.live && s.def0 != null && s.def < s.def0 ? `／${s.def0}（受創，圍城 ${ccSiegeNeed(s)} 週）` : ''}</dd>
+    <dl class="sm-kv">${intelTx}<dt>擁有者</dt><dd>${unk ? '不明' : SM_FAC[own0].name}${s.cap && !unk ? '・首都' : ''}${s.id === S.pl.base ? '・<b style="color:#3fdf8f">你的據點</b>' : ''}</dd>${unk ? '' : `<dt>等級</dt><dd>${SM_TIER[s.tier]}${V.live && s.bd ? `・${cpSum(S, s)}` : ''}・地面防禦 ${V.def}${V.live && s.def0 != null && s.def < s.def0 ? `／${s.def0}（受創，圍城 ${ccSiegeNeed(s)} 週）` : ''}</dd>
       <dt>軌道防禦</dt><dd>${dl.length ? dl.map((d) => `${CAP_UNIT[d.type].name} ${Math.round(d.hp * 100)}%`).join('、') : '沒有'}</dd>
       <dt>設施</dt><dd>${[V.yard ? '維修船塢（修船、造艦）' : '', V.depot ? '補給站（補飛彈）' : ''].filter(Boolean).join('、') || '沒有'}</dd>${V.live && ccYardSum(S, s) ? `<dt>你的船塢</dt><dd>${ccYardSum(S, s)}</dd>` : ''}`}
       <dt>太空</dt><dd>${CAP_SPACE[s.scene || 'belt'].name}<div class="g-dim" style="font-size:11px">${CAP_SPACE[s.scene || 'belt'].desc}</div></dd>
@@ -282,6 +283,7 @@ function ccCard() {
   on('cc-repair', () => { const before = Q.ships.filter((c) => c.hp < 0.999).map((c) => ({ c, hp: c.hp })); if (!ccRepair(S, Q)) { ccRender(); return; } ccSave(S); crRepair(before, SM_FAC[S.fac].game, () => ccRender()); });
   on('cc-msl', () => { ccResupply(S, Q); ccSave(S); ccRender(); });
   on('cc-yard', () => ccYardView(s));
+  on('cc-planet', () => cpView(s));
   on('cc-shop', () => ccShopView(s));
   on('cc-raid', () => ccLaunch(S, 'raid', { sys: s.id }));
   on('cc-base', () => { ccMoveBase(S, s); ccSave(S); ccRender(); });
@@ -504,8 +506,8 @@ function ccLaunch(S, kind, o) {
     info.ownDefIdx = ownDefs.map((d) => s.defs.indexOf(d));
     info.own = own.map((q) => q.id); info.foe = foe.map((q) => q.id); info.att = B.att; info.defIdx = defs.map((d) => s.defs.indexOf(d));
     const duel = { a: own.map((q) => q.ships.map((c) => c.key)), b: foe.map((q) => q.ships.map((c) => c.key)), st: [own.map((q) => q.ships.map(ccShipStP)), foe.map((q) => q.ships.map(ccShipSt))], li, real: true,
-      defs: defs.map((d) => ({ type: d.type, hp: d.hp })), ownDefs: ownDefs.map((d) => ({ type: d.type, hp: d.hp })), yard: B.att && s.yard, depot: B.att && s.depot, hm: R.tech.hull, shm: R.tech.shield,
-      ownYard: !B.att && s.owner === S.fac && s.yard, ownDepot: !B.att && s.owner === S.fac && s.depot };
+      defs: defs.map((d) => ({ type: d.type, hp: d.hp })), ownDefs: ownDefs.map((d) => ({ type: d.type, hp: d.hp, k: d.k })), yard: B.att && s.yard, depot: B.att && s.depot, hm: R.tech.hull, shm: R.tech.shield,
+      ownYard: !B.att && s.owner === S.fac && s.yard, ownDepot: !B.att && s.owner === S.fac && s.depot, ...cpScene(S, s, !B.att) };
     const K = CC.cont; CC.cont = null;
     if (K && K.snap && !B.att && K.sys === s.id && K.turn === S.turn && own[0] === P && K.snap.ships.length === P.ships.length) duel.cont = K.snap;
     if (!B.att) {   // 迎擊戰：敵軍從星圖上來的方向躍遷進來（倒數 CC_INB_T 秒）
@@ -555,7 +557,7 @@ function ccBattleDone() {
   }
   (I.ownDefIdx || []).forEach((di, k) => { const g = CAP.G.gts.find((u) => u.def && u.side === CAP.side && u.di === k); const d = s.defs[di]; if (d) d.hp = !g || gtDead(g) ? 0 : g.hp / g.max; });
   I.defIdx.forEach((di, k) => { const g = CAP.G.gts.find((u) => u.def && u.side !== CAP.side && u.di === k); const d = s.defs[di]; if (d) d.hp = !g || gtDead(g) ? 0 : g.hp / g.max; });
-  for (const g of CAP.G.gts) { if (!gtDead(g)) continue; if (g.cu === 'yard') s.yard = false; if (g.cu === 'depot') s.depot = false; }
+  for (const g of CAP.G.gts) { if (!gtDead(g) || g.pv) continue; if (g.cu === 'yard') cpKill(S, s, 'yard'); if (g.cu === 'depot') cpKill(S, s, 'depot'); }   // 你的建築（g.pv）打壞了不會拆掉
   if (R.capOk && st.ks) { ccRpGain(S, st.ks * CC_RP.kill, `打撈 ${s.name} 的殘骸`); const fq = I.foe.map(ccSqById).find(Boolean); ccBpDrop(S, fq ? fq.fac : s.owner, st.ks, CC_BP.kill, `打撈 ${s.name} 的殘骸`); }
   S.pl.kills += st.ks; S.pl.merit += st.merit; S.pl.money += Math.round(st.merit * 0.5); S.pl.weekFought = 1;
   const P = ccPl(S), ok = !!R.capOk, ret = !!R.retreat || R.why === '超過任務時限';
@@ -666,8 +668,8 @@ const ccIdleOn = () => CAP.on && SIM.m && SIM.m.captain && SIM.m.captain.cc && S
 function ccIdle(S) {
   const P = ccPl(S); if (!P || !P.ships.length || S.fin) return ccRender();
   const s = S.sys[P.sys], R = CC_ROLES[S.role], li = CC_DIFF[S.diff].li, fac = SM_FAC[S.fac].game === 0 ? 0 : 1, mine = s.owner === S.fac;
-  const duel = { a: [P.ships.map((c) => c.key)], b: [], st: [[P.ships.map(ccShipStP)], []], li, real: true, idle: true, defs: [], ownDefs: mine ? ccDefsAlive(s).map((d) => ({ type: d.type, hp: d.hp })) : [],
-    ownYard: mine && s.yard, ownDepot: mine && s.depot, hm: R.tech.hull, shm: R.tech.shield };
+  const duel = { a: [P.ships.map((c) => c.key)], b: [], st: [[P.ships.map(ccShipStP)], []], li, real: true, idle: true, defs: [], ownDefs: mine ? ccDefsAlive(s).map((d) => ({ type: d.type, hp: d.hp, k: d.k })) : [],
+    ownYard: mine && s.yard, ownDepot: mine && s.depot, hm: R.tech.hull, shm: R.tech.shield, ...cpScene(S, s, true) };
   const m = capLayout({ ...capLoad(), fac, diff: li, env: ccSceneEnv(s), mis: 'capture', seed: ccSeedOf(S, s), ally: '', duel, noDef: false });
   m.captain.cc = { kind: 'idle', sys: s.id, own: [P.id], foe: [], defIdx: [], seed: ccSeedOf(S, s), env: ccSceneEnv(s) }; m.name = `${s.name}・巡航`;
   CC.idle = { key: ccIdleKey(S, P) }; CC.over = false;

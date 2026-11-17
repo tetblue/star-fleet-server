@@ -22,7 +22,7 @@ CAP_MIS.capture = { name: '佔領戰', at: 's', text: (M) => M.idle ? `巡航待
 //   f＝艦種基本火力、alpha＝護盾的耐久價值、lambda＝飛彈齊射、gamma＝耐久的指數、delta＝分成兩隊的懲罰、k＝斜率；def＝軌道防禦每座的火力、耐久
 // surv：用遊戲裡的實戰重新擬合（無頭模擬高估了突擊艦的存活）；b＝艦種基準、c1＝勝率、c2＝自己剩下的耐久、c3＝船數比
 const CAP_ODDS = {
-  win: { fk: 1.5, f: { assault: 1, gunship: 2.5208, support: 1.7546 }, alpha: 0.1229, gamma: 0.284, delta: 0.0893, k: 7.763, lambda: 0.0438, def: { orb: { F: 0, E: 4 }, plat: { F: 0, E: 1.5 } } },   // def：217 場有軌道防禦的實戰擬合（耐久≈每 100 點船體 0.28；火力的影響量不出來）
+  win: { fk: 1.5, f: { assault: 1, gunship: 2.5208, support: 1.7546 }, alpha: 0.1229, gamma: 0.284, delta: 0.0893, k: 7.763, lambda: 0.0438, def: { orb: { F: 0, E: 4 }, plat: { F: 0, E: 1.5 }, hangar: { F: 0, E: 1.4 } } },   // def：217 場有軌道防禦的實戰擬合（耐久≈每 100 點船體 0.28；火力的影響量不出來）
   surv: { b: { assault: -3.3628, gunship: -0.2404, support: -1.247 }, c1: 0.4301, c2: 0.8858, c3: 2.828 },
 };
 // sides＝[{ squads: [[{ key, hp, sh, msl }]], diff }, 對方]（hp、sh、msl＝剩下的比例）；回傳我方（sides[0]）的勝率與每艘船的存活率
@@ -88,14 +88,15 @@ function capLayoutCapture(p, key, o) {
     if (D.yard) add('yard', spot(near(B, 220, 420), 170));
     if (D.ownDefs && D.ownDefs.length) {   // 迎擊戰：我方星系的軌道防禦，放在我方出發點的前方
       const H = { x: S.x, z: 600 };
-      D.ownDefs.forEach((d, k) => add(d.type, d.type === 'orb' && !D.ownDefs.slice(0, k).some((x) => x.type === 'orb') ? { x: H.x, y: alt(0.5), z: H.z } : spot(near(H, 90, 240), 120), { def: true, own: true, di: k, hpf: d.hp }));
+      D.ownDefs.forEach((d, k) => add(d.type, d.type === 'orb' && !D.ownDefs.slice(0, k).some((x) => x.type === 'orb') ? { x: H.x, y: alt(0.5), z: H.z } : spot(near(H, 90, 240), 120), { def: true, own: true, di: k, hpf: d.hp, mark: (d.k || 1) > 1 }));
     }
     if (D.depot) add('depot', spot(near(B, 220, 420), 170));
     if (D.ownYard || D.ownDepot) {   // 我方星系的設施（不參戰）：巡航、迎擊戰都放，放法一樣
       const H = { x: S.x, z: 600 };
-      if (D.ownYard) add('yard', spot(near(H, 160, 320), 150), { own: true });
-      if (D.ownDepot) add('depot', spot(near(H, 160, 320), 150), { own: true });
+      if (D.ownYard) add('yard', spot(near(H, 160, 320), 150), { own: true, mark: !!D.markYard });
+      if (D.ownDepot) add('depot', spot(near(H, 160, 320), 150), { own: true, mark: !!D.markDepot });
     }
+    if (D.pv && D.pv.length) { const H = { x: S.x, z: 600 }; for (const t of D.pv) add(t.cu, spot(near(H, 160, 320), 150), { own: true, pv: true, mark: true }); }   // 你的建築（capplanet.js）：綠色識別燈
   } else if (!p.noDef) {
     if (li >= 1) add('orb', { x: B.x, z: B.z }, { def: true });   // B 已經在 used 裡，直接放在據點正中央
     for (let k = 0, n = [1, 1, 2, 2, 3][li]; k < n; k++) add('plat', spot(near(B, 140, 320), 160), { def: true });

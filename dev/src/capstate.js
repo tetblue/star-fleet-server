@@ -76,6 +76,13 @@ function capResumeBind(p, keep) {
 
 // ───── 太空設施的模型：專案裡的太空站（models/<陣營>/太空站），載入前先顯示幾何造型 ─────
 // [大小 0～2（小、中、大）, 模型長度＝單位半徑的幾倍]
+// 你的建築、你強化過的建築：頂上一顆綠色的識別燈（capplanet.js）
+let CAP_BEACON = null;
+function capMarkBeacon(o, g, k = 1.5) {
+  if (!g.mark) return;
+  if (!CAP_BEACON) CAP_BEACON = { geo: new THREE.SphereGeometry(1, 10, 8), mat: new THREE.MeshBasicMaterial({ color: 0x3fdf8f }) };
+  const b = new THREE.Mesh(CAP_BEACON.geo, CAP_BEACON.mat); b.userData.shared = true; b.userData.beacon = true; b.scale.setScalar(Math.max(0.5, g.r * 0.22)); b.position.y = g.r * k * 0.55 + 1; o.add(b);
+}
 const CAP_STATION = { orb: [2, 4], plat: [0, 2.6], hangar: [1, 2.8], relay: [0, 2.4], yard: [1, 3], depot: [0, 2.8] };
 function capStationModel(o, g) {
   const S = CAP_STATION[g.cu]; if (!S) return;
@@ -85,5 +92,6 @@ function capStationModel(o, g) {
     const M = getModel(key) || getModel('es' + S[0]); if (!M) return;
     for (const c of o.children.slice()) { o.remove(c); if (c.geometry) c.geometry.dispose(); }   // 幾何造型的材質是整個戰場共用的（V.mats），capSpaceEnd 再釋放
     const m = new THREE.Mesh(M.lods[0], M.mat); m.userData.shared = true; m.scale.setScalar(g.r * S[1]); o.add(m);
+    capMarkBeacon(o, g, S[1]);
   });
 }
