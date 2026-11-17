@@ -56,6 +56,7 @@ for (let r = 0; r < RUNS; r++) {
   if (S.fin) agg.fin++;
   for (const s of S.sys) for (const b of s.bd || []) agg.bld[b.k] = (agg.bld[b.k] || 0) + 1;
   for (const l of S.log) if (l.t.includes('原本是中立')) { const k = l.t.match(/：(.*?)，歸/)[1]; agg.nc = agg.nc || {}; agg.nc[k] = (agg.nc[k] || 0) + 1; }
+  agg.nz = (agg.nz || 0) + S.sys.filter((s) => s.nz).length; agg.nzF = (agg.nzF || 0) + S.sys.filter((s) => s.nz && s.owner !== 3).length; agg.neuM = (agg.neuM || 0) + S.missions.filter((m) => m.neu).length; agg.pvnz = (agg.pvnz || 0) + S.sys.reduce((a, s) => a + (s.pv || []).filter((x) => x.nz).length, 0);
   agg.riot += S.log.filter((l) => l.t.includes('暴動')).length; agg.take += S.log.filter((l) => l.t.includes('接管')).length; agg.raze += S.log.filter((l) => l.t.includes('破壞了')).length;
 }
 const per = (v) => (v / RUNS).toFixed(1), fac = ['聯盟', '帝國', '海盜', '中立'];
@@ -63,4 +64,5 @@ console.log(`${RUNS} 局 × ${TURNS} 週（難度 ${DIFF}、${ROLE}${AUTO ? '、
 agg.sys.forEach((v, k) => { if (!agg.money[k]) return; const per = (x) => (x / agg.n[k]).toFixed(1); console.log(`(${agg.n[k]} 局) ` + `第 ${k * 10 + 1} 週：星系 ${v.map((x, f) => `${fac[f]} ${per(x)}`).join('・')}｜勢力資金 ${agg.money[k].map((x) => per(x)).join('／')}｜船 ${agg.sq[k].map((x) => per(x)).join('／')}｜玩家資金 ${per(agg.pl[k])}｜船塢 ${per(agg.yards[k])}｜平均等級 ${(agg.tier[k] / agg.n[k]).toFixed(2)}・繁榮 ${(agg.prosp[k] / agg.n[k]).toFixed(1)}${agg.inc[k] ? `｜收入 ${agg.inc[k].map((x) => per(x)).join('／')}` : ''}`); });
 if (Object.keys(agg.bld).length) console.log('最後的建築（每局）：' + Object.entries(agg.bld).map(([k, v]) => `${k} ${per(v)}`).join('・'));
 if (agg.nc) console.log('中立被佔領的原因：', JSON.stringify(agg.nc));
+if (agg.nz != null) console.log(`商會據點 ${per(agg.nz)} 個星系（在非中立星系 ${per(agg.nzF)}）・商會委託 ${per(agg.neuM)} 個・辦事處的私人建築 ${per(agg.pvnz)}`);
 console.log(`暴動 ${per(agg.riot)}・接管 ${per(agg.take)}・玩家破壞 ${per(agg.raze)}（每局的紀錄數）`);

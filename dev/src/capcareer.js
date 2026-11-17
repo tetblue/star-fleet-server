@@ -142,6 +142,7 @@ function ccNewGame(o) {
   ccPlan(S);
   ccT(S);   // 研發：開局軍階已經能造的船型算研究好了
   ccShopInit(S);   // 商店
+  cpNzInit(S);   // 星際商會在各星系的據點、商船隊（capplanet.js）
   return S;
 }
 // 星系的軌道防禦與後勤設施（依擁有者、等級）
@@ -485,11 +486,12 @@ function ccCanMove(S, to, P = ccPl(S)) {
   return '';
 }
 const ccBaseK = (S, P) => (P.sys === S.pl.base ? 0.5 : 1);   // 據點：半價
-function ccRepairCost(S, P) { return Math.round(P.ships.reduce((a, c) => a + (1 - c.hp) * CAP_HULLS[c.key].hp, 0) * CC_RULE.repair * ccBaseK(S, P) * cpRepK(S, S.sys[P.sys])); }
-function ccMissileCost(S, P) { return Math.round(P.ships.reduce((a, c) => a + (CAP_HULLS[c.key].msl ? (1 - c.msl) * CAP_HULLS[c.key].msl.n : 0), 0) * CC_RULE.missile * ccBaseK(S, P) * (cpStore(S, S.sys[P.sys]) ? 1 : cpMslK(S, S.sys[P.sys]))); }
+function ccRepairCost(S, P) { return Math.round(P.ships.reduce((a, c) => a + (1 - c.hp) * CAP_HULLS[c.key].hp, 0) * CC_RULE.repair * ccBaseK(S, P) * (S.sys[P.sys].owner === S.fac ? cpRepK(S, S.sys[P.sys]) : CP_RULE.dockK)); }
+function ccMissileCost(S, P) { return Math.round(P.ships.reduce((a, c) => a + (CAP_HULLS[c.key].msl ? (1 - c.msl) * CAP_HULLS[c.key].msl.n : 0), 0) * CC_RULE.missile * ccBaseK(S, P) * (cpStore(S, S.sys[P.sys]) ? 1 : S.sys[P.sys].owner === S.fac ? cpMslK(S, S.sys[P.sys]) : CP_RULE.dockK)); }
 function ccCanService(S, kind, P = ccPl(S)) {
   const s = S.sys[P.sys];
   if (kind === 'missile' && cpStore(S, s)) return '';   // 你的倉庫
+  if ((kind === 'repair' || kind === 'missile') && cpNzDock(S, s)) return '';   // 商會維修站
   if (s.owner !== S.fac) return '要在己方的星系';
   if (kind === 'repair' && !s.yard) return '這裡沒有維修船塢';
   if (kind === 'missile' && !(s.depot || s.yard || s.cap)) return '這裡沒有補給站';
@@ -752,7 +754,7 @@ function ccBpDrop(S, fac, n, p, where) {
 
 // 商店：中立星系的貿易站、海盜星系的黑市（開局時挑幾個，s.shop）。小隊要開過去；貨每週換；價格看好感度與聲望。
 // 貿易站：那個星系的擁有者跟你交戰中就不賣（中立的照賣）；黑市誰都賣，但貴 30%。
-const CC_SHOP = { trade: { name: '貿易站', n: 2, k: 1, fav: SM_N }, black: { name: '海盜黑市', n: 2, k: 1.3, fav: SM_P }, bp: 450, rp: [[40, 320], [70, 480]], xp: [25, 350] };
+const CC_SHOP = { nz: { name: '商會貿易所', n: 0, k: 1.1, fav: SM_N }, trade: { name: '貿易站', n: 2, k: 1, fav: SM_N }, black: { name: '海盜黑市', n: 2, k: 1.3, fav: SM_P }, bp: 450, rp: [[40, 320], [70, 480]], xp: [25, 350] };
 function ccShopInit(S) {
   if (S.shopInit) return; S.shopInit = 1;
   const nt = S.sys.filter((s) => s.owner === SM_N && !s.cap), np = S.sys.filter((s) => s.owner === SM_P && !s.cap);
@@ -776,6 +778,7 @@ function ccShopK(S, s) { const T = CC_SHOP[s.shop], fav = ccFavOf(S, T.fav), fam
 const ccShopItemName = (it) => (it.kind === 'bp' ? `藍圖：${ccBpName(it.k)}（${SM_FAC[CC_ORG[it.k]].name}）` : it.kind === 'rp' ? `研究資料（研究點數 +${it.n}）` : `教官訓練（在場你的小隊每艘 +${it.n} 經驗）`);
 function ccShopWhy(S, s) {
   if (!s.shop) return '這裡沒有商店';
+  if (s.shop === 'nz' && !cpNzOk(S)) return `中立好感度要 ${CP_RULE.nzCard}，星際商會才跟你做生意`;
   if (!S.sq.some((q) => q.pl && q.ships.length && q.sys === s.id)) return '要有你的小隊在這裡';
   if (s.shop === 'trade' && s.owner !== S.fac && s.owner !== SM_N && ccHostile(S, S.fac, s.owner)) return `${SM_FAC[s.owner].name}跟你交戰中，貿易站不賣你`;
   return '';
@@ -792,7 +795,7 @@ function ccShopBuy(S, s, i) {
   if (it.kind === 'bp') ccBpGet(S, it.k, `在 ${s.name} 的${CC_SHOP[s.shop].name}買的`);
   else if (it.kind === 'rp') ccRpGain(S, it.n, `在 ${s.name} 買研究資料`);
   else for (const q of S.sq.filter((x) => x.pl && x.sys === s.id)) for (const c of q.ships) ccXp(S, q, c, it.n);
-  if (s.shop === 'trade') ccFav(S, SM_N, 1);   // 中立好感度
+  if (s.shop === 'trade' || s.shop === 'nz') ccFav(S, SM_N, 1);   // 中立好感度
   ccLog(S, `在 ${s.name} 的${CC_SHOP[s.shop].name}花了 ${it.p} 資金：${ccShopItemName(it)}`, ''); return '';
 }
 
@@ -1040,4 +1043,5 @@ function ccLoad() { try { const t = STORE.getItem(CC_STORE); const S = t ? JSON.
     if (S.pl.rank == null) S.pl.rank = S.pl.merit >= 2000 ? 2 : S.pl.merit >= 800 ? 1 : 0;   // 舊存檔：照以前的指揮權換算軍階
     ccT(S); ccShopInit(S);   // 舊存檔：研發、商店
     for (const s of S.sys) if (!s.bd) { const y = s.yard, d = s.depot; cpInit(S, s); if (!y) cpKill(S, s, 'yard'); if (!d) cpKill(S, s, 'depot'); }   // 舊存檔：星球建設
+    cpNzInit(S);   // 舊存檔：商會的據點、商船隊
     return S; } catch (e) { return null; } }

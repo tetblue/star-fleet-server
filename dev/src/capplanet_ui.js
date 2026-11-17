@@ -15,7 +15,7 @@ function cpMineSum(S, s) {   // 你在這裡的投資
 }
 const cpTkTx = (S, b) => `<span style="color:#ffb35a">接管中：${SM_FAC[b.tk.f].name}再 ${b.tk.left} 週接管${b.raze ? '・<b>這週結束時破壞</b>' : ''}</span>`;
 function cpView(s) {
-  const S = CC.S, V = ccSee(S, s), live = V.live, mine = s.owner === S.fac, neu = s.owner === SM_N;
+  const S = CC.S, V = ccSee(S, s), live = V.live, mine = s.owner === S.fac, nz = cpNzRule(S, s), neu = s.owner === SM_N || nz;
   const R = cpInc(S, s), K = cpRazeK(S), btn = (attr, tx, why) => `<button class="g-btn" ${attr} ${why ? `disabled title="${smuEsc(why)}"` : ''}>${tx}</button>`;
   // 狀況
   const head = live ? `<dl class="sm-kv"><dt>擁有者</dt><dd>${SM_FAC[s.owner].name}・${SM_TIER[s.tier]}${s.tier < 4 ? `（人口到 ${Math.round(SM_TIER_CAP[s.tier] * 0.7)} 可以升級）` : ''}</dd>
@@ -24,7 +24,7 @@ function cpView(s) {
       <dt>地面防禦</dt><dd>${s.def}／${s.def0}（基礎 ${s.gd0}${s.bd.filter((b) => cpAct(b) && CP_B[b.k].gd).map((b) => `＋${CP_B[b.k].name} ${b.lv}`).join('')}${s.mob ? '＋戰時動員 1' : ''}${s.riot ? '−暴動 1' : ''}）</dd>
       ${s.mob ? `<dt>政策</dt><dd>戰時動員（前線）：地面防禦 +1、收入 ×${CP_RULE.mob.inc}、繁榮目標 −${CP_RULE.mob.prosp}</dd>` : ''}
       <dt>勢力的收入</dt><dd>每週 <b>${Math.round(R.g - R.up)}</b><br><span class="g-dim">人口×（0.4＋繁榮/100）×${CP_RULE.incK}＝${Math.round(R.base)}${R.b.map(([b, v]) => `・${CP_B[b.k].name} +${Math.round(v)}`).join('')}・維護 −${R.up}${s.sg ? '・圍城中＝0' : ''}${ccCut(S, s) ? '・補給切斷 ×0.5' : ''}</span></dd>
-      ${neu ? `<dt>中立好感度</dt><dd>${Math.round(ccFavOf(S, SM_N))}（${cpNeuTier(S)[3]}）：中立星系你總共能蓋 ${cpPvCap(S, true)} 座、每個星系 ${cpNeuTier(S)[2]} 座</dd>` : ''}</dl>`
+      ${cpNzRow(S, s, V)}${neu ? `<dt>中立好感度</dt><dd>${Math.round(ccFavOf(S, SM_N))}（${cpNeuTier(S)[3]}）：${nz ? '這裡有商會辦事處，照中立規則；' : ''}中立星系（含辦事處）你總共能蓋 ${cpPvCap(S, true)} 座、每個星系 ${cpNeuTier(S)[2]} 座</dd>` : ''}</dl>`
     : `<p class="g-dim">${V.age == null ? '沒有情報。' : `${V.age} 週前的情報；建築要看得到這個星系才知道。`}</p>`;
   // 勢力的建築
   const fac = live ? ['g', 'o'].map((at) => {
@@ -69,4 +69,19 @@ function cpScene(S, s, here) {
   const mine = s.owner === S.fac;
   return { pv: (s.pv || []).filter((p) => cpAct(p) && CP_PV_CU[p.k]).map((p) => ({ cu: CP_PV_CU[p.k] })),
     markYard: mine && s.bd.some((b) => b.k === 'yard' && b.inv && cpAct(b)), markDepot: mine && s.bd.some((b) => b.k === 'depot' && b.inv && cpAct(b)) };
+}
+
+// 星圖：星際商會的標記（中立的亮黃色）：◇＝有據點、◆＝有商船隊（同時有就畫實心）
+function cpNzIco(g, x, y, nu, nz) {
+  g.save(); g.translate(x, y); g.rotate(Math.PI / 4);
+  g.strokeStyle = '#ffd23f'; g.lineWidth = 1.6; g.fillStyle = nu ? '#ffd23f' : 'rgba(255,210,63,0.12)';
+  g.fillRect(-4, -4, 8, 8); g.strokeRect(-4, -4, 8, 8); g.restore();
+  if (nu > 1) { g.fillStyle = '#ffd23f'; g.font = 'bold 10px sans-serif'; g.textAlign = 'right'; g.fillText(String(nu), x - 7, y + 4); g.textAlign = 'center'; }
+}
+// 星系卡片的一列：商會的據點、商船隊（中立好感度 30 以上，而且看得到這個星系或好感度 50 以上）
+function cpNzRow(S, s, V) {
+  const nu = cpNuAt(S, s.id);
+  if ((!s.nz && !nu.length) || !cpNzOk(S) || (!V.live && !cpNzShow(S))) return '';
+  const b = s.nz ? s.nz.b.map((k) => CP_NZ[k].name) : [];
+  return `<dt>星際商會</dt><dd style="color:#ffd23f">${[...b, ...nu.map((u) => u.name)].join('、')}${V.live && cpNzRule(S, s) ? '<div class="g-dim" style="font-size:11px">辦事處：可以照中立規則蓋你的建築</div>' : ''}${V.live && cpNzDock(S, s) ? '<div class="g-dim" style="font-size:11px">維修站：可以修理、補飛彈（×' + CP_RULE.dockK + '）</div>' : ''}</dd>`;
 }

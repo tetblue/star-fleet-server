@@ -26251,6 +26251,7 @@ function ccNewGame(o) {
   ccPlan(S);
   ccT(S);   // 研發：開局軍階已經能造的船型算研究好了
   ccShopInit(S);   // 商店
+  cpNzInit(S);   // 星際商會在各星系的據點、商船隊（capplanet.js）
   return S;
 }
 // 星系的軌道防禦與後勤設施（依擁有者、等級）
@@ -26594,11 +26595,12 @@ function ccCanMove(S, to, P = ccPl(S)) {
   return '';
 }
 const ccBaseK = (S, P) => (P.sys === S.pl.base ? 0.5 : 1);   // 據點：半價
-function ccRepairCost(S, P) { return Math.round(P.ships.reduce((a, c) => a + (1 - c.hp) * CAP_HULLS[c.key].hp, 0) * CC_RULE.repair * ccBaseK(S, P) * cpRepK(S, S.sys[P.sys])); }
-function ccMissileCost(S, P) { return Math.round(P.ships.reduce((a, c) => a + (CAP_HULLS[c.key].msl ? (1 - c.msl) * CAP_HULLS[c.key].msl.n : 0), 0) * CC_RULE.missile * ccBaseK(S, P) * (cpStore(S, S.sys[P.sys]) ? 1 : cpMslK(S, S.sys[P.sys]))); }
+function ccRepairCost(S, P) { return Math.round(P.ships.reduce((a, c) => a + (1 - c.hp) * CAP_HULLS[c.key].hp, 0) * CC_RULE.repair * ccBaseK(S, P) * (S.sys[P.sys].owner === S.fac ? cpRepK(S, S.sys[P.sys]) : CP_RULE.dockK)); }
+function ccMissileCost(S, P) { return Math.round(P.ships.reduce((a, c) => a + (CAP_HULLS[c.key].msl ? (1 - c.msl) * CAP_HULLS[c.key].msl.n : 0), 0) * CC_RULE.missile * ccBaseK(S, P) * (cpStore(S, S.sys[P.sys]) ? 1 : S.sys[P.sys].owner === S.fac ? cpMslK(S, S.sys[P.sys]) : CP_RULE.dockK)); }
 function ccCanService(S, kind, P = ccPl(S)) {
   const s = S.sys[P.sys];
   if (kind === 'missile' && cpStore(S, s)) return '';   // 你的倉庫
+  if ((kind === 'repair' || kind === 'missile') && cpNzDock(S, s)) return '';   // 商會維修站
   if (s.owner !== S.fac) return '要在己方的星系';
   if (kind === 'repair' && !s.yard) return '這裡沒有維修船塢';
   if (kind === 'missile' && !(s.depot || s.yard || s.cap)) return '這裡沒有補給站';
@@ -26861,7 +26863,7 @@ function ccBpDrop(S, fac, n, p, where) {
 
 // 商店：中立星系的貿易站、海盜星系的黑市（開局時挑幾個，s.shop）。小隊要開過去；貨每週換；價格看好感度與聲望。
 // 貿易站：那個星系的擁有者跟你交戰中就不賣（中立的照賣）；黑市誰都賣，但貴 30%。
-const CC_SHOP = { trade: { name: '貿易站', n: 2, k: 1, fav: SM_N }, black: { name: '海盜黑市', n: 2, k: 1.3, fav: SM_P }, bp: 450, rp: [[40, 320], [70, 480]], xp: [25, 350] };
+const CC_SHOP = { nz: { name: '商會貿易所', n: 0, k: 1.1, fav: SM_N }, trade: { name: '貿易站', n: 2, k: 1, fav: SM_N }, black: { name: '海盜黑市', n: 2, k: 1.3, fav: SM_P }, bp: 450, rp: [[40, 320], [70, 480]], xp: [25, 350] };
 function ccShopInit(S) {
   if (S.shopInit) return; S.shopInit = 1;
   const nt = S.sys.filter((s) => s.owner === SM_N && !s.cap), np = S.sys.filter((s) => s.owner === SM_P && !s.cap);
@@ -26885,6 +26887,7 @@ function ccShopK(S, s) { const T = CC_SHOP[s.shop], fav = ccFavOf(S, T.fav), fam
 const ccShopItemName = (it) => (it.kind === 'bp' ? `藍圖：${ccBpName(it.k)}（${SM_FAC[CC_ORG[it.k]].name}）` : it.kind === 'rp' ? `研究資料（研究點數 +${it.n}）` : `教官訓練（在場你的小隊每艘 +${it.n} 經驗）`);
 function ccShopWhy(S, s) {
   if (!s.shop) return '這裡沒有商店';
+  if (s.shop === 'nz' && !cpNzOk(S)) return `中立好感度要 ${CP_RULE.nzCard}，星際商會才跟你做生意`;
   if (!S.sq.some((q) => q.pl && q.ships.length && q.sys === s.id)) return '要有你的小隊在這裡';
   if (s.shop === 'trade' && s.owner !== S.fac && s.owner !== SM_N && ccHostile(S, S.fac, s.owner)) return `${SM_FAC[s.owner].name}跟你交戰中，貿易站不賣你`;
   return '';
@@ -26901,7 +26904,7 @@ function ccShopBuy(S, s, i) {
   if (it.kind === 'bp') ccBpGet(S, it.k, `在 ${s.name} 的${CC_SHOP[s.shop].name}買的`);
   else if (it.kind === 'rp') ccRpGain(S, it.n, `在 ${s.name} 買研究資料`);
   else for (const q of S.sq.filter((x) => x.pl && x.sys === s.id)) for (const c of q.ships) ccXp(S, q, c, it.n);
-  if (s.shop === 'trade') ccFav(S, SM_N, 1);   // 中立好感度
+  if (s.shop === 'trade' || s.shop === 'nz') ccFav(S, SM_N, 1);   // 中立好感度
   ccLog(S, `在 ${s.name} 的${CC_SHOP[s.shop].name}花了 ${it.p} 資金：${ccShopItemName(it)}`, ''); return '';
 }
 
@@ -27149,6 +27152,7 @@ function ccLoad() { try { const t = STORE.getItem(CC_STORE); const S = t ? JSON.
     if (S.pl.rank == null) S.pl.rank = S.pl.merit >= 2000 ? 2 : S.pl.merit >= 800 ? 1 : 0;   // 舊存檔：照以前的指揮權換算軍階
     ccT(S); ccShopInit(S);   // 舊存檔：研發、商店
     for (const s of S.sys) if (!s.bd) { const y = s.yard, d = s.depot; cpInit(S, s); if (!y) cpKill(S, s, 'yard'); if (!d) cpKill(S, s, 'depot'); }   // 舊存檔：星球建設
+    cpNzInit(S);   // 舊存檔：商會的據點、商船隊
     return S; } catch (e) { return null; } }
 
 // ═══════════════════════ 艦長生涯：星球建設與經營（2026-11-17，企劃第五節） ═══════════════════════
@@ -27336,8 +27340,8 @@ function cpBuildTick(S, s) {
     }
   }
   const p = s.pq[0];
-  if (p && !s.sg && (s.owner === S.fac || s.owner === SM_N) && !(foe && CP_PV[p.k].at === 'o')) {
-    if (--p.left <= 0) { s.pq.shift(); s.pv.push({ id: S.nextId++, k: p.k, cost: p.cost }); ccLog(S, `你在 ${s.name} 的${CP_PV[p.k].name}蓋好了（${CP_PV[p.k].desc}）`, 'ok'); }
+  if (p && !s.sg && (s.owner === S.fac || s.owner === SM_N || p.nz) && !(foe && CP_PV[p.k].at === 'o')) {
+    if (--p.left <= 0) { s.pq.shift(); s.pv.push({ id: S.nextId++, k: p.k, cost: p.cost, nz: p.nz ? 1 : 0 }); ccLog(S, `你在 ${s.name} 的${CP_PV[p.k].name}蓋好了（${CP_PV[p.k].desc}）`, 'ok'); }
   }
 }
 // 失守：接管（每週先處理破壞、再倒數）；ccSiege 之前呼叫，所以佔領的那一週不會倒數，你至少有一週可以下令破壞
@@ -27376,18 +27380,19 @@ function cpCapture(S, s, was, f, raid) {
     b.tk = { f, from: b.tk ? b.tk.from : was, left: b.lv };
   }
   for (const p of s.pv) {
+    if (p.nz) continue;   // 商會辦事處的保護：誰佔領都不動
     if (f === S.fac) { if (p.tk) { p.tk = null; ccLog(S, `${s.name} 回到你的陣營：你的${CP_PV[p.k].name}原樣還你`, 'ok'); } continue; }
     if (!p.tk) p.tk = { f, left: CP_PV[p.k].w };
   }
-  const back = s.bq.reduce((a, o) => a + Math.round((o.pay || 0) * 0.5), 0) + (f === S.fac ? 0 : s.pq.reduce((a, o) => a + Math.round(o.cost * 0.5), 0));
+  const back = s.bq.reduce((a, o) => a + Math.round((o.pay || 0) * 0.5), 0) + (f === S.fac ? 0 : s.pq.filter((o) => !o.nz).reduce((a, o) => a + Math.round(o.cost * 0.5), 0));
   if (back) { S.pl.money += back; ccLog(S, `${s.name} 易主：你在那裡排隊的建設取消，退回 ${back} 資金`, 'bad'); }
-  s.bq = []; if (f !== S.fac) s.pq = [];
+  s.bq = []; if (f !== S.fac) s.pq = s.pq.filter((o) => o.nz);
   if (was === SM_N && ccAt(S, s.id).some((q) => q.pl)) { ccFav(S, SM_N, -15); ccLog(S, `你參與佔領中立的 ${s.name}：中立好感度 −15（${Math.round(ccFavOf(S, SM_N))}）`, 'bad'); }
   cpSync(S, s);
 }
 // 中立好感度：太低＝查封；比能蓋的數量多＝多的停止運作；商行每週 +0.5（最多 +2）
 function cpNeuTick(S) {
-  const T = cpNeuTier(S), L = S.sys.filter((s) => s.owner === SM_N && s.pv).flatMap((s) => s.pv.filter((p) => !p.tk).map((p) => [s, p]));
+  const T = cpNeuTier(S), L = S.sys.filter((s) => s.pv).flatMap((s) => s.pv.filter((p) => !p.tk && (s.owner === SM_N || p.nz)).map((p) => [s, p]));
   if (T[1] === 0) for (const [s, p] of L) if (smRnd(S) < CP_RULE.seize) { s.pv.splice(s.pv.indexOf(p), 1); ccLog(S, `中立好感度太低：你在 ${s.name} 的${CP_PV[p.k].name}被查封`, 'bad'); }
   const live = L.filter(([s, p]) => s.pv.includes(p));
   live.forEach(([s, p], i) => (p.off = i >= T[1] ? 1 : 0));
@@ -27417,16 +27422,18 @@ function cpUp(S, s, b) {
 }
 // 你在己方星系、中立星系能蓋幾座、已經蓋（或排隊）幾座
 function cpPvCount(S, neu) {
-  return S.sys.reduce((a, s) => a + (s.pv && (s.owner === SM_N) === neu && (neu || s.id !== S.pl.base) ? s.pv.length + s.pq.length : 0), 0);
+  let n = 0;
+  for (const s of S.sys) for (const p of (s.pv || []).concat(s.pq || [])) { const isN = s.owner === SM_N || !!p.nz; if (isN === neu && (neu || s.id !== S.pl.base)) n++; }
+  return n;
 }
 const cpPvCap = (S, neu) => (neu ? cpNeuTier(S)[1] + (S.pl.neuBonus || 0) : CP_RULE.pvRank[S.pl.rank || 0]);
-function cpPvSlots(S, s, at) {   // 這個星系你的區塊（地表、軌道各幾格）
-  if (s.owner === SM_N) return at === 'g' || at === 'o' ? cpNeuTier(S)[2] : 0;   // 中立：合計上限（地表＋軌道）
+function cpPvSlots(S, s, at, neu = s.owner === SM_N) {   // 這個星系你的區塊（地表、軌道各幾格）
+  if (neu) return at === 'g' || at === 'o' ? cpNeuTier(S)[2] : 0;   // 中立：合計上限（地表＋軌道）
   return (at === 'g' ? (s.tier >= 2 ? 2 : 1) : 1) + (s.id === S.pl.base ? 1 : 0);
 }
 function cpPvWhy(S, s, k) {
-  const P = CP_PV[k], neu = s.owner === SM_N;
-  if (!neu && s.owner !== S.fac) return '只能蓋在你的陣營或中立的星系';
+  const P = CP_PV[k], nz = cpNzRule(S, s), neu = s.owner === SM_N || nz;
+  if (!neu && s.owner !== S.fac) return '只能蓋在你的陣營、中立的星系，或有星際商會辦事處的星系';
   if (P.neu && !neu) return '只能蓋在中立星系';
   if (P.tech && !ccHas(S, P.tech)) return `要先研究${CC_TECH[P.tech].name}`;
   if (k === 'pdock' && !s.yard) return '這裡要有維修船塢';
@@ -27434,7 +27441,7 @@ function cpPvWhy(S, s, k) {
   if (s.sg) return '圍城中不能施工';
   if (s.pq.length) return '這個星系你一次只能蓋一件';
   const mine = s.pv.length + s.pq.length;
-  if (neu) { if (mine >= cpPvSlots(S, s, 'g')) return `中立星系每個最多 ${cpPvSlots(S, s, 'g')} 座（${cpNeuTier(S)[3]}）`; }
+  if (neu) { if (mine >= cpPvSlots(S, s, 'g', true)) return `${nz ? '商會辦事處' : '中立星系'}每個最多 ${cpPvSlots(S, s, 'g', true)} 座（${cpNeuTier(S)[3]}）`; }
   else if (s.pv.concat(s.pq).filter((x) => CP_PV[x.k].at === P.at).length >= cpPvSlots(S, s, P.at)) return `這裡你的${P.at === 'g' ? '地表' : '軌道'}區塊滿了`;
   if ((neu || s.id !== S.pl.base) && cpPvCount(S, neu) >= cpPvCap(S, neu)) return neu ? `中立星系你總共只能蓋 ${cpPvCap(S, true)} 座（中立好感度：${cpNeuTier(S)[3]}）` : `${ccRankOf(S).name}在己方星系最多蓋 ${cpPvCap(S, false)} 座（據點的不算）`;
   if (s.pv.some((p) => p.k === k) || s.pq.some((p) => p.k === k)) return '這裡已經有了';
@@ -27444,7 +27451,7 @@ function cpPvWhy(S, s, k) {
 }
 function cpPvBuild(S, s, k) {
   const why = cpPvExt(S, s, k); if (why) return why;
-  const P = CP_PV[k]; S.pl.money -= P.cost; s.pq.push({ k, left: P.w, tot: P.w, cost: P.cost });
+  const P = CP_PV[k]; S.pl.money -= P.cost; s.pq.push({ k, left: P.w, tot: P.w, cost: P.cost, nz: cpNzRule(S, s) ? 1 : 0 });
   ccLog(S, `在 ${s.name} 蓋${P.name}（${P.cost} 資金，${P.w} 週）`, 'ok'); return '';
 }
 const cpPvExt = (S, s, k) => cpPvWhy(S, s, k);
@@ -27529,6 +27536,7 @@ function cpWeek(S) {
   S.pl.inc = { sal: I.sal, div: Math.round(I.div), pv: Math.round(I.pv), up: Math.round(I.up), tax: Math.round(I.tax), rp: I.rp };
   for (const f of [SM_A, SM_E, SM_P, SM_N]) cpAiBuild(S, f);
   cpNeuTick(S);
+  cpNzTick(S);   // 商會的據點、商船隊
 }
 
 // ───── 中立的委託任務（星際商會）─────
@@ -27537,12 +27545,12 @@ const CP_NEU_REW = { escort: [350, 4], rescue: [400, 5], strike: [380, 4], expel
 function cpNeuGen(S) {
   const P = ccPl(S); if (!P || S.fin || ccFavOf(S, SM_N) < 30) return;
   if (S.missions.some((M) => M.state === 'open' && M.from === SM_N)) return;
-  const near = (n) => S.sys.filter((s) => s.owner === SM_N && smHop(S, P.sys, s.id) <= n);
+  const near = (n) => S.sys.filter((s) => (s.owner === SM_N || cpNzHas(s, 'office') || (S.nu || []).some((u) => u.sys === s.id)) && smHop(S, P.sys, s.id) <= n);
   const taken = (sid) => S.missions.some((M) => M.state === 'open' && M.sys === sid);
   const C = [];
   for (const s of near(2)) {
     if (taken(s.id)) continue;
-    const foe = ccAt(S, s.id).find((q) => q.fac !== SM_N && q.fac !== S.fac && ccHostile(S, S.fac, q.fac));
+    const foe = s.owner === SM_N && ccAt(S, s.id).find((q) => q.fac !== SM_N && q.fac !== S.fac && ccHostile(S, S.fac, q.fac));
     if (foe) C.push({ type: 'neu', op: 'expel', sys: s.id, sq: foe.id });
     C.push({ type: 'op', op: 'escort', sys: s.id });
   }
@@ -27560,7 +27568,7 @@ function cpNeuTick2(S) {
   for (const M of S.missions) {
     if (M.state !== 'open' || !M.neu) continue;
     const s = S.sys[M.sys];
-    if (s.owner !== SM_N && M.op !== 'strike') { M.state = 'gone'; ccLog(S, `${s.name} 已經不是中立星系：星際商會的委託取消`, ''); continue; }
+    if (M.type === 'neu' && s.owner !== SM_N) { M.state = 'gone'; ccLog(S, `${s.name} 已經不是中立星系：星際商會的委託取消`, ''); continue; }
     if (M.op === 'strike' && s.owner !== SM_P) { M.state = 'gone'; ccLog(S, `${s.name} 已經易主：星際商會的委託取消`, ''); continue; }
     if (M.type === 'neu') {
       const q = S.sq.find((x) => x.id === M.sq), plHere = ccAt(S, s.id).some((x) => x.pl);
@@ -27585,6 +27593,58 @@ function cpAuto(S) {
   }
 }
 const CP_API = { auto: cpAuto };
+
+// ───── 中立的據點與單位（第五輪，2026-11-17）─────
+// 就算沒有中立星系，星際商會也在任意星系有據點（s.nz.b）與商船隊（S.nu），誰擁有那個星系都一樣（佔領不會動它們、商船隊不參戰）。
+// 中立好感度 ≥ CP_RULE.nzMap：星圖標出哪些星系有商會的據點、商船隊；≥ CP_RULE.nzCard：星系卡片寫出來、可以使用。
+//   商會貿易所＝中立的商店（交戰中的勢力的星系也賣你）；商會維修站＝修理、補飛彈（好感度 50，價錢 ×1.3）；
+//   商會辦事處＝在別的勢力的星系也能照中立規則蓋你的建築（受商會保護，失守不會被接管），也會從這裡發委託。
+// 好感度 ≥ 70：每 8 週商會在你的小隊附近多開一個據點。
+Object.assign(CP_RULE, { nzMap: 50, nzCard: 30, dockFav: 50, dockK: 1.3, nzGrow: 8, nzMax: 14, nuN: 5, nuMove: 0.35 });
+const CP_NZ = {
+  post: { name: '商會貿易所', desc: '中立的商店：貨每週換，誰擁有這個星系都照樣賣你' },
+  dock: { name: '商會維修站', desc: '中立好感度 50 以上：修理、補飛彈（價錢 ×1.3）' },
+  office: { name: '商會辦事處', desc: '在這裡照中立規則蓋你的建築（受商會保護，星系易主也不會被接管）；委託從這裡發出' },
+};
+const CP_NU_NAMES = ['金穗', '長風', '遠帆', '晨星', '銀鷗', '恆河', '白鯨', '北斗', '流雲', '琥珀'];
+const cpNzHas = (s, k) => !!(s.nz && s.nz.b.includes(k));
+const cpNzOk = (S) => ccFavOf(S, SM_N) >= CP_RULE.nzCard;
+const cpNzShow = (S) => ccFavOf(S, SM_N) >= CP_RULE.nzMap;
+const cpNzRule = (S, s) => s.owner !== S.fac && s.owner !== SM_N && cpNzHas(s, 'office') && cpNzOk(S);   // 照中立規則蓋
+const cpNzDock = (S, s) => s.owner !== S.fac && cpNzHas(s, 'dock') && ccFavOf(S, SM_N) >= CP_RULE.dockFav;
+const cpNuAt = (S, sid) => (S.nu || []).filter((u) => u.sys === sid);
+function cpNzAdd(S, s, L) {
+  if (!s.nz) s.nz = { b: [] };
+  for (const k of L) if (!s.nz.b.includes(k)) s.nz.b.push(k);
+  if (s.nz.b.includes('post') && !s.shop) s.shop = 'nz';
+}
+function cpNzInit(S) {
+  if (S.nu) return;
+  for (const s of S.sys) {
+    if (s.owner === SM_N) { cpNzAdd(S, s, ['post', 'office'].concat(s.tier >= 2 ? ['dock'] : [])); continue; }
+    if (s.cap || smRnd(S) >= 0.22 + 0.08 * s.tier) continue;
+    cpNzAdd(S, s, ['post'].concat(smRnd(S) < 0.6 ? ['office'] : [], s.tier >= 2 && smRnd(S) < 0.5 ? ['dock'] : []));
+  }
+  const at = S.sys.filter((s) => s.nz);
+  S.nu = Array.from({ length: CP_RULE.nuN }, (_, i) => ({ id: i + 1, sys: (at[Math.floor(smRnd(S) * at.length)] || S.sys[0]).id, name: `商船隊「${CP_NU_NAMES[i % CP_NU_NAMES.length]}」` }));
+}
+// 每週：商船隊移動（有戰鬥的星系先離開，偏好有商會據點的星系）；好感度高時商會開新據點
+function cpNzTick(S) {
+  cpNzInit(S);
+  for (const u of S.nu) {
+    const s = S.sys[u.sys], hot = (s.hit ?? -99) >= S.turn - 1;
+    if (!hot && smRnd(S) >= CP_RULE.nuMove) continue;
+    const L = S.adj[u.sys].map((j) => S.sys[j]).filter((t) => (t.hit ?? -99) < S.turn - 1);
+    if (!L.length) continue;
+    const W = L.map((t) => (t.nz ? 3 : 1)), sum = W.reduce((a, b) => a + b, 0); let r = smRnd(S) * sum, k = 0; while (r > W[k]) r -= W[k++];
+    u.sys = L[Math.min(k, L.length - 1)].id;
+  }
+  if (S.turn % CP_RULE.nzGrow === 0 && ccFavOf(S, SM_N) >= 70 && S.sys.filter((s) => s.nz).length < CP_RULE.nzMax) {
+    const near = new Set(ccOwn(S).flatMap((q) => [q.sys, ...S.adj[q.sys]]));
+    const L = S.sys.filter((s) => near.has(s.id) && !cpNzHas(s, 'office')).sort((a, b) => b.tier - a.tier);
+    if (L[0]) { cpNzAdd(S, L[0], ['post', 'office']); ccLog(S, `星際商會在 ${L[0].name} 開了貿易所與辦事處（中立好感度 ${Math.round(ccFavOf(S, SM_N))}）`, 'ok'); }
+  }
+}
 
 // ═══════════════════════ 艦長生涯：畫面 ═══════════════════════
 // 星圖（canvas）＋星系卡片＋玩家小隊的狀態；樣式與對話框沿用星海生涯（SMU_CSS、smuModal、smuPick）。
@@ -27624,7 +27684,7 @@ function ccRender() {
     <div class="sm-top"><h2>艦長生涯</h2><span class="sm-chip">第 ${S.turn} 週</span><span class="sm-chip">${CC_ROLES[S.role].name}・${ccRankOf(S).name}</span><span class="sm-chip">資金 ${fmtN(Math.round(S.pl.money))}</span><span class="sm-chip">戰功 ${Math.round(S.pl.merit)}</span>${ccTopChips(S, cnt)}
       <span class="sm-btnbar"><button class="g-btn" id="cc-mis">任務${nMis ? `<span class="sm-badge">${nMis}</span>` : ''}</button><button class="g-btn" id="cc-tech" title="研究點數與研發樹">研發 <span class="g-dim">${ccT(S) && S.pl.rp}</span>${ccT(S).cur ? '<span class="sm-badge">…</span>' : ''}</button><button class="g-btn" id="cc-logb">紀錄</button><button class="g-btn" id="cc-quit">離開</button>${S.fin ? '' : `<button class="g-btn" id="cc-fly" title="回到${smuEsc(ccPl(S) ? S.sys[ccPl(S).sys].name : '')}的太空（${keyText('cap_map')}）">回到星系 ✈</button>`}<button class="g-btn primary" id="cc-end" ${S.fin ? 'disabled' : ''}>結束這一週 →</button></span></div>
     <div class="sm-map" id="cc-map"><canvas id="cc-cv"></canvas>
-      <div class="sm-leg" id="cc-leg" style="cursor:pointer;pointer-events:auto">${CC.leg ? `<div><b>圖例 ▾</b></div>${['own', 'ally', 'enemy', 'neutral'].map((k) => `<div><i style="background:${SMU_REL[k].col}"></i>${k === 'own' ? '你的小隊（★＋光圈＝親自指揮，白框＝選中）' : SMU_REL[k].name}</div>`).join('')}<div>箭頭＝一個小隊：越大船越多（1～5 艘）；停在星系下方，閃爍且在航道上＝這週要移動</div><div class="g-dim">星系的顏色＝擁有者跟你的關係：藍＝你的陣營、紅＝敵對、黃＝中立／停戰</div><div>! ＝ 你的小隊下週會被進攻</div><div>◆ 軌道防禦・⚓ 維修船塢・✚ 補給站・$ 商店（貿易站、黑市）・白圈＝首都</div><div>虛線圈：圍城中・⚔ 這週會交戰</div><div>箭頭：看得到的預定動向（你的小隊周圍、偵察過的星系）</div><div>藍色虛線大圈：偵察中・亂＝指揮中斷</div><div class="g-dim">點星系看詳情；點相鄰的星系下令移動</div>` : '<div><b>圖例 ▸</b></div>'}</div>
+      <div class="sm-leg" id="cc-leg" style="cursor:pointer;pointer-events:auto">${CC.leg ? `<div><b>圖例 ▾</b></div>${['own', 'ally', 'enemy', 'neutral'].map((k) => `<div><i style="background:${SMU_REL[k].col}"></i>${k === 'own' ? '你的小隊（★＋光圈＝親自指揮，白框＝選中）' : SMU_REL[k].name}</div>`).join('')}<div>箭頭＝一個小隊：越大船越多（1～5 艘）；停在星系下方，閃爍且在航道上＝這週要移動</div><div class="g-dim">星系的顏色＝擁有者跟你的關係：藍＝你的陣營、紅＝敵對、黃＝中立／停戰</div><div>! ＝ 你的小隊下週會被進攻</div><div>◆ 軌道防禦・⚓ 維修船塢・✚ 補給站・$ 商店（貿易站、黑市、商會貿易所）・白圈＝首都</div>${cpNzShow(S) ? '<div><span style="color:#ffd23f">◇</span> 星際商會的據點・<span style="color:#ffd23f">◆</span> 有商船隊（中立好感度 ' + CP_RULE.nzMap + ' 以上才標）</div>' : ''}<div>虛線圈：圍城中・⚔ 這週會交戰</div><div>箭頭：看得到的預定動向（你的小隊周圍、偵察過的星系）</div><div>藍色虛線大圈：偵察中・亂＝指揮中斷</div><div class="g-dim">點星系看詳情；點相鄰的星系下令移動</div>` : '<div><b>圖例 ▸</b></div>'}</div>
       <div class="sm-dock" id="cc-dock"></div><div class="sm-card" id="cc-card" hidden></div></div></div>`);
   gEl('cc-quit').onclick = () => { ccSave(S); ccIdleStop(); window.removeEventListener('resize', ccResize); GAME.spMode = 'captain'; showSingle(); };
   if (gEl('cc-fly')) gEl('cc-fly').onclick = () => ccFly();
@@ -27695,7 +27755,8 @@ function ccDraw(ts) {
     if (V.owner < 0) { g.fillStyle = '#cfd8e3'; g.font = 'bold 11px sans-serif'; g.fillText('?', x, y + 4); }
     if (s.cap) { g.strokeStyle = '#ffffff'; g.lineWidth = 1.5; g.beginPath(); g.arc(x, y, r + 1.5, 0, 7); g.stroke(); }   // 首都：白圈（黃色是中立）
     const dn = V.defs.length;
-    g.fillStyle = V.live ? '#cfd8e3' : '#7d8794'; g.font = '12px sans-serif'; g.fillText(`${s.name}${V.yard ? ' ⚓' : ''}${V.depot ? ' ✚' : ''}${s.shop ? ' $' : ''}${V.live || V.age == null ? '' : `（${V.age}週前）`}${s.id === S.pl.base ? '［據點］' : ''}`, x, y - r - 6);
+    g.fillStyle = V.live ? '#cfd8e3' : '#7d8794'; g.font = '12px sans-serif'; g.fillText(`${s.name}${V.yard ? ' ⚓' : ''}${V.depot ? ' ✚' : ''}${s.shop && (s.shop !== 'nz' || cpNzShow(S)) ? ' $' : ''}${V.live || V.age == null ? '' : `（${V.age}週前）`}${s.id === S.pl.base ? '［據點］' : ''}`, x, y - r - 6);
+    if ((s.nz || cpNuAt(S, s.id).length) && cpNzShow(S)) cpNzIco(g, x - r - 10, y, cpNuAt(S, s.id).length, !!s.nz);   // 星際商會（中立好感度夠才標）
     if (dn) { g.fillStyle = V.live ? '#e8eef8' : '#7d8794'; g.font = 'bold 11px sans-serif'; g.textAlign = 'left'; g.fillText('◆' + dn, x + r + 3, y + 4); g.textAlign = 'center'; }
     // 小隊：一隊一個箭頭（不寫數字），越大＝船越多；停著的錯開疊在星系下方，要移動的畫在航道上（迴圈後面畫）
     const stay = [];
@@ -27835,7 +27896,7 @@ function ccCard() {
     return on ? { id: 'cc-tcancel', name: `取消派出：${name}`, desc: `成功率 ${Math.round(O.p * 100)}%` } : { id, name: `派出${who}：${name}（計算）`, desc: `成功率 ${Math.round(O.p * 100)}%（${ccPartsTx(O.parts)}）・存活率 ${ccSurvTx(Q, O.surv)}${fx ? `・成功：${fx}` : ''}`, cls: 'go' }; };
   if (Q && !S.fin && qAt && s.sg && s.sg.f === S.fac) acts.push(me ? { id: 'cc-raid', name: '地面突襲', desc: busy ? '這週已經打過一場' : '親自打地面的破壞任務：成功＝這週結束時地面投降', off: busy, cls: 'go' } : taskAct('cc-traid', '地面突襲', { kind: 'raid', sys: s.id }, '這週結束時地面投降'));
   if (Q && !S.fin) for (const M of S.missions) if (M.sys === s.id && ccCanOp(S, M, Q)) acts.push(me ? { id: 'cc-op-' + M.id, name: `執行任務：${CC_OPFX[M.op].name}`, desc: busy ? '這週已經打過一場' : `${qAt ? '' : '從相鄰的星系滲透出擊・'}成功：${CC_OPFX[M.op].fx(S, M)}`, off: busy, cls: 'go' } : taskAct('cc-top-' + M.id, CC_OPFX[M.op].name, { kind: 'op', sys: s.id, mis: M.id }, CC_OPFX[M.op].fx(S, M)));
-  if (!S.fin && s.shop) acts.push({ id: 'cc-shop', name: `${CC_SHOP[s.shop].name}：買藍圖、研究資料`, desc: ccShopWhy(S, s) || '貨每週換', cls: ccShopWhy(S, s) ? '' : 'go' });
+  if (!S.fin && s.shop && (s.shop !== 'nz' || cpNzOk(S))) acts.push({ id: 'cc-shop', name: `${CC_SHOP[s.shop].name}：買藍圖、研究資料`, desc: ccShopWhy(S, s) || '貨每週換', cls: ccShopWhy(S, s) ? '' : 'go' });
   if (!S.fin && V.live && s.owner === S.fac && (s.yard || ccYq(S, s.id).length || ccResAt(S, s.id).length)) acts.push({ id: 'cc-yard', name: '船塢：訂造、預備艦', desc: ccYardSum(S, s) || (ccCanOrder(S, s) ? `訂造：${ccCanOrder(S, s)}` : '在這裡訂造新船（排隊建造，大船比較久）'), cls: 'go' });
   if (!S.fin && s.bd && (V.live || (s.pv || []).length)) acts.push({ id: 'cc-planet', name: '星球：建設、投資', desc: cpMineSum(S, s) || (s.owner === S.fac ? '強化勢力的建築、蓋你自己的建築' : s.owner === SM_N ? '在中立星系蓋你的建築（看中立好感度）' : '看建築與收入'), cls: (s.owner === S.fac || s.owner === SM_N) ? 'go' : '' });
   if (!S.fin && ccRankOf(S).base && s.owner === S.fac && s.yard && S.pl.base !== s.id) acts.push({ id: 'cc-base', name: '設為據點', desc: `${CC_RULE.baseCost} 資金・在據點修理、補飛彈半價，軌道防禦每週重建`, off: S.pl.money < CC_RULE.baseCost });
@@ -27852,7 +27913,7 @@ function ccCard() {
     <dl class="sm-kv">${intelTx}<dt>擁有者</dt><dd>${unk ? '不明' : SM_FAC[own0].name}${s.cap && !unk ? '・首都' : ''}${s.id === S.pl.base ? '・<b style="color:#3fdf8f">你的據點</b>' : ''}</dd>${unk ? '' : `<dt>等級</dt><dd>${SM_TIER[s.tier]}${V.live && s.bd ? `・${cpSum(S, s)}` : ''}・地面防禦 ${V.def}${V.live && s.def0 != null && s.def < s.def0 ? `／${s.def0}（受創，圍城 ${ccSiegeNeed(s)} 週）` : ''}</dd>
       <dt>軌道防禦</dt><dd>${dl.length ? dl.map((d) => `${CAP_UNIT[d.type].name} ${Math.round(d.hp * 100)}%`).join('、') : '沒有'}</dd>
       <dt>設施</dt><dd>${[V.yard ? '維修船塢（修船、造艦）' : '', V.depot ? '補給站（補飛彈）' : ''].filter(Boolean).join('、') || '沒有'}</dd>${V.live && ccYardSum(S, s) ? `<dt>你的船塢</dt><dd>${ccYardSum(S, s)}</dd>` : ''}`}
-      <dt>太空</dt><dd>${CAP_SPACE[s.scene || 'belt'].name}<div class="g-dim" style="font-size:11px">${CAP_SPACE[s.scene || 'belt'].desc}</div></dd>
+      ${cpNzRow(S, s, V)}<dt>太空</dt><dd>${CAP_SPACE[s.scene || 'belt'].name}<div class="g-dim" style="font-size:11px">${CAP_SPACE[s.scene || 'belt'].desc}</div></dd>
       ${V.live && s.sg ? (() => { const G = ccGroundScore(S, s, s.sg.f), P = G.p, f1 = (v) => (v >= 0 ? '+' : '') + v.toFixed(1); return `<dt>圍城</dt><dd>${SM_FAC[s.sg.f].name}・第 ${s.sg.w} 週（${ccSiegeNeed(s)} 週投降）</dd><dt>投降評分</dt><dd><b style="color:${G.v < 0 ? '#ff7a6b' : '#3fdf8f'}">${f1(G.v)}</b>${G.v < 0 ? '・下週投降' : '・抵抗'}<br><span class="g-dim">聲望 ${f1(P.fame)}・艦隊 ${f1(P.fleet)}・地面 ${f1(P.ground)}・鄰近艦隊 ${f1(P.near)}（負數就投降）</span></dd>`; })() : ''}
       ${V.live && ccCut(S, s) ? `<dt>補給</dt><dd style="color:#ffb35a">切斷到第 ${s.fx.cut} 週（不補飛彈、只修一半、防禦不重建）</dd>` : ''}
       ${ccIntel(S, s) ? `<dt>情報</dt><dd style="color:#7fdcff">偵察中，到第 ${s.fx.intel} 週</dd>` : ''}
@@ -28313,7 +28374,7 @@ function cpMineSum(S, s) {   // 你在這裡的投資
 }
 const cpTkTx = (S, b) => `<span style="color:#ffb35a">接管中：${SM_FAC[b.tk.f].name}再 ${b.tk.left} 週接管${b.raze ? '・<b>這週結束時破壞</b>' : ''}</span>`;
 function cpView(s) {
-  const S = CC.S, V = ccSee(S, s), live = V.live, mine = s.owner === S.fac, neu = s.owner === SM_N;
+  const S = CC.S, V = ccSee(S, s), live = V.live, mine = s.owner === S.fac, nz = cpNzRule(S, s), neu = s.owner === SM_N || nz;
   const R = cpInc(S, s), K = cpRazeK(S), btn = (attr, tx, why) => `<button class="g-btn" ${attr} ${why ? `disabled title="${smuEsc(why)}"` : ''}>${tx}</button>`;
   // 狀況
   const head = live ? `<dl class="sm-kv"><dt>擁有者</dt><dd>${SM_FAC[s.owner].name}・${SM_TIER[s.tier]}${s.tier < 4 ? `（人口到 ${Math.round(SM_TIER_CAP[s.tier] * 0.7)} 可以升級）` : ''}</dd>
@@ -28322,7 +28383,7 @@ function cpView(s) {
       <dt>地面防禦</dt><dd>${s.def}／${s.def0}（基礎 ${s.gd0}${s.bd.filter((b) => cpAct(b) && CP_B[b.k].gd).map((b) => `＋${CP_B[b.k].name} ${b.lv}`).join('')}${s.mob ? '＋戰時動員 1' : ''}${s.riot ? '−暴動 1' : ''}）</dd>
       ${s.mob ? `<dt>政策</dt><dd>戰時動員（前線）：地面防禦 +1、收入 ×${CP_RULE.mob.inc}、繁榮目標 −${CP_RULE.mob.prosp}</dd>` : ''}
       <dt>勢力的收入</dt><dd>每週 <b>${Math.round(R.g - R.up)}</b><br><span class="g-dim">人口×（0.4＋繁榮/100）×${CP_RULE.incK}＝${Math.round(R.base)}${R.b.map(([b, v]) => `・${CP_B[b.k].name} +${Math.round(v)}`).join('')}・維護 −${R.up}${s.sg ? '・圍城中＝0' : ''}${ccCut(S, s) ? '・補給切斷 ×0.5' : ''}</span></dd>
-      ${neu ? `<dt>中立好感度</dt><dd>${Math.round(ccFavOf(S, SM_N))}（${cpNeuTier(S)[3]}）：中立星系你總共能蓋 ${cpPvCap(S, true)} 座、每個星系 ${cpNeuTier(S)[2]} 座</dd>` : ''}</dl>`
+      ${cpNzRow(S, s, V)}${neu ? `<dt>中立好感度</dt><dd>${Math.round(ccFavOf(S, SM_N))}（${cpNeuTier(S)[3]}）：${nz ? '這裡有商會辦事處，照中立規則；' : ''}中立星系（含辦事處）你總共能蓋 ${cpPvCap(S, true)} 座、每個星系 ${cpNeuTier(S)[2]} 座</dd>` : ''}</dl>`
     : `<p class="g-dim">${V.age == null ? '沒有情報。' : `${V.age} 週前的情報；建築要看得到這個星系才知道。`}</p>`;
   // 勢力的建築
   const fac = live ? ['g', 'o'].map((at) => {
@@ -28367,6 +28428,21 @@ function cpScene(S, s, here) {
   const mine = s.owner === S.fac;
   return { pv: (s.pv || []).filter((p) => cpAct(p) && CP_PV_CU[p.k]).map((p) => ({ cu: CP_PV_CU[p.k] })),
     markYard: mine && s.bd.some((b) => b.k === 'yard' && b.inv && cpAct(b)), markDepot: mine && s.bd.some((b) => b.k === 'depot' && b.inv && cpAct(b)) };
+}
+
+// 星圖：星際商會的標記（中立的亮黃色）：◇＝有據點、◆＝有商船隊（同時有就畫實心）
+function cpNzIco(g, x, y, nu, nz) {
+  g.save(); g.translate(x, y); g.rotate(Math.PI / 4);
+  g.strokeStyle = '#ffd23f'; g.lineWidth = 1.6; g.fillStyle = nu ? '#ffd23f' : 'rgba(255,210,63,0.12)';
+  g.fillRect(-4, -4, 8, 8); g.strokeRect(-4, -4, 8, 8); g.restore();
+  if (nu > 1) { g.fillStyle = '#ffd23f'; g.font = 'bold 10px sans-serif'; g.textAlign = 'right'; g.fillText(String(nu), x - 7, y + 4); g.textAlign = 'center'; }
+}
+// 星系卡片的一列：商會的據點、商船隊（中立好感度 30 以上，而且看得到這個星系或好感度 50 以上）
+function cpNzRow(S, s, V) {
+  const nu = cpNuAt(S, s.id);
+  if ((!s.nz && !nu.length) || !cpNzOk(S) || (!V.live && !cpNzShow(S))) return '';
+  const b = s.nz ? s.nz.b.map((k) => CP_NZ[k].name) : [];
+  return `<dt>星際商會</dt><dd style="color:#ffd23f">${[...b, ...nu.map((u) => u.name)].join('、')}${V.live && cpNzRule(S, s) ? '<div class="g-dim" style="font-size:11px">辦事處：可以照中立規則蓋你的建築</div>' : ''}${V.live && cpNzDock(S, s) ? '<div class="g-dim" style="font-size:11px">維修站：可以修理、補飛彈（×' + CP_RULE.dockK + '）</div>' : ''}</dd>`;
 }
 
 // ───── 王牌飛行員：3D 機庫（機庫畫面的全螢幕背景）─────
