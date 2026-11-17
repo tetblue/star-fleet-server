@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>生涯結束</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="cap-ui.css">
+<style>
+/* 生涯結束（S.fin）：中上＝大標＋原因；中＝成績；左＝最後的小隊（擊沉）；右＝解鎖與最後的紀錄；下＝按鈕 */
+.over{position:absolute;left:0;right:0;top:120px;text-align:center}
+.over .en{font:700 18px var(--en);letter-spacing:.6em;color:var(--red)}
+.over h1{font:900 104px/1.1 var(--jp);letter-spacing:.3em;text-shadow:0 0 40px rgba(255,77,94,.45);animation:flick 2.4s 1}
+@keyframes flick{0%,12%,24%{opacity:0}6%,18%,30%,100%{opacity:1}}
+.over .why{display:inline-block;margin-top:8px;padding:8px 30px;background:rgba(255,77,94,.16);border-left:4px solid var(--red);border-right:4px solid var(--red);font:700 24px var(--jp);letter-spacing:.08em}
+.over .why small{font:500 18px var(--jp);color:var(--dim);margin-left:14px}
+.stats{position:absolute;left:600px;width:720px;top:380px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.sbox{position:relative;padding:18px 24px;background:linear-gradient(160deg,rgba(18,28,58,.9),rgba(8,12,28,.8));clip-path:polygon(0 0,100% 0,100% calc(100% - 16px),calc(100% - 16px) 100%,0 100%);border-top:3px solid var(--sc,var(--cyan))}
+.sbox .k{font:500 15px var(--jp);color:var(--dim)}
+.sbox .v{font:700 54px/1.1 var(--en);white-space:nowrap}
+.sbox .v small{font-size:22px;color:var(--dim);margin-left:6px}
+.sbox .v.jp{font:900 42px/1.3 var(--jp);letter-spacing:.1em}
+.sbox .x{font:500 13px var(--jp);color:var(--mute)}
+.sbox.wide{grid-column:1/-1}
+.rankbar{display:flex;gap:6px;margin-top:10px}
+.rankbar i{flex:1;height:10px;background:rgba(255,255,255,.12);clip-path:polygon(5px 0,100% 0,calc(100% - 5px) 100%,0 100%)}
+.rankbar i.on{background:var(--gold)}
+.rankbar + .rl{display:flex;justify-content:space-between;font:500 12px var(--jp);color:var(--mute);margin-top:4px}
+.fleet{left:34px;top:380px;width:530px;height:450px;--pc:var(--red)}
+.lost{display:flex;align-items:center;gap:16px;padding:12px 16px;background:rgba(30,12,22,.7);border-left:3px solid var(--red)}
+.lost + .lost{margin-top:8px}
+.lost svg{opacity:.55;flex:none}
+.lost > div:not(.wk){flex:none}
+.lost b{display:block;font:900 20px var(--jp);letter-spacing:.06em;white-space:nowrap}
+.lost span{font:500 13px var(--jp);color:var(--dim)}
+.lost .wk{margin-left:auto;text-align:right;font:500 13px/1.45 var(--jp);color:var(--dim);width:190px}
+.lost .wk em{display:inline-block;font-style:normal;font:700 13px var(--jp);color:#fff;background:var(--red);padding:1px 8px;margin-bottom:4px}
+.unlock{right:34px;top:380px;width:530px;height:200px;--pc:var(--gold);background:linear-gradient(160deg,rgba(70,50,12,.85),rgba(14,14,24,.85))}
+.unlock .u{display:flex;align-items:center;gap:14px;padding:8px 0}
+.unlock .u .tag{--tc:var(--gold);font-size:13px}
+.unlock .u b{font:700 18px var(--jp)}
+.unlock .u div span{font:500 13px var(--jp);color:#d8c9a4;display:block}
+.log{right:34px;top:600px;width:530px;height:230px}
+.log .l{font:500 14px/1.6 var(--jp);color:#aab7c8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.log .l.bad{color:#ff8a8a}.log .l.ok{color:#5fd39a}.log .l.ev{color:#c9a7ff}
+.log .l i{font-style:normal;color:var(--mute);margin-right:8px}
+.foot{position:absolute;left:0;right:0;top:920px;display:flex;justify-content:center;align-items:center;gap:18px}
+.foot .bigbtn{position:relative;width:520px;height:120px}
+.foot .bigbtn h3{top:34px;font-size:44px}
+.foot .bigbtn .op{top:18px}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="bg"></canvas><div class="ui" id="ui"></div></div>
+<script src="cap-ui.js"></script>
+<script>
+const { $, fmt, HULLS, hullSvg } = CAP;
+// 資料：capcareer_ui.js ccEndView（S.fin = { why, turn }）、capcareer.js CC_RANKS、ccMetaLoad（最高軍階 → 開局身分、地獄難度解鎖）
+const RANKS = ['單艦艦長', '小隊長', '特戰隊長', '特戰司令'];
+const ST = {
+  why: '你的小隊在 薩恩 全滅', turn: 37, role: '帝國艦長', diff: '困難',
+  rank: 2, merit: 2840, kills: 46, caps: 5, runBest: 1,
+  lost: [ { n: '艾爾巴號', t: 'gunship', lv: 4, wk: 37, by: '帝國第3小隊・薩恩防衛戰' },
+    { n: '雷霆號', t: 'assault', lv: 3, wk: 37, by: '帝國第3小隊・薩恩防衛戰' },
+    { n: '穿刺號', t: 'ew', lv: 2, wk: 35, by: '攔截任務・歐瑞恩' } ],
+  log: [ ['bad', 37, '你的小隊在 薩恩 全滅'], ['bad', 37, '薩恩防衛戰：打輸了，損失 2 艘'], ['ev', 36, '帝國第3小隊、第5小隊預定開進 薩恩'],
+    ['ok', 35, '攔截成功：歐瑞恩一帶的補給線切斷 4 週'], ['bad', 35, '穿刺號 被擊沉'], ['ok', 33, '升任 特戰隊長'] ],
+};
+const newBest = ST.rank > ST.runBest;
+
+$('ui').innerHTML = `
+  ${CAP.head({ title: '艦長生涯', en: 'CAPTAIN CAREER ・ END', crumb: `${ST.role}・${ST.diff}`, back: '看星圖' })}
+  <div class="vtext">CAREER OVER ／ WEEK ${ST.turn}</div>
+  <div class="over enter" style="--dy:-20px;--d:.05s"><div class="en">CAREER OVER</div><h1>生涯結束</h1>
+    <div class="why">${ST.why}<small>第 ${ST.turn} 週</small></div></div>
+
+  <section class="panel fleet tilt-l enter" style="--dx:-40px;--d:.2s">
+    <div class="ph"><h2>最後的小隊</h2><span class="en">FALLEN</span><span class="r">船沉了，船的等級跟著沒了</span></div>
+    <div class="pb">${ST.lost.map((s, i) => `<div class="lost">${hullSvg(s.t, 'var(--red)', 110)}<div><b>${i === 0 ? '★ ' : ''}${s.n}</b><span>${HULLS[s.t].name}・Lv.${s.lv}</span></div>
+      <div class="wk"><em>擊沉</em>第 ${s.wk} 週・${s.by}</div></div>`).join('')}</div>
+  </section>
+
+  <div class="stats enter" style="--dy:30px;--d:.15s">
+    <div class="sbox wide" style="--sc:var(--gold)"><span class="k">軍階</span><div class="v jp gold">${RANKS[ST.rank]}</div>
+      <div class="rankbar">${RANKS.map((_, i) => `<i class="${i <= ST.rank ? 'on' : ''}"></i>`).join('')}</div><div class="rl">${RANKS.map((r) => `<span>${r}</span>`).join('')}</div></div>
+    <div class="sbox" style="--sc:var(--gold)"><span class="k">戰功</span><div class="v">${fmt(ST.merit)}</div></div>
+    <div class="sbox" style="--sc:var(--cyan)"><span class="k">撐過</span><div class="v">${ST.turn}<small>週</small></div></div>
+    <div class="sbox" style="--sc:var(--red)"><span class="k">擊沉</span><div class="v">${ST.kills}<small>艘</small></div></div>
+    <div class="sbox" style="--sc:var(--own)"><span class="k">親自佔領</span><div class="v">${ST.caps}<small>個星系</small></div></div>
+  </div>
+
+  <section class="panel unlock tilt-r enter" style="--dx:40px;--d:.3s">
+    <div class="ph"><h2>${newBest ? '新紀錄・解鎖' : '下一局'}</h2><span class="en">UNLOCKED</span></div>
+    <div class="pb">${newBest ? `<div class="u"><span class="tag">新紀錄</span><div><b>歷來最高軍階：${RANKS[ST.rank]}</b><span>之前是 ${RANKS[ST.runBest]}</span></div></div>
+      <div class="u"><span class="tag">開局身分</span><div><b>可以用「${RANKS[ST.rank]}」開局</b><span>開局帶三個小隊、可以造匿蹤艦，有據點</span></div></div>`
+      : `<div class="u"><div><b>歷來最高軍階：${RANKS[ST.runBest]}</b><span>升到特戰司令，解鎖「地獄」難度</span></div></div>`}</div>
+  </section>
+
+  <section class="panel log tilt-r enter" style="--dx:40px;--d:.38s">
+    <div class="ph"><h2>最後的紀錄</h2><span class="en">LAST ENTRIES</span></div>
+    <div class="pb">${ST.log.map(([c, w, t]) => `<div class="l ${c}"><i>第 ${w} 週</i>${t}</div>`).join('')}</div>
+  </section>
+
+  <div class="foot enter" style="--dy:30px;--d:.5s"><button class="btn" data-act="回艦長選單">回艦長選單</button><button class="btn" data-act="看星圖">看星圖</button>
+    <button class="bigbtn" id="again"><span class="op">NEW CAREER ・ RUN 5</span><h3>開新局</h3><div class="chev"><i></i><i></i><i></i></div></button></div>`;
+$('again').onclick = () => CAP.modal(`<h4>開新局？</h4><p>這一局的存檔會刪掉。歷來最高軍階會留著，解鎖的開局身分、難度都可以用。</p><div class="mbtns"><button class="btn" onclick="CAP.close()">返回</button><button class="btn pri" data-act="開新局">開新局</button></div>`);
+CAP.bg({ mode: 'red' }); CAP.ready();
+</script>
+</body>
+</html>

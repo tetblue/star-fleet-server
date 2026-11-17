@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lobby UI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --cyan:#3cc8ff; --cyan-d:#1f8fff; --pink:#ff3d8b; --yellow:#f3e94b; --violet:#8b5cf6;
+  --panel:rgba(12,16,36,.72); --panel-2:rgba(18,24,52,.82);
+  --line:rgba(90,200,255,.32); --text:#eef3ff; --dim:#8fa3c7;
+  --jp:'Noto Sans JP',sans-serif; --en:'Rajdhani','Noto Sans JP',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;background:#05060d;overflow:hidden;color:var(--text);font-family:var(--jp)}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+
+/* ---------- 1920x1080 stage, scaled to fit ---------- */
+#stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform-origin:0 0;overflow:hidden;background:#0b0a1c}
+#bg{position:absolute;inset:-40px;width:calc(100% + 80px);height:calc(100% + 80px);transition:transform 1.6s cubic-bezier(.6,0,.2,1),filter .5s}
+#stage::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(ellipse at 50% 45%,transparent 45%,rgba(3,3,12,.75) 100%),
+             repeating-linear-gradient(0deg,rgba(255,255,255,.018) 0 1px,transparent 1px 3px)}
+#ui{position:absolute;inset:0;z-index:2;transition:opacity .35s}
+#ui.hidden{opacity:0;pointer-events:none}
+.glitch #bg{filter:url(#rgb) brightness(1.2)}
+
+/* entrance */
+.enter{opacity:0;translate:var(--dx,0) var(--dy,0)}
+.ready .enter{opacity:1;translate:0 0;transition:opacity .6s ease var(--d,0s),translate .7s cubic-bezier(.2,.8,.2,1) var(--d,0s),transform .2s,filter .2s,background .2s}
+
+/* ---------- frame decorations ---------- */
+.corner{position:absolute;width:70px;height:70px;border-color:rgba(90,200,255,.55);border-style:solid;border-width:0}
+.c-tl{left:10px;top:10px;border-left-width:2px;border-top-width:2px}
+.c-tr{right:10px;top:10px;border-right-width:2px;border-top-width:2px}
+.c-bl{left:10px;bottom:10px;border-left-width:2px;border-bottom-width:2px}
+.c-br{right:10px;bottom:10px;border-right-width:2px;border-bottom-width:2px}
+.vtext{position:absolute;left:12px;top:420px;writing-mode:vertical-rl;transform:rotate(180deg);
+  font:600 11px var(--en);letter-spacing:.35em;color:rgba(160,190,230,.45)}
+.ruler{position:absolute;right:16px;top:240px;width:14px;height:560px;
+  background:repeating-linear-gradient(180deg,rgba(150,200,255,.35) 0 1px,transparent 1px 26px)}
+.ruler::before{content:"";position:absolute;right:0;top:0;bottom:0;width:6px;
+  background:repeating-linear-gradient(180deg,rgba(150,200,255,.5) 0 1px,transparent 1px 130px)}
+
+/* ---------- top status ---------- */
+.status{position:absolute;left:740px;top:14px;height:34px;padding:0 34px;display:flex;align-items:center;gap:14px;
+  background:linear-gradient(90deg,transparent,rgba(10,12,28,.85) 12%,rgba(10,12,28,.85) 88%,transparent);
+  font:600 13px var(--en);letter-spacing:.22em;color:#cfe0ff;clip-path:polygon(4% 0,96% 0,100% 100%,0 100%)}
+.status .live{color:var(--pink)}
+.status .live::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--pink);margin-right:8px;
+  box-shadow:0 0 8px var(--pink);animation:blink 1.4s infinite}
+.status .jp{font:500 13px var(--jp);letter-spacing:.1em;color:var(--dim)}
+@keyframes blink{50%{opacity:.25}}
+
+/* ---------- commander card ---------- */
+.commander{position:absolute;left:34px;top:34px;width:430px;height:124px;
+  background:linear-gradient(100deg,var(--panel-2),rgba(12,16,36,.35) 85%,transparent);
+  clip-path:polygon(0 0,100% 8%,100% 100%,0 100%)}
+.commander::before{content:"";position:absolute;left:0;top:0;right:0;height:1px;background:linear-gradient(90deg,var(--line),transparent);transform:rotate(1deg);transform-origin:0 0}
+.lv{position:absolute;left:12px;top:12px;width:104px;height:104px}
+.lv svg{position:absolute;inset:0;transform:rotate(-90deg)}
+.lv .num{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font:700 46px/1 var(--en)}
+.lv .num small{font:600 12px var(--en);color:var(--dim);letter-spacing:.1em;margin-bottom:-2px}
+.cmd-id{position:absolute;left:136px;top:26px;font:700 12px var(--en);letter-spacing:.14em;color:var(--cyan)}
+.cmd-id span{color:#9fb6d8}
+.cmd-name{position:absolute;left:134px;top:44px;font:900 30px var(--jp);letter-spacing:.12em;text-shadow:0 2px 8px rgba(0,0,0,.6)}
+.exp{position:absolute;left:136px;top:104px;display:flex;gap:2px}
+.exp i{width:6px;height:9px;background:rgba(120,150,190,.3)}
+.exp i.on{background:var(--cyan);box-shadow:0 0 6px rgba(60,200,255,.6)}
+.exp-label{position:absolute;left:372px;top:84px;font:600 11px var(--en);letter-spacing:.1em;color:var(--cyan)}
+
+/* ---------- hex menu ---------- */
+.hexmenu{position:absolute;left:34px;top:190px}
+.hexitem{position:absolute;display:flex;align-items:center;gap:22px;transition:transform .2s;white-space:nowrap;text-align:left}
+.hexitem:hover{transform:translateX(6px)}
+.hex{position:relative;width:92px;height:100px;flex:none;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);
+  background:linear-gradient(160deg,rgba(80,200,255,.75),rgba(40,90,170,.35))}
+.hex::before{content:"";position:absolute;inset:2px;clip-path:inherit;background:linear-gradient(160deg,#1a2648,#0c1124 70%)}
+.hex svg{position:absolute;left:50%;top:50%;width:34px;height:34px;transform:translate(-50%,-50%);stroke:#e8f2ff;fill:none;stroke-width:1.8}
+.hexitem:hover .hex{background:linear-gradient(160deg,#7fe0ff,var(--cyan-d))}
+.badge{position:absolute;width:16px;height:16px;background:var(--yellow);transform:rotate(45deg);box-shadow:0 0 10px rgba(243,233,75,.7)}
+.hexitem .badge{left:70px;top:8px}
+.hexlabel{border-left:1px solid rgba(150,190,240,.3);padding-left:14px}
+.hexlabel b{display:block;font:700 19px var(--jp);letter-spacing:.06em}
+.hexlabel small{display:block;font:700 11px var(--en);letter-spacing:.18em;color:var(--dim);margin-top:-2px}
+
+/* ---------- companion tag + bubble ---------- */
+.anchor{position:absolute;left:0;top:0;animation:float 7s ease-in-out infinite}
+@keyframes float{0%,100%{transform:translate(0,0)}33%{transform:translate(-14px,8px)}66%{transform:translate(10px,-6px)}}
+.tagname{position:absolute;left:1032px;top:82px;font:700 22px var(--en);letter-spacing:.32em;white-space:nowrap}
+.tagname small{display:block;font:700 12px var(--en);letter-spacing:.14em;color:var(--cyan);margin-top:-2px}
+.tagname small em{font-style:normal;color:var(--yellow)}
+.leader{position:absolute;left:966px;top:128px;overflow:visible}
+.diamond{position:absolute;left:958px;top:172px;width:24px;height:24px;border:2px solid var(--cyan);transform:rotate(45deg);
+  box-shadow:0 0 10px rgba(60,200,255,.6)}
+.diamond::after{content:"";position:absolute;inset:5px;background:var(--cyan)}
+.bubble{position:absolute;left:994px;top:214px;min-width:120px;padding:12px 22px;background:#f2f4fa;color:#1a1c2a;
+  font:500 19px var(--jp);letter-spacing:.06em;white-space:nowrap;clip-path:polygon(0 0,100% 0,100% 72%,93% 100%,0 100%);
+  transition:opacity .3s,transform .3s}
+.bubble.off{opacity:0;transform:translateY(6px)}
+.bubble .caret{display:inline-block;width:2px;height:1em;background:#1a1c2a;margin-left:2px;vertical-align:-2px;animation:blink .8s infinite}
+
+/* ---------- right column (tilted) ---------- */
+.right{position:absolute;right:0;top:0;width:820px;height:760px;perspective:1500px}
+.tilt{position:absolute;inset:0;transform-origin:100% 50%;transform:translateX(-36px) rotateY(-10deg) rotateZ(-1deg);transform-style:preserve-3d}
+
+.res{position:absolute;top:96px;display:flex;gap:18px;left:110px}
+.res-item{position:relative;display:flex;align-items:center;gap:10px;height:46px;padding:0 6px 0 16px;
+  background:linear-gradient(90deg,rgba(10,13,30,.9),rgba(16,22,48,.8));clip-path:polygon(4% 0,100% 0,96% 100%,0 100%)}
+.res-item::after{content:"";position:absolute;left:0;right:6px;bottom:0;height:2px;background:var(--c)}
+.res-item svg{width:22px;height:22px}
+.res-item b{font:700 22px var(--en);letter-spacing:.04em;min-width:60px}
+.res-item b small{font-size:14px;color:var(--dim)}
+.plus{width:30px;height:30px;background:rgba(120,140,180,.25);font:700 20px/30px var(--en);text-align:center;transition:background .2s}
+.plus:hover{background:var(--c);color:#0a0d1e}
+.iconbtn{position:absolute;top:40px;width:56px;height:52px;background:rgba(12,16,36,.85);border:1px solid rgba(120,170,230,.25);
+  display:flex;align-items:center;justify-content:center;transition:border-color .2s}
+.iconbtn:hover{border-color:var(--cyan)}
+.iconbtn svg{width:26px;height:26px;stroke:#e8f2ff;fill:none;stroke-width:1.7}
+.iconbtn .badge{right:-4px;top:-6px}
+
+.event{position:absolute;left:258px;top:186px;width:528px;height:116px;cursor:pointer;
+  background:linear-gradient(100deg,#d63384 0%,#a33fc1 45%,#5b3dcc 75%,rgba(50,50,150,.4) 100%);
+  clip-path:polygon(0 12%,100% 0,100% 100%,0 100%);transition:filter .2s}
+.event:hover{filter:brightness(1.15)}
+.event .tag{position:absolute;left:24px;top:22px;background:var(--yellow);color:#151515;font:700 12px var(--en);letter-spacing:.26em;padding:1px 8px}
+.event h2{position:absolute;left:22px;top:38px;font:900 30px var(--jp);letter-spacing:.06em;text-shadow:0 2px 0 rgba(60,0,60,.4)}
+.event p{position:absolute;left:24px;top:80px;font:700 11px var(--en);letter-spacing:.14em;color:rgba(255,235,255,.8)}
+.event p span{font-family:var(--jp);letter-spacing:.06em}
+.seg{position:absolute;display:flex;gap:2px}
+.seg i{width:5px;height:9px;background:rgba(255,255,255,.22)}
+.seg i.on{background:#fff}
+.event .seg{left:24px;top:98px}
+
+.sortie{position:absolute;left:170px;top:306px;width:616px;height:200px;cursor:pointer;overflow:hidden;
+  background:
+    repeating-linear-gradient(-60deg,rgba(255,255,255,.07) 0 2px,transparent 2px 22px),
+    linear-gradient(100deg,#29b6ff,#2f86ff 60%,#3a6cf0);
+  clip-path:polygon(0 22%,100% 0,100% 72%,95% 100%,0 100%);transition:filter .2s,transform .2s}
+.sortie:hover{filter:brightness(1.12)}
+.sortie:active{transform:scale(.985)}
+.sortie::after{content:"";position:absolute;top:-20%;bottom:-20%;width:120px;left:-200px;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);transform:skewX(-20deg);animation:shine 4.5s 1.4s infinite}
+@keyframes shine{0%{left:-200px}22%,100%{left:760px}}
+.ring{position:absolute;left:28px;top:44px;width:132px;height:132px}
+.ring .r1{position:absolute;inset:0;animation:spin 12s linear infinite}
+.ring .r2{position:absolute;inset:16px;animation:spin 6s linear infinite reverse}
+.ring .play{position:absolute;left:50%;top:50%;transform:translate(-36%,-50%);width:0;height:0;border-left:34px solid #0b1430;border-top:22px solid transparent;border-bottom:22px solid transparent}
+@keyframes spin{to{transform:rotate(360deg)}}
+.sortie .op{position:absolute;left:188px;top:48px;font:700 13px var(--en);letter-spacing:.18em;color:#0d2050}
+.sortie h1{position:absolute;left:184px;top:58px;font:900 84px/1 var(--jp);letter-spacing:.14em;color:#0b1430}
+.sortie .en{position:absolute;left:190px;top:150px;font:700 18px var(--en);letter-spacing:.7em;color:#0d2050}
+.chev{position:absolute;right:46px;bottom:28px;display:flex}
+.chev i{width:14px;height:22px;background:#0d2050;clip-path:polygon(0 0,50% 0,100% 50%,50% 100%,0 100%,50% 50%);margin-left:-3px;animation:chev 1.2s infinite}
+.chev i:nth-child(2){animation-delay:.15s}.chev i:nth-child(3){animation-delay:.3s}
+@keyframes chev{0%,100%{opacity:.35}40%{opacity:1}}
+
+.tiles{position:absolute;left:186px;top:520px;display:flex;gap:10px}
+.tile{position:relative;width:148px;height:176px;cursor:pointer;
+  background:linear-gradient(180deg,rgba(20,28,60,.9),rgba(10,14,32,.75));border-top:3px solid var(--cyan);
+  clip-path:polygon(9% 0,100% 0,91% 100%,0 100%);transition:transform .2s,background .2s}
+.tile:hover{transform:translateY(-6px);background:linear-gradient(180deg,rgba(30,60,110,.95),rgba(10,14,32,.8))}
+.tile svg{position:absolute;left:30px;top:18px;width:32px;height:32px;stroke:var(--cyan);fill:none;stroke-width:1.8}
+.tile .jp{position:absolute;right:28px;top:16px;writing-mode:vertical-rl;font:700 22px var(--jp);letter-spacing:.1em}
+.tile .en{position:absolute;left:24px;bottom:20px;writing-mode:vertical-rl;transform:rotate(180deg);font:700 10px var(--en);letter-spacing:.22em;color:var(--dim)}
+.tile .no{position:absolute;right:20px;bottom:6px;font:700 34px var(--en);color:transparent;-webkit-text-stroke:1px rgba(90,200,255,.45)}
+.tile .badge{left:76px;top:14px}
+
+/* ---------- name plate & poses ---------- */
+.plate{position:absolute;left:34px;top:810px}
+.plate .en{font:700 13px var(--en);letter-spacing:.2em;color:var(--pink);margin-left:22px}
+.plate h3{font:900 50px/1.05 var(--jp);letter-spacing:.12em;border-left:5px solid var(--pink);padding-left:18px;margin-top:2px;text-shadow:0 3px 10px rgba(0,0,0,.6)}
+.bond{display:flex;align-items:center;gap:10px;margin-top:10px;font:700 14px var(--en);letter-spacing:.12em}
+.bond em{font-style:normal;color:var(--pink)}
+.bond .seg{position:static}
+.bond .seg i.on{background:var(--pink)}
+.poses{position:absolute;left:38px;top:918px;display:flex;gap:10px;transform:rotate(-4deg);transform-origin:0 100%}
+.pose{display:flex;align-items:center;gap:12px;height:40px;padding:0 22px;background:rgba(14,18,40,.85);
+  font:500 16px var(--jp);clip-path:polygon(7% 0,100% 0,93% 100%,0 100%);transition:background .2s}
+.pose i{font:700 12px var(--en);font-style:normal;color:var(--cyan)}
+.pose:hover{background:rgba(40,60,110,.9)}
+.pose.on{background:var(--pink)}
+.pose.on i{color:#fff}
+
+/* ---------- camera readout & tools ---------- */
+.camread{position:absolute;left:810px;top:982px;display:flex;gap:28px;font:600 13px var(--en);letter-spacing:.18em;color:#c9d6f0}
+.camread b{color:var(--cyan);font-weight:600}
+.tools{position:absolute;right:62px;top:916px;display:flex;gap:14px;transform:perspective(600px) rotateY(-14deg)}
+.tools .iconbtn{position:static;width:56px;height:54px}
+
+/* ---------- news ---------- */
+.news{position:absolute;left:60px;right:80px;top:1006px;height:54px;display:flex;align-items:center;
+  border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:linear-gradient(90deg,rgba(8,10,24,.6),rgba(8,10,24,.85))}
+.news .label{margin-left:86px;padding:3px 18px;background:var(--cyan);color:#06122a;font:700 15px var(--en);letter-spacing:.3em;font-style:italic;
+  clip-path:polygon(10% 0,100% 0,90% 100%,0 100%)}
+.ticker{position:relative;flex:1;height:100%;overflow:hidden;margin:0 24px;
+  -webkit-mask:linear-gradient(90deg,transparent,#000 5%,#000 95%,transparent);mask:linear-gradient(90deg,transparent,#000 5%,#000 95%,transparent)}
+.ticker .track{position:absolute;top:50%;transform:translateY(-50%);white-space:nowrap;font:500 18px var(--jp);letter-spacing:.04em;animation:tick 48s linear infinite}
+.ticker .track span{margin-right:40px}
+.ticker .track span::after{content:"◆";margin-left:40px;font-size:13px;color:#fff}
+@keyframes tick{from{transform:translate(0,-50%)}to{transform:translate(-50%,-50%)}}
+.clock{font:600 30px var(--en);color:var(--cyan);letter-spacing:.06em;margin-right:60px}
+
+.restore{position:absolute;inset:0;z-index:5;display:none;cursor:pointer}
+.restore.on{display:block}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <filter id="rgb"><feColorMatrix in="SourceGraphic" type="matrix" values="1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0" result="r"/>
+    <feOffset in="r" dx="-8" result="r2"/>
+    <feColorMatrix in="SourceGraphic" type="matrix" values="0 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0" result="gb"/>
+    <feOffset in="gb" dx="8" result="gb2"/>
+    <feBlend in="r2" in2="gb2" mode="screen"/></filter>
+</svg>
+
+<div id="stage">
+  <canvas id="bg"></canvas>
+
+  <div id="ui">
+    <div class="corner c-tl"></div><div class="corner c-tr"></div><div class="corner c-bl"></div><div class="corner c-br"></div>
+    <div class="vtext enter" style="--dx:-20px">ROOFTOP UNIT ／ ルナ ／ 07</div>
+    <div class="ruler enter" style="--dx:20px"></div>
+
+    <div class="status enter" style="--dy:-20px"><span class="live">LIVE</span><span>SECTOR 07</span><span>／</span><span>ROOFTOP-A</span><span class="jp">雨上がり 12℃</span></div>
+
+    <!-- commander -->
+    <div class="commander enter" style="--dx:-40px;--d:.05s">
+      <div class="lv">
+        <svg viewBox="0 0 104 104"><circle cx="52" cy="52" r="46" stroke="rgba(120,150,190,.25)" stroke-width="5" fill="none"/>
+          <circle cx="52" cy="52" r="46" stroke="#3cc8ff" stroke-width="5" fill="none" stroke-dasharray="289" stroke-dashoffset="104" style="filter:drop-shadow(0 0 4px #3cc8ff)"/></svg>
+        <div class="num"><small>LV</small>42</div>
+      </div>
+      <div class="cmd-id">COMMANDER <span>／ ID 0x7A21</span></div>
+      <div class="cmd-name">指揮官</div>
+      <div class="exp-label">EXP 64%</div>
+      <div class="exp" id="exp"></div>
+    </div>
+
+    <!-- hex menu -->
+    <nav class="hexmenu">
+      <button class="hexitem enter" style="left:0;top:0;--dx:-40px;--d:.15s">
+        <div class="hex"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="1"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></div>
+        <i class="badge"></i><div class="hexlabel"><b>ミッション</b><small>MISSION</small></div></button>
+      <button class="hexitem enter" style="left:66px;top:94px;--dx:-40px;--d:.22s">
+        <div class="hex"><svg viewBox="0 0 24 24"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg></div>
+        <i class="badge"></i><div class="hexlabel"><b>イベント</b><small>EVENT</small></div></button>
+      <button class="hexitem enter" style="left:0;top:188px;--dx:-40px;--d:.29s">
+        <div class="hex"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M15 4.8a3.5 3.5 0 010 6.4M17.5 14.5c2.3.8 4 2.8 4 5.5"/></svg></div>
+        <div class="hexlabel"><b>フレンド</b><small>FRIEND</small></div></button>
+      <button class="hexitem enter" style="left:66px;top:282px;--dx:-40px;--d:.36s">
+        <div class="hex"><svg viewBox="0 0 24 24"><path d="M4 9v6h4l6 4V5L8 9z"/><path d="M17.5 9a4 4 0 010 6M20 6.5a7.5 7.5 0 010 11"/></svg></div>
+        <div class="hexlabel"><b>お知らせ</b><small>NEWS</small></div></button>
+    </nav>
+
+    <!-- companion tag (anchor floats as if tracking a 3D head) -->
+    <div class="anchor enter" style="--d:.9s">
+      <div class="tagname">LUNA<small>SYNC <em id="sync">96.7</em>%</small></div>
+      <svg class="leader" width="80" height="60"><path d="M70 0 L64 0 L6 52" stroke="rgba(90,200,255,.7)" stroke-width="1.5" fill="none"/></svg>
+      <div class="diamond"></div>
+      <div class="bubble off" id="bubble"><span id="say"></span><span class="caret"></span></div>
+    </div>
+
+    <!-- right column -->
+    <div class="right">
+      <div class="tilt">
+        <div class="res enter" style="--dy:-20px;--d:.1s">
+          <div class="res-item" style="--c:var(--yellow)"><svg viewBox="0 0 24 24"><path d="M13 2L5 14h6l-1 8 8-12h-6z" fill="#f3e94b"/></svg><b>142<small>/160</small></b><button class="plus">+</button></div>
+          <div class="res-item" style="--c:var(--cyan)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#f3c94b" stroke-width="2"/><path d="M9 8h6M12 8v8M9 12h6" stroke="#f3c94b" stroke-width="2"/></svg><b>1,284,500</b><button class="plus">+</button></div>
+          <div class="res-item" style="--c:var(--pink)"><svg viewBox="0 0 24 24"><path d="M6 4h12l4 5-10 12L2 9z M2 9h20 M9 4l3 17 3-17" fill="none" stroke="#ff3d8b" stroke-width="1.8"/></svg><b>3,260</b><button class="plus">+</button></div>
+        </div>
+        <button class="iconbtn enter" style="left:654px;--dy:-20px;--d:.15s"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13"/><path d="M3 7l9 6 9-6"/></svg><i class="badge"></i></button>
+        <button class="iconbtn enter" style="left:722px;--dy:-20px;--d:.18s"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></button>
+
+        <div class="event enter" style="--dx:60px;--d:.3s">
+          <span class="tag">EVENT</span>
+          <h2>雨上がりのネオン街</h2>
+          <p>NEON AFTER THE RAIN ・ <span id="remain">残り 6日 12時間</span></p>
+          <div class="seg" id="evseg"></div>
+        </div>
+
+        <button class="sortie enter" style="--dx:80px;--d:.4s">
+          <div class="ring">
+            <svg class="r1" viewBox="0 0 132 132"><circle cx="66" cy="66" r="62" stroke="#0b1430" stroke-width="3" stroke-dasharray="4 6" fill="none"/></svg>
+            <svg class="r2" viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" stroke="#0b1430" stroke-width="5" stroke-dasharray="60 12 30 12" fill="none"/></svg>
+            <i class="play"></i>
+          </div>
+          <span class="op">MAIN OPERATION ・ 3-7</span>
+          <h1>出撃</h1>
+          <span class="en">SORTIE</span>
+          <div class="chev"><i></i><i></i><i></i></div>
+        </button>
+
+        <div class="tiles">
+          <button class="tile enter" style="--dy:30px;--d:.5s"><svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg><span class="jp">編成</span><span class="en">FORMATION</span><span class="no">01</span></button>
+          <button class="tile enter" style="--dy:30px;--d:.56s"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg><i class="badge"></i><span class="jp">スカウト</span><span class="en">SCOUT</span><span class="no">02</span></button>
+          <button class="tile enter" style="--dy:30px;--d:.62s"><svg viewBox="0 0 24 24"><path d="M3 5c3-1 6-1 9 1 3-2 6-2 9-1v14c-3-1-6-1-9 1-3-2-6-2-9-1zM12 6v14"/></svg><span class="jp">ストーリー</span><span class="en">STORY</span><span class="no">03</span></button>
+          <button class="tile enter" style="--dy:30px;--d:.68s"><svg viewBox="0 0 24 24"><path d="M4 8h16l-1.5 12h-13z"/><path d="M8.5 8V6a3.5 3.5 0 017 0v2"/></svg><span class="jp">ショップ</span><span class="en">SHOP</span><span class="no">04</span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- name plate -->
+    <div class="plate enter" style="--dx:-40px;--d:.45s">
+      <div class="en">SHIRAYUKI LUNA</div>
+      <h3>白雪 ルナ</h3>
+      <div class="bond">BOND <em>Lv.7</em><div class="seg" id="bondseg"></div></div>
+    </div>
+    <div class="poses enter" style="--dx:-40px;--d:.55s" id="poses">
+      <button class="pose on"><i>1</i>振り返り</button>
+      <button class="pose"><i>2</i>のぞき込み</button>
+      <button class="pose"><i>3</i>すまし</button>
+      <button class="pose"><i>4</i>うしろ手</button>
+    </div>
+
+    <div class="camread enter" style="--dy:10px;--d:.7s"><span>FL <b>130</b>mm</span><span>FD <b id="fd">41.48</b>m</span><span>CAM <b id="cam">WIDE-01</b></span></div>
+    <div class="tools enter" style="--dx:30px;--d:.6s">
+      <button class="iconbtn" title="スクリーンショット"><svg viewBox="0 0 24 24"><path d="M3 8h4l2-3h6l2 3h4v11H3z"/><circle cx="12" cy="13" r="3.5"/></svg></button>
+      <button class="iconbtn" id="hideui" title="UI を隠す"><svg viewBox="0 0 24 24"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+    </div>
+
+    <div class="news enter" style="--dy:20px;--d:.75s">
+      <span class="label">NEWS</span>
+      <div class="ticker"><div class="track" id="track"></div></div>
+      <span class="clock" id="clock">13:24</span>
+    </div>
+  </div>
+  <div class="restore" id="restore"></div>
+</div>
+
+<script>
+/* ---------- fit stage ---------- */
+const stage=document.getElementById('stage');
+function fit(){const s=Math.min(innerWidth/1920,innerHeight/1080);stage.style.transform=`scale(${s}) translate(-50%,-50%)`;}
+addEventListener('resize',fit);fit();
+
+/* ---------- segmented bars ---------- */
+function seg(el,n,on){el.innerHTML=Array.from({length:n},(_,i)=>`<i class="${i<on?'on':''}"></i>`).join('');}
+seg(document.getElementById('exp'),36,23);
+seg(document.getElementById('evseg'),78,54);
+seg(document.getElementById('bondseg'),22,11);
+
+/* ---------- background: blurred neon city ---------- */
+const cv=document.getElementById('bg'),g=cv.getContext('2d');
+let W,H,buildings=[],bokeh=[],cars=[];
+function initBg(){
+  W=cv.width=2000;H=cv.height=1160;
+  buildings=[];
+  for(let layer=0;layer<3;layer++){
+    let x=-50;
+    while(x<W+50){
+      const w=60+Math.random()*(layer?140:90), h=(layer===0?380:layer===1?560:760)*(.55+Math.random()*.5);
+      buildings.push({layer,x,w,h,win:Array.from({length:40},()=>({x:Math.random(),y:Math.random(),c:Math.random()<.7?'#ffd56b':Math.random()<.5?'#5be0ff':'#ff4fa0',a:Math.random()}))});
+      x+=w+(layer?10:30)+Math.random()*30;
+    }
+  }
+  bokeh=Array.from({length:70},()=>({x:Math.random()*W,y:200+Math.random()*900,r:6+Math.random()*28,
+    c:['255,210,110','90,220,255','255,80,160','170,120,255'][Math.random()*4|0],a:.15+Math.random()*.35,s:Math.random()*Math.PI*2}));
+  cars=Array.from({length:3},(_,i)=>({x:Math.random()*W,y:120+i*90,v:(i%2?-1:1)*(1+Math.random())}));
+}
+// static city layer: rendered once (blur/glow are expensive per frame)
+let city;
+function buildCity(){
+  city=document.createElement('canvas');city.width=W;city.height=H;const c=city.getContext('2d');
+  const gr=c.createLinearGradient(0,0,0,H);
+  gr.addColorStop(0,'#3a2147');gr.addColorStop(.35,'#2a1d4a');gr.addColorStop(.7,'#161a3a');gr.addColorStop(1,'#0c0f24');
+  c.fillStyle=gr;c.fillRect(0,0,W,H);
+  const hz=c.createRadialGradient(W*.75,H*.25,0,W*.75,H*.25,700);hz.addColorStop(0,'rgba(255,90,90,.25)');hz.addColorStop(1,'rgba(255,90,90,0)');
+  c.fillStyle=hz;c.fillRect(0,0,W,H);
+  c.filter='blur(3px)';
+  for(const b of buildings){
+    c.fillStyle=['#3e3870','#302d5e','#24234a'][b.layer];c.fillRect(b.x,H-b.h,b.w,b.h);
+    for(const w of b.win){
+      c.fillStyle=w.c;c.globalAlpha=(.25+w.a*.5)*(b.layer===2?1:.7);
+      c.fillRect(b.x+w.x*(b.w-10)+3,H-b.h+20+w.y*(b.h-40),b.layer===2?8:5,b.layer===2?5:3);
+    }
+    c.globalAlpha=1;
+  }
+  c.filter='none';
+}
+const signs=Array.from({length:6},(_,i)=>({x:150+i*330,y:360+((i*137)%240),h:150+(i%3)*40,
+  col:['#ff3d8b','#3cc8ff','#ffd56b','#a96bff','#3cc8ff','#ff3d8b'][i]}));
+function drawBg(t){
+  g.drawImage(city,0,0);
+  // neon signboards: cheap glow = translucent wide rect + solid core
+  g.globalAlpha=.55;
+  for(const [i,s] of signs.entries()){
+    const on=Math.sin(t/400+i*1.7)>-.7;
+    g.fillStyle='#14122a';g.fillRect(s.x-8,s.y-8,40,s.h+16);
+    if(on){g.globalAlpha=.12;g.fillStyle=s.col;g.fillRect(s.x-22,s.y-22,68,s.h+44);g.globalAlpha=.55;}
+    g.strokeStyle=on?s.col:'#3a3550';g.lineWidth=3;g.strokeRect(s.x-8,s.y-8,40,s.h+16);
+    g.fillStyle=on?s.col:'#3a3550';
+    for(let k=0;k<5;k++)g.fillRect(s.x+4,s.y+6+k*(s.h/5),16,s.h/5-12);
+  }
+  g.globalAlpha=1;
+  // flying cars
+  for(const c of cars){
+    c.x+=c.v;if(c.x>W+80)c.x=-80;if(c.x<-80)c.x=W+80;
+    g.fillStyle='rgba(255,190,90,.25)';g.fillRect(c.x-10,c.y-6,46,18);
+    g.fillStyle='rgba(255,200,110,.9)';g.fillRect(c.x,c.y,26,6);
+  }
+  // bokeh
+  for(const b of bokeh){
+    const a=b.a*(.7+.3*Math.sin(t/1200+b.s));
+    const rg=g.createRadialGradient(b.x,b.y,0,b.x,b.y,b.r);
+    rg.addColorStop(0,`rgba(${b.c},${a})`);rg.addColorStop(.7,`rgba(${b.c},${a*.8})`);rg.addColorStop(1,`rgba(${b.c},0)`);
+    g.fillStyle=rg;g.beginPath();g.arc(b.x,b.y,b.r,0,7);g.fill();
+    b.y-=.05;if(b.y<150)b.y=1100;
+  }
+  // fog
+  const fg=g.createLinearGradient(0,H*.55,0,H);fg.addColorStop(0,'rgba(80,90,150,0)');fg.addColorStop(1,'rgba(80,90,150,.22)');
+  g.fillStyle=fg;g.fillRect(0,0,W,H);
+  requestAnimationFrame(drawBg);
+}
+initBg();buildCity();requestAnimationFrame(drawBg);
+
+/* ---------- camera cuts (WIDE / FACE alternate) ---------- */
+const shots=[
+  {cam:'WIDE-01',fd:41.48,tf:'scale(1) translate(0,0)'},
+  {cam:'FACE-01',fd:4.65,tf:'scale(1.18) translate(-30px,20px) rotate(-1deg)'},
+  {cam:'WIDE-02',fd:3.17,tf:'scale(1.08) translate(40px,-30px) rotate(1deg)'},
+  {cam:'FACE-02',fd:3.79,tf:'scale(1.22) translate(20px,30px) rotate(.6deg)'},
+  {cam:'WIDE-03',fd:5.02,tf:'scale(1.05) translate(-50px,-10px)'},
+  {cam:'FACE-03',fd:4.52,tf:'scale(1.2) translate(10px,-20px) rotate(-.8deg)'}];
+let shot=0;const bgEl=document.getElementById('bg');
+function cut(){
+  shot=(shot+1)%shots.length;const s=shots[shot];
+  stage.classList.add('glitch');
+  setTimeout(()=>{
+    bgEl.style.transform=s.tf;
+    document.getElementById('cam').textContent=s.cam;
+    animateNum(document.getElementById('fd'),s.fd);
+  },120);
+  setTimeout(()=>stage.classList.remove('glitch'),320);
+}
+function animateNum(el,to){const from=parseFloat(el.textContent),t0=performance.now();
+  (function step(now){const k=Math.min(1,(now-t0)/600);el.textContent=(from+(to-from)*(1-Math.pow(1-k,3))).toFixed(2);if(k<1)requestAnimationFrame(step);})(t0);}
+setInterval(cut,7000);
+
+/* ---------- speech bubble typewriter ---------- */
+const lines=['雨、あがったね。','次はどこ行く？','ネオン、きれいだね。','指揮官、準備はいい？'];
+let li=0;const bub=document.getElementById('bubble'),say=document.getElementById('say');
+function speak(){
+  const txt=lines[li++%lines.length];say.textContent='';bub.classList.remove('off');
+  let i=0;const iv=setInterval(()=>{say.textContent=txt.slice(0,++i);if(i>=txt.length){clearInterval(iv);setTimeout(()=>bub.classList.add('off'),3200);}},90);
+}
+setTimeout(speak,2200);setInterval(speak,9000);
+setInterval(()=>{document.getElementById('sync').textContent=(96+Math.random()*1.4).toFixed(1)},1500);
+
+/* ---------- poses ---------- */
+document.getElementById('poses').addEventListener('click',e=>{
+  const b=e.target.closest('.pose');if(!b)return;
+  document.querySelectorAll('.pose').forEach(p=>p.classList.toggle('on',p===b));cut();
+});
+
+/* ---------- hide UI ---------- */
+const ui=document.getElementById('ui'),restore=document.getElementById('restore');
+document.getElementById('hideui').onclick=()=>{ui.classList.add('hidden');restore.classList.add('on');};
+restore.onclick=()=>{ui.classList.remove('hidden');restore.classList.remove('on');};
+
+/* ---------- news ticker & clock & countdown ---------- */
+const news=['【開催中】イベント「雨上がりのネオン街」屋上エリアを期間限定で解放','【スカウト】白雪 ルナ ピックアップ 開催中','【お知らせ】SECTOR 07 定期メンテナンスは明日 04:00 から','【ログインボーナス】7日目の報酬を受け取れます'];
+const html=news.map(n=>`<span>${n}</span>`).join('');
+document.getElementById('track').innerHTML=html+html;
+const end=Date.now()+(6*24+12)*3600e3;
+function tickClock(){
+  const d=new Date();document.getElementById('clock').textContent=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  const r=Math.max(0,end-Date.now()),dd=Math.floor(r/864e5),hh=Math.floor(r%864e5/36e5);
+  document.getElementById('remain').textContent=`残り ${dd}日 ${hh}時間`;
+}
+tickClock();setInterval(tickClock,10000);
+
+/* ---------- entrance ---------- */
+requestAnimationFrame(()=>setTimeout(()=>stage.classList.add('ready'),250));
+</script>
+</body>
+</html>

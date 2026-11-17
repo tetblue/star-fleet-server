@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>星球</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="cap-ui.css">
+<style>
+/* 星球：左＝狀況與收入；中＝勢力的建築（地表、軌道）與建設佇列；右＝你的建築；右下大按鈕＝強化／蓋 */
+.stat-p{left:34px;top:178px;width:470px;height:840px}
+.sline{display:grid;grid-template-columns:92px 1fr auto;align-items:center;gap:12px;margin-bottom:14px;font:500 15px var(--jp)}
+.sline .k{color:var(--dim)}
+.sline .v{font:700 20px var(--en);text-align:right;white-space:nowrap}
+.prosp{position:relative}
+.prosp .mk{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--red)}
+.prosp .mk.b{background:var(--yellow)}
+.note{font:500 13px/1.5 var(--jp);color:var(--mute);margin:-8px 0 12px}
+.inc{display:grid;grid-template-columns:1fr auto;gap:6px 12px;font:500 15px var(--jp)}
+.inc .n{font:700 17px var(--en);text-align:right}
+.inc .t{border-top:1px solid var(--line-2);padding-top:8px;font-weight:900}
+.inc .t + .n{border-top:1px solid var(--line-2);padding-top:8px;font-size:24px;color:var(--gold)}
+.mob{display:inline-block;margin-left:6px;padding:0 8px;background:rgba(255,77,94,.2);color:#ff8a95;font:700 12px var(--jp)}
+.sub-h{font:900 16px var(--jp);letter-spacing:.12em;margin:18px 0 10px;display:flex;align-items:baseline;gap:10px}
+.sub-h small{font:700 10px var(--en);letter-spacing:.24em;color:var(--dim)}
+
+.fac{left:540px;top:178px;width:760px;height:840px;--pc:var(--ally)}
+.zone{display:flex;align-items:baseline;gap:10px;margin:2px 0 10px;font:900 17px var(--jp);letter-spacing:.12em}
+.zone small{font:700 10px var(--en);letter-spacing:.24em;color:var(--dim)}
+.zone .slots{margin-left:auto;display:flex;gap:4px}
+.zone .slots i{width:16px;height:8px;background:rgba(255,255,255,.14);clip-path:polygon(3px 0,100% 0,calc(100% - 3px) 100%,0 100%)}
+.zone .slots i.on{background:var(--ally)}
+.bgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px}
+.bt{position:relative;height:108px;padding:12px 14px;cursor:pointer;background:rgba(12,20,42,.85);border-top:2px solid var(--ally);clip-path:polygon(0 0,100% 0,100% calc(100% - 12px),calc(100% - 12px) 100%,0 100%);transition:background .15s}
+.bt:hover{background:rgba(28,44,84,.92)}
+.bt.on{outline:2px solid var(--cyan);outline-offset:-2px;background:rgba(28,60,100,.95)}
+.bt b{font:900 18px var(--jp);letter-spacing:.06em;white-space:nowrap}
+.bt .pips{position:absolute;right:12px;top:14px;display:flex;gap:3px}
+.bt .pips i{width:14px;height:7px;background:rgba(255,255,255,.15)}
+.bt .pips i.on{background:var(--gold)}
+.bt .d{font:500 12px/1.45 var(--jp);color:var(--dim);margin-top:4px;height:36px;overflow:hidden}
+.bt .st{position:absolute;left:14px;bottom:8px;font:600 12px var(--jp);white-space:nowrap}
+.bt.mine{border-top-color:var(--own)}
+.bt.mine::after{content:"你出資";position:absolute;right:12px;bottom:8px;font:700 11px var(--jp);color:var(--own)}
+.bt.tk{border-top-color:#ffb35a;background:repeating-linear-gradient(-45deg,rgba(255,179,90,.08) 0 8px,transparent 8px 16px),rgba(30,20,20,.85)}
+.bt.empty{border-top-color:var(--mute);border-style:dashed;background:transparent;outline:1px dashed rgba(150,190,240,.2);outline-offset:-1px;cursor:default;display:flex;align-items:center;justify-content:center;color:var(--mute);font:500 14px var(--jp)}
+.queue .qrow{display:flex;align-items:center;gap:14px;padding:10px 14px;background:rgba(12,20,42,.75);font:500 15px var(--jp)}
+.queue .qrow + .qrow{margin-top:6px}
+.queue .qrow b{font:700 20px var(--en);color:var(--violet);width:30px}
+.queue .qrow .w{margin-left:auto;color:var(--dim);white-space:nowrap}
+.queue .qrow.pay{border-left:3px solid var(--own)}
+
+.mine-p{left:1336px;top:178px;width:550px;height:650px;--pc:var(--own)}
+.cap{display:flex;gap:18px;margin-bottom:14px}
+.cap .c{flex:1;padding:10px 14px;background:rgba(12,20,42,.8)}
+.cap .c .k{font:500 13px var(--jp);color:var(--dim);white-space:nowrap}
+.cap .c .v{font:700 26px var(--en)}
+.cap .c .v small{font-size:15px;color:var(--dim)}
+.pv{display:grid;grid-template-columns:1fr auto;gap:2px 12px;align-items:center;padding:10px 14px;background:rgba(12,40,30,.5);border-left:3px solid var(--own)}
+.pv + .pv{margin-top:6px}
+.pv b{font:900 17px var(--jp)}
+.pv span{font:500 12px var(--jp);color:var(--dim);white-space:nowrap}
+.pv.build{border-left-color:var(--violet);background:rgba(50,30,90,.4)}
+.cat{display:grid;gap:5px;margin-top:6px}
+.ci{display:grid;grid-template-columns:118px 46px 1fr auto;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;background:rgba(12,20,42,.75);font:500 13px var(--jp)}
+.ci:hover{background:rgba(28,44,84,.9)}
+.ci.on{background:rgba(28,60,100,.95);outline:1px solid var(--cyan)}
+.ci b{font:900 15px var(--jp);white-space:nowrap}
+.ci .at{font:700 11px var(--jp);color:var(--dim)}
+.ci .m{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ci .p{font:700 15px var(--en);color:var(--gold);white-space:nowrap}
+.ci.no{opacity:.5}.ci.no .p{color:var(--mute);font:500 12px var(--jp)}
+.cap{margin-bottom:10px}.cap .c{padding:8px 14px}
+.mine-p .pb{height:578px;overflow:auto;scrollbar-width:thin;scrollbar-color:rgba(90,200,255,.35) transparent}
+.go{right:34px;top:846px;width:550px;height:172px}
+.go.off{filter:grayscale(.85) brightness(.6);cursor:not-allowed}
+.go h3{font-size:42px}
+.go .why2{position:absolute;left:36px;top:100px;max-width:480px;overflow:hidden;text-overflow:ellipsis;font:500 14px var(--jp);color:#0b1430;white-space:nowrap}
+.go.red .why2{color:#ffe0e4}
+#demo{position:absolute;left:640px;top:62px;font:500 14px var(--jp);color:#9fb6d8;cursor:pointer;padding:8px 16px;border:1px solid var(--line-2)}
+#demo:hover{border-color:#ffb35a;color:#ffb35a}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="bg"></canvas><div class="ui" id="ui"></div></div>
+<script src="cap-ui.js"></script>
+<script>
+const { $, fmt } = CAP;
+/* 資料：capplanet.js 的 CP_RULE、CP_B、CP_PV、cpInc、cpUpCost、cpUpWhy、cpPvWhy；capplanet_ui.js 的 cpView */
+const ST = {
+  sys: '蓋爾', owner: '聯盟', tier: 3, tierName: '都市', fac: '聯盟', money: 1840, week: 12, rank: '特戰隊長',
+  pop: 11.2, prosp: 46, riot: false, mob: true, gd0: 2,
+  favN: 62, neuTier: '友好', razeK: 0.3,
+  lost: null,                                  // 示範：失守後 { f:'帝國' }
+  bd: [   // 勢力的建築（lv、你出的錢 inv）
+    { id: 1, k: 'home', lv: 1 }, { id: 2, k: 'ind', lv: 2, inv: 210 }, { id: 3, k: 'port', lv: 1 },
+    { id: 4, k: 'gar', lv: 1 }, { id: 5, k: 'aa', lv: 1 }, { id: 6, k: 'lab', lv: 1 },
+    { id: 7, k: 'yard', lv: 1, inv: 540 }, { id: 8, k: 'depot', lv: 1 }, { id: 9, k: 'orb', lv: 1 }, { id: 10, k: 'plat', lv: 1 },
+  ],
+  bq: [ { bid: 7, k: 'yard', lv: 2, left: 1, pay: 540 }, { k: 'plat', left: 1 } ],
+  pv: [ { k: 'shop' }, { k: 'store' } ], pq: [],
+  pvCap: { own: [2, 4], neu: [1, 3] },         // 你的建築：已蓋／上限（己方照軍階、中立照好感度）
+  slotsG: 6, slotsO: 6, pvSlots: { g: 2, o: 1 },
+  inc: { sal: 120, div: 22, pv: 59, tax: 26, up: 10, rp: 0 },   // 上週你的收入
+  B: {
+    home: { at: 'g', name: '住宅區', cost: 200, up: 5, desc: '人口上限 +2（每級）', fac: '人口上限再 +2', perk: '—（人口多，你的商行收入也多）' },
+    ind: { at: 'g', name: '工業區', cost: 350, up: 10, desc: '收入 +25；這個星系造船、改裝便宜 15%；繁榮目標 −3', fac: '收入 +20／+40%', perk: '分紅：每週這個星系總收入的 8／15%' },
+    port: { at: 'g', name: '商業港', cost: 400, up: 10, desc: '收入 +人口×3；繁榮目標 +4', fac: '收入 +20／+40%', perk: '分紅：每週這個星系總收入的 8／15%' },
+    gar: { at: 'g', name: '守備營', cost: 250, up: 10, gd: 1, desc: '地面防禦 +1（每級）', fac: '地面防禦再 +1', perk: '投降評分：你的陣營的聲望多算一次' },
+    aa: { at: 'g', name: '防空陣地', cost: 300, up: 12, gd: 1, desc: '地面防禦 +1；敵方對這裡的特戰、地面突襲成功率 −10', fac: '地面防禦再 +1', perk: '投降評分：你的陣營的聲望多算一次' },
+    lab: { at: 'g', name: '研究所', cost: 450, up: 15, desc: '勢力的研發加快', fac: '勢力的研發再加快', perk: '每週 +4／+8 研究點數' },
+    yard: { at: 'o', name: '維修船塢', cost: 900, up: 20, desc: '修理、造船、改裝', fac: '每週修理量 +20／+40%', perk: '你修理、改裝便宜 20／35%' },
+    depot: { at: 'o', name: '補給站', cost: 300, up: 8, desc: '補飛彈', fac: '補給線被切斷時仍補飛彈', perk: '你補飛彈半價／免費' },
+    orb: { at: 'o', name: '軌道防禦站', cost: 600, up: 15, desc: '防禦戰的大型砲台', fac: '耐久 +20／+40%', perk: '—' },
+    plat: { at: 'o', name: '防禦平台', cost: 250, up: 6, desc: '防禦戰的砲台', fac: '耐久 +20／+40%', perk: '—' },
+  },
+  PV: {
+    shop: { at: 'g', name: '商行', cost: 450, w: 2, up: 5, fav: 50, desc: '每週收入 40＋人口×4（繳稅給星系的擁有者）' },
+    plab: { at: 'g', name: '私人研究室', cost: 400, w: 2, up: 12, fav: 70, desc: '每週 +5 研究點數' },
+    crew: { at: 'g', name: '船員招募處', cost: 350, w: 2, up: 10, fav: 70, desc: '在這個星系造的船起始經驗 +30' },
+    safe: { at: 'g', name: '安全屋', cost: 300, w: 1, up: 6, fav: 50, neu: 1, desc: '從這裡或相鄰星系出擊的特戰成功率 +8' },
+    store: { at: 'o', name: '倉庫', cost: 250, w: 1, up: 5, fav: 30, desc: '你的小隊在這裡補飛彈（不用補給站）' },
+    listen: { at: 'o', name: '監聽站', cost: 300, w: 1, up: 8, fav: 30, desc: '這個星系與相鄰的星系永遠看得到' },
+    pdock: { at: 'o', name: '私人船台', cost: 700, w: 2, up: 15, fav: 85, desc: '這裡的船塢多一條只給你用的船台' },
+  },
+};
+const UPK = [0, 0, 0.6, 1.2], UPW = [0, 0, 2, 3];
+const upCost = (b) => Math.round(ST.B[b.k].cost * UPK[b.lv + 1]);
+const popCap = () => [2, 4, 8, 14, 22][ST.tier] + 2 * ST.bd.filter((b) => b.k === 'home').reduce((a, b) => a + b.lv, 0);
+function income() {   // cpInc
+  const k = ST.mob ? 0.8 : 1, base = ST.riot ? 0 : ST.pop * (0.4 + ST.prosp / 100) * 26 * k, L = [];
+  for (const b of ST.bd) { const m = 1 + 0.2 * (b.lv - 1); if (b.k === 'ind') L.push([b, 25 * m * k]); if (b.k === 'port') L.push([b, ST.pop * 3 * m * k]); }
+  const up = ST.bd.reduce((a, b) => a + ST.B[b.k].up, 0);
+  return { base, L, g: base + L.reduce((a, x) => a + x[1], 0), up };
+}
+function upWhy(b) {   // cpUpWhy
+  if (ST.lost) return '接管中';
+  if (b.lv >= 3) return '已經是 Lv3';
+  if (ST.bq.some((o) => o.bid === b.id)) return '已經在排隊強化';
+  if (ST.money < upCost(b)) return `資金不夠（要 ${upCost(b)}）`;
+  return '';
+}
+function pvWhy(k) {   // cpPvWhy（這裡是你的陣營的星系）
+  const P = ST.PV[k];
+  if (ST.lost) return '只能蓋在你的陣營、中立的星系';
+  if (P.neu) return '只能蓋在中立星系';
+  if (ST.pq.length) return '這個星系你一次只能蓋一件';
+  if (ST.pv.concat(ST.pq).filter((x) => ST.PV[x.k].at === P.at).length >= ST.pvSlots[P.at]) return `這裡你的${P.at === 'g' ? '地表' : '軌道'}區塊滿了`;
+  if (ST.pvCap.own[0] >= ST.pvCap.own[1]) return `${ST.rank}在己方星系最多蓋 ${ST.pvCap.own[1]} 座`;
+  if (ST.pv.some((p) => p.k === k)) return '這裡已經有了';
+  if (ST.money < P.cost) return `資金不夠（要 ${P.cost}）`;
+  return '';
+}
+let sel = { t: 'bd', id: 2 };
+function render() {
+  const R = income(), def = ST.gd0 + ST.bd.filter((b) => ST.B[b.k].gd).reduce((a, b) => a + b.lv, 0) + (ST.mob ? 1 : 0) - (ST.riot ? 1 : 0);
+  const tile = (b) => { const B = ST.B[b.k], q = ST.bq.find((o) => o.bid === b.id);
+    const st = ST.lost ? `<span style="color:#ffb35a">接管中：${ST.lost.f}再 ${b.lv} 週接管</span>` : q ? `<span style="color:var(--violet)">強化到 Lv${q.lv}：剩 ${q.left} 週</span>` : b.lv < 3 ? `<span class="cy">強化 ${fmt(upCost(b))}</span>` : '<span class="dim">已滿級</span>';
+    return `<div class="bt ${b.inv ? 'mine' : ''} ${ST.lost ? 'tk' : ''} ${sel.t === 'bd' && sel.id === b.id ? 'on' : ''}" data-b="${b.id}"><b>${B.name}</b><div class="pips">${[1, 2, 3].map((l) => `<i class="${l <= b.lv ? 'on' : ''}"></i>`).join('')}</div><div class="d">${B.desc}</div><span class="st">${st}</span></div>`; };
+  const zone = (at, n) => { const L = ST.bd.filter((b) => ST.B[b.k].at === at);
+    return `<div class="zone">${at === 'g' ? '地表' : '軌道'}<small>${at === 'g' ? 'SURFACE' : 'ORBIT'}</small><span class="dim" style="font:500 13px var(--jp)">${L.length}／${n} 格</span><span class="slots">${Array.from({ length: n }, (_, i) => `<i class="${i < L.length ? 'on' : ''}"></i>`).join('')}</span></div>
+      <div class="bgrid">${L.map(tile).join('')}${Array.from({ length: Math.max(0, n - L.length) }, () => '<div class="bt empty">空地</div>').join('')}</div>`; };
+  // 選中的東西 → 大按鈕
+  let act;
+  if (sel.t === 'bd') { const b = ST.bd.find((x) => x.id === sel.id), B = ST.B[b.k], w = ST.lost ? (b.inv ? '' : '這座沒有你出的錢') : upWhy(b);
+    act = ST.lost ? { op: 'SCORCH', h: `破壞${B.name}`, sub: b.inv ? `拿回 ${Math.round(b.inv * ST.razeK)} 資金（你出的 ${b.inv} × ${Math.round(ST.razeK * 100)}%）・這週結束時破壞` : '', w }
+      : { op: `UPGRADE ・ LV${Math.min(3, b.lv + 1)}`, h: `強化${B.name}`, sub: b.lv < 3 ? `到 Lv${b.lv + 1}・${fmt(upCost(b))} 資金・${UPW[b.lv + 1]} 週` : '', w, info: `你得到：${B.perk}` }; }
+  else { const P = ST.PV[sel.k], w = pvWhy(sel.k); act = { op: `BUILD ・ ${P.at === 'g' ? 'SURFACE' : 'ORBIT'}`, h: `蓋${P.name}`, sub: `${P.cost} 資金・${P.w} 週・每週維護 ${P.up}`, w, info: P.desc }; }
+  $('ui').innerHTML = `
+    ${CAP.head({ title: '星球', en: 'PLANET', crumb: `<b>${ST.sys}星系</b>・${ST.lost ? `<span class="bad">失守：${ST.lost.f}接管中</span>` : `${ST.owner}・${ST.tierName}`}` })}
+    ${CAP.res([['資金', fmt(ST.money), 'var(--gold)', 'money'], ['中立好感', ST.favN, 'var(--yellow)', 'flag'], ['週', ST.week, 'var(--dim)', 'week']])}
+    <button id="demo">示範：${ST.lost ? '奪回星系 ▸' : '星系失守（接管中）▸'}</button>
+
+    <section class="panel stat-p tilt-l enter" style="--dx:-40px;--d:.1s">
+      <div class="ph"><h2>狀況</h2><span class="en">STATUS</span><span class="r">${ST.owner}・${ST.tierName}</span></div>
+      <div class="pb">
+        <div class="sline"><span class="k">人口</span>${CAP.bar(ST.pop / popCap(), 'var(--cyan)')}<span class="v">${ST.pop}<small class="dim">／${popCap()}</small></span></div>
+        <div class="sline"><span class="k">繁榮（民心）</span><div class="prosp">${CAP.bar(ST.prosp / 100, ST.prosp < 20 ? 'var(--red)' : ST.prosp < 40 ? '#ffb35a' : 'var(--own)')}<i class="mk" style="left:20%"></i><i class="mk b" style="left:30%"></i></div><span class="v">${ST.prosp}</span></div>
+        <div class="note">低於 20 會暴動（收入歸零、地面防禦 −1），回到 30 才平息</div>
+        <div class="sline"><span class="k">地面防禦</span><span style="font:500 13px var(--jp);color:var(--dim)">基礎 ${ST.gd0}＋守備營 1＋防空陣地 1${ST.mob ? '＋戰時動員 1' : ''}</span><span class="v">${def}</span></div>
+        <div class="sline"><span class="k">政策</span><span>${ST.mob ? '戰時動員（前線）<span class="mob">收入 ×0.8</span>' : '平時'}</span><span></span></div>
+        ${ST.mob ? '<div class="note">地面防禦 +1、收入 ×0.8、繁榮目標 −5</div>' : ''}
+
+        <div class="sub-h">勢力的收入<small>FACTION INCOME ・ WEEKLY</small></div>
+        <div class="inc">
+          <span>人口×（0.4＋繁榮/100）×26${ST.mob ? '×0.8' : ''}</span><span class="n">${Math.round(R.base)}</span>
+          ${R.L.map(([b, v]) => `<span>${ST.B[b.k].name} Lv${b.lv}</span><span class="n">+${Math.round(v)}</span>`).join('')}
+          <span>維護（${ST.bd.length} 座）</span><span class="n bad">−${R.up}</span>
+          <span class="t">每週</span><span class="n">${Math.round(R.g - R.up)}</span>
+        </div>
+
+        <div class="sub-h">上週你的收入<small>YOUR INCOME ・ LAST WEEK</small></div>
+        <div class="inc">
+          <span>薪餉</span><span class="n">${ST.inc.sal}</span>
+          <span>分紅（你強化的工業區、商業港）</span><span class="n">${ST.inc.div}</span>
+          <span>你的建築（已繳稅 ${ST.inc.tax}）</span><span class="n">${ST.inc.pv}</span>
+          <span>維護</span><span class="n bad">−${ST.inc.up}</span>
+          <span class="t">合計</span><span class="n">${ST.inc.sal + ST.inc.div + ST.inc.pv - ST.inc.up}</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel fac enter" style="--dy:30px;--d:.2s">
+      <div class="ph"><h2>勢力的建築</h2><span class="en">FACTION BUILDINGS</span><span class="r">上級（AI）蓋・你出錢強化：好處一半給勢力、一半給你</span></div>
+      <div class="pb">
+        ${zone('g', ST.slotsG)}${zone('o', ST.slotsO)}
+        <div class="queue"><div class="zone">建設佇列<small>QUEUE ・ ${ST.owner}</small></div>
+          ${ST.bq.length ? ST.bq.map((o, i) => `<div class="qrow ${o.pay ? 'pay' : ''}"><b>${i ? i + 1 : '▶'}</b>${o.bid ? `強化${ST.B[o.k].name}到 Lv${o.lv}${o.pay ? '<span class="good" style="margin-left:8px;font-size:13px">你出資 ' + o.pay + '</span>' : ''}` : ST.B[o.k].name}<span class="w">${i ? '' : '施工中・'}剩 ${o.left} 週</span></div>`).join('') : '<div class="dim">沒有。</div>'}</div>
+      </div>
+    </section>
+
+    <section class="panel mine-p tilt-r enter" style="--dx:40px;--d:.3s">
+      <div class="ph"><h2>你的建築</h2><span class="en">YOUR BUILDINGS</span><span class="r">地表 ${ST.pvSlots.g} 格・軌道 ${ST.pvSlots.o} 格</span></div>
+      <div class="pb">
+        <div class="cap"><div class="c"><div class="k">己方星系（${ST.rank}）</div><div class="v">${ST.pvCap.own[0]}<small>／${ST.pvCap.own[1]} 座</small></div></div>
+          <div class="c"><div class="k">中立星系（${ST.neuTier}）</div><div class="v">${ST.pvCap.neu[0]}<small>／${ST.pvCap.neu[1]} 座</small></div></div></div>
+        ${ST.pv.map((p) => { const P = ST.PV[p.k]; return `<div class="pv" ${ST.lost ? 'style="border-left-color:#ffb35a"' : ''}><b>${P.name} <span>${P.at === 'g' ? '地表' : '軌道'}</span></b><button class="btn sm ${ST.lost ? 'danger' : 'ghost'}" data-act="${ST.lost ? `破壞${P.name}（拿回 ${Math.round(P.cost * ST.razeK)}）` : `拆除${P.name}（退 ${Math.round(P.cost * 0.25)}）`}">${ST.lost ? `破壞（拿回 ${Math.round(P.cost * ST.razeK)}）` : `拆除（退 ${Math.round(P.cost * 0.25)}）`}</button>
+          <span>${ST.lost ? `<span style="color:#ffb35a">接管中：${ST.lost.f}再 ${P.w} 週接管</span>` : `${P.desc}・每週維護 ${P.up}`}</span></div>`; }).join('')}
+        ${ST.pq.map((o) => `<div class="pv build"><b>${ST.PV[o.k].name} <span>建設中</span></b><span style="color:var(--violet)">剩 ${o.left} 週</span></div>`).join('')}
+        <div class="lab" style="margin:14px 0 2px">可以蓋的 ／ BUILD</div>
+        <div class="cat">${Object.entries(ST.PV).map(([k, P]) => { const w = pvWhy(k);
+          return `<div class="ci ${w ? 'no' : ''} ${sel.t === 'pv' && sel.k === k ? 'on' : ''}" data-k="${k}"><b>${P.name}</b><span class="at">${P.at === 'g' ? '地表' : '軌道'}</span><span class="m">${w || `${P.w} 週・維護 ${P.up}・中立好感 ${P.fav}`}</span><span class="p">${w ? '' : fmt(P.cost)}</span></div>`; }).join('')}</div>
+      </div>
+    </section>
+
+    <button class="bigbtn go ${act.w ? 'off' : ''} ${ST.lost ? 'red' : ''} enter" style="--dx:40px;--d:.4s" id="go">
+      <span class="op">${act.op}</span><h3>${act.h}</h3><span class="why2">${act.w ? `✗ ${act.w}` : act.info || ''}</span>
+      <span class="sub">${act.sub}</span><div class="chev"><i></i><i></i><i></i></div></button>`;
+  document.querySelectorAll('[data-b]').forEach((e) => e.onclick = () => { sel = { t: 'bd', id: +e.dataset.b }; render(); });
+  document.querySelectorAll('[data-k]').forEach((e) => e.onclick = () => { sel = { t: 'pv', k: e.dataset.k }; render(); });
+  $('demo').onclick = () => { ST.lost = ST.lost ? null : { f: '帝國' }; sel = { t: 'bd', id: 7 }; CAP.glitch(); render(); };
+  $('go').onclick = () => {
+    if (act.w) return CAP.toast(act.w);
+    if (ST.lost) { CAP.toast('這週結束時破壞（示意）'); return; }
+    if (sel.t === 'bd') { const b = ST.bd.find((x) => x.id === sel.id), c = upCost(b); ST.money -= c; b.inv = (b.inv || 0) + c; ST.bq.unshift({ bid: b.id, k: b.k, lv: b.lv + 1, left: UPW[b.lv + 1], pay: c }); CAP.toast(`出資強化 ${ST.sys} 的${ST.B[b.k].name}到 Lv${b.lv + 1}（${c} 資金，${UPW[b.lv + 1]} 週）`); }
+    else { const P = ST.PV[sel.k]; ST.money -= P.cost; ST.pq.push({ k: sel.k, left: P.w }); ST.pvCap.own[0]++; CAP.toast(`在 ${ST.sys} 蓋${P.name}（${P.cost} 資金，${P.w} 週）`); }
+    render();
+  };
+  if (window._r) document.getElementById('stage').classList.add('ready'); window._r = 1;
+}
+CAP.bg({ mode: 'space' });
+render(); CAP.ready();
+</script>
+</body>
+</html>

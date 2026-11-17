@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>戰艦庫</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="cap-ui.css">
+<style>
+/* 戰艦庫（capbay.js）：背景是全螢幕 3D 機庫（這裡用剪影代替）；下＝1～5 號船塢；右＝選艦種與說明；右下＝前往出擊。
+   單艦視角：側欄收起、鏡頭貼近一艘船，下方只剩 ‹ 船名 › */
+.bay{position:absolute;left:0;right:0;top:150px;height:640px;pointer-events:none}
+.bay .ship{position:absolute;left:44%;top:50%;translate:-50% -50%;transition:transform .8s cubic-bezier(.2,.8,.2,1),left .8s;filter:drop-shadow(0 0 30px rgba(60,200,255,.25))}
+.bay .cradle{position:absolute;left:44%;top:72%;translate:-50% 0;width:760px;height:12px;background:repeating-linear-gradient(90deg,#f2b35a 0 30px,#2a2a2a 30px 50px);opacity:.7;transition:opacity .4s}
+.bay .arm{position:absolute;top:22%;width:14px;height:360px;background:linear-gradient(180deg,#5c6a8a,#1c2236);transform-origin:50% 0;transition:opacity .4s}
+.bay .arm.l{left:20%;transform:rotate(-14deg)}.bay .arm.r{left:66%;transform:rotate(14deg)}
+.bay .spot{position:absolute;top:-150px;width:420px;height:820px;background:linear-gradient(180deg,rgba(150,210,255,.16),transparent 80%);clip-path:polygon(40% 0,60% 0,100% 100%,0 100%)}
+.bay .spot.a{left:18%}.bay .spot.b{left:46%}
+.bay .ship svg *{vector-effect:non-scaling-stroke;stroke-width:2.5px}
+.bay .ship svg polygon{fill:rgba(60,100,170,.28)}
+.focus .bay .ship{transform:scale(1.7);left:50%}
+.focus .bay .cradle,.focus .bay .arm{opacity:0}
+.mark{position:absolute;left:44%;top:50%;translate:-50% -50%;width:880px;height:360px;border:2px solid rgba(242,179,90,.7);transition:opacity .4s}
+.mark::before,.mark::after{content:"";position:absolute;width:30px;height:30px;border:3px solid #f2b35a}
+.mark::before{left:-3px;top:-3px;border-right:0;border-bottom:0}.mark::after{right:-3px;bottom:-3px;border-left:0;border-top:0}
+.focus .mark{opacity:0}
+
+.bays{position:absolute;left:34px;bottom:46px;display:flex;gap:10px;transition:opacity .4s,translate .4s}
+.bslot{position:relative;width:206px;height:118px;padding:14px 18px;background:linear-gradient(180deg,rgba(18,28,58,.92),rgba(8,14,32,.82));border-top:3px solid var(--mute);clip-path:polygon(10px 0,100% 0,calc(100% - 10px) 100%,0 100%);transition:background .2s,transform .2s}
+.bslot:hover{transform:translateY(-4px)}
+.bslot.on{border-top-color:var(--gold);background:linear-gradient(180deg,rgba(70,52,20,.9),rgba(14,18,34,.85))}
+.bslot .no{font:700 12px var(--en);letter-spacing:.2em;color:var(--dim)}
+.bslot .no small{margin-left:8px;color:var(--own);font-family:var(--jp);letter-spacing:.1em}
+.bslot b{display:block;font:900 22px var(--jp);letter-spacing:.08em;margin-top:2px}
+.bslot b small{font:700 11px var(--en);letter-spacing:.2em;color:var(--dim);margin-left:8px}
+.bslot svg{position:absolute;right:14px;top:12px;opacity:.8}
+.bslot.empty b{color:var(--mute)}
+.focus .bays{opacity:0;translate:0 30px;pointer-events:none}
+
+.side{right:34px;top:170px;width:560px;height:560px;--pc:var(--gold);transition:opacity .4s,translate .4s}
+.focus .side{opacity:0;translate:40px 0;pointer-events:none}
+.pick{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.hchip{display:flex;flex-direction:column;gap:2px;padding:10px 14px;background:rgba(10,16,36,.88);clip-path:polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%)}
+.hchip b{font:900 18px var(--jp)}.hchip small{font:700 10px var(--en);letter-spacing:.2em;color:var(--dim)}
+.hchip:hover{background:rgba(30,50,90,.92)}
+.hchip.on{background:var(--gold);color:#1c1204}.hchip.on small{color:#4a3410}
+.hchip:disabled{opacity:.35;cursor:not-allowed}
+.hdesc{margin-top:16px;font:500 15px/1.7 var(--jp);color:#cfdaf0}
+.hstats{display:grid;grid-template-columns:70px 1fr 70px;gap:8px 12px;align-items:center;margin-top:14px;font:500 14px var(--jp);color:var(--dim)}
+.hstats b{font:700 17px var(--en);color:var(--text);text-align:right}
+.wpn{margin-top:14px;font:500 14px/1.7 var(--jp);color:var(--dim)}
+.wpn b{color:var(--text)}
+
+.viewbtn{position:absolute;right:34px;top:752px}
+.go{right:34px;top:820px;width:560px;height:170px}
+.focus .go{width:420px}
+.fbar{position:absolute;left:50%;bottom:60px;translate:-50% 0;display:flex;align-items:center;gap:30px;opacity:0;pointer-events:none;transition:opacity .4s}
+.focus .fbar{opacity:1;pointer-events:auto}
+.fbar .arrow{width:64px;height:64px;font:700 34px var(--en);background:rgba(10,16,36,.88);border:1px solid var(--line);text-align:center}
+.fbar .arrow:hover{border-color:var(--gold)}
+.fbar .nm{text-align:center;min-width:300px}
+.fbar .nm small{font:700 12px var(--en);letter-spacing:.3em;color:var(--gold)}
+.fbar .nm b{display:block;font:900 48px var(--jp);letter-spacing:.14em;text-shadow:0 3px 14px rgba(0,0,0,.7)}
+.fbar .nm span{font:700 13px var(--en);letter-spacing:.4em;color:var(--dim)}
+.hint{position:absolute;left:50%;top:150px;translate:-50% 0;font:500 14px var(--jp);color:var(--dim);white-space:nowrap;padding:6px 18px;background:rgba(6,10,22,.6)}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="bg"></canvas><div class="ui" id="ui"></div></div>
+<script src="cap-ui.js"></script>
+<script>
+const { $, fmt, HULLS, hullSvg, bar } = CAP;
+// 資料照 capbay.js showCapBay：五座船塢（存檔與「隨機任務」的小隊編成同一份）、單艦視角、前往出擊
+const ST = {
+  fac: '帝國', merit: 1240, wins: 18, sorties: 25,
+  slots: ['assault', 'gunship', 'ew', '', ''],
+  info: {
+    assault: { cruise: 8, max: 13, turn: 30, main: '磁軌主砲（30 傷害、2.2 秒、射程 240）', tur: 2, pd: 2, msl: 24, desc: '快、靈活，主砲射速快（射界左右各 45°）。技能：推進過載（5 秒內速度、轉向大幅提升）。' },
+    gunship: { cruise: 5.5, max: 8.5, turn: 16, main: '重粒子主砲（85 傷害、6 秒、射程 320）', tur: 4, pd: 2, msl: 32, desc: '慢、最耐打，主砲一發重創，但砲塔轉得慢、射界只有左右各 30°；飛彈最多。技能：護盾超載（護盾立刻充滿，8 秒內受到的傷害減半）。' },
+    support: { cruise: 6.5, max: 10, turn: 20, main: '速射砲（12 傷害、0.9 秒、射程 200）', tur: 2, pd: 4, msl: 16, ftr: 6, desc: '帶 6 架護航機、點防禦最強，速射砲幾乎全方位。技能：維修光束（按住技能鍵，對準友艦修理船體與護盾；沒對準就修自己）。' },
+    ew: { cruise: 6.8, max: 10.5, turn: 21, main: '脈衝砲（16 傷害、1.1 秒、射程 210）', tur: 2, pd: 3, msl: 16, desc: '火力普通，靠干擾保護小隊。技能：電子干擾（8 秒內，周圍 320 內的友艦受到的傷害 −35%，範圍內的敵方雷達、偵測失效）。' },
+    stealth: { cruise: 8.5, max: 13.5, turn: 32, main: '穿甲魚雷砲（42 傷害、3.2 秒、射程 230）', tur: 1, pd: 1, msl: 12, desc: '最脆，但船身難被偵測（敵方的偵測距離 ×0.55）。技能：匿蹤（10 秒內完全隱形，敵軍失去你的位置；開火、掃描會解除）。' },
+  },
+};
+const ORDER = ['assault', 'gunship', 'support', 'ew', 'stealth'];
+let sel = 1, focus = false;
+
+function render() {
+  const k = ST.slots[sel], H = k && HULLS[k], I = k && ST.info[k], lead = ST.slots.findIndex(Boolean), only = ST.slots.filter(Boolean).length === 1 && k;
+  document.getElementById('stage').classList.toggle('focus', focus);
+  $('ui').innerHTML = `
+    <div class="bay"><div class="spot a"></div><div class="spot b"></div><div class="arm l"></div><div class="arm r"></div>
+      ${k ? `<div class="ship">${CAP.shipImg(k, 760)}</div>` : ''}<div class="cradle"></div><div class="mark"></div></div>
+    ${CAP.head({ title: '戰艦庫', en: 'HANGAR', crumb: '艦長・小隊的特製戰艦（1～5 艘）' })}
+    ${CAP.res([['陣營', ST.fac, 'var(--red)', 'flag'], ['戰功', fmt(ST.merit), 'var(--own)', 'merit'], ['任務成功', `${ST.wins}／${ST.sorties}`, 'var(--cyan)', 'target']])}
+    <div class="hint">${focus ? '左右拖曳繞著船走・上下拖曳改變高度・滾輪靠近／退後' : '拖曳背景轉動視角・滾輪拉近拉遠・點一個船塢，再選要停的艦種'}</div>
+
+    <div class="bays enter" style="--dy:30px;--d:.1s">${ST.slots.map((h, i) => `<button class="bslot ${i === sel ? 'on' : ''} ${h ? '' : 'empty'}" data-b="${i}">
+      <span class="no">BAY ${String(i + 1).padStart(2, '0')}${i === lead ? '<small>旗艦</small>' : ''}</span><b>${h ? HULLS[h].name : '（空）'}${h ? `<small>${HULLS[h].en}</small>` : ''}</b>${h ? hullSvg(h, i === sel ? 'var(--gold)' : '#6f84ac', 70) : ''}</button>`).join('')}</div>
+
+    <section class="panel side tilt-r enter" style="--dx:40px;--d:.15s">
+      <div class="ph"><h2>${sel + 1} 號船塢</h2><span class="en">BAY ${String(sel + 1).padStart(2, '0')}</span><span class="r">選要停的艦種</span></div>
+      <div class="pb">
+        <div class="pick"><button class="hchip ${!k ? 'on' : ''}" data-h="" ${only ? 'disabled' : ''}><b>不帶</b><small>EMPTY</small></button>
+          ${ORDER.map((h) => `<button class="hchip ${k === h ? 'on' : ''}" data-h="${h}"><b>${HULLS[h].name}</b><small>${HULLS[h].en}</small></button>`).join('')}</div>
+        ${k ? `<div class="hdesc"><b style="font-size:19px">${H.name}</b>　${I.desc}</div>
+          <div class="hstats"><span>耐久</span>${bar(H.hp / 620, 'var(--own)')}<b>${H.hp}</b><span>護盾</span>${bar(H.sh / 320, 'var(--ally)')}<b>${H.sh}</b>
+            <span>速度</span>${bar(I.max / 13.5, 'var(--cyan)')}<b>${I.cruise}～${I.max}</b><span>轉向</span>${bar(I.turn / 32, 'var(--violet)')}<b>${I.turn}°</b></div>
+          <div class="wpn">主砲：<b>${I.main}</b>・砲塔 ${I.tur} 座・點防禦 ${I.pd} 座・飛彈 ${I.msl} 枚${I.ftr ? `・護航機 ${I.ftr} 架` : ''}</div>`
+        : '<div class="hdesc dim">這個船塢空著。小隊至少要有一艘船。</div>'}
+      </div>
+    </section>
+
+    <button class="btn viewbtn enter" style="--dx:30px;--d:.2s" id="view">${focus ? '回到總覽' : '單艦視角'}<small>${focus ? 'OVERVIEW' : 'FOCUS'}</small></button>
+    <button class="bigbtn go enter" style="--dx:40px;--d:.25s" id="go"><span class="op">SORTIE SETUP</span><h3>前往出擊</h3><span class="sub">${ST.slots.filter(Boolean).map((h) => HULLS[h].name).join('＋')}</span><div class="chev"><i></i><i></i><i></i></div></button>
+
+    <div class="fbar"><button class="arrow" id="prev">‹</button><div class="nm"><small>${sel + 1} 號船塢</small><b>${k ? H.name : '（空）'}</b><span>${k ? H.en : ''}</span></div><button class="arrow" id="next">›</button></div>`;
+  document.querySelectorAll('[data-b]').forEach((b) => b.onclick = () => { sel = +b.dataset.b; render(); });
+  document.querySelectorAll('[data-h]').forEach((b) => b.onclick = () => { ST.slots[sel] = b.dataset.h; if (!ST.slots.some(Boolean)) ST.slots[sel] = 'assault'; CAP.glitch(200); render(); });
+  $('view').onclick = () => { focus = !focus; if (focus && !ST.slots[sel]) sel = ST.slots.findIndex(Boolean); render(); };
+  const step = (d) => { const ks = [0, 1, 2, 3, 4].filter((i) => ST.slots[i]); const i = ks.indexOf(sel); sel = ks[((i < 0 ? 0 : i + d) + ks.length) % ks.length]; render(); };
+  $('prev').onclick = () => step(-1); $('next').onclick = () => step(1);
+  $('go').onclick = () => CAP.toast('開啟「小隊編成」（示意）');
+  document.getElementById('stage').classList.add('ready');
+}
+CAP.bg({ mode: 'hangar', drift: .4 });
+render(); CAP.ready();
+</script>
+</body>
+</html>

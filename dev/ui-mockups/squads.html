@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>小隊</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="cap-ui.css">
+<style>
+/* 小隊：上＝每個小隊一個分頁；左＝同星系小隊的換船／分隊；右＝選中的船的資料；右下＝這個情境的主要動作 */
+.sqtabs{position:absolute;left:34px;top:168px;display:flex;gap:10px}
+.sqtab{position:relative;display:flex;flex-direction:column;justify-content:center;height:62px;padding:0 30px 0 26px;min-width:200px;background:rgba(10,16,36,.88);clip-path:polygon(12px 0,100% 0,calc(100% - 12px) 100%,0 100%);white-space:nowrap;transition:background .2s}
+.sqtab b{font:900 20px var(--jp);letter-spacing:.08em}
+.sqtab small{font:500 13px var(--jp);color:var(--dim)}
+.sqtab:hover{background:rgba(30,50,90,.92)}
+.sqtab.on{background:linear-gradient(100deg,#2fcf7f,#1d9e64);color:#04180e}.sqtab.on small{color:#0b3a24}
+.sqtab .warn{position:absolute;right:12px;top:8px;font:700 13px var(--jp);color:var(--red)}
+.sqtab.on .warn{color:#7a0010}
+.sqtab.add{min-width:0;color:var(--dim);border:1px dashed var(--line-2);background:transparent}
+
+.swap{left:34px;top:250px;width:1110px;height:730px;--pc:var(--own)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:26px}
+.col h3{display:flex;align-items:center;gap:10px;font:900 19px var(--jp);color:var(--own);letter-spacing:.1em;margin-bottom:10px}
+.col h3 small{font:500 13px var(--jp);color:var(--dim)}
+.col h3 .cnt{margin-left:auto;font:700 18px var(--en);color:var(--text)}
+.shipcard{cursor:pointer}
+.shipcard + .shipcard{margin-top:10px}
+.shipcard .mv{position:absolute;right:76px;top:8px;display:flex;gap:6px}
+.shipcard .mv .btn{height:32px}
+.shipcard .bars{grid-template-columns:42px 1fr 46px;gap:3px 10px;margin-top:4px}
+.shipcard .mv:empty{display:none}
+.slotx{height:112px;border:1px dashed var(--line-2);display:flex;align-items:center;justify-content:center;color:var(--mute);font:500 15px var(--jp);margin-top:10px}
+.swaprule{margin-top:16px;font:500 14px/1.6 var(--jp);color:var(--mute)}
+.threat{margin-bottom:16px;padding:16px 20px;background:linear-gradient(100deg,rgba(120,20,40,.55),rgba(40,10,24,.5));border-left:4px solid var(--red)}
+.threat b.t{font:900 20px var(--jp);color:#ff8a8a;letter-spacing:.06em}
+.threat .r{display:flex;gap:30px;align-items:flex-end;margin-top:8px}
+.threat .odds{font-size:52px}
+.lone{padding:22px;border:1px dashed var(--line-2);color:var(--dim);font:500 16px/1.7 var(--jp)}
+
+.detail{left:1190px;top:168px;width:696px;height:592px;--pc:var(--gold)}
+.dh{display:flex;align-items:flex-end;gap:14px}
+.dh h2{font:900 34px var(--jp);letter-spacing:.1em}
+.dh small{font:500 16px var(--jp);color:var(--dim);margin-bottom:6px}
+.dh .lv{margin-left:auto;font:700 34px var(--en);color:var(--gold)}
+.xp{display:flex;align-items:center;gap:10px;margin-top:6px;font:500 13px var(--jp);color:var(--dim)}
+.mkcap{margin-top:8px;font:500 14px var(--jp);color:var(--dim)}
+.mkcap b{color:var(--violet)}
+.slots{margin-top:14px;display:grid;grid-template-columns:96px 1fr 70px;gap:0;font:500 15px var(--jp)}
+.slots > *{padding:9px 0;border-top:1px solid var(--line-2)}
+.slots .sn{color:var(--dim)}
+.slots .md b{font-weight:700}
+.slots .md small{display:block;font-size:12px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:400px}
+.mk{display:inline-block;margin-left:6px;padding:0 6px;font:700 12px var(--en);background:rgba(169,123,255,.25);color:#d6c2ff}
+.prof{text-align:right;font:700 13px var(--en);color:var(--cyan)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px}
+.stats .stat .v{font-size:24px}
+
+.act{right:34px;top:790px;width:696px;height:190px}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="bg"></canvas><div class="ui" id="ui"></div></div>
+<script src="cap-ui.js"></script>
+<script>
+const { $, fmt, bar, hpCol, HULLS, hullSvg } = CAP;
+// 資料照 capcareer_ui.js：ccDock（分頁、⚠）、ccSwapView（換船／分隊）、ccShipView（等級、Mk 上限、槽位、熟練度）
+const ST = {
+  week: 12, money: 18450, merit: 1240, rank: '特戰隊長', slots: 3, maxShips: 5,
+  squads: [
+    { id: 1, name: '第1小隊', lead: true, sys: '蓋爾', ships: [
+      { n: '艾爾巴號', t: 'gunship', lv: 3, xp: 95, hp: .82, sh: 1, msl: .6,
+        mod: [['主砲', '重粒子主砲', 2, '原廠', 2], ['副砲', '重型砲塔', 1, '傷害高、射得慢、比較不準', 1], ['飛彈艙／機庫', '飛彈艙', 1, '原廠', 3], ['防禦', '重裝甲', 2, '船體多 25%，護盾少 10%、速度慢 10%', 1], ['引擎', '原廠引擎', 1, '原廠', 0]],
+        st: [['船體', 775], ['護盾', 288], ['主砲每秒', 15.6], ['最高速度', 7.7]], skill: '護盾超載' },
+      { n: '雷霆號', t: 'assault', lv: 2, xp: 52, hp: .36, sh: .5, msl: .3,
+        mod: [['主砲', '磁軌主砲', 1, '原廠', 1], ['副砲', '原廠砲塔', 1, '原廠', 0], ['飛彈艙／機庫', '蜂群飛彈', 1, '數量多、一發傷害低，鎖定快', 2], ['防禦', '原廠', 1, '原廠', 0], ['引擎', '機動引擎', 1, '轉向快 30%、側移快，最高速度慢 10%', 1]],
+        st: [['船體', 300], ['護盾', 160], ['主砲每秒', 13.6], ['最高速度', 11.7]], skill: '推進過載' },
+      { n: '穿刺號', t: 'ew', lv: 1, xp: 18, hp: 1, sh: 1, msl: 1,
+        mod: [['主砲', '原廠主砲', 1, '原廠', 0], ['副砲', '原廠砲塔', 1, '原廠', 0], ['飛彈艙／機庫', '飛彈艙', 1, '原廠', 0], ['防禦', '強化護盾', 1, '護盾多 35%，船體少 15%', 0], ['引擎', '原廠引擎', 1, '原廠', 0]],
+        st: [['船體', 323], ['護盾', 324], ['主砲每秒', 10.2], ['最高速度', 10.5]], skill: '電子干擾' } ] },
+    { id: 2, name: '第2小隊', sys: '薩恩', threat: { who: '帝國第3小隊、帝國第5小隊（6 艘）', odds: 41, surv: [['斷鋒號', 58], ['迅羽號', 34]] }, ships: [
+      { n: '斷鋒號', t: 'support', lv: 2, xp: 40, hp: .9, sh: 1, msl: .8, mod: [], st: [['船體', 420], ['護盾', 260], ['主砲每秒', 13.3], ['最高速度', 10]], skill: '維修光束' },
+      { n: '迅羽號', t: 'assault', lv: 1, xp: 10, hp: .6, sh: .7, msl: 1, mod: [], st: [['船體', 300], ['護盾', 160], ['主砲每秒', 13.6], ['最高速度', 13]], skill: '推進過載' } ] },
+    { id: 3, name: '第3小隊', sys: '蓋爾', ships: [
+      { n: '赤隼號', t: 'stealth', lv: 1, xp: 6, hp: 1, sh: 1, msl: 1, mod: [], st: [['船體', 240], ['護盾', 120], ['主砲每秒', 13.6], ['最高速度', 13.5]], skill: '匿蹤' } ] },
+  ],
+};
+const LV = [0, 30, 80, 160, 300], MK = ['', 'Mk I', 'Mk II', 'Mk III'];
+const mkCapLv = (lv) => lv >= 5 ? 3 : lv >= 3 ? 2 : 1;
+let cur = 1, pick = { q: 1, k: 0 };
+const Q = (id) => ST.squads.find((q) => q.id === id);
+
+function card(q, c, k, mates) {
+  const H = HULLS[c.t], on = pick.q === q.id && pick.k === k;
+  return `<div class="shipcard ${on ? 'sel' : ''} ${q.lead && k === 0 ? 'lead' : ''}" data-p="${q.id}:${k}"><span class="lv">Lv.${c.lv}</span>
+    <div class="nm">${c.n}<small>${H.name}</small></div>
+    <div style="display:flex;gap:18px;align-items:center"><div style="flex:none">${hullSvg(c.t, on ? 'var(--cyan)' : '#8fa3c7', 90)}</div>
+    <div class="bars" style="flex:1"><span>HULL</span>${bar(c.hp, hpCol(c.hp))}<b>${Math.round(c.hp * 100)}%</b><span>SHLD</span>${bar(c.sh, 'var(--ally)')}<b>${Math.round(c.sh * 100)}%</b><span>MSL</span>${bar(c.msl, 'var(--yellow)')}<b>${Math.round(c.msl * 100)}%</b></div></div>
+    <div class="mv">${mates.map((o) => `<button class="btn sm own" data-mv="${q.id}:${k}:${o.id}">→ ${o.name}</button>`).join('')}${q.ships.length > 1 && ST.squads.length < ST.slots ? `<button class="btn sm ghost" data-mv="${q.id}:${k}:new">分出</button>` : ''}</div></div>`;
+}
+function render() {
+  const S = Q(cur), here = ST.squads.filter((q) => q.sys === S.sys), mates = (q) => here.filter((o) => o !== q);
+  const P = Q(pick.q), c = P && P.ships[pick.k], H = c && HULLS[c.t];
+  const lead = ST.squads.find((q) => q.lead), canCmd = !S.lead && S.sys === lead.sys;
+  $('ui').innerHTML = `
+    ${CAP.head({ title: '小隊', en: 'SQUADS', crumb: `${ST.rank}・指揮權 <b>${ST.squads.length}／${ST.slots}</b> 隊・每隊最多 ${ST.maxShips} 艘` })}
+    ${CAP.res([['資金', fmt(ST.money), 'var(--gold)', 'money'], ['戰功', fmt(ST.merit), 'var(--own)', 'merit'], ['週', ST.week, 'var(--dim)', 'week']])}
+    <div class="sqtabs enter" style="--dy:-10px;--d:.05s">${ST.squads.map((q) => `<button class="sqtab ${q.id === cur ? 'on' : ''}" data-q="${q.id}">${q.threat ? '<span class="warn">⚠ 下週來襲</span>' : ''}<b>${q.lead ? '★ ' : ''}${q.name}</b><small>${q.ships.length} 艘・在 ${q.sys}${q.lead ? '・親自指揮' : ''}</small></button>`).join('')}
+      ${ST.squads.length < ST.slots ? '<button class="sqtab add" data-act="成立新小隊">＋ 成立新小隊</button>' : ''}</div>
+
+    <section class="panel swap enter" style="--dx:-40px;--d:.1s">
+      <div class="ph"><h2>${here.length > 1 ? `換船／分隊：${S.sys}` : `${S.name}・${S.sys}`}</h2><span class="en">${here.length > 1 ? 'TRANSFER' : 'SQUAD'}</span><span class="r">${here.length > 1 ? '同一個星系的小隊之間換船，不花時間' : ''}</span></div>
+      <div class="pb">
+        ${S.threat ? `<div class="threat"><b class="t">⚠ 下週敵軍來襲</b><span class="dim" style="margin-left:12px">${S.threat.who}</span>
+          <div class="r"><div><div class="lab">DEFEND</div><div class="odds bad">${S.threat.odds}<small>%</small></div></div><div style="font:500 15px/1.7 var(--jp)">駐守的勝率・存活率 ${S.threat.surv.map(([n, v]) => `${n} <b class="${v < 50 ? 'bad' : 'warn'}">${v}%</b>`).join('、')}<br><span class="dim">不想打就往相鄰的星系移動（星圖下令）</span></div></div></div>` : ''}
+        ${here.length > 1 ? `<div class="cols">${here.map((q) => `<div class="col"><h3>${q.lead ? '★ ' : ''}${q.name}<small>${q.lead ? '親自指揮・至少留一艘' : ''}</small><span class="cnt">${q.ships.length}／${ST.maxShips}</span></h3>
+            ${q.ships.map((c, k) => card(q, c, k, mates(q))).join('')}${q.ships.length < ST.maxShips ? '<div class="slotx">空位：點另一隊的船「→」移過來</div>' : ''}</div>`).join('')}</div>
+          <div class="swaprule">每隊最多 ${ST.maxShips} 艘；親自指揮的小隊至少留一艘。「分出」＝用這艘船成立新的小隊（要有指揮權）。</div>`
+        : `${S.ships.map((c, k) => card(S, c, k, [])).join('')}<div class="lone" style="margin-top:14px">${S.sys} 沒有你的其他小隊，所以不能換船。兩隊開到同一個星系就能互換。</div>`}
+      </div>
+    </section>
+
+    ${c ? `<section class="panel detail tilt-r enter" style="--dx:40px;--d:.2s">
+      <div class="ph"><h2>船的資料</h2><span class="en">SHIP DATA</span><span class="r">${P.name}</span></div>
+      <div class="pb">
+        <div class="dh"><h2>${c.n}</h2><small>${H.name} ${H.en}・技能 ${c.skill}（船型固定）</small><span class="lv">Lv${c.lv}</span></div>
+        <div class="xp">${CAP.seg(30, Math.round(30 * Math.min(1, (c.xp - LV[c.lv - 1]) / ((LV[c.lv] || c.xp) - LV[c.lv - 1] || 1))), 'var(--gold)')}<span>經驗 ${c.xp}／${LV[c.lv] || '—'}（升到 Lv${c.lv + 1}）</span></div>
+        <div class="mkcap">Mk 上限：<b>${MK[Math.min(mkCapLv(c.lv), 2)]}</b>（船的等級 Lv1～2＝Mk I、Lv3～4＝Mk II、Lv5＝Mk III，再跟研發到的 Mk II 取低的）</div>
+        ${c.mod.length ? `<div class="slots">${c.mod.map(([s, n, mk, d, pf]) => `<span class="sn">${s}</span><span class="md"><b>${n}</b><span class="mk">${MK[mk]}</span><small>${d}</small></span><span class="prof" title="艦長熟練度">熟練 Lv${pf}</span>`).join('')}</div>`
+          : '<div class="lone" style="margin-top:14px;padding:14px">全部是原廠模組（Mk I）。</div>'}
+        <div class="stats">${c.st.map(([k, v]) => `<div class="stat"><span class="k">${k}</span><span class="v">${v}</span></div>`).join('')}</div>
+      </div>
+    </section>` : ''}
+
+    <button class="bigbtn act ${S.threat ? 'red' : ''} enter" style="--dx:40px;--d:.3s" id="act">
+      ${canCmd ? `<span class="op">TAKE COMMAND</span><h3>改為親自指揮</h3><span class="sub">艦長換到${S.name}（要和現在指揮的小隊在同一個星系）</span>`
+        : S.threat ? `<span class="op">ORDERS</span><h3>星圖・下令</h3><span class="sub">${S.name}：駐守勝率 ${S.threat.odds}%，撤退或迎戰</span>`
+        : `<span class="op">REFIT ・ ${H ? H.en : ''}</span><h3>改裝 ${c ? c.n : ''}</h3><span class="sub">換模組、升 Mk：在有船塢的己方星系，佔用船塢一週</span>`}
+      <div class="chev"><i></i><i></i><i></i></div></button>`;
+  document.querySelectorAll('[data-q]').forEach((b) => b.onclick = () => { cur = +b.dataset.q; pick = { q: cur, k: 0 }; render(); });
+  document.querySelectorAll('[data-p]').forEach((b) => b.onclick = (e) => { if (e.target.closest('[data-mv]')) return; const [q, k] = b.dataset.p.split(':').map(Number); pick = { q, k }; render(); });
+  document.querySelectorAll('[data-mv]').forEach((b) => b.onclick = () => {
+    const [a, k, to] = b.dataset.mv.split(':'), q = Q(+a);
+    if (q.lead && q.ships.length <= 1) return CAP.toast('親自指揮的小隊至少要留一艘');
+    if (to === 'new') { if (ST.squads.length >= ST.slots) return CAP.toast(`指揮權 ${ST.squads.length}／${ST.slots} 隊：要升遷才能多帶`); const id = Math.max(...ST.squads.map((x) => x.id)) + 1; ST.squads.push({ id, name: `第${id}小隊`, sys: q.sys, ships: q.ships.splice(+k, 1) }); CAP.toast(`成立第${id}小隊`); }
+    else { const o = Q(+to); if (o.ships.length >= ST.maxShips) return CAP.toast('那一隊已經滿了'); o.ships.push(q.ships.splice(+k, 1)[0]); pick = { q: o.id, k: o.ships.length - 1 }; CAP.toast(`移到${o.name}`); }
+    render();
+  });
+  $('act').onclick = () => { CAP.glitch(); CAP.toast(canCmd ? `艦長換到${S.name}` : S.threat ? '開啟星圖（示意）' : '開啟改裝（示意）'); };
+  document.getElementById('stage').classList.add('ready');
+}
+CAP.bg({ mode: 'deep' });
+render(); CAP.ready();
+</script>
+</body>
+</html>

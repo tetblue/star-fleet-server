@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>研發</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="cap-ui.css">
+<style>
+/* 研發：左＝研發樹（一列一類，線＝前置）、右＝選中項目的說明＋開始研究；下＝艦長熟練度 */
+.tree{left:34px;top:178px;width:1270px;height:640px}
+.lanes{position:relative;height:560px;margin:4px 0 0}
+.lane{position:absolute;left:0;right:0;height:84px;border-bottom:1px dashed rgba(150,190,240,.1)}
+.lane .gname{position:absolute;left:0;top:26px;width:96px;font:900 18px var(--jp);letter-spacing:.12em}
+.lane .gname small{display:block;font:700 10px var(--en);letter-spacing:.24em;color:var(--dim)}
+#links{position:absolute;inset:0;overflow:visible;pointer-events:none}
+.node{position:absolute;width:228px;height:70px;padding:10px 14px 0 18px;background:rgba(12,20,42,.88);border-left:3px solid var(--mute);
+  clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,0 100%);cursor:pointer;transition:background .15s}
+.node:hover{background:rgba(28,44,84,.92)}
+.node b{display:block;font:900 17px var(--jp);letter-spacing:.06em;white-space:nowrap}
+.node .st{display:flex;gap:8px;align-items:center;font:500 12px var(--jp);color:var(--dim);margin-top:3px;white-space:nowrap}
+.node .cost{position:absolute;right:12px;top:10px;font:700 17px var(--en);color:var(--cyan)}
+.node .cost s{color:var(--mute);font-size:13px;margin-right:4px}
+.node.done{border-left-color:var(--own)}.node.done .cost{color:var(--own);font:500 13px var(--jp)}
+.node.cur{border-left-color:var(--violet);background:linear-gradient(100deg,rgba(70,40,120,.6),rgba(12,20,42,.88))}
+.node.cur .prog{position:absolute;left:18px;right:14px;bottom:7px;height:4px;background:rgba(255,255,255,.12)}
+.node.cur .prog i{position:absolute;left:0;top:0;bottom:0;background:repeating-linear-gradient(-45deg,var(--violet) 0 5px,rgba(169,123,255,.4) 5px 10px);background-size:14px 14px;animation:prog 1s linear infinite}
+@keyframes prog{to{background-position:14px 0}}
+.node.avail{border-left-color:var(--cyan)}
+.node.bp{border-left-color:var(--yellow)}
+.node.lock{opacity:.5}.node.lock .cost{color:var(--mute)}
+.node.on{outline:2px solid var(--cyan);outline-offset:-2px;background:rgba(28,60,100,.95)}
+.good{display:inline-block;padding:0 6px;background:var(--own);color:#062014;font:700 11px var(--jp)}
+.legend{display:flex;gap:18px;font:500 13px var(--jp);color:var(--dim)}
+.legend i{display:inline-block;width:12px;height:12px;margin-right:6px;vertical-align:-1px}
+
+.curbar{position:absolute;left:640px;top:58px;width:640px;display:flex;align-items:center;gap:16px;padding:12px 22px;background:linear-gradient(100deg,rgba(70,40,120,.75),rgba(14,22,44,.8));clip-path:polygon(12px 0,100% 0,calc(100% - 12px) 100%,0 100%)}
+.curbar .k{display:block;font:700 11px var(--en);letter-spacing:.24em;color:#d4c2ff}
+.curbar b{font:900 21px var(--jp);letter-spacing:.06em;white-space:nowrap}
+.curbar .w{margin-left:auto;font:700 26px var(--en);color:#d4c2ff;white-space:nowrap}
+.curbar .w small{font:500 13px var(--jp);color:var(--dim);margin-left:4px}
+
+.detail{left:1346px;top:178px;width:540px;height:470px;--pc:var(--violet)}
+.detail .nm{font:900 34px var(--jp);letter-spacing:.08em;margin:2px 0 6px;white-space:nowrap}
+.detail .desc{font:500 17px/1.6 var(--jp);color:#dfe8fa;min-height:56px}
+.detail .nums{display:flex;gap:40px;margin:18px 0 14px}
+.detail .req{display:grid;gap:6px;font:500 15px var(--jp)}
+.detail .req div{display:flex;gap:10px;align-items:center}
+.detail .why{margin-top:14px;padding:10px 14px;font:500 15px var(--jp);background:rgba(255,77,94,.12);border-left:3px solid var(--red);white-space:nowrap}
+.detail .why.ok{background:rgba(63,223,143,.1);border-left-color:var(--own)}
+.go{right:34px;top:676px;width:540px;height:150px}
+.go h3{font-size:50px}
+.go.off{filter:grayscale(.85) brightness(.6);cursor:not-allowed}
+
+.prof{left:34px;top:846px;width:1852px;height:204px;--pc:var(--gold)}
+.prof .pb{display:flex;gap:12px;padding-top:12px}
+.pcard{flex:1;position:relative;padding:12px 16px;background:rgba(12,20,42,.8);clip-path:polygon(0 0,100% 0,100% calc(100% - 12px),calc(100% - 12px) 100%,0 100%)}
+.pcard b{font:900 17px var(--jp);letter-spacing:.06em;white-space:nowrap}
+.pcard .lv{position:absolute;right:14px;top:10px;font:700 22px var(--en);color:var(--gold)}
+.pcard .pips{display:flex;gap:4px;margin:8px 0 6px}
+.pcard .pips i{flex:1;height:8px;background:rgba(255,255,255,.12);clip-path:polygon(3px 0,100% 0,calc(100% - 3px) 100%,0 100%)}
+.pcard .pips i.on{background:var(--gold)}
+.pcard .fx{font:500 13px var(--jp);color:var(--dim);white-space:nowrap}
+.pcard .fx b{font:700 15px var(--en);color:var(--text)}
+.pcard.max{background:linear-gradient(100deg,rgba(90,64,14,.6),rgba(12,20,42,.8))}
+.pcard.max .fx{color:var(--gold)}
+.src{position:absolute;left:34px;top:142px;font:500 13px var(--jp);color:var(--mute);white-space:nowrap}
+#demo{position:absolute;right:34px;top:142px;font:500 13px var(--jp);color:#9fb6d8;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="bg"></canvas><div class="ui" id="ui"></div></div>
+<script src="cap-ui.js"></script>
+<script>
+const { $, fmt } = CAP;
+/* 資料：capcareer.js 的 CC_TECH、CC_RP、ccTechWhy；caphulls.js 的 CAP_PROF。玩家＝聯盟（光束砲、電戰艦便宜 20%） */
+const ST = {
+  fac: '聯盟', rp: 86, money: 18450, week: 12,
+  cur: { id: 'mk2', left: 1, tot: 2 },
+  done: { ew: 1, lab: 1 },
+  bp: { react: 1, cp_rapid: 1 },        // 拿到藍圖的外陣營技術
+  tech: {
+    mk2:     { g: '工藝', name: 'Mk II 工藝', rp: 60, w: 2, desc: '模組可以升到 Mk II（船也要 Lv3）', at: [0, 0] },
+    mk3:     { g: '工藝', name: 'Mk III 工藝', rp: 150, w: 4, need: ['mk2'], desc: '模組可以升到 Mk III（船也要 Lv5）', at: [0, 1] },
+    beam:    { g: '模組', name: '光束砲', rp: 90, w: 3, need: ['mk2'], good: 1, desc: '主砲模組：持續照射、每秒傷害最高、射程最短', at: [1, 1] },
+    react:   { g: '模組', name: '反應裝甲', rp: 80, w: 3, foreign: '帝國', desc: '防禦模組：飛彈打到船體的傷害少 30%', at: [1, 0] },
+    ew:      { g: '船型', name: '電戰艦設計', rp: 60, w: 2, good: 1, desc: '可以建造電戰艦（還要小隊長軍階）', at: [2, 0] },
+    stealth: { g: '船型', name: '匿蹤艦設計', rp: 110, w: 3, need: ['ew'], desc: '可以建造匿蹤艦（還要特戰隊長軍階）', at: [2, 1] },
+    lab:     { g: '設施', name: '研究所', rp: 50, w: 2, desc: '據點每週 +8 研究點數（要有據點：特戰隊長）；可以蓋私人研究室', at: [3, 0] },
+    yard1:   { g: '設施', name: '船塢自動化', rp: 100, w: 3, desc: '所有船型的建造週數 −1（最少 1 週）', at: [3, 1] },
+    yard2:   { g: '設施', name: '第二條船台', rp: 180, w: 4, need: ['yard1'], desc: '每座船塢同時處理兩件（造船、改裝）', at: [3, 2] },
+    scorch1: { g: '設施', name: '焦土協定 I', rp: 60, w: 2, desc: '星系失守時破壞你出資的建築：返還 30% → 50%', at: [4, 0] },
+    scorch2: { g: '設施', name: '焦土協定 II', rp: 150, w: 3, need: ['scorch1'], desc: '返還 50% → 80%', at: [4, 1] },
+    scorch3: { g: '設施', name: '焦土協定 III', rp: 300, w: 4, need: ['scorch2'], desc: '返還 80% → 100%', at: [4, 2] },
+    cp_heavy:  { g: '仿製', name: '仿製：重粒子砲', rp: 40, w: 2, foreign: '帝國', desc: '帝國的主砲模組（要藍圖）', at: [5, 0] },
+    cp_rapid:  { g: '仿製', name: '仿製：速射砲', rp: 30, w: 1, foreign: '海盜', desc: '海盜的主砲模組（要藍圖）', at: [5, 1] },
+    cp_sprint: { g: '仿製', name: '仿製：衝刺引擎', rp: 30, w: 1, foreign: '海盜', desc: '海盜的引擎模組（要藍圖）', at: [5, 2] },
+  },
+  lanes: [['工藝', 'CRAFT'], ['模組', 'MODULE'], ['船型', 'HULL'], ['設施', 'FACILITY'], ['焦土', 'SCORCH'], ['仿製', 'COPY']],
+  // 艦長熟練度：經驗門檻 CAP_PROF.lv＝[0,40,100,200,350,550]，每級 +3%，Lv5 解鎖特性（CAP_PROF_FX）
+  prof: [
+    { k: '原廠主砲', fx: '主砲裝填', trait: '精準射擊：主砲射程 +10%', xp: 560 },
+    { k: '磁軌砲', fx: '主砲裝填', trait: '精準射擊：主砲射程 +10%', xp: 130 },
+    { k: '原廠副砲', fx: '副砲命中', trait: '連射：副砲裝填 −10%', xp: 260 },
+    { k: '原廠飛彈艙／機庫', fx: '飛彈鎖定', trait: '加大彈艙：飛彈 +20%', xp: 88 },
+    { k: '原廠防禦', fx: '護盾', trait: '損管：船體 +5%', xp: 210 },
+    { k: '原廠引擎', fx: '轉向', trait: '急轉：側移 +15%', xp: 34 },
+  ],
+};
+const PLV = [0, 40, 100, 200, 350, 550];
+const lvOf = (x) => PLV.reduce((a, v, k) => (x >= v ? k : a), 0);
+const cost = (T) => Math.round(T.rp * (T.good ? 0.8 : 1));
+function why(id) {   // ccTechWhy 的順序
+  const T = ST.tech[id];
+  if (ST.done[id]) return '已經研究好';
+  if (T.foreign && !ST.bp[id]) return `${T.foreign}的技術：要先拿到藍圖`;
+  if (ST.cur) return ST.cur.id === id ? '研究中' : '一次只能研究一項';
+  const n = (T.need || []).find((k) => !ST.done[k]); if (n) return `要先研究${ST.tech[n].name}`;
+  if (ST.rp < cost(T)) return `研究點數不夠（要 ${cost(T)}）`;
+  return '';
+}
+function state(id) {   // 畫面上的狀態（「一次只能研究一項」不算鎖住：等目前的研究完成就能開始）
+  const T = ST.tech[id];
+  if (ST.done[id]) return 'done';
+  if (ST.cur && ST.cur.id === id) return 'cur';
+  if (T.foreign && !ST.bp[id]) return 'lock';
+  if ((T.need || []).some((k) => !ST.done[k])) return 'lock';
+  return T.foreign ? 'bp' : 'avail';
+}
+let sel = 'stealth';
+const X0 = 120, DX = 290, Y0 = 8, DY = 92;
+function render() {
+  const T = ST.tech, ids = Object.keys(T), S = T[sel], st = state(sel), w = why(sel);
+  const stTx = { done: '<span class="good" style="background:var(--own)">✓ 已完成</span>', cur: `<span style="color:#d4c2ff">研究中・剩 ${ST.cur && ST.cur.left} 週</span>`,
+    avail: '<span class="cy">可以研究</span>', bp: '<span style="color:var(--yellow)">有藍圖・可以研究</span>', lock: '<span>🔒 鎖住</span>' };
+  const curT = ST.cur && T[ST.cur.id];
+  $('ui').innerHTML = `
+    ${CAP.head({ title: '研發', en: 'RESEARCH', crumb: `<b>${ST.fac}</b>的研發樹・一次研究一項・開始時付點數` })}
+    ${CAP.res([['研究點', ST.rp, 'var(--cyan)', 'rp'], ['資金', fmt(ST.money), 'var(--gold)', 'money'], ['週', ST.week, 'var(--dim)', 'week']])}
+    ${curT ? `<div class="curbar enter" style="--dy:-20px;--d:.1s"><div><span class="k">RESEARCHING</span><b>${curT.name}</b></div>
+      <div style="flex:1;min-width:120px">${CAP.seg(ST.cur.tot * 6, (ST.cur.tot - ST.cur.left) * 6, 'var(--violet)')}</div><span class="w">${ST.cur.left}<small>週後完成</small></span></div>`
+      : `<div class="curbar enter" style="--dy:-20px;--d:.1s;background:linear-gradient(100deg,rgba(20,40,70,.8),rgba(14,22,44,.8))"><div><span class="k" style="color:var(--cyan)">IDLE</span><b>目前沒有在研究</b></div></div>`}
+    <div class="src">研究點數：任務完成（戰功的 1/10）・打贏後打撈殘骸（親自打的每擊沉一艘 4 點、計算的每艘 3 點）・據點的研究所（每週 8 點）</div>
+
+    <section class="panel tree tilt-l enter" style="--dx:-40px;--d:.15s">
+      <div class="ph"><h2>研發樹</h2><span class="en">TECH TREE</span>
+        <span class="r legend"><span><i style="background:var(--own)"></i>已完成</span><span><i style="background:var(--violet)"></i>研究中</span><span><i style="background:var(--cyan)"></i>可以研究</span><span><i style="background:var(--yellow)"></i>有藍圖</span><span><i style="background:var(--mute)"></i>鎖住</span><span><span class="good">−20%</span> 你的陣營擅長</span></span></div>
+      <div class="pb"><div class="lanes" id="lanes">
+        ${ST.lanes.map(([n, e], r) => `<div class="lane" style="top:${Y0 + r * DY - 6}px"><div class="gname">${n}<small>${e}</small></div></div>`).join('')}
+        <svg id="links"></svg>
+        ${ids.map((id) => { const t = T[id], s = state(id), [r, c] = t.at;
+          return `<div class="node ${s} ${id === sel ? 'on' : ''}" data-id="${id}" style="left:${X0 + c * DX}px;top:${Y0 + r * DY}px">
+            <span class="cost">${s === 'done' ? '✓' : t.good ? `<s>${t.rp}</s>${cost(t)}` : cost(t)}</span>
+            <b>${t.name}</b><div class="st">${s === 'cur' ? `剩 ${ST.cur.left} 週` : s === 'lock' ? (t.foreign && !ST.bp[id] ? `🔒 要${t.foreign}的藍圖` : `🔒 要先研究${T[t.need.find((k) => !ST.done[k])].name}`) : s === 'done' ? '已完成' : `${t.w} 週`}${t.good && s !== 'done' ? '<span class="good">−20%</span>' : ''}</div>
+            ${s === 'cur' ? `<div class="prog"><i style="width:${(ST.cur.tot - ST.cur.left) / ST.cur.tot * 100}%"></i></div>` : ''}</div>`; }).join('')}
+      </div></div>
+    </section>
+
+    <section class="panel detail tilt-r enter" style="--dx:40px;--d:.25s">
+      <div class="ph"><h2>${S.g}</h2><span class="en">DETAIL</span><span class="r">${stTx[st]}</span></div>
+      <div class="pb">
+        <div class="nm">${S.name}</div>
+        <div class="desc">${S.desc}</div>
+        <div class="nums">
+          <div class="stat"><span class="k">研究點數</span><span class="v cy">${cost(S)}${S.good ? `<small style="text-decoration:line-through">${S.rp}</small>` : ''}</span></div>
+          <div class="stat"><span class="k">時間</span><span class="v">${S.w}<small>週</small></span></div>
+          <div class="stat"><span class="k">你有</span><span class="v ${ST.rp >= cost(S) ? 'good' : 'bad'}">${ST.rp}</span></div>
+        </div>
+        <div class="req">${(S.need || []).map((k) => `<div>${ST.done[k] ? '<span class="good" style="padding:0 5px">✓</span>' : '<span class="tag" style="--tc:var(--mute)">✗</span>'}前置：${T[k].name}</div>`).join('')}
+          ${S.foreign ? `<div>${ST.bp[sel] ? '<span class="good" style="padding:0 5px">✓</span>' : '<span class="tag" style="--tc:var(--mute)">✗</span>'}${S.foreign}的藍圖（打贏後打撈、商店買）</div>` : ''}
+          ${S.good ? '<div><span class="good">−20%</span>你的陣營擅長，便宜 20%</div>' : ''}
+          ${!(S.need || []).length && !S.foreign && !S.good ? '<div class="dim">沒有前置條件</div>' : ''}</div>
+        <div class="why ${!w || st === 'done' ? 'ok' : ''}" ${st === 'cur' ? 'style="background:rgba(169,123,255,.14);border-left-color:var(--violet)"' : ''}>${st === 'cur' ? `研究中：再 ${ST.cur.left} 週完成` : w ? (w === '一次只能研究一項' ? `一次只能研究一項：${curT.name}再 ${ST.cur.left} 週完成` : w) : '可以開始研究'}</div>
+      </div>
+    </section>
+
+    <button class="bigbtn go ${w ? 'off' : ''} enter" style="--dx:40px;--d:.35s" id="go">
+      <span class="op">START RESEARCH</span><h3>開始研究</h3>
+      <span class="sub">${S.name}・${cost(S)} 點・${S.w} 週後完成</span><div class="chev"><i></i><i></i><i></i></div></button>
+
+    <section class="panel prof enter" style="--dy:30px;--d:.4s">
+      <div class="ph"><h2>艦長熟練度</h2><span class="en">CAPTAIN MASTERY</span><span class="r">經驗只從你親自開的船累積・效果套用到你所有小隊・每級 +3%・Lv5 解鎖特性</span></div>
+      <div class="pb">${ST.prof.map((p) => { const lv = lvOf(p.xp), max = lv >= 5, lo = PLV[lv], hi = PLV[lv + 1];
+        return `<div class="pcard ${max ? 'max' : ''}"><b>${p.k}</b><span class="lv">Lv${lv}</span>
+          <div class="pips">${[1, 2, 3, 4, 5].map((k) => `<i class="${k <= lv ? 'on' : ''}"></i>`).join('')}</div>
+          <div class="fx">${p.fx} <b>+${lv * 3}%</b>${max ? `・${p.trait}` : `・經驗 ${p.xp}／${hi}`}</div>
+          ${max ? '' : `<div style="margin-top:6px">${CAP.bar((p.xp - lo) / (hi - lo), 'var(--gold)')}</div>`}</div>`; }).join('')}</div>
+    </section>
+    <span id="demo">示範：${ST.cur ? '讓目前的研究完成 ▸' : '回到研究中 ▸'}</span>`;
+  // 前置的連線（同一列的直線、跨列的折線）
+  const svg = $('links'), P = (id) => { const [r, c] = T[id].at; return [X0 + c * DX, Y0 + r * DY + 35]; };
+  svg.innerHTML = ids.flatMap((id) => (T[id].need || []).map((n) => {
+    const [x1, y1] = P(n), [x2, y2] = P(id), a = x1 + 228, m = (a + x2) / 2, ok = ST.done[n];
+    return `<path d="M${a} ${y1} H${m} V${y2} H${x2}" fill="none" stroke="${ok ? 'rgba(63,223,143,.7)' : 'rgba(150,190,240,.35)'}" stroke-width="2" ${ok ? '' : 'stroke-dasharray="6 5"'}/><circle cx="${x2}" cy="${y2}" r="4" fill="${ok ? '#3fdf8f' : '#5d6f92'}"/>`;
+  })).join('');
+  document.querySelectorAll('.node').forEach((n) => n.onclick = () => { sel = n.dataset.id; render(); });
+  $('go').onclick = () => {
+    const w2 = why(sel); if (w2) return CAP.toast(w2 === '一次只能研究一項' ? `一次只能研究一項：${curT.name}再 ${ST.cur.left} 週完成` : w2);
+    ST.rp -= cost(S); ST.cur = { id: sel, left: S.w, tot: S.w }; CAP.glitch(); render(); CAP.toast(`開始研究${S.name}（${cost(S)} 點，${S.w} 週）`);
+  };
+  $('demo').onclick = () => { if (ST.cur) { ST.done[ST.cur.id] = 1; CAP.toast(`研究完成：${T[ST.cur.id].name}`); ST.cur = null; } else { ST.cur = { id: 'mk3', left: 4, tot: 4 }; delete ST.done.mk3; } render(); };
+  if (window._r) document.getElementById('stage').classList.add('ready'); window._r = 1;   // 重畫時不再播進場
+}
+CAP.bg({ mode: 'deep' });
+render(); CAP.ready();
+</script>
+</body>
+</html>

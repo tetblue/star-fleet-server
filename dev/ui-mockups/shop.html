@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>商店</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="cap-ui.css">
+<style>
+/* 商店：上＝貿易站／黑市切換；左＝這家店與價格倍率；中＝這週的貨；右＝選中的貨＋購買 */
+.kind{position:absolute;left:640px;top:52px;display:flex;gap:10px}
+.kind .chip{height:48px;padding:0 30px;font:700 19px var(--jp);letter-spacing:.12em}
+.kind .chip.black.on{background:var(--red);color:#fff}
+.store{left:34px;top:178px;width:470px;height:790px}
+.store .sign{position:relative;height:150px;margin:-2px 0 14px;overflow:hidden;background:linear-gradient(120deg,rgba(60,200,255,.16),transparent 70%);border-bottom:1px solid var(--line-2)}
+.store.black .sign{background:linear-gradient(120deg,rgba(255,77,94,.2),transparent 70%)}
+.store .sign b{position:absolute;left:24px;top:30px;font:900 42px var(--jp);letter-spacing:.16em}
+.store .sign small{position:absolute;left:26px;top:88px;font:700 12px var(--en);letter-spacing:.3em;color:var(--dim)}
+.store .sign svg{position:absolute;right:18px;top:18px;width:120px;height:120px;stroke:rgba(90,200,255,.35);fill:none;stroke-width:.8}
+.store.black .sign svg{stroke:rgba(255,77,94,.4)}
+.mult{display:grid;grid-template-columns:1fr auto;gap:10px 16px;font:500 16px var(--jp);align-items:center}
+.mult .x{font:700 22px var(--en);text-align:right}
+.mult .src{grid-column:1/-1;font:500 13px var(--jp);color:var(--mute);margin-top:-6px}
+.mult .tot{border-top:1px solid var(--line-2);padding-top:12px;font:900 19px var(--jp)}
+.mult .tot + .x{border-top:1px solid var(--line-2);padding-top:12px;font-size:32px}
+.restock{margin-top:22px;padding:14px 18px;background:rgba(12,20,42,.8);border-left:3px solid var(--gold)}
+.restock b{font:700 30px var(--en);color:var(--gold)}
+.restock span{display:block;font:500 14px var(--jp);color:var(--dim)}
+.rule{margin-top:16px;font:500 14px/1.6 var(--jp);color:var(--dim)}
+
+.goods{left:540px;top:178px;width:760px;height:790px;--pc:var(--gold)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.item{position:relative;height:300px;padding:18px 20px;cursor:pointer;background:linear-gradient(170deg,rgba(18,30,60,.95),rgba(8,14,32,.85));border-top:3px solid var(--ic,var(--cyan));
+  clip-path:polygon(0 0,100% 0,100% calc(100% - 18px),calc(100% - 18px) 100%,0 100%);transition:transform .2s,background .2s}
+.item:hover{transform:translateY(-4px)}
+.item.on{outline:2px solid var(--cyan);outline-offset:-2px;background:linear-gradient(170deg,rgba(30,60,100,.95),rgba(10,20,40,.9))}
+.item .kindtag{font:700 11px var(--en);letter-spacing:.26em;color:var(--ic)}
+.item .art{height:110px;display:flex;align-items:center;justify-content:center;margin:6px 0 4px}
+.item .art svg{width:96px;height:96px;stroke:var(--ic);fill:none;stroke-width:1.3}
+.item h3{font:900 22px var(--jp);letter-spacing:.06em;white-space:nowrap}
+.item p{font:500 13px/1.5 var(--jp);color:var(--dim);height:40px;overflow:hidden}
+.item .price{position:absolute;right:20px;bottom:18px;font:700 28px var(--en);color:var(--gold);display:flex;align-items:center;gap:6px}
+.item .price s{font-size:16px;color:var(--mute)}
+.item .owner{position:absolute;left:20px;bottom:22px}
+.item.got{opacity:.55}
+.item.got::after{content:attr(data-got);position:absolute;right:-48px;top:34px;width:220px;transform:rotate(30deg);text-align:center;padding:6px 0;background:var(--own);color:#062014;font:900 15px var(--jp);letter-spacing:.2em}
+.item .new{position:absolute;right:18px;top:16px}
+
+.detail{left:1336px;top:178px;width:550px;height:560px}
+.detail .nm{font:900 30px var(--jp);letter-spacing:.06em;margin:4px 0 10px}
+.detail .desc{font:500 16px/1.7 var(--jp);color:#dfe8fa}
+.detail .after{margin-top:16px;padding:12px 16px;font:500 15px/1.6 var(--jp);background:rgba(63,223,143,.08);border-left:3px solid var(--own)}
+.detail .why{margin-top:14px;padding:10px 14px;font:500 15px var(--jp);background:rgba(255,77,94,.12);border-left:3px solid var(--red)}
+.buy{right:34px;top:772px;width:550px;height:196px}
+.buy.off{filter:grayscale(.85) brightness(.6);cursor:not-allowed}
+.keeper{left:960px;top:48px}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="bg"></canvas><div class="ui" id="ui"></div></div>
+<script src="cap-ui.js"></script>
+<script>
+const { $, fmt } = CAP;
+/* 資料：capcareer.js 的 CC_SHOP、ccShopStock、ccShopK、ccShopWhy、ccShopBuy。玩家＝聯盟 */
+const ST = {
+  fac: '聯盟', money: 1840, rp: 86, week: 12,
+  favN: 62, favP: 35, fame: 58,            // 中立好感度、海盜好感度、你的陣營的聲望
+  bp: { 'def:react': 1 },                  // 已經有的藍圖
+  bought: { trade: [2], black: [] },       // 這週已經買過的（第幾樣）
+  shops: {
+    trade: { name: '貿易站', en: 'TRADE POST', sys: '艾瑞斯', owner: '中立', k: 1, favName: '中立', fav: 'favN',
+      rule: '擁有者跟你交戰中就不賣（中立的照賣）。在這裡買東西，中立好感度 +1。',
+      line: '這週的貨不多，要買要快。',
+      stock: [ { kind: 'bp', k: 'main:heavy', p: 450 }, { kind: 'bp', k: 'def:react', p: 450 }, { kind: 'rp', n: 40, p: 320 }, { kind: 'xp', n: 25, p: 350 } ] },
+    black: { name: '海盜黑市', en: 'BLACK MARKET', sys: '拉格納', owner: '海盜', k: 1.3, favName: '海盜', fav: 'favP',
+      rule: '黑市誰都賣，但貴 30%；價格看海盜對你的好感度。',
+      line: '錢帶夠了嗎？這裡不賒帳。',
+      stock: [ { kind: 'bp', k: 'main:rapid', p: 450 }, { kind: 'bp', k: 'eng:sprint', p: 450 }, { kind: 'rp', n: 70, p: 480 } ] },
+  },
+  mods: {
+    'main:heavy': { name: '重粒子砲', fac: '帝國', desc: '一發重、射得慢、射程遠；砲塔轉得慢，射界左右各 30°' },
+    'def:react': { name: '反應裝甲', fac: '帝國', desc: '船體多 5%，飛彈對船體的傷害少 30%' },
+    'main:rapid': { name: '速射砲', fac: '海盜', desc: '射界幾乎全方位，單發輕、射程短' },
+    'eng:sprint': { name: '衝刺引擎', fac: '海盜', desc: '最高速度快 20%，轉向慢 20%' },
+  },
+};
+const ART = {
+  bp: '<rect x="14" y="20" width="68" height="56"/><path d="M14 32h68M26 44h20M26 54h30M26 64h14"/><circle cx="66" cy="56" r="10"/><path d="M60 56h12M66 50v12"/>',
+  rp: '<path d="M38 12h20M41 12v24L22 70a7 7 0 006 10h40a7 7 0 006-10L55 36V12"/><path d="M30 58h36"/><circle cx="44" cy="66" r="3"/><circle cx="54" cy="62" r="2"/>',
+  xp: '<circle cx="48" cy="30" r="12"/><path d="M26 80c0-14 10-24 22-24s22 10 22 24"/><path d="M40 62l8 8 8-8"/><path d="M16 22l8-6 8 6M64 22l8-6 8 6"/>',
+};
+const KIND = { bp: ['BLUEPRINT', '藍圖', 'var(--yellow)'], rp: ['RESEARCH DATA', '研究資料', 'var(--cyan)'], xp: ['TRAINING', '教官訓練', 'var(--own)'] };
+let shop = 'trade', sel = 0;
+const mult = (s) => { const T = ST.shops[s], fav = ST[T.fav]; return { base: T.k, fav: 1.2 - fav / 250, fame: 1.1 - ST.fame / 500, favV: fav }; };
+const K = (s) => { const m = mult(s); return m.base * m.fav * m.fame; };
+const price = (it) => Math.round(it.p * K(shop) / 10) * 10;
+const name = (it) => it.kind === 'bp' ? `藍圖：${ST.mods[it.k].name}` : it.kind === 'rp' ? `研究資料（研究點數 +${it.n}）` : `教官訓練（每艘 +${it.n} 經驗）`;
+const desc = (it) => it.kind === 'bp' ? `${ST.mods[it.k].fac}的技術。${ST.mods[it.k].desc}` : it.kind === 'rp' ? `研究點數 +${it.n}，馬上可以用在「研發」。` : `在場你的小隊每艘 +${it.n} 經驗（船的等級影響 Mk 上限）。`;
+const after = (it) => it.kind === 'bp' ? `買到後在「研發」研究「仿製：${ST.mods[it.k].name}」（或它原本的研發項目），研究好就能在改裝時裝上。` : it.kind === 'rp' ? '研究點數也能從任務、打撈殘骸、據點的研究所拿到。' : '只算這週停在這個星系的你的小隊。';
+function why(i) {   // ccShopBuy 的順序
+  const it = ST.shops[shop].stock[i];
+  if (ST.bought[shop].includes(i)) return '這週已經買過了';
+  if (it.kind === 'bp' && ST.bp[it.k]) return '已經有這張藍圖';
+  if (ST.money < price(it)) return `資金不夠（要 ${price(it)}）`;
+  return '';
+}
+function render() {
+  const T = ST.shops[shop], m = mult(shop), it = T.stock[sel], w = why(sel), black = shop === 'black';
+  $('ui').innerHTML = `
+    ${CAP.head({ title: '商店', en: 'SHOP', crumb: `<b>${T.sys}星系</b>・${T.owner}・你的小隊在這裡` })}
+    ${CAP.res([['資金', fmt(ST.money), 'var(--gold)', 'money'], ['研究點', ST.rp, 'var(--cyan)', 'rp'], ['週', ST.week, 'var(--dim)', 'week']])}
+    <div class="kind enter" style="--dy:-20px;--d:.05s"><button class="chip ${shop === 'trade' ? 'on' : ''}" data-s="trade">貿易站</button><button class="chip black ${black ? 'on' : ''}" data-s="black">海盜黑市</button></div>
+
+    <section class="panel store ${black ? 'black' : ''} tilt-l enter" style="--dx:-40px;--d:.1s;--pc:${black ? 'var(--red)' : 'var(--cyan)'}">
+      <div class="sign"><b>${T.name}</b><small>${T.en} ・ ${T.sys.toUpperCase()}</small>
+        <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="46"/><circle cx="50" cy="50" r="34" stroke-dasharray="3 5"/><path d="M28 40h44l-4 30H32zM38 40v-6a12 12 0 0124 0v6"/></svg></div>
+      <div class="pb">
+        <div class="lab" style="margin-bottom:12px">價格倍率 ／ PRICE</div>
+        <div class="mult">
+          <span>${black ? '黑市加價' : '基本'}</span><span class="x">×${m.base.toFixed(2)}</span>
+          <span>${T.favName}好感度 <b>${m.favV}</b></span><span class="x ${m.fav < 1 ? 'good' : 'bad'}">×${m.fav.toFixed(2)}</span>
+          <span class="src">好感度越高越便宜：×（1.2 − 好感度 ÷ 250）</span>
+          <span>${ST.fac}的聲望 <b>${ST.fame}</b></span><span class="x ${m.fame < 1 ? 'good' : 'bad'}">×${m.fame.toFixed(2)}</span>
+          <span class="src">聲望越高越便宜：×（1.1 − 聲望 ÷ 500）</span>
+          <span class="tot">這家店</span><span class="x ${K(shop) < 1 ? 'good' : 'bad'}">×${K(shop).toFixed(2)}</span>
+        </div>
+        <div class="restock"><b>${ST.week + 1}</b> <span style="display:inline">週換貨</span><span>貨每週換・結束這一週後上新貨</span></div>
+        <div class="rule">${T.rule}</div>
+      </div>
+    </section>
+
+    <section class="panel goods enter" style="--dy:30px;--d:.2s">
+      <div class="ph"><h2>這週的貨</h2><span class="en">THIS WEEK ・ WEEK ${ST.week}</span><span class="r">每樣每週限買一次</span></div>
+      <div class="pb"><div class="grid">${T.stock.map((x, i) => { const [ke, kz, kc] = KIND[x.kind], got = ST.bought[shop].includes(i) ? '已經買了' : x.kind === 'bp' && ST.bp[x.k] ? '已經有了' : '';
+        const p0 = Math.round(x.p / 10) * 10, p = price(x);
+        return `<div class="item ${i === sel ? 'on' : ''} ${got ? 'got' : ''}" data-i="${i}" data-got="${got}" style="--ic:${kc}">
+          <span class="kindtag">${ke} ・ ${kz}</span>
+          <div class="art"><svg viewBox="0 0 96 96">${ART[x.kind]}</svg></div>
+          <h3>${x.kind === 'bp' ? ST.mods[x.k].name : kz}</h3><p>${x.kind === 'bp' ? ST.mods[x.k].desc : x.kind === 'rp' ? `研究點數 +${x.n}` : `在場每艘 +${x.n} 經驗`}</p>
+          ${x.kind === 'bp' ? `<span class="owner tag" style="--tc:${ST.mods[x.k].fac === '帝國' ? 'var(--red)' : 'var(--gold)'}">${ST.mods[x.k].fac}</span>` : ''}
+          <span class="price">${p < p0 ? `<s>${p0}</s>` : p > p0 ? `<small class="bad" style="font-size:15px">${p0} ↑</small>` : ''}${fmt(p)}</span></div>`; }).join('')}</div></div>
+    </section>
+
+    <div class="bubble keeper enter" style="--dy:-10px;--d:.6s"><span class="who">${black ? 'BROKER' : 'MERCHANT'}</span><span id="say"></span></div>
+
+    <section class="panel detail tilt-r enter" style="--dx:40px;--d:.3s;--pc:${KIND[it.kind][2]}">
+      <div class="ph"><h2>${KIND[it.kind][1]}</h2><span class="en">${KIND[it.kind][0]}</span></div>
+      <div class="pb">
+        <div class="nm">${name(it)}</div>
+        <div class="desc">${desc(it)}</div>
+        <div class="after">${after(it)}</div>
+        ${w ? `<div class="why">${w}</div>` : ''}
+      </div>
+    </section>
+
+    <button class="bigbtn buy ${w ? 'off' : ''} enter" style="--dx:40px;--d:.4s" id="go">
+      <span class="op">PURCHASE ・ ${KIND[it.kind][0]}</span><h3>購買</h3>
+      <span class="sub">${fmt(price(it))} 資金・買完剩 ${fmt(ST.money - price(it))}</span><div class="chev"><i></i><i></i><i></i></div></button>`;
+  CAP.type($('say'), T.line, 60);
+  document.querySelectorAll('[data-s]').forEach((b) => b.onclick = () => { shop = b.dataset.s; sel = 0; CAP.glitch(); render(); });
+  document.querySelectorAll('[data-i]').forEach((b) => b.onclick = () => { sel = +b.dataset.i; render(); });
+  $('go').onclick = () => {
+    const w2 = why(sel); if (w2) return CAP.toast(w2);
+    ST.money -= price(it); ST.bought[shop].push(sel);
+    if (it.kind === 'bp') ST.bp[it.k] = 1; else if (it.kind === 'rp') ST.rp += it.n;
+    if (!black) ST.favN = Math.min(100, ST.favN + 1);
+    render(); CAP.toast(`在 ${T.sys} 的${T.name}花了 ${price(it)} 資金：${name(it)}`);
+  };
+  if (window._r) document.getElementById('stage').classList.add('ready'); window._r = 1;
+}
+CAP.bg({ mode: 'space', planet: false });
+render(); CAP.ready();
+</script>
+</body>
+</html>

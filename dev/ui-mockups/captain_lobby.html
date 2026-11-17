@@ -1,0 +1,738 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>艦長生涯大廳</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+/* 艦長生涯大廳 mockup。顏色：青＝行動、綠＝你的小隊與船、紅＝警報、黃＝提醒徽章 */
+:root{
+  --cyan:#3cc8ff; --cyan-d:#1f8fff; --own:#3fdf8f; --red:#ff4d5e; --yellow:#f3e94b; --gold:#ffc24a;
+  --panel:rgba(10,16,32,.74); --panel-2:rgba(14,22,44,.84);
+  --line:rgba(90,200,255,.32); --text:#eef3ff; --dim:#8fa3c7;
+  --jp:'Noto Sans TC',sans-serif; --en:'Rajdhani','Noto Sans TC',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;background:#03050b;overflow:hidden;color:var(--text);font-family:var(--jp)}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-align:left}
+
+#stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform-origin:0 0;overflow:hidden;background:#05070f}
+#bg{position:absolute;inset:0;width:100%;height:100%;transition:filter .3s}
+#stage::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:1;
+  background:radial-gradient(ellipse at 50% 50%,transparent 50%,rgba(2,3,10,.7) 100%),
+             repeating-linear-gradient(0deg,rgba(255,255,255,.015) 0 1px,transparent 1px 3px)}
+.glitch #bg{filter:url(#rgb) brightness(1.25)}
+
+.layer{position:absolute;inset:0;z-index:2;transition:opacity .4s}
+.layer.off{opacity:0;pointer-events:none}
+
+.enter{opacity:0;translate:var(--dx,0) var(--dy,0)}
+.ready .enter{opacity:1;translate:0 0;transition:opacity .6s ease var(--d,0s),translate .7s cubic-bezier(.2,.8,.2,1) var(--d,0s),transform .2s,filter .2s,background .2s}
+
+/* frame */
+.corner{position:absolute;width:70px;height:70px;border:0 solid rgba(90,200,255,.55)}
+.c-tl{left:10px;top:10px;border-left-width:2px;border-top-width:2px}
+.c-tr{right:10px;top:10px;border-right-width:2px;border-top-width:2px}
+.c-bl{left:10px;bottom:10px;border-left-width:2px;border-bottom-width:2px}
+.c-br{right:10px;bottom:10px;border-right-width:2px;border-bottom-width:2px}
+.vtext{position:absolute;left:12px;top:440px;writing-mode:vertical-rl;transform:rotate(180deg);font:600 11px var(--en);letter-spacing:.35em;color:rgba(160,190,230,.45)}
+.ruler{position:absolute;right:16px;top:240px;width:14px;height:520px;background:repeating-linear-gradient(180deg,rgba(150,200,255,.35) 0 1px,transparent 1px 26px)}
+
+/* top status */
+.status{position:absolute;left:50%;top:14px;translate:-50% 0;height:34px;padding:0 40px;display:flex;align-items:center;gap:14px;white-space:nowrap;
+  background:linear-gradient(90deg,transparent,rgba(8,12,26,.88) 10%,rgba(8,12,26,.88) 90%,transparent);
+  font:600 13px var(--en);letter-spacing:.2em;color:#cfe0ff;clip-path:polygon(3% 0,97% 0,100% 100%,0 100%)}
+.ready .status.enter{translate:-50% 0}
+.status .live{color:var(--own)}
+.status .live::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--own);margin-right:8px;box-shadow:0 0 8px var(--own);animation:blink 1.6s infinite}
+.status .zh{font:500 14px var(--jp);letter-spacing:.08em;color:#dfe8fa}
+.status .sep{color:var(--dim)}
+.status .own-ally{color:#5aa8ff}
+@keyframes blink{50%{opacity:.25}}
+
+/* rank card */
+.rankcard{position:absolute;left:34px;top:34px;width:470px;height:128px;background:linear-gradient(100deg,var(--panel-2),rgba(12,16,36,.3) 85%,transparent);clip-path:polygon(0 0,100% 8%,100% 100%,0 100%)}
+.ringbox{position:absolute;left:12px;top:12px;width:104px;height:104px}
+.ringbox svg.ring{position:absolute;inset:0;transform:rotate(-90deg)}
+.ringbox .ins{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.ringbox .ins svg{width:46px;height:40px}
+.ringbox .ins small{font:700 11px var(--en);letter-spacing:.14em;color:var(--dim);margin-top:2px}
+.rk-id{position:absolute;left:136px;top:22px;font:700 12px var(--en);letter-spacing:.14em;color:var(--cyan);white-space:nowrap}
+.rk-id span{color:#9fb6d8}
+.rk-name{position:absolute;left:134px;top:40px;font:900 28px var(--jp);letter-spacing:.1em;white-space:nowrap;text-shadow:0 2px 8px rgba(0,0,0,.6)}
+.rk-name small{font:500 15px var(--jp);color:var(--dim);margin-left:10px;letter-spacing:.06em}
+.rk-bar{position:absolute;left:136px;top:104px;display:flex;gap:2px}
+.rk-bar i{width:6px;height:9px;background:rgba(120,150,190,.3)}
+.rk-bar i.on{background:var(--cyan);box-shadow:0 0 6px rgba(60,200,255,.6)}
+.rk-lab{position:absolute;left:136px;top:84px;width:300px;display:flex;justify-content:space-between;font:600 12px var(--jp);color:var(--dim);white-space:nowrap}
+.rk-lab b{color:var(--cyan);font-family:var(--en);font-weight:700}
+
+/* hex menu */
+.hexmenu{position:absolute;left:34px;top:196px}
+.hexitem{position:absolute;display:flex;align-items:center;gap:22px;transition:transform .2s;white-space:nowrap}
+.hexitem:hover{transform:translateX(6px)}
+.hex{position:relative;flex:none;width:92px;height:100px;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);background:linear-gradient(160deg,rgba(80,200,255,.75),rgba(40,90,170,.35))}
+.hex::before{content:"";position:absolute;inset:2px;clip-path:inherit;background:linear-gradient(160deg,#18244a,#0b1124 70%)}
+.hex svg{position:absolute;left:50%;top:50%;width:34px;height:34px;transform:translate(-50%,-50%);stroke:#e8f2ff;fill:none;stroke-width:1.8}
+.hexitem:hover .hex{background:linear-gradient(160deg,#7fe0ff,var(--cyan-d))}
+.badge{position:absolute;width:16px;height:16px;background:var(--yellow);transform:rotate(45deg);box-shadow:0 0 10px rgba(243,233,75,.7)}
+.nbadge{position:absolute;min-width:24px;height:24px;padding:0 6px;border-radius:12px;background:var(--yellow);color:#14130a;font:700 15px/24px var(--en);text-align:center;box-shadow:0 0 10px rgba(243,233,75,.6)}
+.hexitem .badge{left:72px;top:8px}
+.hexitem .nbadge{left:66px;top:2px}
+.hexlabel{border-left:1px solid rgba(150,190,240,.3);padding-left:14px}
+.hexlabel b{display:block;font:700 20px var(--jp);letter-spacing:.1em}
+.hexlabel small{display:block;font:700 11px var(--en);letter-spacing:.18em;color:var(--dim);margin-top:-2px}
+
+/* flagship anchor (follows the ship on screen) */
+#anchor{position:absolute;left:0;top:0;width:0;height:0;will-change:transform}
+/* tag + bubble extend to the LEFT of the ship: the right side belongs to the buttons */
+.tagname{position:absolute;right:66px;top:-150px;font:700 22px var(--jp);letter-spacing:.18em;white-space:nowrap;text-align:right}
+.tagname small{display:flex;justify-content:flex-end;gap:8px;align-items:center;font:700 12px var(--en);letter-spacing:.12em;color:var(--own);margin-top:2px}
+.hpmini{display:inline-block;width:90px;height:5px;background:rgba(255,255,255,.15)}
+.hpmini i{display:block;height:100%;background:var(--own)}
+.leader{position:absolute;left:-80px;top:-110px;overflow:visible}
+.diamond{position:absolute;left:-12px;top:-12px;width:24px;height:24px;border:2px solid var(--own);transform:rotate(45deg);box-shadow:0 0 10px rgba(63,223,143,.6)}
+.diamond::after{content:"";position:absolute;inset:5px;background:var(--own)}
+.bubble{position:absolute;right:84px;top:-92px;padding:12px 22px;background:#f2f4fa;color:#141826;white-space:nowrap;
+  font:500 19px var(--jp);letter-spacing:.06em;clip-path:polygon(0 0,100% 0,100% 100%,6% 100%,0 72%);transition:opacity .3s,transform .3s}
+.bubble .who{display:block;font:700 11px var(--en);letter-spacing:.18em;color:#4a5a80;margin-bottom:2px}
+.bubble.off{opacity:0;transform:translateY(6px)}
+.caret{display:inline-block;width:2px;height:1em;background:#141826;margin-left:2px;vertical-align:-2px;animation:blink .8s infinite}
+
+/* right column (tilted) */
+.right{position:absolute;right:0;top:0;width:820px;height:760px;perspective:1500px}
+.tilt{position:absolute;inset:0;transform-origin:100% 50%;transform:translateX(-36px) rotateY(-10deg) rotateZ(-1deg)}
+.res{position:absolute;top:96px;left:96px;display:flex;gap:16px}
+.res-item{position:relative;display:flex;align-items:center;gap:10px;height:48px;padding:0 6px 0 16px;white-space:nowrap;background:linear-gradient(90deg,rgba(8,12,28,.92),rgba(14,22,46,.82));clip-path:polygon(4% 0,100% 0,96% 100%,0 100%)}
+.res-item::after{content:"";position:absolute;left:0;right:6px;bottom:0;height:2px;background:var(--c)}
+.res-item svg{width:22px;height:22px;flex:none}
+.res-item .k{font:500 12px var(--jp);color:var(--dim)}
+.res-item b{font:700 22px var(--en);letter-spacing:.04em}
+.res-item b small{font-size:14px;color:var(--dim)}
+.plus{width:30px;height:30px;background:rgba(120,140,180,.25);font:700 15px/30px var(--en);text-align:center;transition:background .2s}
+.plus:hover{background:var(--c);color:#0a0d1e}
+.iconbtn{position:absolute;top:40px;width:56px;height:52px;background:rgba(10,16,34,.86);border:1px solid rgba(120,170,230,.25);display:flex;align-items:center;justify-content:center;transition:border-color .2s}
+.iconbtn:hover{border-color:var(--cyan)}
+.iconbtn svg{width:26px;height:26px;stroke:#e8f2ff;fill:none;stroke-width:1.7}
+.iconbtn .nbadge{right:-10px;top:-10px;transform:scale(.8)}
+
+/* priority banner */
+.prio{position:absolute;left:258px;top:186px;width:528px;height:116px;cursor:pointer;clip-path:polygon(0 12%,100% 0,100% 100%,0 100%);transition:filter .2s,background .4s}
+.prio:hover{filter:brightness(1.15)}
+.prio.alert{background:linear-gradient(100deg,#d8263f 0%,#a01f4f 50%,#4a1f5a 85%,rgba(40,30,80,.4) 100%)}
+.prio.promo{background:linear-gradient(100deg,#e8a91c 0%,#c2741a 40%,#7a3f5e 78%,rgba(50,40,90,.45) 100%)}
+.prio.mis{background:linear-gradient(100deg,#2f6fd6 0%,#4a4bc8 45%,#3a2f8a 80%,rgba(30,30,80,.4) 100%)}
+.prio.alert::before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(-45deg,rgba(0,0,0,.12) 0 10px,transparent 10px 20px);animation:warn 1.2s linear infinite}
+@keyframes warn{to{background-position:28px 0}}
+.prio .tag{position:absolute;left:24px;top:20px;background:#fff;color:#151515;font:700 13px var(--jp);letter-spacing:.14em;padding:1px 8px}
+.prio.alert .tag{background:var(--yellow)}
+.prio h2{position:absolute;left:22px;top:42px;font:900 28px var(--jp);letter-spacing:.06em;white-space:nowrap;text-shadow:0 2px 0 rgba(0,0,0,.25)}
+.prio p{position:absolute;left:24px;top:82px;font:500 14px var(--jp);letter-spacing:.04em;color:rgba(255,240,245,.9);white-space:nowrap}
+.prio .left{position:absolute;right:60px;top:22px;font:700 15px var(--jp);color:#fff;background:rgba(0,0,0,.3);padding:1px 10px}
+.prio .dots{position:absolute;right:58px;bottom:14px;display:flex;gap:6px}
+.prio .dots i{width:8px;height:8px;background:rgba(255,255,255,.35);transform:rotate(45deg)}
+.prio .dots i.on{background:#fff}
+
+/* main button */
+.mainbtn{position:absolute;left:170px;top:306px;width:616px;height:200px;cursor:pointer;overflow:hidden;
+  background:repeating-linear-gradient(-60deg,rgba(255,255,255,.07) 0 2px,transparent 2px 22px),linear-gradient(100deg,#29b6ff,#2f86ff 60%,#3a6cf0);
+  clip-path:polygon(0 22%,100% 0,100% 72%,95% 100%,0 100%);transition:filter .2s,transform .2s}
+.mainbtn:hover{filter:brightness(1.12)}
+.mainbtn:active{transform:scale(.985)}
+.mainbtn::after{content:"";position:absolute;top:-20%;bottom:-20%;width:120px;left:-200px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);transform:skewX(-20deg);animation:shine 4.5s 1.4s infinite}
+@keyframes shine{0%{left:-200px}22%,100%{left:760px}}
+.mapicon{position:absolute;left:30px;top:46px;width:128px;height:128px}
+.mapicon .r1{position:absolute;inset:0;animation:spin 14s linear infinite}
+.mapicon .r2{position:absolute;inset:14px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.mainbtn .op{position:absolute;left:188px;top:46px;font:700 13px var(--en);letter-spacing:.18em;color:#0d2050}
+.mainbtn h1{position:absolute;left:184px;top:66px;font:900 58px/1 var(--jp);letter-spacing:.1em;color:#0b1430;white-space:nowrap}
+.mainbtn .sub{position:absolute;left:190px;top:144px;font:700 16px var(--jp);letter-spacing:.08em;color:#0d2050;white-space:nowrap}
+.mainbtn .sub em{font-style:normal;background:#0b1430;color:#7fe0ff;padding:0 8px;margin:0 4px}
+.mainbtn .key{position:absolute;right:52px;top:92px;width:46px;height:46px;border:2px solid #0b1430;font:700 24px/42px var(--en);text-align:center;color:#0b1430}
+.chev{position:absolute;right:46px;bottom:26px;display:flex}
+.chev i{width:14px;height:22px;background:#0d2050;clip-path:polygon(0 0,50% 0,100% 50%,50% 100%,0 100%,50% 50%);margin-left:-3px;animation:chev 1.2s infinite}
+.chev i:nth-child(2){animation-delay:.15s}.chev i:nth-child(3){animation-delay:.3s}
+@keyframes chev{0%,100%{opacity:.35}40%{opacity:1}}
+
+/* tiles */
+.tiles{position:absolute;left:186px;top:520px;display:flex;gap:10px}
+.tile{position:relative;flex:none;width:148px;height:176px;cursor:pointer;background:linear-gradient(180deg,rgba(18,28,58,.92),rgba(8,14,32,.78));border-top:3px solid var(--cyan);clip-path:polygon(9% 0,100% 0,91% 100%,0 100%);transition:transform .2s,background .2s,opacity .2s}
+.tile:hover{transform:translateY(-6px);background:linear-gradient(180deg,rgba(30,60,110,.95),rgba(10,14,32,.8))}
+.tile svg{position:absolute;left:30px;top:18px;width:32px;height:32px;stroke:var(--cyan);fill:none;stroke-width:1.8}
+.tile .jp{position:absolute;right:30px;top:16px;writing-mode:vertical-rl;font:700 24px var(--jp);letter-spacing:.14em}
+.tile .en{position:absolute;left:24px;bottom:20px;writing-mode:vertical-rl;transform:rotate(180deg);font:700 10px var(--en);letter-spacing:.22em;color:var(--dim)}
+.tile .no{position:absolute;right:20px;bottom:6px;font:700 34px var(--en);color:transparent;-webkit-text-stroke:1px rgba(90,200,255,.45)}
+.tile .note{position:absolute;left:18px;right:16px;bottom:52px;white-space:pre-line;font:500 12px var(--jp);color:var(--yellow);line-height:1.3}
+.tile .badge{left:76px;top:14px}
+.tile.dis{opacity:.55;border-top-color:#4a5a78}
+.tile.dis svg{stroke:#6a7a98}
+.tile.dis .note{color:#aab7cf}
+.tile{transition:transform .2s,background .2s,opacity .2s,width .35s}
+.tile.shop{border-top-color:var(--gold);width:0;margin-left:-10px;opacity:0;transition:width .35s,margin .35s,opacity .3s}
+.tiles.five .tile{width:116px}
+.tiles.five .tile .jp{right:22px;font-size:21px}
+.tiles.five .tile svg{left:24px}
+.tiles.five .tile .badge{left:50px;top:12px}
+.tiles.five .tile.shop{width:116px;margin-left:0;opacity:1}
+.tile.shop svg{stroke:var(--gold)}
+
+/* end-week */
+/* end-week: a "turn" control — current week → next week, then the label */
+.endweek{position:absolute;right:66px;top:766px;width:420px;height:82px;display:flex;align-items:center;gap:18px;padding:0 24px 0 30px;overflow:hidden;
+  background:repeating-linear-gradient(-60deg,rgba(255,255,255,.035) 0 2px,transparent 2px 16px),linear-gradient(100deg,rgba(14,22,44,.95),rgba(24,38,72,.95));
+  border-top:2px solid var(--cyan);clip-path:polygon(7% 0,100% 0,100% 100%,0 100%);transition:filter .2s}
+.endweek:hover{filter:brightness(1.25)}
+.endweek .wk{display:flex;align-items:baseline;gap:6px;padding-right:18px;border-right:1px solid var(--line-2,rgba(150,190,240,.18));white-space:nowrap}
+.endweek .wk b{font:700 34px/1 var(--en);color:var(--dim)}
+.endweek .wk b.n{color:var(--cyan)}
+.endweek .wk i{font-style:normal;font:700 20px var(--en);color:var(--cyan);animation:chev 1.2s infinite}
+.endweek .wk small{display:block;font:700 10px var(--en);letter-spacing:.24em;color:var(--dim);margin-top:2px}
+.endweek .tx b{font:900 25px var(--jp);letter-spacing:.12em;white-space:nowrap}
+.endweek .tx small{display:block;font:700 11px var(--en);letter-spacing:.24em;color:var(--dim)}
+.endweek .warn{margin-left:auto;display:flex;align-items:center;gap:6px;padding:4px 10px;background:var(--red);font:700 16px var(--en);white-space:nowrap;box-shadow:0 0 14px rgba(255,77,94,.5)}
+
+/* name plate & ship chips */
+.plate{position:absolute;left:34px;top:796px}
+.plate .sq{font:700 14px var(--jp);letter-spacing:.14em;color:var(--own);margin-left:22px;white-space:nowrap}
+.plate .sq span{font-family:var(--en);color:#9fe8c0}
+.plate h3{font:900 48px/1.08 var(--jp);letter-spacing:.1em;border-left:5px solid var(--own);padding-left:18px;margin-top:2px;white-space:nowrap;text-shadow:0 3px 10px rgba(0,0,0,.6)}
+.plate h3 small{font:500 18px var(--jp);color:var(--dim);margin-left:12px;letter-spacing:.06em}
+.plate .xp{display:flex;align-items:center;gap:10px;margin-top:8px;font:700 14px var(--en);letter-spacing:.12em;white-space:nowrap}
+.plate .xp em{font-style:normal;color:var(--own)}
+.seg{display:flex;gap:2px}
+.seg i{width:5px;height:9px;background:rgba(255,255,255,.2)}
+.seg i.on{background:var(--own)}
+.ships{position:absolute;left:38px;top:928px;display:flex;gap:10px;transform:rotate(-4deg);transform-origin:0 100%}
+.ship{position:relative;display:flex;flex-direction:column;justify-content:center;height:46px;padding:0 22px 0 26px;min-width:150px;background:rgba(10,16,36,.88);clip-path:polygon(7% 0,100% 0,93% 100%,0 100%);transition:background .2s;white-space:nowrap}
+.ship:hover{background:rgba(30,50,90,.92)}
+.ship .t{font:500 15px var(--jp)}
+.ship .t i{font:700 12px var(--en);font-style:normal;color:var(--cyan);margin-right:8px}
+.ship .bars{display:flex;gap:3px;margin-top:4px}
+.ship .bars span{height:4px;background:rgba(255,255,255,.15);flex:1}
+.ship .bars span i{display:block;height:100%}
+.ship.on{background:var(--own);color:#062014}
+.ship.on .t i{color:#062014}
+.ship.on .bars span{background:rgba(0,0,0,.25)}
+
+/* camera readout & tools */
+.camread{position:absolute;left:50%;translate:-50% 0;top:982px;display:flex;gap:28px;font:600 13px var(--en);letter-spacing:.18em;color:#c9d6f0;white-space:nowrap}
+.ready .camread.enter{translate:-50% 0}
+.camread b{color:var(--cyan);font-weight:600}
+.camread .haz b{color:var(--yellow)}
+.tools{position:absolute;right:62px;top:900px;display:flex;gap:14px;transform:perspective(600px) rotateY(-14deg)}
+.tools .iconbtn{position:static;width:56px;height:54px}
+.tools .cruise{width:auto;padding:0 18px;gap:10px;font:700 15px var(--jp);letter-spacing:.1em}
+.tools .cruise kbd{font:700 12px var(--en);border:1px solid var(--dim);padding:0 5px;color:var(--dim)}
+
+/* intel ticker */
+.news{position:absolute;left:60px;right:80px;top:1006px;height:54px;display:flex;align-items:center;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:linear-gradient(90deg,rgba(6,10,22,.6),rgba(6,10,22,.88))}
+.news .label{margin-left:86px;padding:3px 18px;background:var(--cyan);color:#06122a;font:700 15px var(--jp);letter-spacing:.3em;clip-path:polygon(10% 0,100% 0,90% 100%,0 100%);white-space:nowrap}
+.ticker{position:relative;flex:1;height:100%;overflow:hidden;margin:0 24px;-webkit-mask:linear-gradient(90deg,transparent,#000 5%,#000 95%,transparent);mask:linear-gradient(90deg,transparent,#000 5%,#000 95%,transparent)}
+.ticker .track{position:absolute;top:50%;transform:translateY(-50%);white-space:nowrap;font:500 18px var(--jp);letter-spacing:.04em;animation:tick 52s linear infinite}
+.ticker .track span{margin-right:40px}
+.ticker .track span b{font-weight:700;margin-right:6px}
+.ticker .track span::after{content:"◆";margin-left:40px;font-size:13px;color:#fff}
+@keyframes tick{from{transform:translate(0,-50%)}to{transform:translate(-50%,-50%)}}
+.weekclock{font:600 30px var(--en);color:var(--cyan);letter-spacing:.06em;margin-right:60px;white-space:nowrap}
+.weekclock small{font:500 15px var(--jp);color:var(--dim);margin-right:6px}
+
+/* cruise HUD */
+#cruise .reticle{position:absolute;left:50%;top:50%;width:90px;height:90px;translate:-50% -50%;border:1.5px solid rgba(60,200,255,.6);border-radius:50%}
+#cruise .reticle::before,#cruise .reticle::after{content:"";position:absolute;background:var(--cyan)}
+#cruise .reticle::before{left:50%;top:-14px;bottom:-14px;width:1.5px;translate:-50% 0;-webkit-mask:linear-gradient(#000 16px,transparent 16px calc(100% - 16px),#000 0);mask:linear-gradient(#000 16px,transparent 16px calc(100% - 16px),#000 0)}
+#cruise .reticle::after{top:50%;left:-14px;right:-14px;height:1.5px;translate:0 -50%;-webkit-mask:linear-gradient(90deg,#000 16px,transparent 16px calc(100% - 16px),#000 0);mask:linear-gradient(90deg,#000 16px,transparent 16px calc(100% - 16px),#000 0)}
+#cruise .chud{position:absolute;left:60px;bottom:70px;font:600 14px var(--en);letter-spacing:.16em;color:#cfe0ff}
+#cruise .chud b{display:block;font:700 46px var(--en);color:var(--cyan)}
+#cruise .hint{position:absolute;left:50%;bottom:60px;translate:-50% 0;display:flex;gap:26px;font:500 16px var(--jp);color:#dfe8fa;white-space:nowrap}
+#cruise .hint kbd{font:700 13px var(--en);border:1px solid #9fb6d8;padding:1px 7px;margin-right:6px}
+#cruise .ctop{position:absolute;left:50%;top:24px;translate:-50% 0;font:700 15px var(--jp);letter-spacing:.2em;color:var(--own);white-space:nowrap}
+
+/* modal + toast */
+.modal{position:absolute;inset:0;z-index:20;display:none;align-items:center;justify-content:center;background:rgba(2,4,12,.6)}
+.modal.on{display:flex}
+.mbox{width:720px;padding:32px 40px;background:linear-gradient(160deg,#111b36,#0a1024);border:1px solid var(--line);clip-path:polygon(0 0,96% 0,100% 6%,100% 100%,4% 100%,0 94%)}
+.mbox h4{font:900 28px var(--jp);letter-spacing:.1em;margin-bottom:6px}
+.mbox p{font:500 17px var(--jp);color:var(--dim);margin-bottom:18px}
+.mrow{display:flex;justify-content:space-between;padding:12px 16px;margin-bottom:8px;background:rgba(255,77,94,.12);border-left:4px solid var(--red);font:500 18px var(--jp)}
+.mrow b{font:700 20px var(--en);color:var(--red)}
+.mbtns{display:flex;gap:14px;margin-top:22px;justify-content:flex-end}
+.mbtns button{padding:10px 28px;font:700 18px var(--jp);letter-spacing:.1em;border:1px solid var(--line);background:rgba(20,30,60,.9)}
+.mbtns button.pri{background:var(--cyan);color:#06122a;border-color:var(--cyan)}
+.toast{position:absolute;left:50%;top:120px;translate:-50% -10px;z-index:21;padding:12px 28px;background:rgba(8,14,30,.95);border:1px solid var(--cyan);font:500 18px var(--jp);opacity:0;transition:opacity .25s,translate .25s;pointer-events:none;white-space:nowrap}
+.toast.on{opacity:1;translate:-50% 0}
+
+/* demo switches (not part of the design) */
+#demo{position:absolute;left:34px;top:700px;z-index:50;font:12px var(--jp);color:#9fb6d8;background:rgba(0,0,0,.6);padding:6px 10px;border:1px solid #2a3a50}
+#demo label{margin-right:10px;cursor:pointer}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <filter id="rgb"><feColorMatrix in="SourceGraphic" type="matrix" values="1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0" result="r"/><feOffset in="r" dx="-8" result="r2"/>
+    <feColorMatrix in="SourceGraphic" type="matrix" values="0 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0" result="gb"/><feOffset in="gb" dx="8" result="gb2"/><feBlend in="r2" in2="gb2" mode="screen"/></filter>
+</svg>
+
+<div id="stage">
+  <canvas id="bg" width="1920" height="1080"></canvas>
+
+  <!-- ===== 停泊（大廳） ===== -->
+  <div class="layer" id="lobby">
+    <div class="corner c-tl"></div><div class="corner c-tr"></div><div class="corner c-bl"></div><div class="corner c-br"></div>
+    <div class="vtext enter" style="--dx:-20px" id="vtext"></div>
+    <div class="ruler enter" style="--dx:20px"></div>
+
+    <div class="status enter" style="--dy:-20px" id="status"></div>
+
+    <div class="rankcard enter" style="--dx:-40px;--d:.05s">
+      <div class="ringbox">
+        <svg class="ring" viewBox="0 0 104 104"><circle cx="52" cy="52" r="46" stroke="rgba(120,150,190,.25)" stroke-width="5" fill="none"/>
+          <circle id="rkring" cx="52" cy="52" r="46" stroke="#3cc8ff" stroke-width="5" fill="none" stroke-dasharray="289" stroke-dashoffset="289" style="filter:drop-shadow(0 0 4px #3cc8ff)"/></svg>
+        <div class="ins"><svg id="rkicon" viewBox="0 0 46 40"></svg><small>RANK</small></div>
+      </div>
+      <div class="rk-id" id="rkid"></div>
+      <div class="rk-name" id="rkname"></div>
+      <div class="rk-lab" id="rklab"></div>
+      <div class="rk-bar" id="rkbar"></div>
+    </div>
+
+    <nav class="hexmenu">
+      <button class="hexitem enter" data-act="任務" style="left:0;top:0;--dx:-40px;--d:.15s">
+        <div class="hex"><svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="1"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></div>
+        <span class="nbadge" id="misn"></span><div class="hexlabel"><b>任務</b><small>MISSIONS</small></div></button>
+      <button class="hexitem enter" data-act="勢力（好感、聲望）" style="left:66px;top:94px;--dx:-40px;--d:.22s">
+        <div class="hex"><svg viewBox="0 0 24 24"><path d="M5 3v18M5 4h11l-2 4 2 4H5"/></svg></div>
+        <div class="hexlabel"><b>勢力</b><small>FACTIONS</small></div></button>
+      <button class="hexitem enter" data-act="紀錄" style="left:0;top:188px;--dx:-40px;--d:.29s">
+        <div class="hex"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h8M8 17h4"/></svg></div>
+        <div class="hexlabel"><b>紀錄</b><small>LOG</small></div></button>
+      <button class="hexitem enter" data-act="說明與圖例" style="left:66px;top:282px;--dx:-40px;--d:.36s">
+        <div class="hex"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 114 2c-1 .6-1.5 1.2-1.5 2.5M12 17v.5"/></svg></div>
+        <div class="hexlabel"><b>說明</b><small>GUIDE</small></div></button>
+    </nav>
+
+    <div class="right">
+      <div class="tilt">
+        <div class="res enter" style="--dy:-20px;--d:.1s" id="res"></div>
+        <button class="iconbtn enter" data-act="戰報" style="left:654px;--dy:-20px;--d:.15s"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13"/><path d="M3 7l9 6 9-6"/></svg><span class="nbadge" id="logn"></span></button>
+        <button class="iconbtn enter" data-act="設定・存檔・回艦長選單" style="left:722px;--dy:-20px;--d:.18s"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></button>
+
+        <div class="prio enter" style="--dx:60px;--d:.3s" id="prio"></div>
+
+        <button class="mainbtn enter" style="--dx:80px;--d:.4s" id="mapbtn">
+          <div class="mapicon">
+            <svg class="r1" viewBox="0 0 128 128"><circle cx="64" cy="64" r="60" stroke="#0b1430" stroke-width="3" stroke-dasharray="4 6" fill="none"/></svg>
+            <svg class="r2" viewBox="0 0 100 100" fill="#0b1430" stroke="#0b1430" stroke-width="3">
+              <path d="M22 70L46 30L78 46L60 78Z" fill="none"/><circle cx="22" cy="70" r="7"/><circle cx="46" cy="30" r="7"/><circle cx="78" cy="46" r="7"/><circle cx="60" cy="78" r="9" fill="#7fe0ff"/></svg>
+          </div>
+          <span class="op">STAR MAP ・ ORDERS</span>
+          <h1>星圖・下令</h1>
+          <span class="sub" id="mapsub"></span>
+          <span class="key">M</span>
+          <div class="chev"><i></i><i></i><i></i></div>
+        </button>
+
+        <div class="tiles" id="tiles">
+          <button class="tile enter" data-act="小隊（編成、換船、分隊）" style="--dy:30px;--d:.5s"><svg viewBox="0 0 24 24"><path d="M3 15l9-9 9 9M6 19l6-6 6 6"/></svg><span class="jp">小隊</span><span class="en">SQUADS</span><span class="no">01</span></button>
+          <button class="tile enter" id="t-yard" data-act="船塢（修理、補飛彈、訂造、改裝）" style="--dy:30px;--d:.56s"><svg viewBox="0 0 24 24"><path d="M3 20h18M5 20V9l7-5 7 5v11M9 20v-6h6v6"/></svg><span class="jp">船塢</span><span class="note" id="yardnote"></span><span class="en">SHIPYARD</span><span class="no">02</span></button>
+          <button class="tile enter" data-act="研發" style="--dy:30px;--d:.62s"><svg viewBox="0 0 24 24"><path d="M9 3h6M10 3v6l-5 9a2 2 0 002 3h10a2 2 0 002-3l-5-9V3"/><path d="M7.5 15h9"/></svg><i class="badge" id="techbadge"></i><span class="jp">研發</span><span class="en">RESEARCH</span><span class="no">03</span></button>
+          <button class="tile enter" data-act="星球（建設、投資）" style="--dy:30px;--d:.68s"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/><ellipse cx="12" cy="12" rx="11" ry="4" transform="rotate(-20 12 12)"/></svg><span class="jp">星球</span><span class="en">PLANET</span><span class="no">04</span></button>
+          <button class="tile shop" id="t-shop" data-act="商店"><svg viewBox="0 0 24 24"><path d="M4 8h16l-1.5 12h-13z"/><path d="M8.5 8V6a3.5 3.5 0 017 0v2"/></svg><span class="jp" id="shopname">貿易站</span><span class="en">SHOP</span><span class="no">05</span></button>
+        </div>
+      </div>
+    </div>
+
+    <button class="endweek enter" style="--dx:40px;--d:.65s" id="endweek">
+      <div><div class="wk"><b id="wk0"></b><i>▸</i><b class="n" id="wk1"></b></div></div>
+      <div class="tx"><b>結束這一週</b><small>END WEEK</small></div>
+      <span class="warn" id="ewwarn">⚠ <span id="ewn"></span></span>
+    </button>
+
+    <div class="plate enter" style="--dx:-40px;--d:.45s" id="plate"></div>
+    <div class="ships enter" style="--dx:-40px;--d:.55s" id="ships"></div>
+
+    <div class="camread enter" style="--dy:10px;--d:.7s"><span>FL <b>200</b>mm</span><span>FD <b id="fd">2.40</b>km</span><span>CAM <b id="cam">WIDE-01</b></span><span class="haz" id="haz"></span></div>
+    <div class="tools enter" style="--dx:30px;--d:.6s">
+      <button class="iconbtn cruise" id="cruisebtn" title="親自開船"><svg viewBox="0 0 24 24"><path d="M3 12l16-7-5 16-3-6z"/></svg>巡航<kbd>F</kbd></button>
+      <button class="iconbtn" data-act="截圖" title="截圖"><svg viewBox="0 0 24 24"><path d="M3 8h4l2-3h6l2 3h4v11H3z"/><circle cx="12" cy="13" r="3.5"/></svg></button>
+      <button class="iconbtn" id="hideui" title="隱藏介面"><svg viewBox="0 0 24 24"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+    </div>
+
+    <div class="news enter" style="--dy:20px;--d:.75s">
+      <span class="label">情報</span>
+      <div class="ticker"><div class="track" id="track"></div></div>
+      <span class="weekclock" id="weekclock"></span>
+    </div>
+  </div>
+
+  <!-- the flagship tag lives outside #lobby's fade so it can be shown/hidden separately -->
+  <div class="layer" id="taglayer" style="pointer-events:none">
+    <div id="anchor">
+      <div class="diamond"></div>
+      <svg class="leader" width="80" height="110"><path d="M80 110 L20 30 L14 30" stroke="rgba(63,223,143,.75)" stroke-width="1.5" fill="none"/></svg>
+      <div class="tagname" id="tagname"></div>
+      <div class="bubble off" id="bubble"><span class="who" id="who">ADJUTANT</span><span id="say"></span><span class="caret"></span></div>
+    </div>
+  </div>
+
+  <!-- ===== 巡航（開船） ===== -->
+  <div class="layer off" id="cruise">
+    <div class="corner c-tl"></div><div class="corner c-tr"></div><div class="corner c-bl"></div><div class="corner c-br"></div>
+    <div class="ctop" id="ctop"></div>
+    <div class="reticle"></div>
+    <div class="chud">SPEED<b id="spd">0</b>船體 <span id="chp"></span></div>
+    <div class="hint"><span><kbd>WASD</kbd>移動</span><span><kbd>M</kbd>星圖</span><span><kbd>F</kbd>／<kbd>Esc</kbd>停泊（回到大廳）</span></div>
+  </div>
+
+  <div class="layer off" id="restore" style="cursor:pointer"></div>
+
+  <div class="modal" id="modal"><div class="mbox" id="mbox"></div></div>
+  <div class="toast" id="toast"></div>
+</div>
+
+<a id="demohome" href="index.html" style="position:absolute;right:20px;bottom:4px;z-index:60;font:600 12px Rajdhani,sans-serif;letter-spacing:.2em;color:rgba(160,190,230,.6);text-decoration:none">◀ DEMO INDEX</a>
+<div id="demo">示範情境：
+  <label><input type="checkbox" id="d-shop"> 在商店星系</label>
+  <label><input type="checkbox" id="d-noyard"> 這裡沒有船塢</label>
+  <label><input type="checkbox" id="d-safe"> 沒有敵軍來襲</label>
+</div>
+
+<script>
+/* ============ 資料（之後換成 capcareer.js 的 S） ============ */
+const ST = {
+  week: 12,
+  sys: '蓋爾', scene: '星雲', owner: '聯盟領', ownerRel: 'ally',
+  role: '聯盟艦長', name: '雷恩・柯特', rank: '特戰隊長', rankI: 2,
+  merit: 1240, meritNext: 1600, nextRank: '特戰司令',
+  money: 18450, rp: 86, misOpen: 2, logUnread: 3, techDone: true,
+  squad: { name: '第1小隊', ships: [
+    { n: '艾爾巴號', t: '重砲艦', lv: 3, hp: .82, sh: 1, xp: 11, xpN: 22 },
+    { n: '雷霆號', t: '突擊艦', lv: 2, hp: .36, sh: .5, xp: 15, xpN: 22 },
+    { n: '穿刺號', t: '電戰艦', lv: 1, hp: 1, sh: 1, xp: 4, xpN: 22 } ] },
+  unordered: 2,
+  threats: [ { sq: '第2小隊', sys: '薩恩', odds: 41, surv: 63 } ],
+  promo: { title: '佔領 維克多星系', sub: '完成就升任 特戰司令', left: 4 },
+  mission: { title: '攔截 帝國補給船隊', sub: '成功：那一區補給線切斷 4 週', left: 2 },
+  hasYard: true, nearestYard: '雷姆（2 航道）',
+  atShop: false, shopName: '貿易站',
+  hazard: '離子風暴 1.2 km',
+  log: [
+    ['戰報', '#ff8a8a', '帝國第3小隊佔領 歐瑞恩'],
+    ['情報', '#7fe0ff', '帝國的戰艦升到 Mk II'],
+    ['補給', '#ffc24a', '薩恩一帶的補給線切斷，還有 2 週'],
+    ['任務', '#f3e94b', '歐文・哈特准將交辦：攔截帝國補給船隊'],
+    ['船塢', '#3fdf8f', '雷姆船塢：突擊艦「迅羽號」下週完工'],
+  ],
+  lines: [
+    '補給線還沒恢復，飛彈省著用。',
+    '第2小隊下週會被攻擊，要撤嗎？',
+    '雷霆號的船體只剩三成多了。',
+    '研發完成了，可以開始下一項。',
+  ],
+};
+
+/* ============ fit ============ */
+const stage = document.getElementById('stage');
+let SCALE = 1;
+function fit(){ SCALE = Math.min(innerWidth/1920, innerHeight/1080); stage.style.transform = `scale(${SCALE}) translate(-50%,-50%)`; }
+addEventListener('resize', fit); fit();
+const $ = (id) => document.getElementById(id);
+stage.appendChild($('demo'));   // demo switches live inside the scaled stage
+const fmt = (n) => n.toLocaleString('en-US');
+function seg(el, n, on){ el.innerHTML = Array.from({length:n}, (_, i) => `<i class="${i < on ? 'on' : ''}"></i>`).join(''); }
+
+/* ============ render UI from ST ============ */
+const RANK_ICON = [ // chevrons by rank
+  '<path d="M8 26l15-9 15 9" stroke="#e8f2ff" stroke-width="4" fill="none"/>',
+  '<path d="M8 22l15-9 15 9M8 32l15-9 15 9" stroke="#e8f2ff" stroke-width="4" fill="none"/>',
+  '<path d="M8 18l15-9 15 9M8 27l15-9 15 9M8 36l15-9 15 9" stroke="#e8f2ff" stroke-width="3.6" fill="none"/>',
+  '<path d="M23 2l3 7 7 .6-5.4 4.6 1.7 7L23 17.6 16.7 21.2l1.7-7L13 9.6 20 9z" fill="#f3e94b"/><path d="M8 28l15-8 15 8M8 37l15-8 15 8" stroke="#e8f2ff" stroke-width="3.6" fill="none"/>' ];
+let selShip = 0, prioI = 0;
+
+function prioList(){
+  const L = [];
+  for (const T of ST.threats) L.push({ k:'alert', tag:'⚠ 下週敵軍來襲', title:`${T.sq}・駐守 ${T.sys}`, sub:`駐守勝率 ${T.odds}%・旗艦存活 ${T.surv}%・點這裡下令`, left:'下週' });
+  if (ST.promo) L.push({ k:'promo', tag:'升遷考核', title:ST.promo.title, sub:ST.promo.sub, left:`剩 ${ST.promo.left} 週` });
+  if (ST.mission) L.push({ k:'mis', tag:'任務', title:ST.mission.title, sub:ST.mission.sub, left:`剩 ${ST.mission.left} 週` });
+  return L;
+}
+function renderPrio(){
+  const L = prioList(); if (prioI >= L.length) prioI = 0; const P = L[prioI];
+  const el = $('prio'); el.className = `prio enter ${P.k}`;
+  el.innerHTML = `<span class="tag">${P.tag}</span><span class="left">${P.left}</span><h2>${P.title}</h2><p>${P.sub}</p>
+    <div class="dots">${L.map((_, i) => `<i class="${i === prioI ? 'on' : ''}"></i>`).join('')}</div>`;
+}
+function renderShips(){
+  const S = ST.squad.ships, F = S[selShip];
+  const hpCol = (v) => v > .6 ? '#3fdf8f' : v > .3 ? '#f3e94b' : '#ff4d5e';
+  $('plate').innerHTML = `<div class="sq">★ ${ST.squad.name} <span>／ ${S.length} SHIPS</span></div>
+    <h3>${F.n}<small>${F.t}</small></h3>
+    <div class="xp">SHIP <em>Lv.${F.lv}</em><div class="seg" id="xpseg"></div></div>`;
+  seg($('xpseg'), F.xpN, F.xp);
+  $('ships').innerHTML = S.map((s, i) => `<button class="ship ${i === selShip ? 'on' : ''}" data-i="${i}">
+    <span class="t"><i>${i + 1}</i>${s.n}</span>
+    <span class="bars"><span><i style="width:${s.hp*100}%;background:${i === selShip ? '#062014' : hpCol(s.hp)}"></i></span><span><i style="width:${s.sh*100}%;background:${i === selShip ? '#0b3a24' : '#5aa8ff'}"></i></span></span></button>`).join('');
+  $('tagname').innerHTML = `${F.n}<small>HULL ${Math.round(F.hp*100)}% <span class="hpmini"><i style="width:${F.hp*100}%;background:${hpCol(F.hp)}"></i></span></small>`;
+  $('chp').textContent = Math.round(S[0].hp*100) + '%';
+}
+function render(){
+  $('status').innerHTML = `<span class="live">停泊中</span><span>WEEK ${ST.week}</span><span class="sep">／</span><span class="zh">${ST.sys}星系</span><span class="sep">／</span><span class="zh">${ST.scene}</span><span class="sep">／</span><span class="zh own-ally">${ST.owner}</span>`;
+  $('vtext').textContent = `${ST.sys.toUpperCase()} SYSTEM ／ WEEK ${ST.week} ／ ${ST.squad.name}`;
+  $('rkicon').innerHTML = RANK_ICON[ST.rankI];
+  $('rkring').setAttribute('stroke-dashoffset', 289 * (1 - ST.merit / ST.meritNext));
+  $('rkid').innerHTML = `CAPTAIN <span>／ ${ST.role}</span>`;
+  $('rkname').innerHTML = `${ST.rank}<small>${ST.name}</small>`;
+  $('rklab').innerHTML = `<span>戰功 <b>${fmt(ST.merit)}</b> / ${fmt(ST.meritNext)}</span><span>→ ${ST.nextRank}考核</span>`;
+  seg($('rkbar'), 40, Math.round(40 * ST.merit / ST.meritNext));
+  $('misn').textContent = ST.misOpen; $('misn').style.display = ST.misOpen ? '' : 'none';
+  $('logn').textContent = ST.logUnread; $('logn').style.display = ST.logUnread ? '' : 'none';
+  $('techbadge').style.display = ST.techDone ? '' : 'none';
+  $('res').innerHTML = [
+    ['資金', fmt(ST.money), 'var(--yellow)', '<circle cx="12" cy="12" r="9" fill="none" stroke="#f3c94b" stroke-width="2"/><path d="M12 6v12M8.5 9.5c0-1.5 1.5-2.2 3.5-2.2s3.5.8 3.5 2.2-1.5 2-3.5 2.4-3.5 1-3.5 2.5 1.5 2.3 3.5 2.3 3.5-.8 3.5-2.3" fill="none" stroke="#f3c94b" stroke-width="1.8"/>', '收入'],
+    ['研究點', fmt(ST.rp), 'var(--cyan)', '<path d="M9 3h6M10 3v6l-5 9a2 2 0 002 3h10a2 2 0 002-3l-5-9V3" fill="none" stroke="#3cc8ff" stroke-width="1.8"/>', '研發'],
+    ['戰功', fmt(ST.merit), 'var(--own)', '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z" fill="none" stroke="#3fdf8f" stroke-width="1.8"/>', ''],
+  ].map(([k, v, c, ic, act]) => `<div class="res-item" style="--c:${c}"><svg viewBox="0 0 24 24">${ic}</svg><span class="k">${k}</span><b>${v}</b>${act ? `<button class="plus" data-act="${k}：${act}明細" title="${act}">▸</button>` : ''}</div>`).join('');
+  renderPrio();
+  $('mapsub').innerHTML = ST.unordered ? `還有<em>${ST.unordered} 隊</em>沒下令` : '所有小隊都下令了';
+  const yard = $('t-yard'); yard.classList.toggle('dis', !ST.hasYard);
+  $('yardnote').textContent = ST.hasYard ? '' : `這裡沒有船塢\n最近：${ST.nearestYard}`;
+  $('tiles').classList.toggle('five', ST.atShop); $('shopname').textContent = ST.shopName;
+  $('ewwarn').style.display = ST.threats.length ? '' : 'none'; $('ewn').textContent = ST.threats.length;
+  $('wk0').textContent = 'W' + ST.week; $('wk1').textContent = 'W' + (ST.week + 1);
+  $('haz').innerHTML = ST.hazard ? `⚠ <b>${ST.hazard}</b>` : '';
+  const html = ST.log.map(([k, c, t]) => `<span><b style="color:${c}">【${k}】</b>${t}</span>`).join('');
+  $('track').innerHTML = html + html;
+  $('weekclock').innerHTML = `<small>第</small>${ST.week}<small style="margin-left:6px">週</small>`;
+  $('ctop').textContent = `巡航中・${ST.sys}星系・${ST.scene}`;
+  renderShips();
+}
+render();
+setInterval(() => { prioI++; renderPrio(); }, 6000);
+
+/* ============ space background + ships (canvas) ============ */
+const cv = $('bg'), g = cv.getContext('2d'), W = 1920, H = 1080;
+// world is larger than the screen; camera = {x,y,z}
+const WORLD = { w: 3200, h: 1900 };
+let far, mid;
+function mkCanvas(w, h){ const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+function buildFar(){
+  far = mkCanvas(WORLD.w, WORLD.h); const c = far.getContext('2d');
+  c.fillStyle = '#04060f'; c.fillRect(0, 0, WORLD.w, WORLD.h);
+  const blobs = [[900,500,900,'70,40,140',.55],[2100,700,1100,'20,90,160',.45],[1500,1300,800,'140,40,120',.35],[2700,400,700,'40,140,170',.3]];
+  for (const [x, y, r, col, a] of blobs){ const gr = c.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, `rgba(${col},${a})`); gr.addColorStop(1, `rgba(${col},0)`); c.fillStyle = gr; c.fillRect(0, 0, WORLD.w, WORLD.h); }
+  for (let i = 0; i < 2600; i++){ const s = Math.random(); c.fillStyle = `rgba(${200+Math.random()*55|0},${210+Math.random()*45|0},255,${.2+s*.7})`; c.fillRect(Math.random()*WORLD.w, Math.random()*WORLD.h, s > .97 ? 2.4 : 1.2, s > .97 ? 2.4 : 1.2); }
+  // planet
+  const px = 2350, py = 1500, pr = 620;
+  const pg = c.createRadialGradient(px - 260, py - 300, 60, px, py, pr); pg.addColorStop(0, '#5a7ec8'); pg.addColorStop(.5, '#2a3d78'); pg.addColorStop(1, '#0a1028');
+  c.fillStyle = pg; c.beginPath(); c.arc(px, py, pr, 0, 7); c.fill();
+  c.strokeStyle = 'rgba(120,200,255,.55)'; c.lineWidth = 10; c.filter = 'blur(6px)'; c.beginPath(); c.arc(px, py, pr, Math.PI*1.05, Math.PI*1.75); c.stroke(); c.filter = 'none';
+}
+// Placeholder hulls (the real lobby uses the 3D cruise scene). Side view, bow to the right.
+// Points are in hull units: x 0..1 along the length, y 0..1 of the height.
+const HULL_SHAPES = {
+  heavy: { h:.34, pts:[[1,.56],[.86,.4],[.7,.3],[.56,.28],[.5,.06],[.36,.04],[.31,.24],[.12,.22],[.04,.12],[0,.14],[0,.88],[.06,.94],[.2,.86],[.62,.84],[.84,.74]],
+    tower:[.36,.04,.14,.24], guns:[[.62,.26,.1],[.74,.32,.08]], fins:[] },
+  assault: { h:.3, pts:[[1,.6],[.78,.42],[.6,.36],[.48,.18],[.36,.18],[.3,.32],[.08,.3],[0,.36],[0,.8],[.1,.86],[.66,.8],[.86,.7]],
+    tower:[.36,.18,.12,.16], guns:[[.66,.36,.08]], fins:[[.14,.84,.2,.22]] },
+  ew: { h:.36, pts:[[1,.58],[.82,.46],[.62,.4],[.54,.26],[.4,.26],[.34,.38],[.1,.36],[0,.42],[0,.82],[.1,.9],[.7,.84],[.88,.72]],
+    tower:[.4,.26,.14,.14], guns:[], fins:[[.2,.38,.16,-.3],[.5,.84,.14,.2]], dish:[.47,.12] },
+};
+function shipSprite(len, type){
+  const S = HULL_SHAPES[type], h = len * S.h, pad = 60, c0 = mkCanvas(len + pad*2, h + pad*2), c = c0.getContext('2d');
+  c.translate(pad, pad);
+  const P = (p) => [p[0]*len, p[1]*h];
+  const path = () => { c.beginPath(); S.pts.forEach((p, i) => { const [x, y] = P(p); i ? c.lineTo(x, y) : c.moveTo(x, y); }); c.closePath(); };
+  // fins / antenna behind the hull
+  c.fillStyle = '#1a2036';
+  for (const [x, y, w, d] of S.fins){ c.beginPath(); c.moveTo(x*len, y*h); c.lineTo((x+w)*len, y*h); c.lineTo((x+w*.3)*len, (y+d)*h); c.closePath(); c.fill(); }
+  if (S.dish){ const [x, y] = P(S.dish); c.strokeStyle = '#8fa0c8'; c.lineWidth = 3; c.beginPath(); c.moveTo(x, y + h*.14); c.lineTo(x, y); c.stroke();
+    c.beginPath(); c.ellipse(x, y, len*.05, h*.06, -.3, 0, Math.PI*2); c.fillStyle = '#2a3354'; c.fill(); c.stroke(); }
+  // base hull: dark steel, lit from above
+  const base = c.createLinearGradient(0, 0, 0, h); base.addColorStop(0, '#5d6b92'); base.addColorStop(.35, '#323c5c'); base.addColorStop(.75, '#1a2038'); base.addColorStop(1, '#0c0f1e');
+  path(); c.fillStyle = base; c.fill();
+  c.save(); path(); c.clip();
+  // armor panels
+  let seed = len; const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+  for (let k = 0; k < 46; k++){ c.fillStyle = `rgba(${rnd() < .5 ? '170,190,240' : '10,14,30'},${.06 + rnd()*.1})`; c.fillRect(rnd()*len, h*(.2 + rnd()*.6), len*(.03 + rnd()*.09), h*(.05 + rnd()*.12)); }
+  c.strokeStyle = 'rgba(150,175,230,.18)'; c.lineWidth = 1;
+  for (let k = 1; k < 9; k++){ const x = len*(.08 + k*.09); c.beginPath(); c.moveTo(x, 0); c.lineTo(x - h*.08, h); c.stroke(); }
+  c.beginPath(); c.moveTo(0, h*.62); c.lineTo(len*.9, h*.66); c.stroke();
+  // rim light: cyan on top edge, magenta from the nebula underneath
+  const top = c.createLinearGradient(0, 0, 0, h*.5); top.addColorStop(0, 'rgba(120,220,255,.55)'); top.addColorStop(1, 'rgba(120,220,255,0)'); c.fillStyle = top; c.fillRect(0, 0, len, h*.5);
+  const bot = c.createLinearGradient(0, h*.7, 0, h); bot.addColorStop(0, 'rgba(255,80,170,0)'); bot.addColorStop(1, 'rgba(255,80,170,.4)'); c.fillStyle = bot; c.fillRect(0, h*.7, len, h*.3);
+  // engine block shading at the stern
+  const st = c.createLinearGradient(0, 0, len*.12, 0); st.addColorStop(0, 'rgba(0,0,0,.45)'); st.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = st; c.fillRect(0, 0, len*.12, h);
+  c.restore();
+  // edge highlight
+  path(); c.strokeStyle = 'rgba(160,215,255,.45)'; c.lineWidth = 1.4; c.stroke();
+  // bridge tower windows
+  const [tx, ty, tw, th] = S.tower; c.fillStyle = 'rgba(255,236,190,.95)';
+  for (let k = 0; k < 6; k++) c.fillRect((tx + .02 + k*tw/7)*len, (ty + th*.35)*h, len*.012, h*.03);
+  // hull window rows
+  for (let r = 0; r < 2; r++) for (let k = 0; k < 22; k++) if (rnd() < .55){ c.fillStyle = rnd() < .8 ? 'rgba(255,230,180,.85)' : 'rgba(130,220,255,.9)'; c.fillRect(len*(.14 + k*.032), h*(.5 + r*.1), len*.008, h*.022); }
+  // turrets
+  for (const [x, y, w] of S.guns){ c.fillStyle = '#3a4568'; c.beginPath(); c.ellipse(x*len, y*h, w*len*.4, h*.06, 0, Math.PI, 0); c.fill();
+    c.strokeStyle = '#7f90bb'; c.lineWidth = 3; c.beginPath(); c.moveTo(x*len, y*h - h*.03); c.lineTo((x + w)*len, y*h - h*.05); c.stroke(); }
+  // your-faction stripe (green = you)
+  c.fillStyle = '#3fdf8f'; c.shadowColor = '#3fdf8f'; c.shadowBlur = 8; c.fillRect(len*.58, h*.7, len*.22, h*.025); c.shadowBlur = 0;
+  // engine nozzles
+  c.fillStyle = '#0a0e1c'; c.fillRect(-len*.02, h*.3, len*.03, h*.5);
+  c.fillStyle = 'rgba(150,230,255,.95)'; c.fillRect(-len*.02, h*.36, len*.012, h*.14); c.fillRect(-len*.02, h*.58, len*.012, h*.14);
+  return c0;
+}
+const SHIPS = [ // world positions; i = index into ST.squad.ships
+  { i:0, x:1350, y:900,  len:640, type:'heavy',   ph:0 },
+  { i:1, x:900,  y:1180, len:400, type:'assault', ph:2 },
+  { i:2, x:1700, y:1230, len:340, type:'ew',      ph:4 },
+];
+const SPR_PAD = 60;
+function buildShips(){
+  for (const s of SHIPS){
+    s.h = s.len * HULL_SHAPES[s.type].h;
+    s.spr = shipSprite(s.len, s.type);
+    // out-of-focus copy, made once (per-frame blur is too slow)
+    s.blur = mkCanvas(s.spr.width, s.spr.height); const c = s.blur.getContext('2d');
+    c.filter = 'blur(5px) brightness(.8)'; c.drawImage(s.spr, 0, 0);
+  }
+}
+buildFar(); buildShips();
+// distant orbital station (pre-rendered, softened) + soft dust sprite for foreground depth
+const station = mkCanvas(360, 200); (function () {
+  const c = station.getContext('2d'); c.filter = 'blur(1.2px)'; c.translate(180, 100);
+  c.strokeStyle = 'rgba(150,180,230,.75)'; c.lineWidth = 7; c.beginPath(); c.ellipse(0, 0, 150, 44, -.12, 0, Math.PI * 2); c.stroke();
+  c.strokeStyle = 'rgba(80,100,150,.8)'; c.lineWidth = 3; for (let a = 0; a < 6; a++){ const t = a / 6 * Math.PI * 2; c.beginPath(); c.moveTo(0, 0); c.lineTo(Math.cos(t) * 150, Math.sin(t) * 44 - Math.cos(t) * 18); c.stroke(); }
+  c.fillStyle = '#3a4568'; c.fillRect(-16, -60, 32, 120); c.fillStyle = '#58668f'; c.fillRect(-30, -14, 60, 28);
+  c.fillStyle = 'rgba(255,220,160,.9)'; for (let k = 0; k < 14; k++) c.fillRect(-140 + k * 20, 6 + Math.sin(k) * 10, 4, 3);
+  c.fillStyle = '#3fdf8f'; c.fillRect(-4, -66, 8, 6);
+})();
+const dot = mkCanvas(64, 64); (function () { const c = dot.getContext('2d'), gr = c.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(190,220,255,.9)'); gr.addColorStop(.4, 'rgba(190,220,255,.35)'); gr.addColorStop(1, 'rgba(190,220,255,0)'); c.fillStyle = gr; c.fillRect(0, 0, 64, 64); })();
+const DUST = Array.from({ length: 34 }, () => ({ x: Math.random() * 1920, y: Math.random() * 1080, r: 6 + Math.random() * 34, a: .04 + Math.random() * .16, v: .2 + Math.random() * .6 }));
+
+const SHOTS = [
+  // ships sit left of centre: the right third of the screen is the button column
+  { cam:'WIDE-01', fd:2.40, f:() => ({ x:1620, y:1060, z:.78 }) },
+  { cam:'SHIP',    fd:0.62, f:() => { const s = SHIPS[selShip]; return { x:s.x + s.len*.75, y:s.y + 40, z:s.i === 0 ? 1.0 : 1.4 }; } },
+  { cam:'WIDE-02', fd:3.10, f:() => ({ x:1750, y:1000, z:.7 }) },
+  { cam:'SHIP',    fd:0.48, f:() => { const s = SHIPS[selShip]; return { x:s.x + s.len*.65, y:s.y + 30, z:s.i === 0 ? 1.1 : 1.5 }; } },
+];
+let shotI = 0, cam = { ...SHOTS[0].f() }, camT = { ...cam }, cruising = false;
+function cutTo(i){
+  shotI = i; stage.classList.add('glitch');
+  setTimeout(() => { cam = { ...SHOTS[shotI].f() }; camT = { ...cam }; const S = SHOTS[shotI];
+    $('cam').textContent = S.cam === 'SHIP' ? `SHIP-0${selShip + 1}` : S.cam; animNum($('fd'), S.fd); }, 110);
+  setTimeout(() => stage.classList.remove('glitch'), 300);
+}
+function animNum(el, to){ const from = parseFloat(el.textContent), t0 = performance.now();
+  (function step(n){ const k = Math.min(1, (n - t0) / 600); el.textContent = (from + (to - from) * (1 - Math.pow(1 - k, 3))).toFixed(2); if (k < 1) requestAnimationFrame(step); })(t0); }
+setInterval(() => { if (!cruising) cutTo((shotI + 1) % SHOTS.length); }, 8000);
+
+const anchor = $('anchor');
+let last = performance.now(), speed = 0;
+function frame(t){
+  const dt = Math.min(.05, (t - last) / 1000); last = t;
+  if (cruising){ const s = SHIPS[0]; camT = { x:s.x + s.len*.2 + Math.sin(t/3000)*40, y:s.y + 10, z:1.25 }; speed += (220 - speed) * dt; }
+  else { const base = SHOTS[shotI].f(); camT = { x:base.x + Math.sin(t/5200)*60, y:base.y + Math.cos(t/6100)*30, z:base.z * (1 + Math.sin(t/7000)*.02) }; speed += (0 - speed) * dt * 2; }
+  cam.x += (camT.x - cam.x) * dt * 1.2; cam.y += (camT.y - cam.y) * dt * 1.2; cam.z += (camT.z - cam.z) * dt * 1.2;
+  const roll = Math.sin(t / 9000) * .015;
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  // far layer: parallax 0.35
+  const fz = .6 + cam.z * .25, fx = W/2 - (cam.x * .35 + WORLD.w*.2) * fz, fy = H/2 - (cam.y * .35 + WORLD.h*.25) * fz;
+  g.drawImage(far, fx, fy, WORLD.w * fz, WORLD.h * fz);
+  // station: slight parallax, blinking beacon
+  const stx = 1010 - (cam.x - 1620) * .12, sty = 190 - (cam.y - 1060) * .12, ss = .42 + cam.z * .08;
+  g.globalAlpha = .5; g.drawImage(station, stx - 180 * ss, sty - 100 * ss, 360 * ss, 200 * ss); g.globalAlpha = 1;
+  if (Math.sin(t / 400) > .7){ g.fillStyle = '#ff4d5e'; g.fillRect(stx + 140 * ss, sty - 4, 4, 4); }
+  // ships
+  g.translate(W/2, H/2); g.rotate(roll); g.scale(cam.z, cam.z); g.translate(-cam.x, -cam.y);
+  const order = [...SHIPS].sort((a, b) => a.y - b.y);
+  for (const s of order){
+    const bob = Math.sin(t / 1400 + s.ph) * 6, x = s.x - SPR_PAD, y = s.y - SPR_PAD + bob;
+    // depth-of-field: ships not selected get blurred on SHIP shots
+    const focus = cruising ? s.i === 0 : (SHOTS[shotI].cam !== 'SHIP' || s.i === selShip);
+    g.drawImage(focus ? s.spr : s.blur, x, y);
+    // engine glow (cheap: layered translucent rects)
+    const h = s.h, ex = s.x - s.len * .02, ey = s.y + h * .54 + bob, fl = .75 + Math.sin(t / 60 + s.ph) * .1 + speed / 600;
+    const er = h * (.38 + speed / 900), eg = g.createRadialGradient(ex, ey, 0, ex, ey, er);
+    eg.addColorStop(0, `rgba(210,245,255,${.85*fl})`); eg.addColorStop(.25, `rgba(90,200,255,${.45*fl})`); eg.addColorStop(1, 'rgba(60,140,255,0)');
+    g.save(); g.translate(ex, ey); g.scale(1.8 + speed / 150, 1); g.translate(-ex, -ey);
+    g.fillStyle = eg; g.beginPath(); g.arc(ex, ey, er, 0, 7); g.fill(); g.restore();
+    // nav lights
+    if (Math.sin(t / 500 + s.ph) > .6){ g.fillStyle = '#3fdf8f'; g.fillRect(s.x + s.len*.35, s.y + bob, 5, 5); g.fillStyle = '#ff4d5e'; g.fillRect(s.x + s.len*.9, s.y + h*.6 + bob, 5, 5); }
+    if (s.i === selShip){ s.sx = s.x + s.len*.36; s.sy = s.y + bob + 6; }
+  }
+  // project the selected ship's tag point to screen
+  const s = SHIPS[selShip], cs = Math.cos(roll), sn = Math.sin(roll);
+  let px = (s.sx - cam.x) * cam.z, py = (s.sy - cam.y) * cam.z;
+  const sx = W/2 + px * cs - py * sn, sy = H/2 + px * sn + py * cs;
+  anchor.style.transform = `translate(${Math.max(620, Math.min(1180, sx))}px,${Math.max(330, Math.min(820, sy))}px)`;
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  // foreground dust: drifts faster than the ships (closer to the lens), streaks when cruising
+  for (const d of DUST){
+    d.x -= (d.v + speed / 40) * dt * 60; if (d.x < -60){ d.x = 1980; d.y = Math.random() * 1080; }
+    const px = d.x - (cam.x - 1620) * .5, py = d.y - (cam.y - 1060) * .5;
+    g.globalAlpha = d.a; g.drawImage(dot, ((px % 2040) + 2040) % 2040 - 60, py, d.r * (1 + speed / 80), d.r);
+  }
+  g.globalAlpha = 1;
+  if (cruising){ $('spd').textContent = Math.round(speed); }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* ============ adjutant bubble ============ */
+let li = 0; const bub = $('bubble'), say = $('say');
+function speak(){
+  if (cruising) return;
+  const txt = ST.lines[li++ % ST.lines.length]; say.textContent = ''; bub.classList.remove('off');
+  let i = 0; const iv = setInterval(() => { say.textContent = txt.slice(0, ++i); if (i >= txt.length){ clearInterval(iv); setTimeout(() => bub.classList.add('off'), 3400); } }, 80);
+}
+setTimeout(speak, 2200); setInterval(speak, 9500);
+
+/* ============ interactions ============ */
+let toastT;
+function toast(msg){ const t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 1800); }
+document.addEventListener('click', (e) => { const b = e.target.closest('[data-act]'); if (b && !b.classList.contains('dis')) toast(`開啟「${b.dataset.act}」（示意）`); else if (b) toast(`這裡沒有船塢・最近：${ST.nearestYard}`); });
+$('ships').addEventListener('click', (e) => { const b = e.target.closest('.ship'); if (!b) return; selShip = +b.dataset.i; renderShips(); cutTo(1); });
+$('prio').onclick = () => { const P = prioList()[prioI]; toast(P.k === 'alert' ? '開啟星圖，選中受威脅的小隊（示意）' : '開啟任務簡報（示意）'); };
+$('mapbtn').onclick = () => toast('開啟星圖（示意）');
+$('endweek').onclick = () => {
+  if (!ST.threats.length){ nextWeek(); return; }
+  $('mbox').innerHTML = `<h4>還有小隊會被攻擊</h4><p>這些小隊在駐守，下週敵軍會開進它們所在的星系：</p>
+    ${ST.threats.map((T) => `<div class="mrow"><span>${T.sq}・${T.sys}星系</span><span>駐守勝率 <b>${T.odds}%</b></span></div>`).join('')}
+    <div class="mbtns"><button id="m-back">返回下令</button><button class="pri" id="m-go">照樣結束這一週</button></div>`;
+  $('modal').classList.add('on');
+  $('m-back').onclick = () => $('modal').classList.remove('on');
+  $('m-go').onclick = () => { $('modal').classList.remove('on'); nextWeek(); };
+};
+function nextWeek(){
+  ST.week++; ST.log.unshift(['戰報', '#ff8a8a', `第 ${ST.week - 1} 週結束：薩恩防衛戰（計算）打輸了，第2小隊撤到雷姆`]);
+  stage.classList.add('glitch'); setTimeout(() => stage.classList.remove('glitch'), 400);
+  render(); toast(`第 ${ST.week} 週開始`);
+}
+function setCruise(on){
+  cruising = on; $('demo').style.display = on ? 'none' : ''; $('lobby').classList.toggle('off', on); $('taglayer').classList.toggle('off', on); $('cruise').classList.toggle('off', !on);
+  if (on){ selShip = 0; renderShips(); bub.classList.add('off'); } else cutTo(0);
+}
+$('cruisebtn').onclick = () => setCruise(true);
+$('hideui').onclick = () => { $('lobby').classList.add('off'); $('taglayer').classList.add('off'); $('restore').classList.remove('off'); };
+$('restore').onclick = () => { $('lobby').classList.remove('off'); $('taglayer').classList.remove('off'); $('restore').classList.add('off'); };
+addEventListener('keydown', (e) => {
+  if ($('modal').classList.contains('on')) { if (e.key === 'Escape') $('modal').classList.remove('on'); return; }
+  const k = e.key.toLowerCase();
+  if (k === 'f') setCruise(!cruising);
+  else if (k === 'escape' && cruising) setCruise(false);
+  else if (k === 'm') toast('開啟星圖（示意）');
+  else if (!cruising && '12345'.includes(k) && ST.squad.ships[+k - 1]){ selShip = +k - 1; renderShips(); cutTo(1); }
+});
+
+/* demo switches */
+$('d-shop').onchange = (e) => { ST.atShop = e.target.checked; render(); };
+$('d-noyard').onchange = (e) => { ST.hasYard = !e.target.checked; render(); };
+$('d-safe').onchange = (e) => { ST.threats = e.target.checked ? [] : [ { sq: '第2小隊', sys: '薩恩', odds: 41, surv: 63 } ]; prioI = 0; render(); };
+
+requestAnimationFrame(() => setTimeout(() => stage.classList.add('ready'), 250));
+</script>
+</body>
+</html>

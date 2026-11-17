@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>隨機任務</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="cap-ui.css">
+<style>
+/* 隨機任務：上＝撤退中的戰鬥（有存檔才出現）；左＝小隊編成（5 個位置＋船型）；中＝戰場設定；右＝操作；右下＝出擊 */
+.resume{position:absolute;left:34px;top:146px;width:1440px;height:92px;display:flex;align-items:center;gap:26px;padding:0 26px 0 30px;
+  background:linear-gradient(100deg,rgba(80,58,14,.82),rgba(20,18,30,.75) 70%);border-left:4px solid var(--gold);clip-path:polygon(0 0,100% 0,calc(100% - 18px) 100%,0 100%)}
+.resume .t b{display:block;font:900 22px var(--jp);letter-spacing:.1em;color:var(--gold)}
+.resume .t b small{font:500 14px var(--jp);color:var(--dim);margin-left:10px;letter-spacing:.04em}
+.resume .t span{font:500 15px var(--jp);color:#e6d8b8}
+.resume .t span em{font-style:normal;color:#ff9a5a}
+.resume .time{text-align:center;margin-left:auto}
+.resume .time b{display:block;font:700 34px/1 var(--en);color:var(--gold)}
+.resume .time small{font:500 12px var(--jp);color:var(--dim)}
+
+.squad{left:34px;top:262px;width:860px;height:770px;--pc:var(--own)}
+.slots{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.slot{position:relative;height:178px;padding:12px 12px;background:rgba(12,20,42,.78);border-top:3px solid var(--mute);clip-path:polygon(0 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%);transition:background .2s}
+.slot:hover{background:rgba(28,44,84,.9)}
+.slot .no{font:700 12px var(--en);letter-spacing:.2em;color:var(--dim)}
+.slot b{display:block;font:900 19px var(--jp);letter-spacing:.06em;margin-top:2px}
+.slot small{display:block;font:500 12px var(--jp);color:var(--dim);margin-top:2px;white-space:nowrap}
+.slot svg{position:absolute;left:10px;bottom:12px}
+.slot.full{border-top-color:var(--own)}
+.slot.on{background:rgba(26,70,60,.85);outline:1px solid var(--own)}
+.slot.empty b{color:var(--mute)}
+.slot .star{position:absolute;right:10px;top:8px;color:var(--own);font-size:14px}
+.pick{margin-top:16px}
+.hdesc{margin-top:16px;padding:16px 20px;background:rgba(8,14,30,.7);border-left:3px solid var(--cyan)}
+.hdesc h4{font:900 24px var(--jp);letter-spacing:.1em}
+.hdesc h4 small{font:700 12px var(--en);letter-spacing:.24em;color:var(--dim);margin-left:10px}
+.hdesc p{font:500 15px/1.6 var(--jp);color:#cfdaf0;margin:6px 0 12px}
+.wgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.wbox{padding:10px 12px;background:rgba(18,28,58,.7)}
+.wbox .k{font:500 12px var(--jp);color:var(--dim)}
+.wbox b{display:block;font:700 16px var(--jp);margin:2px 0}
+.wbox span{font:500 12px var(--jp);color:#aab7cf;line-height:1.45;display:block}
+.mob{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}
+.mob .stat .v{font-size:24px}
+.fail{margin-top:14px;font:500 13px/1.6 var(--jp);color:var(--mute)}
+.fail b{color:var(--dim)}
+
+.field{left:914px;top:262px;width:580px;height:562px}
+.opt{margin-bottom:9px}
+.opt .lab{margin-bottom:7px}
+.opt .lab b{font:700 15px var(--jp);color:var(--text);letter-spacing:.1em;margin-right:8px}
+.opt .chip{height:31px;padding:0 13px;font-size:14px}
+.opt .seg{gap:6px}
+.opt .note{font:500 12px var(--jp);color:var(--mute);margin-top:3px}
+
+.keys{left:1514px;top:262px;width:372px;height:562px}
+.keys table{width:100%;border-collapse:collapse}
+.keys td{padding:2px 0;font:500 13px var(--jp);color:#c9d6ee;vertical-align:top}
+.keys td:first-child{width:118px;padding-right:8px}
+.keys kbd{display:inline-block;min-width:26px;padding:1px 6px;margin:1px 2px 1px 0;border:1px solid rgba(150,190,240,.45);font:700 12px var(--en);color:var(--cyan);text-align:center;background:rgba(10,18,40,.8)}
+.go{right:34px;top:842px;width:952px;height:190px}
+.go h3{font-size:74px}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="bg"></canvas><div class="ui" id="ui"></div></div>
+<script src="cap-ui.js"></script>
+<script>
+const { $, fmt, HULLS, hullSvg } = CAP;
+// 資料：captain.js showCaptain / capLoad / CAP_DIFF / CAP_MIS / CAP_ALLY、capstate.js capResumeCard、main.js 預設按鍵
+const HULL_INFO = {
+  assault: { main: ['磁軌主砲', '30 傷害・2.2 秒・射程 240・射界左右各 45°'], tur: 2, pd: 2, msl: 24, skill: ['推進過載', '5 秒內速度、轉向大幅提升'], spd: 8, turn: 30,
+    desc: '快、靈活，主砲射速快（射界左右各 45°）。' },
+  gunship: { main: ['重粒子主砲', '85 傷害・6 秒・射程 320・射界左右各 30°'], tur: 4, pd: 2, msl: 32, skill: ['護盾超載', '護盾立刻充滿，8 秒內受到的傷害減半'], spd: 5.5, turn: 16,
+    desc: '慢、最耐打，主砲一發重創，但砲塔轉得慢、射界只有左右各 30°；飛彈最多。' },
+  support: { main: ['速射砲', '12 傷害・0.9 秒・射程 200・射界左右各 150°'], tur: 2, pd: 4, msl: 16, skill: ['維修光束', '按住技能鍵，對準友艦修理船體與護盾'], spd: 6.5, turn: 20,
+    desc: '帶 6 架護航機、點防禦最強，速射砲幾乎全方位。' },
+};
+const ST = {
+  merit: 4860, sorties: 14, wins: 11, ghost: 4, kills: 238, lost: 6,
+  slots: ['assault', 'gunship', 'support', '', ''], sel: 1,
+  fac: 0, diff: 1, env: 0, mis: '', ally: '',
+  resume: { name: '佔領戰・小行星帶・老練', n: 2, left: '17:42', ships: 3, defs: 1, yard: true, depot: false },
+};
+const OPT = {
+  fac: { t: '所屬陣營', en: 'FACTION', v: [[0, '聯盟'], [1, '帝國']], note: '敵軍是另一個陣營' },
+  diff: { t: '難度', en: 'DIFFICULTY', v: [[0, '新兵'], [1, '普通'], [2, '老練'], [3, '精英'], [4, '傳奇']], note: '敵軍的數量、偵測距離、增援波數' },
+  env: { t: '地點', en: 'LOCATION', v: [[0, '隨機'], [1, '都市'], [2, '海港'], [3, '軍事基地'], [4, '軌道電梯'], [5, '群山'], [6, '太空・小行星帶'], [7, '太空・黑洞邊緣'], [8, '太空・深空・恆星'], [9, '太空・行星軌道'], [10, '太空・星雲'], [11, '太空・太空站周邊']],
+    note: '海港才有海上軍艦；群山最好躲雷達。太空：躲進小行星區擋雷達' },
+  mis: { t: '任務', en: 'MISSION', v: [['', '隨機'], ['sabotage', '破壞'], ['decap', '斬首'], ['wipe', '全滅'], ['escort', '護送（太空）'], ['rescue', '救援撤離（太空）'], ['strike', '摧毀設施（太空）'], ['scan', '偵察（太空）'], ['capture', '佔領戰（太空）']],
+    note: '任務和地點不合時，以任務為準換地點' },
+  ally: { t: '友軍小隊', en: 'ALLY SQUAD', v: [['', '無'], ['same', '和你相同'], ['aa', '突擊艦 ×2'], ['gs', '重砲＋支援'], ['ags', '突擊＋重砲＋支援']], note: '只有佔領戰會出動：另一個由 AI 指揮的小隊，按 B 切換過去親自指揮' },
+};
+const KEYS = [['滑鼠移動', '準心瞄準：停在敵人上＝鎖定'], ['左鍵', '開火（主砲、砲塔、點防禦）'], ['右鍵', '飛彈（鎖定完成才發射）'], ['A D', '左轉／右轉'], ['W S', '油門加／減（減到 0 以下＝倒退）'], ['Z', '油門歸零'],
+  ['Q E', '左右平移'], ['Space C', '上升／下降'], ['Shift', '推進加速'], ['T', '鎖定準心附近的敵人'], ['X', '火控：不攻擊／手動／自動'], ['F', '艦種技能'], ['G', '支援艦的護航機出擊／收回'],
+  ['Tab', '換船（接手下一艘）'], ['1 2 3 4', '僚艦：跟隨／集火／自由交戰／原地防守'], ['V', '鏡頭：近景／遠景／俯視'], ['J', '脫離戰鬥後：躍遷撤離']];
+const kb = (s) => s.split(' ').map((k) => `<kbd>${k}</kbd>`).join('');
+const nm = (k, v) => OPT[k].v.find((x) => x[0] === v)[1].replace('（太空）', '');
+const optHtml = (k, st = '') => { const O = OPT[k]; return `<div class="opt" style="${st}"><div class="lab"><b>${O.t}</b>${O.en}</div>
+  <div class="seg">${O.v.map(([v, t]) => `<button class="chip ${ST[k] === v ? 'on' : ''}" data-o="${k}" data-v="${v}">${t}</button>`).join('')}</div><div class="note">${O.note}</div></div>`; };
+
+function render() {
+  const H = ST.slots[ST.sel], I = HULL_INFO[H], n = ST.slots.filter(Boolean).length, only = n === 1 && H;
+  const R = ST.resume;
+  $('ui').innerHTML = `
+    ${CAP.head({ title: '隨機任務', en: 'RANDOM MISSION ・ SETUP', crumb: '艦長・帶領特種小隊執行敵後作戰・沒有回放', back: '艦長' })}
+    ${CAP.res([['戰功', fmt(ST.merit), 'var(--gold)', 'merit'], ['出擊', ST.sorties, 'var(--cyan)', 'play'], ['任務成功', `${ST.wins}／${ST.sorties}`, 'var(--own)', 'target'], ['無聲完成', ST.ghost, 'var(--violet)', 'flag'], ['擊毀', ST.kills, 'var(--red)', 'warn'], ['損失', ST.lost, 'var(--dim)', 'ship']])}
+    <div class="vtext">RANDOM MISSION ／ SQUAD ${n} ／ ${nm('diff', ST.diff)}</div>
+
+    ${R ? `<div class="resume enter" style="--dy:-10px;--d:.05s">
+      <div class="t"><b>撤退中的戰鬥<small>${R.name}・已出擊 ${R.n} 次</small></b>
+        <span>敵方剩 ${R.ships} 艘、軌道防禦 ${R.defs} 座・${R.yard ? '<em>維修船塢還在（敵方會整修）</em>' : '沒有維修船塢'}・${R.depot ? '補給站還在（飛彈會補滿）' : '沒有補給站'}・你的船已經修好、飛彈補滿</span></div>
+      <div class="time"><b>${R.left}</b><small>任務時限剩</small></div>
+      <button class="btn sm" id="drop">放棄這場戰鬥</button><button class="btn pri" data-act="接續戰鬥">接續戰鬥 →</button></div>` : ''}
+
+    <section class="panel squad tilt-l enter" style="--dx:-40px;--d:.1s">
+      <div class="ph"><h2>小隊編成</h2><span class="en">SQUAD</span><span class="r">1～5 艘・你親自駕駛其中一艘，其他是僚艦</span></div>
+      <div class="pb">
+        <div class="slots">${ST.slots.map((k, i) => `<button class="slot ${k ? 'full' : 'empty'} ${i === ST.sel ? 'on' : ''}" data-s="${i}">
+          ${i === 0 && k ? '<span class="star">★</span>' : ''}<span class="no">${i + 1} 號艦</span><b>${k ? HULLS[k].name : '（空）'}</b>
+          <small>${k ? `耐久 ${HULLS[k].hp}＋護盾 ${HULLS[k].sh}` : '這個位置空著'}</small>${k ? hullSvg(k, i === ST.sel ? 'var(--own)' : '#8fa3c7', 120) : ''}</button>`).join('')}</div>
+        <div class="pick seg">${[['', '不帶', '這個位置空著'], ...['assault', 'gunship', 'support'].map((k) => [k, HULLS[k].name, HULLS[k].en])].map(([k, a, b]) =>
+          `<button class="chip ${H === k ? 'on' : ''} ${!k && only ? 'lock' : ''}" data-h="${k}">${a}<i>${b}</i></button>`).join('')}</div>
+        ${I ? `<div class="hdesc"><h4>${HULLS[H].name}<small>${HULLS[H].en}</small></h4><p>${I.desc}</p>
+          <div class="wgrid">
+            <div class="wbox"><span class="k">主砲</span><b>${I.main[0]}</b><span>${I.main[1]}</span></div>
+            <div class="wbox"><span class="k">砲塔・點防禦</span><b>${I.tur} 座・${I.pd} 座</b><span>自動射擊；點防禦攔飛彈、打戰機</span></div>
+            <div class="wbox"><span class="k">飛彈</span><b>${I.msl} 枚</b><span>要先鎖定・會隨時間補充</span></div>
+            <div class="wbox"><span class="k">技能</span><b class="cy">${I.skill[0]}</b><span>${I.skill[1]}</span></div></div>
+          <div class="mob"><div class="stat"><span class="k">船體</span><span class="v">${HULLS[H].hp}</span></div><div class="stat"><span class="k">護盾</span><span class="v">${HULLS[H].sh}</span></div>
+            <div class="stat"><span class="k">巡航速度</span><span class="v">${I.spd}</span></div><div class="stat"><span class="k">轉向</span><span class="v">${I.turn}<small>°/秒</small></span></div></div></div>`
+          : '<div class="hdesc"><p>這個位置空著。至少要帶一艘船。</p></div>'}
+        ${optHtml('ally', 'margin-top:18px')}
+        <div class="fail"><b>失敗：</b>任務時限（25 分鐘，每次出擊的戰鬥時間累計）用完，或你的小隊全滅。脫離戰鬥後按 J 可以隨時<b>躍遷撤退</b>：不算失敗，戰況會保留，修好船之後可以接續。</div>
+      </div>
+    </section>
+
+    <section class="panel field enter" style="--dy:30px;--d:.2s">
+      <div class="ph"><h2>戰場</h2><span class="en">BATTLEFIELD</span></div>
+      <div class="pb">${['fac', 'diff', 'env', 'mis'].map((k) => optHtml(k)).join('')}</div>
+    </section>
+
+    <section class="panel keys tilt-r enter" style="--dx:40px;--d:.3s">
+      <div class="ph"><h2>操作</h2><span class="en">CONTROLS</span><button class="r btn sm ghost" data-act="修改按鍵">修改…</button></div>
+      <div class="pb"><table>${KEYS.map(([a, b]) => `<tr><td>${a.includes('滑鼠') || a.includes('鍵') ? `<kbd>${a}</kbd>` : kb(a)}</td><td>${b}</td></tr>`).join('')}</table></div>
+    </section>
+
+    <button class="bigbtn go enter" style="--dx:60px;--d:.4s" id="go">
+      <span class="op">SORTIE ・ ${nm('mis', ST.mis) === '隨機' ? 'RANDOM MISSION' : 'MISSION'}</span><h3>${R ? '出擊新任務' : '出擊'}</h3>
+      <span class="sub">${ST.slots.filter(Boolean).map((k) => HULLS[k].name).join('＋')}・${nm('fac', ST.fac)}・${nm('diff', ST.diff)}・${nm('env', ST.env)}地點・${nm('mis', ST.mis)}任務${R ? '（放棄撤退中的戰鬥）' : ''}</span>
+      <div class="chev"><i></i><i></i><i></i></div></button>`;
+  document.querySelectorAll('[data-s]').forEach((b) => b.onclick = () => { ST.sel = +b.dataset.s; rerender(); });
+  document.querySelectorAll('[data-h]').forEach((b) => b.onclick = () => { if (!b.dataset.h && ST.slots.filter(Boolean).length === 1 && ST.slots[ST.sel]) return CAP.toast('至少要帶一艘船'); ST.slots[ST.sel] = b.dataset.h; rerender(); });
+  document.querySelectorAll('[data-o]').forEach((b) => b.onclick = () => { const k = b.dataset.o; ST[k] = typeof OPT[k].v[0][0] === 'number' ? +b.dataset.v : b.dataset.v; rerender(); });
+  if ($('drop')) $('drop').onclick = () => CAP.modal(`<h4>放棄這場戰鬥？</h4><p>撤退中的戰況會被刪掉，不能再接續。</p><div class="mbtns"><button class="btn" onclick="CAP.close()">返回</button><button class="btn danger" id="m-drop">放棄</button></div>`) || ($('m-drop').onclick = () => { ST.resume = null; CAP.close(); rerender(); CAP.toast('已放棄撤退中的戰鬥'); });
+  $('go').onclick = () => { CAP.glitch(400); CAP.toast('出擊！點一下畫面開始操艦（示意）'); };
+}
+function rerender() { render(); document.getElementById('stage').classList.add('ready'); }
+CAP.bg({ mode: 'deep' }); render(); CAP.ready();
+</script>
+</body>
+</html>

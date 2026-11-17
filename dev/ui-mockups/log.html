@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>紀錄</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="cap-ui.css">
+<style>
+/* 紀錄：上＝分類篩選；左＝依週分組的時間線（綠＝好事、紅＝你的陣營的損失、紫＝事件、灰＝一般）；右＝這週摘要＋選中的紀錄 */
+.filters{position:absolute;left:34px;top:150px;display:flex;gap:8px;align-items:center}
+.filters .chip .n{font:700 13px var(--en);color:var(--dim);margin-left:4px}
+.filters .chip.on .n{color:#06122a}
+.filters .sep{width:1px;height:28px;background:var(--line-2);margin:0 8px}
+.filters .chip.bad.on{background:var(--red);color:#fff}.filters .chip.bad.on .n{color:#ffe0e4}
+.tl{left:34px;top:210px;width:1270px;height:820px}
+.tl .pb{height:750px;overflow:auto;padding-right:16px;scrollbar-width:thin;scrollbar-color:rgba(90,200,255,.35) transparent}
+.wk{display:flex;align-items:baseline;gap:14px;margin:6px 0 10px;position:sticky;top:0;z-index:2;padding:6px 0;background:linear-gradient(180deg,rgba(14,22,44,.98) 70%,rgba(14,22,44,0))}
+.wk b{font:700 40px/1 var(--en);color:var(--cyan)}
+.wk span{font:900 18px var(--jp);letter-spacing:.14em}
+.wk small{font:700 11px var(--en);letter-spacing:.24em;color:var(--dim)}
+.wk::after{content:"";flex:1;height:1px;background:var(--line-2);align-self:center}
+.wk .cnt{font:500 13px var(--jp);color:var(--dim)}
+.ent{position:relative;display:grid;grid-template-columns:22px 70px 1fr auto;align-items:center;gap:12px;padding:10px 14px 10px 6px;margin-left:16px;cursor:pointer;border-left:2px solid rgba(150,190,240,.15);transition:background .15s}
+.ent:hover{background:rgba(28,44,84,.6)}
+.ent.on{background:rgba(28,60,100,.85)}
+.ent .dot{width:12px;height:12px;transform:rotate(45deg);margin-left:-13px;background:var(--c);box-shadow:0 0 8px var(--c)}
+.ent .kind{font:700 12px var(--jp);letter-spacing:.08em;color:var(--c);white-space:nowrap}
+.ent .tx{font:500 16px var(--jp);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ent .tx em{font-style:normal;font-weight:700}
+.ent.bad{background:rgba(120,20,40,.18)}
+.ent.bad .tx{color:#ffc2c8}
+.ent .go{opacity:.0;transition:opacity .15s}
+.ent:hover .go,.ent.on .go{opacity:1}
+.ent .go.none{display:none}
+.side{left:1340px;top:150px;width:546px;height:350px;--pc:var(--gold)}
+.sum{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.sum .c{padding:12px 16px;background:rgba(12,20,42,.8);border-left:3px solid var(--c)}
+.sum .c .k{font:500 13px var(--jp);color:var(--dim)}
+.sum .c .v{font:700 32px var(--en);color:var(--c)}
+.legend{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px;margin-top:16px;font:500 14px var(--jp);color:var(--dim)}
+.legend i{display:inline-block;width:10px;height:10px;transform:rotate(45deg);margin-right:8px}
+.det{left:1340px;top:524px;width:546px;height:316px}
+.det .k{font:700 13px var(--jp);color:var(--c);letter-spacing:.1em}
+.det .t{font:700 20px/1.5 var(--jp);margin-top:6px}
+.det .w{font:500 14px var(--jp);color:var(--dim);margin-top:8px}
+.mapbtn{right:34px;top:862px;width:546px;height:168px}
+.mapbtn h3{font-size:46px}
+.mapbtn.off{filter:grayscale(.85) brightness(.6);cursor:not-allowed}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="bg"></canvas><div class="ui" id="ui"></div></div>
+<script src="cap-ui.js"></script>
+<script>
+const { $, fmt } = CAP;
+/* 資料：capcareer.js ccLog(S, 文字, c)：c＝ok（綠）／bad（紅：你的陣營的損失）／ev（紫：事件）／空（灰）。文字照遊戲裡的寫法；k＝這個 demo 用來分類的種類、sys＝相關的星系 */
+const ST = {
+  week: 12,
+  log: [
+    [12, 'bad', '戰報', '薩恩防衛戰（計算）：第2小隊打輸了，損失 1 艘，撤到雷姆', '薩恩'],
+    [12, 'ok', '研發', '研究完成：Mk II 工藝（模組可以升到 Mk II（船也要 Lv3））', ''],
+    [12, 'ev', '任務', '新任務：攔截・帝國補給船隊（時限 3 週）', '歐瑞恩'],
+    [12, 'ok', '船塢', '雷姆 的船塢造好突擊艦「迅羽號」，加入第1小隊', '雷姆'],
+    [12, '', '經濟', '研究點數 +12（打撈殘骸）', ''],
+    [12, 'bad', '星球', '歐瑞恩 失守：停在船塢的支援艦「斷鋒號」被俘', '歐瑞恩'],
+    [11, 'ev', '情報', '情報：帝國的艦隊開始配備 Mk II 裝備', ''],
+    [11, 'ok', '星球', '出資強化 蓋爾 的維修船塢到 Lv2（540 資金，2 週）', '蓋爾'],
+    [11, 'ok', '戰報', '佔領 維克多：軌道防禦全滅，地面投降', '維克多'],
+    [11, '', '經濟', '在 艾瑞斯 的貿易站花了 300 資金：研究資料（研究點數 +40）', '艾瑞斯'],
+    [11, 'ok', '任務', '任務的影響：歐瑞恩一帶的補給線切斷 4 週', '歐瑞恩'],
+    [10, 'ev', '任務', '升遷考核：佔領 維克多星系。完成就升任特戰司令（4 週）', '維克多'],
+    [10, 'bad', '星球', '中立好感度太低：你在 拉格納 的安全屋被查封', '拉格納'],
+    [10, 'ok', '經濟', '在 蓋爾 修好第1小隊（220 資金）', '蓋爾'],
+    [10, '', '小隊', '第1小隊的穿刺號停進 雷姆 的船塢', '雷姆'],
+    [10, 'ok', '研發', '開始研究Mk II 工藝（60 點，2 週）', ''],
+    [9, 'ev', '小隊', '你改為親自指揮第1小隊', ''],
+    [9, 'ok', '星球', '你在 蓋爾 的倉庫蓋好了（軌道）', '蓋爾'],
+  ],
+};
+const COL = { ok: 'var(--own)', bad: 'var(--red)', ev: 'var(--violet)', '': '#8fa3c7' };
+const KINDS = ['全部', '戰報', '任務', '小隊', '船塢', '研發', '星球', '經濟', '情報'];
+let kind = '全部', badOnly = false, sel = 0;
+const shown = () => ST.log.map((e, i) => [e, i]).filter(([e]) => (kind === '全部' || e[2] === kind) && (!badOnly || e[1] === 'bad'));
+function render() {
+  const L = shown(), weeks = [...new Set(L.map(([e]) => e[0]))];
+  if (!L.some(([, i]) => i === sel) && L.length) sel = L[0][1];
+  const E = ST.log[sel], thisW = ST.log.filter((e) => e[0] === ST.week);
+  $('ui').innerHTML = `
+    ${CAP.head({ title: '紀錄', en: 'LOG', crumb: `艦長生涯・<b>第 ${ST.week} 週</b>・最近 ${ST.log.length} 條` })}
+    ${CAP.res([['週', ST.week, 'var(--cyan)', 'week']])}
+    <div class="filters enter" style="--dy:-10px;--d:.05s">
+      ${KINDS.map((k) => `<button class="chip ${kind === k ? 'on' : ''}" data-k="${k}">${k}<span class="n">${k === '全部' ? ST.log.length : ST.log.filter((e) => e[2] === k).length}</span></button>`).join('')}
+      <span class="sep"></span><button class="chip bad ${badOnly ? 'on' : ''}" id="bad">只看損失<span class="n">${ST.log.filter((e) => e[1] === 'bad').length}</span></button>
+    </div>
+
+    <section class="panel tl enter" style="--dx:-40px;--d:.1s">
+      <div class="ph"><h2>時間線</h2><span class="en">TIMELINE</span><span class="r">新的在上面・紅＝你的陣營的損失</span></div>
+      <div class="pb" id="tlb">${weeks.length ? weeks.map((w) => { const R = L.filter(([e]) => e[0] === w);
+        return `<div class="wk"><b>${String(w).padStart(2, '0')}</b><span>第 ${w} 週</span><small>WEEK ${w}</small><span class="cnt">${R.length} 條${w === ST.week ? '・這週' : ''}</span></div>
+          ${R.map(([e, i]) => `<div class="ent ${e[1] === 'bad' ? 'bad' : ''} ${i === sel ? 'on' : ''}" data-i="${i}" style="--c:${COL[e[1]]}">
+            <i class="dot"></i><span class="kind">${e[2]}</span><span class="tx">${e[3].replace(e[4] || '\u0000', `<em>${e[4]}</em>`)}</span>
+            <button class="btn sm go ${e[4] ? '' : 'none'}" data-act="在星圖上看 ${e[4]}">在星圖上看</button></div>`).join('')}`; }).join('') : '<div class="dim" style="padding:30px">沒有紀錄。</div>'}</div>
+    </section>
+
+    <section class="panel side tilt-r enter" style="--dx:40px;--d:.2s">
+      <div class="ph"><h2>這週</h2><span class="en">WEEK ${ST.week} SUMMARY</span></div>
+      <div class="pb">
+        <div class="sum">
+          <div class="c" style="--c:var(--own)"><div class="k">好消息</div><div class="v">${thisW.filter((e) => e[1] === 'ok').length}</div></div>
+          <div class="c" style="--c:var(--red)"><div class="k">損失</div><div class="v">${thisW.filter((e) => e[1] === 'bad').length}</div></div>
+          <div class="c" style="--c:var(--violet)"><div class="k">事件、新任務</div><div class="v">${thisW.filter((e) => e[1] === 'ev').length}</div></div>
+          <div class="c" style="--c:#8fa3c7"><div class="k">一般</div><div class="v">${thisW.filter((e) => e[1] === '').length}</div></div>
+        </div>
+        <div class="legend"><span><i style="background:var(--own)"></i>好事（完成、造好、佔領）</span><span><i style="background:var(--red)"></i>你的陣營的損失</span>
+          <span><i style="background:var(--violet)"></i>事件（任務、情報）</span><span><i style="background:#8fa3c7"></i>一般（花費、點數）</span></div>
+      </div>
+    </section>
+
+    <section class="panel det tilt-r enter" style="--dx:40px;--d:.3s;--pc:${COL[E[1]]};--c:${COL[E[1]]}">
+      <div class="ph"><h2>第 ${E[0]} 週</h2><span class="en">ENTRY</span><span class="r">${E[4] ? `${E[4]}星系` : '沒有相關的星系'}</span></div>
+      <div class="pb"><div class="k">${E[2]}</div><div class="t">${E[3]}</div></div>
+    </section>
+
+    <button class="bigbtn mapbtn ${E[4] ? '' : 'off'} enter" style="--dx:40px;--d:.4s" id="map">
+      <span class="op">SHOW ON STAR MAP</span><h3>在星圖上看</h3><span class="sub">${E[4] ? `打開星圖，選中 ${E[4]} 星系` : '這條紀錄沒有相關的星系'}</span><div class="chev"><i></i><i></i><i></i></div></button>`;
+  document.querySelectorAll('[data-k]').forEach((b) => b.onclick = () => { kind = b.dataset.k; render(); });
+  $('bad').onclick = () => { badOnly = !badOnly; render(); };
+  document.querySelectorAll('[data-i]').forEach((b) => b.onclick = (ev) => { if (ev.target.closest('.go')) return; sel = +b.dataset.i; render(); });
+  $('map').onclick = () => CAP.toast(E[4] ? `開啟星圖，選中 ${E[4]}（示意）` : '這條紀錄沒有相關的星系');
+  if (window._r) document.getElementById('stage').classList.add('ready'); window._r = 1;
+}
+CAP.bg({ mode: 'deep' });
+render(); CAP.ready();
+</script>
+</body>
+</html>

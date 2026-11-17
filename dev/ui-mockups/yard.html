@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>船塢</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="cap-ui.css">
+<style>
+/* 船塢：左＝訂造（選船型）、中＝船台排隊、右＝預備艦與小隊的船；右下大按鈕＝確認訂造 */
+.build{left:34px;top:190px;width:560px;height:700px}
+.hullrow{display:grid;grid-template-columns:130px 1fr auto;align-items:center;gap:14px;cursor:pointer;padding:9px 18px}
+.hullrow .meta{white-space:nowrap}
+.hullrow svg{display:block;margin-bottom:2px}
+.hullrow .nm{font:900 21px var(--jp);letter-spacing:.08em}
+.hullrow .nm small{display:block;font:700 11px var(--en);letter-spacing:.2em;color:var(--dim)}
+.hullrow .meta{font:500 14px var(--jp);color:var(--dim);line-height:1.5}
+.hullrow .meta b{color:var(--text);font-family:var(--en);font-size:17px}
+.hullrow .price{font:700 22px var(--en);color:var(--gold);text-align:right}
+.hullrow.lock{opacity:.45;cursor:default}
+.hullrow.lock .price{color:var(--dim);font:500 13px var(--jp)}
+.dest{margin-top:18px;padding-top:14px;border-top:1px solid var(--line-2)}
+
+.slip{left:640px;top:190px;width:640px;height:700px;--pc:var(--gold)}
+.qitem{position:relative;padding:16px 20px;background:rgba(12,20,42,.75);border-left:3px solid var(--mute);clip-path:polygon(0 0,100% 0,100% calc(100% - 12px),calc(100% - 12px) 100%,0 100%)}
+.qitem + .qitem{margin-top:10px}
+.qitem.now{border-left-color:var(--gold);background:linear-gradient(100deg,rgba(60,44,14,.6),rgba(12,20,42,.75))}
+.qitem.fit{border-left-color:var(--violet)}
+.qitem .top{display:flex;align-items:center;gap:12px}
+.qitem .no{font:700 30px var(--en);color:transparent;-webkit-text-stroke:1px rgba(255,194,74,.6);width:42px}
+.qitem .nm{font:900 22px var(--jp);letter-spacing:.06em}
+.qitem .nm small{font:500 14px var(--jp);color:var(--dim);margin-left:8px}
+.qitem .eta{margin-left:auto;text-align:right}
+.qitem .eta b{display:block;font:700 26px var(--en)}
+.qitem .eta small{font:500 13px var(--jp);color:var(--dim)}
+.qitem .weeks{display:flex;gap:4px;margin:12px 0 0 54px}
+.qitem .weeks i{flex:1;max-width:120px;height:10px;background:rgba(255,255,255,.12);clip-path:polygon(4px 0,100% 0,calc(100% - 4px) 100%,0 100%)}
+.qitem .weeks i.done{background:var(--gold)}
+.qitem .weeks i.cur{background:repeating-linear-gradient(-45deg,var(--gold) 0 6px,rgba(255,194,74,.35) 6px 12px);animation:prog 1s linear infinite;background-size:17px 17px}
+@keyframes prog{to{background-position:17px 0}}
+.qitem .x{position:absolute;right:14px;bottom:10px;font:500 13px var(--jp);color:var(--dim)}
+.qitem .x:hover{color:var(--red)}
+.qempty{padding:16px 20px;border:1px dashed var(--line-2);color:var(--mute);font:500 15px var(--jp)}
+.slipviz{position:relative;height:150px;margin-bottom:18px;background:linear-gradient(180deg,rgba(255,194,74,.06),transparent);border-bottom:1px solid rgba(255,194,74,.3);overflow:hidden}
+.slipviz .frame{position:absolute;inset:18px 30px 12px;border:1px solid rgba(255,194,74,.25);border-top:0;background:repeating-linear-gradient(90deg,rgba(255,194,74,.12) 0 2px,transparent 2px 46px)}
+.slipviz .hullimg{position:absolute;left:50%;top:50%;translate:-50% -46%}
+.slipviz .scan{position:absolute;top:18px;bottom:12px;width:3px;background:var(--gold);box-shadow:0 0 18px var(--gold);animation:scan 3.2s ease-in-out infinite alternate}
+@keyframes scan{from{left:40px}to{left:calc(100% - 40px)}}
+.slipviz .lbl{position:absolute;left:30px;top:2px;font:700 11px var(--en);letter-spacing:.24em;color:var(--gold)}
+
+.side{left:1326px;top:190px;width:560px;height:560px;--pc:var(--own)}
+.shipcard + .shipcard{margin-top:10px}
+.shipcard .acts{display:flex;gap:8px;margin-top:12px}
+.sqh{display:flex;align-items:center;gap:10px;margin:18px 0 8px;font:700 15px var(--jp);color:var(--own);letter-spacing:.1em}
+.sqh::after{content:"";flex:1;height:1px;background:var(--line-2)}
+
+.confirm{right:34px;top:780px;width:560px;height:180px}
+.rule{position:absolute;left:34px;bottom:30px;width:1220px;font:500 14px var(--jp);color:var(--mute);line-height:1.6}
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="bg"></canvas>
+  <div class="ui" id="ui"></div>
+</div>
+<script src="cap-ui.js"></script>
+<script>
+const { $, fmt, seg, bar, hpCol, HULLS, hullSvg } = CAP;
+const ST = {
+  sys: '蓋爾', owner: '聯盟領', money: 18450, rp: 86, week: 12,
+  unlocked: ['assault', 'gunship', 'support', 'ew'], lockWhy: { stealth: '要先研究「匿蹤艦設計」' },
+  queue: [
+    { kind: 'build', key: 'assault', name: '迅羽號', weeks: 1, done: 0, to: '第1小隊' },
+    { kind: 'fit', key: 'assault', name: '雷霆號', weeks: 1, done: 0, what: '主砲 → 速射砲・Mk II' },
+    { kind: 'build', key: 'gunship', name: '', weeks: 3, done: 0, to: null },
+  ],
+  reserve: [ { n: '斷鋒號', t: 'support', lv: 1, hp: 1, sh: 1 } ],
+  squads: [ { name: '第1小隊', lead: true, ships: [
+    { n: '艾爾巴號', t: 'gunship', lv: 3, hp: .82, sh: 1 }, { n: '穿刺號', t: 'ew', lv: 1, hp: 1, sh: 1 } ] } ],
+  yardQ: 4,
+};
+let pick = 'gunship', dest = '第1小隊';
+const eta = (i) => ST.queue.slice(0, i + 1).reduce((a, o) => a + (o.weeks - o.done), 0);
+
+function render() {
+  const q = ST.queue;
+  $('ui').innerHTML = `
+    ${CAP.head({ title: '船塢', en: 'SHIPYARD', crumb: `<b>${ST.sys}星系</b>・${ST.owner}・排隊 ${q.length}／${ST.yardQ}` })}
+    ${CAP.res([['資金', fmt(ST.money), 'var(--gold)', 'money'], ['研究點', ST.rp, 'var(--cyan)', 'rp'], ['週', ST.week, 'var(--dim)', 'week']])}
+    <div class="vtext">SHIPYARD ／ ${ST.sys.toUpperCase()} ／ WEEK ${ST.week}</div>
+
+    <section class="panel build tilt-l enter" style="--dx:-40px;--d:.1s">
+      <div class="ph"><h2>訂造</h2><span class="en">BUILD</span><span class="r">錢在訂造時付</span></div>
+      <div class="pb">
+        ${Object.entries(HULLS).map(([k, H]) => { const lock = !ST.unlocked.includes(k);
+          return `<div class="row hullrow ${lock ? 'lock' : ''} ${pick === k ? 'on' : ''}" data-h="${k}">
+            <div class="nm">${H.name}<small>${H.en}</small></div>
+            <div>${hullSvg(k, lock ? 'var(--mute)' : pick === k ? 'var(--cyan)' : '#8fa3c7', 96)}<div class="meta">建造 <b>${H.weeks}</b> 週・船體 <b>${H.hp}</b>・護盾 <b>${H.sh}</b></div></div>
+            <div class="price">${lock ? '🔒 要研發' : fmt(H.price)}</div></div>`; }).join('')}
+        <div class="dest"><div class="lab" style="margin-bottom:8px">造好後 ／ ON COMPLETION</div>
+          <div class="seg">${ST.squads.map((s) => `<button class="chip own ${dest === s.name ? 'on' : ''}" data-d="${s.name}"><i>★</i>加入${s.name}</button>`).join('')}
+            <button class="chip ${dest === null ? 'on' : ''}" data-d="">停在船塢（預備艦）</button></div></div>
+      </div>
+    </section>
+
+    <section class="panel slip enter" style="--dy:30px;--d:.2s">
+      <div class="ph"><h2>船台</h2><span class="en">SLIPWAY</span><span class="r">一次一艘・排前面的先做</span></div>
+      <div class="pb">
+        <div class="slipviz"><span class="lbl">NOW BUILDING</span><div class="frame"></div><div class="hullimg">${hullSvg(q[0].key, 'var(--gold)', 300)}</div><div class="scan"></div></div>
+        ${q.map((o, i) => `<div class="qitem ${i === 0 ? 'now' : ''} ${o.kind === 'fit' ? 'fit' : ''}">
+          <div class="top"><span class="no">${String(i + 1).padStart(2, '0')}</span>
+            <span class="nm">${o.kind === 'fit' ? `改裝 ${o.name}` : `${HULLS[o.key].name}${o.name ? ` ${o.name}` : ''}`}<small>${o.kind === 'fit' ? o.what : o.to ? `→ 加入${o.to}` : '→ 預備艦'}</small></span>
+            <span class="eta"><b class="${i === 0 ? 'gold' : ''}">${eta(i)}</b><small>週後${o.kind === 'fit' ? '好' : '完成'}</small></span></div>
+          <div class="weeks">${Array.from({ length: o.weeks }, (_, w) => `<i class="${w < o.done ? 'done' : w === o.done && i === 0 ? 'cur' : ''}"></i>`).join('')}</div>
+          <button class="x" data-c="${i}">${i === 0 ? '取消（退一半）' : '取消（全額退）'}</button></div>`).join('')}
+        ${Array.from({ length: ST.yardQ - q.length }, () => '<div class="qempty" style="margin-top:10px">空的船台位置</div>').join('')}
+      </div>
+    </section>
+
+    <section class="panel side tilt-r enter" style="--dx:40px;--d:.3s">
+      <div class="ph"><h2>預備艦與小隊</h2><span class="en">RESERVE ／ SQUADS</span></div>
+      <div class="pb scroll" style="height:490px">
+        ${ST.reserve.map((c) => card(c, `<button class="btn sm own" data-act="${c.n} 加入第1小隊">→ 第1小隊</button><button class="btn sm" data-act="${c.n} 成立新小隊">成立新小隊</button><button class="btn sm ghost" data-act="改裝 ${c.n}">改裝</button>`, false)).join('')}
+        ${ST.squads.map((s) => `<div class="sqh">${s.lead ? '★ ' : ''}${s.name}</div>${s.ships.map((c) => card(c, `<button class="btn sm" data-act="改裝 ${c.n}">改裝</button><button class="btn sm ghost" data-act="${c.n} 停進船塢">停進船塢</button>`, true)).join('')}`).join('')}
+      </div>
+    </section>
+
+    <button class="bigbtn confirm enter" style="--dx:40px;--d:.4s" id="go">
+      <span class="op">ORDER ・ ${HULLS[pick].en}</span><h3>訂造${HULLS[pick].name}</h3>
+      <span class="sub">${fmt(HULLS[pick].price)} 資金・${eta(q.length - 1) + HULLS[pick].weeks} 週後完成・${dest ? `加入${dest}` : '停在船塢'}</span>
+      <div class="chev"><i></i><i></i><i></i></div></button>
+
+    <div class="rule">一座船塢一次造一艘，大船造得久。改裝佔用一週，排在還沒開工的造船前面。星系失守時排隊暫停，預備艦與改裝中的船被俘。</div>`;
+  function card(c, acts, inSq) { const H = HULLS[c.t];
+    return `<div class="shipcard ${inSq ? '' : ''}" style="border-left-color:${inSq ? 'var(--own)' : 'var(--gold)'}"><span class="lv">Lv.${c.lv}</span>
+      <div class="nm">${c.n}<small>${H.name}${inSq ? '' : '・預備艦'}</small></div>
+      <div class="bars"><span>HULL</span>${bar(c.hp, hpCol(c.hp))}<b>${Math.round(c.hp * 100)}%</b><span>SHLD</span>${bar(c.sh, 'var(--ally)')}<b>${Math.round(c.sh * 100)}%</b></div>
+      <div class="acts">${acts}</div></div>`; }
+  document.querySelectorAll('[data-h]').forEach((b) => b.onclick = () => { if (b.classList.contains('lock')) return CAP.toast(ST.lockWhy[b.dataset.h]); pick = b.dataset.h; render(); document.getElementById('stage').classList.add('ready'); });
+  document.querySelectorAll('[data-d]').forEach((b) => b.onclick = () => { dest = b.dataset.d || null; render(); document.getElementById('stage').classList.add('ready'); });
+  document.querySelectorAll('[data-c]').forEach((b) => b.onclick = () => { ST.queue.splice(+b.dataset.c, 1); render(); CAP.toast('已取消'); });
+  $('go').onclick = () => {
+    if (ST.queue.length >= ST.yardQ) return CAP.toast('船台排滿了');
+    if (ST.money < HULLS[pick].price) return CAP.toast('資金不夠');
+    ST.money -= HULLS[pick].price; ST.queue.push({ kind: 'build', key: pick, name: '', weeks: HULLS[pick].weeks, done: 0, to: dest });
+    CAP.glitch(); render(); CAP.toast(`已訂造${HULLS[pick].name}`);
+  };
+}
+CAP.bg({ mode: 'hangar' });
+render(); CAP.ready();
+</script>
+</body>
+</html>

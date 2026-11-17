@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>艦長生涯・開新局</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="cap-ui.css">
+<style>
+/* 開新局：左＝規則說明＋升遷之路；右＝角色（兩張大卡）、開局身分、難度；右下＝開始 */
+.intro{left:34px;top:160px;width:700px;height:870px}
+.intro p{font:500 17px/1.75 var(--jp);color:#cfdaf0}
+.intro p b{color:var(--red)}
+.ladder{position:relative;margin-top:26px;padding-left:34px}
+.ladder::before{content:"";position:absolute;left:13px;top:14px;bottom:30px;width:2px;background:linear-gradient(var(--gold),rgba(255,194,74,.15))}
+.step{position:relative;padding:10px 16px 12px;margin-bottom:10px;background:rgba(12,20,42,.72);clip-path:polygon(0 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%)}
+.step::before{content:"";position:absolute;left:-27px;top:16px;width:14px;height:14px;background:#0b1124;border:2px solid var(--mute);transform:rotate(45deg)}
+.step.got::before{background:var(--gold);border-color:var(--gold);box-shadow:0 0 10px var(--gold)}
+.step .t{display:flex;align-items:baseline;gap:12px}
+.step b{font:900 21px var(--jp);letter-spacing:.1em}
+.step .m{font:700 15px var(--en);color:var(--gold)}
+.step .best{margin-left:auto;font:700 12px var(--jp);color:#1a1200;background:var(--gold);padding:1px 8px}
+.step span{display:block;font:500 13px/1.5 var(--jp);color:var(--dim);margin-top:3px}
+.meta{position:absolute;left:26px;right:26px;bottom:22px;display:flex;gap:40px;padding-top:14px;border-top:1px solid var(--line-2)}
+
+.sec{position:absolute;left:770px;right:34px}
+.sec > .lab{margin-bottom:10px;font-size:12px}
+.sec > .lab b{font:900 20px var(--jp);color:var(--text);letter-spacing:.14em;margin-right:10px}
+.roles{top:160px;display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.role{position:relative;height:350px;padding:26px 30px;text-align:left;overflow:hidden;background:linear-gradient(160deg,rgba(18,28,58,.92),rgba(8,12,28,.85));border-top:4px solid var(--fc);
+  clip-path:polygon(0 0,calc(100% - 30px) 0,100% 30px,100% 100%,30px 100%,0 calc(100% - 30px));transition:transform .2s,background .2s}
+.role:hover{transform:translateY(-4px)}
+.role.on{background:linear-gradient(160deg,color-mix(in srgb,var(--fc) 32%,#0e1630),rgba(8,12,28,.9));outline:2px solid var(--fc)}
+.role .emb{position:absolute;right:24px;top:22px;width:96px;height:96px;opacity:.85}
+.role .en{font:700 13px var(--en);letter-spacing:.3em;color:var(--fc)}
+.role h2{font:900 44px/1.1 var(--jp);letter-spacing:.14em;margin-top:2px}
+.role p{font:500 16px/1.6 var(--jp);color:#cfdaf0;margin-top:10px;width:86%}
+.role .fleet{display:flex;align-items:flex-end;gap:26px;margin-top:18px}
+.role .fleet div b{display:block;font:700 15px var(--jp);color:var(--own);margin-top:4px}
+.role .tech{position:absolute;left:30px;bottom:24px;display:flex;align-items:center;gap:10px;font:700 16px var(--jp)}
+.role .tech .tag{--tc:var(--fc)}
+.role .pick{position:absolute;right:28px;bottom:22px;font:700 14px var(--jp);color:var(--fc);opacity:0}
+.role.on .pick{opacity:1}
+.starts{top:540px}
+.opts{display:grid;gap:14px}
+.opts.c3{grid-template-columns:repeat(3,1fr)}.opts.c4{grid-template-columns:repeat(4,1fr)}
+.opt{position:relative;padding:16px 20px;text-align:left;background:rgba(12,20,42,.82);border-left:3px solid var(--mute);clip-path:polygon(0 0,100% 0,100% calc(100% - 12px),calc(100% - 12px) 100%,0 100%);transition:background .2s}
+.opt:hover{background:rgba(28,44,84,.9)}
+.opt.on{background:rgba(24,64,104,.92);border-left-color:var(--cyan)}
+.opt b{display:block;font:900 21px var(--jp);letter-spacing:.1em}
+.opt span{display:block;font:500 14px/1.5 var(--jp);color:var(--dim);margin-top:4px}
+.opt .warn{color:var(--yellow);font-size:13px}
+.opt.lock{opacity:.6;cursor:not-allowed;border-left-color:#4a5a78}
+.opt.lock b{color:var(--dim)}
+.diffs{top:716px}
+.go{right:34px;top:880px;width:760px;height:160px}
+.go h3{top:50px;font-size:52px}
+.go .sub{bottom:18px}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="bg"></canvas><div class="ui" id="ui"></div></div>
+<script src="cap-ui.js"></script>
+<script>
+const { $, fmt, HULLS, hullSvg } = CAP;
+// 資料：capcareer.js CC_ROLES / CC_STARTS / CC_DIFF / CC_RANKS、capcareer_ui.js ccNewDialog
+const ROLES = {
+  emp: { name: '帝國艦長', en: 'IMPERIAL CAPTAIN', col: 'var(--gold)', hulls: ['gunship', 'assault'], tech: '強化裝甲：船體 +10%',
+    desc: '帝國艦隊的重砲艦艦長，帶一艘突擊艦護衛。從帝國的前線出發。' },
+  all: { name: '聯盟艦長', en: 'ALLIANCE CAPTAIN', col: 'var(--ally)', hulls: ['support', 'assault'], tech: '護盾調諧：護盾 +15%',
+    desc: '聯盟的支援艦艦長，帶一艘突擊艦護衛。從聯盟的前線出發。' },
+};
+const STARTS = [{ name: '單艦艦長', need: 0, desc: '從一個小隊開始' }, { name: '小隊長', need: 1, desc: '開局就帶兩個小隊、可以造電戰艦' }, { name: '特戰隊長', need: 2, desc: '開局帶三個小隊、可以造匿蹤艦，有據點' }];
+const DIFF = [{ name: '簡單', desc: '敵方的特製戰艦弱一級，AI 比較保守。' }, { name: '普通', desc: '標準的局勢。' }, { name: '困難', desc: '敵方的特製戰艦強一級，AI 積極進攻。' }, { name: '地獄', need: 3, desc: '敵方的特製戰艦強兩級，AI 非常積極、收入更多。' }];
+const RANKS = [{ name: '單艦艦長', merit: 0, desc: '帶一個小隊' }, { name: '小隊長', merit: 600, desc: '帶兩個小隊・可以建造電戰艦・任務多一個' },
+  { name: '特戰隊長', merit: 1600, desc: '帶三個小隊・可以建造匿蹤艦・有自己的據點' }, { name: '特戰司令', merit: 3200, desc: '帶四個小隊・據點多一座軌道防禦站' }];
+const ST = { runs: 3, best: 1, role: 'emp', start: 0, diff: 1 };
+const EMB = { emp: '<svg class="emb" viewBox="0 0 100 100" fill="none" stroke="var(--gold)" stroke-width="3"><path d="M50 6l38 16v28c0 22-16 38-38 44C28 88 12 72 12 50V22z"/><path d="M30 40l20-12 20 12M30 56l20-12 20 12M30 72l20-12 20 12"/></svg>',
+  all: '<svg class="emb" viewBox="0 0 100 100" fill="none" stroke="var(--ally)" stroke-width="3"><circle cx="50" cy="50" r="42"/><path d="M50 14l9 26h28l-22 16 8 26-23-16-23 16 8-26-22-16h28z"/></svg>' };
+
+function render() {
+  const R = ROLES[ST.role];
+  $('ui').innerHTML = `
+    ${CAP.head({ title: '艦長生涯', en: 'CAPTAIN CAREER ・ NEW', crumb: '開新局', back: '艦長' })}
+    <div class="vtext">NEW CAREER ／ RUN ${ST.runs + 1}</div>
+
+    <section class="panel intro tilt-l enter" style="--dx:-40px;--d:.05s;--pc:var(--gold)">
+      <div class="ph"><h2>規則</h2><span class="en">HOW IT WORKS</span></div>
+      <div class="pb"><p>回合制的星圖，每一回合是一週。所有勢力的兵力都是戰艦小隊，沒有艦隊戰：小隊戰的結果決定星系的所有權。你的小隊碰上敵人時，由你親自操艦；其他的戰鬥用公式計算，下令前都看得到勝率與每艘船的存活率。損傷會留到下一場，要回有維修船塢的星系花錢修理。<b>你的小隊全滅，生涯就結束。</b></p>
+        <div class="lab" style="margin-top:22px">升遷 ／ PROMOTION　戰功到了上級會發「升遷考核」（佔領任務），完成就升任</div>
+        <div class="ladder">${RANKS.map((K, i) => `<div class="step ${i <= ST.best ? 'got' : ''}"><div class="t"><b>${K.name}</b><span class="m">${i ? `戰功 ${fmt(K.merit)}` : '起點'}</span>${i === ST.best ? '<span class="best">歷來最高</span>' : ''}</div><span>${K.desc}</span></div>`).join('')}</div>
+        <div class="meta"><div class="stat"><span class="k">這一局</span><span class="v">第 ${ST.runs + 1} 局</span></div><div class="stat"><span class="k">歷來最高軍階</span><span class="v gold" style="font-family:var(--jp);font-size:26px">${RANKS[ST.best].name}</span></div></div></div>
+    </section>
+
+    <div class="sec roles enter" style="--dy:30px;--d:.15s">${Object.entries(ROLES).map(([k, X]) => `<button class="role ${ST.role === k ? 'on' : ''}" style="--fc:${X.col}" data-r="${k}">${EMB[k]}
+      <span class="en">${X.en}</span><h2>${X.name}</h2><p>${X.desc}</p>
+      <div class="fleet">${X.hulls.map((h, i) => `<div>${hullSvg(h, i ? '#8fd8b4' : 'var(--own)', i ? 130 : 170)}<b>${i ? '' : '★ '}${HULLS[h].name}</b></div>`).join('')}</div>
+      <div class="tech"><span class="tag">開局科技</span>${X.tech}</div><span class="pick">✔ 已選擇</span></button>`).join('')}</div>
+
+    <div class="sec starts enter" style="--dy:30px;--d:.25s"><div class="lab"><b>開局身分</b>STARTING RANK</div>
+      <div class="opts c3">${STARTS.map((X, i) => { const on = ST.best >= X.need; return `<button class="opt ${on ? '' : 'lock'} ${ST.start === i ? 'on' : ''}" data-s="${i}" ${on ? '' : 'data-lock="1"'}>
+        <b>${on ? '' : '🔒 '}${X.name}</b><span>${X.desc}</span>${on ? '' : `<span class="warn">解鎖：在任何一局升到${RANKS[X.need].name}</span>`}</button>`; }).join('')}</div></div>
+
+    <div class="sec diffs enter" style="--dy:30px;--d:.35s"><div class="lab"><b>難度</b>DIFFICULTY</div>
+      <div class="opts c4">${DIFF.map((D, i) => { const on = !D.need || ST.best >= D.need; return `<button class="opt ${on ? '' : 'lock'} ${ST.diff === i ? 'on' : ''}" data-d="${i}" ${on ? '' : 'data-lock="1"'}>
+        <b>${on ? '' : '🔒 '}${D.name}</b><span>${on ? D.desc : `<span class="warn">解鎖：在任何一局升到${RANKS[D.need].name}</span>`}</span></button>`; }).join('')}</div></div>
+
+    <button class="bigbtn go enter" style="--dx:60px;--d:.45s" id="go"><span class="op">START ・ RUN ${ST.runs + 1}</span><h3>開始</h3>
+      <span class="sub">${R.name}・${STARTS[ST.start].name}開局・${DIFF[ST.diff].name}・${R.hulls.map((h) => HULLS[h].name).join('＋')}</span><div class="chev"><i></i><i></i><i></i></div></button>`;
+  const re = () => { render(); document.getElementById('stage').classList.add('ready'); };
+  document.querySelectorAll('[data-r]').forEach((b) => b.onclick = () => { ST.role = b.dataset.r; re(); });
+  document.querySelectorAll('[data-s]').forEach((b) => b.onclick = () => { if (b.dataset.lock) return CAP.toast('還沒解鎖'); ST.start = +b.dataset.s; re(); });
+  document.querySelectorAll('[data-d]').forEach((b) => b.onclick = () => { if (b.dataset.lock) return CAP.toast('還沒解鎖'); ST.diff = +b.dataset.d; re(); });
+  $('go').onclick = () => { CAP.glitch(400); CAP.toast('進入星圖：上級的第一份簡報（示意）'); };
+}
+CAP.bg({ mode: 'space' }); render(); CAP.ready();
+</script>
+</body>
+</html>

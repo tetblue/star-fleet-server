@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>艦長模式 UI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="cap-ui.css">
+<style>
+.grp{position:absolute;top:200px}
+.grp h2{font:900 24px var(--jp);letter-spacing:.14em;margin-bottom:4px}
+.grp .en{font:700 12px var(--en);letter-spacing:.3em;color:var(--cyan);margin-bottom:16px;display:block}
+.cards{display:grid;gap:12px}
+.card{position:relative;display:block;width:400px;padding:16px 22px 14px 26px;text-decoration:none;color:var(--text);background:linear-gradient(100deg,rgba(14,24,50,.92),rgba(10,16,34,.8));border-left:3px solid var(--cyan);
+  clip-path:polygon(0 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%);transition:background .2s,transform .2s}
+.card:hover{background:linear-gradient(100deg,rgba(30,64,110,.95),rgba(14,30,52,.85));transform:translateX(6px)}
+.card b{font:900 21px var(--jp);letter-spacing:.1em}
+.card small{display:block;font:700 11px var(--en);letter-spacing:.22em;color:var(--dim)}
+.card span{display:block;font:500 13px var(--jp);color:var(--dim);margin-top:4px}
+.card .no{position:absolute;right:18px;top:12px;font:700 26px var(--en);color:transparent;-webkit-text-stroke:1px rgba(90,200,255,.45)}
+.card.todo{opacity:.45;pointer-events:none;border-left-color:var(--mute)}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="bg"></canvas><div class="ui" id="ui"></div></div>
+<script src="cap-ui.js"></script>
+<script>
+const PAGES = [
+  ['艦長模式・隨機任務', 'CAPTAIN ・ SORTIE', [
+    ['mode_menu.html', '艦長模式', 'CAPTAIN MODE', '模式入口：隨機任務、艦長生涯、整備庫、武器配置'],
+    ['sortie_setup.html', '小隊編成', 'SORTIE SETUP', '隨機任務：選 1～5 艘、陣營、難度、地點、任務'],
+    ['battle_hud.html', '戰鬥 HUD', 'BATTLE HUD', '開船時的儀表：船體、武器、小隊、偵測、危險區'],
+    ['report.html', '任務報告', 'MISSION REPORT', '評等、戰果、戰功'],
+    ['hangar.html', '整備庫', 'HANGAR', '戰艦庫：看船、換位置'],
+    ['loadout.html', '武器配置', 'LOADOUT', '武器表現預覽'],
+  ]],
+  ['艦長生涯・主畫面', 'CAREER ・ CORE', [
+    ['career_new.html', '開新局', 'NEW CAREER', '角色、開局身分、難度'],
+    ['captain_lobby.html', '大廳', 'LOBBY', '停泊中的小隊、這週要做什麼'],
+    ['starmap.html', '星圖・下令', 'STAR MAP', '星系、小隊、航道、星系資訊卡'],
+    ['engage.html', '交戰評估', 'ENGAGEMENT', '勝率、每艘船的存活率：親自指揮或撤退'],
+    ['missions.html', '任務', 'MISSIONS', '任務清單與上級簡報'],
+    ['career_end.html', '生涯結束', 'CAREER END', '全滅或退役的結算'],
+  ]],
+  ['艦長生涯・整備與經營', 'CAREER ・ MANAGEMENT', [
+    ['squads.html', '小隊', 'SQUADS', '各小隊、換船／分隊、船的資料'],
+    ['yard.html', '船塢', 'SHIPYARD', '訂造、船台排隊、預備艦'],
+    ['refit.html', '改裝', 'REFIT', '換模組、升 Mk、前後比較'],
+    ['research.html', '研發', 'RESEARCH', '研發樹、熟練度'],
+    ['shop.html', '商店', 'SHOP', '貿易站／黑市：藍圖、研究資料、教官'],
+    ['planet.html', '星球', 'PLANET', '勢力建築、強化、你的建築'],
+    ['log.html', '紀錄', 'LOG', '戰報與事件紀錄'],
+  ]],
+];
+let n = 0;
+document.getElementById('ui').innerHTML = `${CAP.head({ title: '艦長模式 UI', en: 'CAPTAIN MODE ・ UI DEMO', crumb: '風格：手遊大廳式・青＝行動 綠＝你 紅＝警報 黃＝提醒', back: '返回' })}
+  ${PAGES.map(([t, en, L], gi) => `<div class="grp enter" style="left:${60 + gi * 610}px;--dy:30px;--d:${.1 + gi * .1}s"><h2>${t}</h2><span class="en">${en}</span><div class="cards">
+    ${L.map(([f, name, e, d]) => `<a class="card" data-f="${f}" href="${f}"><span class="no">${String(++n).padStart(2, '0')}</span><b>${name}</b><small>${e}</small><span>${d}</span></a>`).join('')}</div></div>`).join('')}`;
+// grey out pages that don't exist yet
+document.querySelectorAll('.card').forEach((a) => fetch(a.dataset.f, { method: 'HEAD' }).then((r) => { if (!r.ok) a.classList.add('todo'); }).catch(() => {}));
+CAP.bg({ mode: 'space' }); CAP.ready();
+</script>
+</body>
+</html>

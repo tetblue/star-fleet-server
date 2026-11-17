@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>武器配置</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="cap-ui.css">
+<style>
+/* 武器配置（weapons.js weOpen＋weprev.js 表現預覽）：上＝風格／艦種；中＝3D 編輯畫面（這裡用俯視剪影）＋表現預覽；
+   右＝新增武器、掛點清單、選取的掛點；下＝2D 八方向預覽；右下＝完成 */
+.bar1{position:absolute;left:34px;top:150px;right:34px;display:flex;align-items:center;gap:16px}
+.bar1 .grp{display:flex;align-items:center;gap:8px}
+.bar1 .lab{margin-right:4px}
+.bar1 .chip{height:36px;padding:0 14px;font-size:15px}
+.bar1 .sp{flex:1}
+.tool{height:36px;padding:0 14px;font:500 14px var(--jp);background:rgba(10,16,36,.88);border:1px solid var(--line-2);white-space:nowrap}
+.tool:hover{border-color:var(--cyan)}
+.tool.on{border-color:var(--cyan);color:var(--cyan)}
+
+.view{left:34px;top:206px;width:1250px;height:620px;--pc:var(--cyan);background:#0a1020;overflow:hidden}
+.view .grid{position:absolute;inset:0;background:repeating-linear-gradient(90deg,rgba(52,80,122,.45) 0 1px,transparent 1px 44px),repeating-linear-gradient(0deg,rgba(52,80,122,.45) 0 1px,transparent 1px 44px);transform:perspective(900px) rotateX(48deg) scale(1.6);transform-origin:50% 60%}
+.cams{position:absolute;left:20px;top:18px;display:flex;gap:6px;z-index:3}
+.cams .tool{height:32px;font-size:13px}
+.hint2{position:absolute;left:20px;bottom:16px;font:500 14px var(--jp);color:var(--dim);z-index:3}
+.shipwrap{position:absolute;left:46%;top:54%;translate:-50% -50%;width:760px;height:260px;transition:transform .8s cubic-bezier(.4,0,.2,1),opacity .4s}
+.shipwrap svg.hull{position:absolute;inset:0}
+.mnt{position:absolute;translate:-50% -50%;width:26px;height:26px;border:2px solid #ffd27a;background:rgba(10,16,32,.85);display:flex;align-items:center;justify-content:center;font:700 13px var(--en);color:#ffd27a;cursor:pointer;transition:transform .2s}
+.mnt.on{background:#ffd27a;color:#1c1204;box-shadow:0 0 16px #ffd27a;transform:scale(1.25)}
+.mnt.aa{border-color:var(--cyan);color:var(--cyan)}
+.flame{position:absolute;right:100%;top:50%;translate:0 -50%;height:40px;width:0;background:radial-gradient(ellipse at 100% 50%,#e8fbff,#5bd0ff 35%,rgba(60,140,255,0) 72%);transition:width .5s}
+.eng1 .flame{width:90px}.eng2 .flame{width:220px;height:56px}
+.eng2 .shipwrap{animation:shake .12s infinite}
+@keyframes shake{50%{transform:translate(1px,-1px)}}
+.shot{position:absolute;height:3px;background:linear-gradient(90deg,#fff,#ffcf6a);box-shadow:0 0 10px #ffb84a;transform-origin:0 50%;animation:shot .5s ease-out forwards;pointer-events:none}
+.shot.msl{height:5px;background:linear-gradient(90deg,#fff,#ff7a5a)}
+.shot.aa{height:2px;background:linear-gradient(90deg,#fff,#5bd0ff);box-shadow:0 0 8px #5bd0ff}
+@keyframes shot{from{width:0;opacity:1}60%{opacity:1}to{width:520px;opacity:0}}
+.boom{position:absolute;width:60px;height:60px;translate:-50% -50%;border-radius:50%;background:radial-gradient(#fff,#ffb84a 30%,#ff5a2a 55%,rgba(255,60,20,0) 70%);animation:boom .7s ease-out forwards;pointer-events:none}
+@keyframes boom{from{transform:scale(.2);opacity:1}to{transform:scale(1.8);opacity:0}}
+.smoke{position:absolute;width:26px;height:26px;border-radius:50%;background:radial-gradient(rgba(60,60,70,.8),rgba(60,60,70,0) 70%);animation:smoke 2.4s linear infinite;pointer-events:none}
+@keyframes smoke{from{transform:translate(0,0) scale(.6);opacity:.9}to{transform:translate(-60px,-50px) scale(2.2);opacity:0}}
+.scorch{position:absolute;width:44px;height:30px;border-radius:50%;background:radial-gradient(rgba(10,6,4,.85),rgba(10,6,4,0) 70%);pointer-events:none}
+.warp .shipwrap{transform:translate(900px,0) scaleX(3);opacity:0}
+.warpin .shipwrap{transition:none;transform:translate(-900px,0) scaleX(3);opacity:0}
+.charge .hull{filter:drop-shadow(0 0 24px #9fe8ff)}
+.dead .shipwrap .hull{opacity:0}
+.piece{position:absolute;background:#33405e;border:1px solid #7f90bb;transition:transform 1.4s cubic-bezier(.2,.8,.2,1),opacity 1.4s}
+.pv-badge{position:absolute;right:20px;top:18px;padding:4px 14px;background:var(--red);font:700 13px var(--jp);letter-spacing:.14em;z-index:3}
+
+.fx{left:34px;top:842px;width:1250px;height:150px;--pc:var(--red)}
+.fx .pb{display:flex;gap:26px;padding-top:12px}
+.fx .row2{display:flex;flex-direction:column;gap:6px}
+.fx .row2 .lab{margin-bottom:2px}
+.fx .row2 div{display:flex;gap:6px}
+.fx .tool{height:34px}
+
+.side{right:34px;top:206px;width:570px;height:620px;--pc:var(--gold)}
+.side .pb{padding-top:12px}
+.side h4{display:flex;align-items:baseline;gap:10px;font:900 16px var(--jp);letter-spacing:.1em;margin:10px 0 6px}
+.side h4:first-child{margin-top:0}
+.side h4 small{font:500 12px var(--jp);color:var(--dim);letter-spacing:0}
+.pal{display:flex;flex-wrap:wrap;gap:6px}
+.pal .tool{font-size:13px;height:32px}
+.mlist{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.mit{display:flex;align-items:center;gap:8px;padding:3px 10px;font:500 13px var(--jp);background:rgba(12,20,42,.75);border-left:3px solid transparent;white-space:nowrap;overflow:hidden}
+.mit b{font:700 14px var(--en);color:#ffd27a;width:16px}
+.mit span{margin-left:auto;color:var(--dim);font-size:12px}
+.mit.on{border-left-color:#ffd27a;background:rgba(60,48,20,.7)}
+.props{display:grid;grid-template-columns:1.6fr repeat(6,1fr);gap:6px}
+.num{display:flex;flex-direction:column;gap:2px;font:500 12px var(--jp);color:var(--dim);min-width:0;white-space:nowrap}
+.num input,.num select{width:100%;min-width:0;height:30px;padding:0 6px!important;font-size:13px!important;padding:0 10px;font:700 15px var(--en);color:var(--text);background:rgba(6,10,24,.9);border:1px solid var(--line-2)}
+.num select{font-family:var(--jp);font-size:14px}
+.pacts{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.pacts .tool{height:30px;font-size:13px}
+.theme{display:flex;gap:6px}
+.sw{width:28px;height:28px;border:2px solid transparent;background:var(--c)}
+.sw.on{border-color:#fff}
+.sw.org{background:linear-gradient(135deg,#6f84ac 50%,#c9a35a 50%)}
+
+.done{right:34px;top:842px;width:570px;height:150px}
+.done h3{font-size:44px;top:50px}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="bg"></canvas><div class="ui" id="ui"></div></div>
+<script src="cap-ui.js"></script>
+<script>
+const { $ } = CAP;
+// 資料照 weapons.js：STYLES、HULL_NAMES、STATION_NAMES、WEAPON_NAMES、THEME_SW；表現預覽照 weprev.js wpBar
+const ST = {
+  styles: ['帝國軍', '聯盟軍', '傭兵', '機械改造人類', '機械智慧族', '蟲族感染人類', '蟲族'],
+  hulls: ['航空母艦', '戰列艦', '巡洋艦', '驅逐艦', '護衛艦'], stations: ['太空站・小', '太空站・中', '太空站・大'],
+  weapons: ['三聯裝巨砲塔', '雙聯裝砲塔', '舷砲砲座模組', '防空砲塔', '魚雷發射管組', '金色衝角砲'],
+  theme: [['', '原色'], ['#d8413a', '紅'], ['#ee8a2a', '橙'], ['#e8c04a', '金'], ['#5cc45a', '綠'], ['#3ec8c0', '青'], ['#3f86e8', '藍'], ['#8a5ae0', '紫'], ['#e070b0', '粉'], ['#e8ecf2', '白'], ['#3a3f4a', '黑']],
+  style: 0, hull: 1, th: '',
+  // 掛點：w＝種類（WEAPON_NAMES 的索引）、x／y＝俯視位置（0～1，x 沿船身、y 左右）、p＝左右 X、高度 Y、前後 Z
+  mounts: [
+    { w: 0, x: .74, y: .5, p: [0, .052, .31] }, { w: 0, x: .62, y: .5, p: [0, .064, .2] }, { w: 4, x: .9, y: .5, p: [0, .02, .44] },
+    { w: 1, x: .46, y: .3, p: [-.06, .05, .04] }, { w: 1, x: .46, y: .7, p: [.06, .05, .04] },
+    { w: 2, x: .55, y: .16, p: [-.09, .03, .12] }, { w: 2, x: .55, y: .84, p: [.09, .03, .12] },
+    { w: 3, x: .28, y: .28, p: [-.05, .06, -.16] }, { w: 3, x: .28, y: .72, p: [.05, .06, -.16] },
+  ],
+  sel: 0, place: -1, sym: true, cam: 'iso',
+};
+let eng = 0, auto = null, dmg = 0, preview = false;
+const side = (m) => `${m.p[0] < -.01 ? '左' : m.p[0] > .01 ? '右' : '中'}・${m.p[2] > .15 ? '前' : m.p[2] < -.15 ? '後' : '中段'}`;
+
+function render() {
+  const m = ST.mounts[ST.sel];
+  $('ui').innerHTML = `
+    ${CAP.head({ title: '武器配置', en: 'WEAPON LOADOUT', crumb: '調整、新增各艦種的武器位置（2D／3D 共用）' })}
+    <div class="bar1 enter" style="--dy:-10px;--d:.05s">
+      <div class="grp"><span class="lab">風格</span>${ST.styles.map((n, i) => `<button class="chip ${i === ST.style ? 'on' : ''}" data-sty="${i}">${n}</button>`).join('')}</div>
+      <span class="sp"></span>
+      <button class="tool" data-act="復原（Ctrl＋Z）">↶</button><button class="tool" data-act="重做（Ctrl＋Y）">↷</button>
+      <button class="tool" data-act="匯出／匯入">匯出／匯入</button><button class="tool ${ST.sym ? 'on' : ''}" id="sym">${ST.sym ? '☑' : '☐'} 左右對稱</button>
+      <button class="tool" data-act="此艦預設">此艦預設</button><button class="tool" data-act="全部預設">全部預設</button>
+    </div>
+    <section class="panel view enter ${['', 'eng1', 'eng2'][eng]}" id="view" style="--dx:-30px;--d:.1s">
+      <div class="grid"></div>
+      <div class="cams">${[['iso', '斜視'], ['top', '俯視'], ['side', '側視'], ['front', '正面'], ['game', '遊戲角度']].map(([k, n]) => `<button class="tool ${ST.cam === k ? 'on' : ''}" data-cam="${k}">${n}</button>`).join('')}
+        <span style="width:16px"></span>${ST.hulls.map((n, i) => `<button class="tool ${i === ST.hull ? 'on' : ''}" data-hull="${i}">${n}</button>`).join('')}${ST.stations.map((n) => `<button class="tool" data-act="${n}">${n}</button>`).join('')}</div>
+      ${preview ? '<span class="pv-badge">表現預覽中</span>' : ''}
+      <div class="shipwrap" id="ship"><div class="flame"></div>
+        <svg class="hull" viewBox="0 0 760 260"><path d="M20 130 L60 70 L300 52 L560 64 L700 104 L748 130 L700 156 L560 196 L300 208 L60 190 Z" fill="${ST.th || '#2b3654'}" fill-opacity="${ST.th ? .55 : 1}" stroke="#8fa3c7" stroke-width="2"/>
+          <path d="M120 130 H700 M300 52 V208 M440 58 V202" stroke="rgba(143,163,199,.35)" stroke-width="1.5"/><path d="M748 130 l14 0" stroke="#f2b35a" stroke-width="3"/></svg>
+        ${ST.mounts.map((q, i) => `<button class="mnt ${i === ST.sel ? 'on' : ''} ${q.w === 3 ? 'aa' : ''}" data-mn="${i}" style="left:${q.x * 100}%;top:${q.y * 100}%">${i + 1}</button>`).join('')}
+        ${Array.from({ length: dmg }, (_, i) => `<span class="scorch" style="left:${20 + i * 17 % 60}%;top:${30 + i * 23 % 40}%"></span><span class="smoke" style="left:${22 + i * 17 % 60}%;top:${28 + i * 23 % 40}%;animation-delay:${i * .3}s"></span>`).join('')}
+      </div>
+      <div class="hint2">${ST.place >= 0 ? `放置「${ST.weapons[ST.place]}」：在船身上點一下（Esc 取消）` : '左鍵拖曳旋轉・右鍵拖曳平移・滾輪縮放・點武器選取、拖曳沿船身移動・Delete 刪除・M 鏡像'}</div>
+    </section>
+
+    <section class="panel fx enter" style="--dy:30px;--d:.2s">
+      <div class="ph"><h2>表現預覽</h2><span class="en">PREVIEW</span><span class="r">開火、推進、躍傳、受損時的樣子</span></div>
+      <div class="pb">
+        <div class="row2"><span class="lab">武器 ／ WEAPONS</span><div>${[['m', '主砲'], ['s', '副砲'], ['a', '防空'], ['x', '飛彈'], ['all', '齊射']].map(([k, n]) => `<button class="tool" data-fx="${k}">${n}</button>`).join('')}
+          <button class="tool ${auto ? 'on' : ''}" data-fx="auto" title="每秒自動開火">連續開火</button><button class="tool" data-fx="turn" title="靶機繞著船飛，砲塔跟著轉">靶機繞飛</button></div></div>
+        <div class="row2"><span class="lab">航行 ／ ENGINE</span><div><button class="tool ${eng ? 'on' : ''}" data-fx="eng" title="關 → 巡航 → 全速">推進：${['關', '巡航', '全速'][eng]}</button><button class="tool" data-fx="warp">躍傳</button></div></div>
+        <div class="row2"><span class="lab">損傷 ／ DAMAGE</span><div><button class="tool" data-fx="dmg" title="每按一次再傷一點">受損</button><button class="tool" data-fx="kill">破壞</button><button class="tool" data-fx="rep">修復</button></div></div>
+        <div class="row2"><span class="lab">&nbsp;</span><div><button class="tool" data-fx="reset">重置</button><button class="tool" data-fx="end">結束預覽</button></div></div>
+      </div>
+    </section>
+
+    <section class="panel side tilt-r enter" style="--dx:40px;--d:.15s">
+      <div class="ph"><h2>${ST.styles[ST.style]}・${ST.hulls[ST.hull]}</h2><span class="en">MOUNTS</span><span class="r">掛點 ${ST.mounts.length}</span></div>
+      <div class="pb">
+        <h4>主題色<small>${ST.styles[ST.style]}・船體與武器一起換色</small></h4>
+        <div class="theme">${ST.theme.map(([h, n]) => `<button class="sw ${h === ST.th ? 'on' : ''} ${h ? '' : 'org'}" data-th="${h}" title="${n}" style="--c:${h}"></button>`).join('')}</div>
+        <h4>新增武器<small>點選後在船身上點一下放置；按住 Shift 可連續放</small></h4>
+        <div class="pal">${ST.weapons.map((n, w) => `<button class="tool ${ST.place === w ? 'on' : ''}" data-w="${w}">${n}</button>`).join('')}</div>
+        <h4>掛點<small>（${ST.mounts.length}）</small></h4>
+        <div class="mlist">${ST.mounts.map((q, i) => `<button class="mit ${i === ST.sel ? 'on' : ''}" data-mn="${i}"><b>${i + 1}</b>${ST.weapons[q.w]}<span>${side(q)}</span></button>`).join('')}</div>
+        <h4>選取的掛點</h4>
+        ${m ? `<div class="props"><label class="num">種類<select id="pw">${ST.weapons.map((n, w) => `<option value="${w}" ${w === m.w ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+          ${[['左右 X', m.p[0]], ['高度 Y', m.p[1]], ['前後 Z', m.p[2]], ['轉向°', 0], ['側傾°', 0], ['尺寸', .06]].map(([n, v]) => `<label class="num">${n}<input type="number" value="${v}" step="0.002"></label>`).join('')}</div>
+          <div class="pacts"><button class="tool" data-act="貼齊船身">貼齊船身</button><button class="tool" data-act="鏡像複製到另一側">鏡像複製到另一側</button><button class="tool" data-act="複製一個">複製一個</button><button class="tool" id="del" style="color:var(--red)">刪除</button></div>` : '<p class="dim">點選 3D 畫面或上面清單裡的武器來調整。</p>'}
+      </div>
+    </section>
+
+    <button class="bigbtn done enter" style="--dx:40px;--d:.25s" id="done"><span class="op">SAVE & CLOSE</span><h3>完成</h3><span class="sub">掛點存檔・2D 八方向疊圖會重新產生</span><div class="chev"><i></i><i></i><i></i></div></button>`;
+  bind();
+  document.getElementById('stage').classList.add('ready');
+}
+// 開火：從每個對應的掛點往船頭方向射出
+function fire(k) {
+  preview = true; const view = $('view'), ship = $('ship'), r = ship.getBoundingClientRect(), vr = view.getBoundingClientRect(), sc = vr.width / 1250;
+  const pick = { m: [0], s: [1, 2], a: [3], x: [4], all: [0, 1, 2, 3, 4] }[k];
+  ST.mounts.forEach((q) => { if (!pick.includes(q.w)) return;
+    const el = document.createElement('i'); el.className = `shot ${q.w === 4 ? 'msl' : q.w === 3 ? 'aa' : ''}`;
+    el.style.left = ((r.left - vr.left) / sc + q.x * 760) + 'px'; el.style.top = ((r.top - vr.top) / sc + q.y * 260) + 'px';
+    el.style.transform = `rotate(${(q.y - .5) * (q.w === 3 ? -80 : -14)}deg)`; view.appendChild(el); setTimeout(() => el.remove(), 600); });
+  if (!view.querySelector('.pv-badge')) view.insertAdjacentHTML('beforeend', '<span class="pv-badge">表現預覽中</span>');
+}
+function bind() {
+  document.querySelectorAll('[data-sty]').forEach((b) => b.onclick = () => { ST.style = +b.dataset.sty; render(); });
+  document.querySelectorAll('[data-hull]').forEach((b) => b.onclick = () => { ST.hull = +b.dataset.hull; render(); });
+  document.querySelectorAll('[data-cam]').forEach((b) => b.onclick = () => { ST.cam = b.dataset.cam; render(); });
+  document.querySelectorAll('[data-mn]').forEach((b) => b.onclick = () => { ST.sel = +b.dataset.mn; render(); });
+  document.querySelectorAll('[data-w]').forEach((b) => b.onclick = () => { ST.place = ST.place === +b.dataset.w ? -1 : +b.dataset.w; render(); });
+  document.querySelectorAll('[data-th]').forEach((b) => b.onclick = () => { ST.th = b.dataset.th; render(); });
+  $('sym').onclick = () => { ST.sym = !ST.sym; render(); };
+  if ($('pw')) $('pw').onchange = (e) => { ST.mounts[ST.sel].w = +e.target.value; render(); };
+  if ($('del')) $('del').onclick = () => { ST.mounts.splice(ST.sel, 1); ST.sel = Math.min(ST.sel, ST.mounts.length - 1); render(); };
+  $('done').onclick = () => CAP.toast('掛點已存檔（示意）');
+  document.querySelectorAll('[data-fx]').forEach((b) => b.onclick = () => {
+    const k = b.dataset.fx, view = $('view');
+    if ('m s a x all'.split(' ').includes(k)) return fire(k);
+    if (k === 'auto') { if (auto) { clearInterval(auto); auto = null; } else auto = setInterval(() => fire('all'), 1000); preview = true; return render(); }
+    if (k === 'turn') return CAP.toast('靶機繞著船飛，砲塔跟著轉（3D 才看得到）');
+    if (k === 'eng') { eng = (eng + 1) % 3; preview = true; return render(); }
+    if (k === 'warp') { preview = true; view.classList.add('charge'); setTimeout(() => { view.classList.add('warp'); }, 700);
+      setTimeout(() => { view.classList.remove('warp', 'charge'); view.classList.add('warpin'); requestAnimationFrame(() => requestAnimationFrame(() => view.classList.remove('warpin'))); }, 1700); return; }
+    if (k === 'dmg') { dmg = Math.min(6, dmg + 1); preview = true; render(); const s = $('ship'); s.insertAdjacentHTML('beforeend', `<span class="boom" style="left:${20 + Math.random() * 60}%;top:${30 + Math.random() * 40}%"></span>`); return; }
+    if (k === 'kill') { preview = true; const s = $('ship'); [[.1, .3], [.4, .5], [.7, .4], [.3, .7], [.6, .7]].forEach(([x, y]) => s.insertAdjacentHTML('beforeend', `<span class="boom" style="left:${x * 100}%;top:${y * 100}%"></span>`));
+      setTimeout(() => { view.classList.add('dead'); s.querySelectorAll('.mnt').forEach((n) => n.style.opacity = 0);
+        for (let i = 0; i < 8; i++) { const p = document.createElement('i'); p.className = 'piece'; p.style.cssText = `left:${10 + i * 10}%;top:${35 + (i % 3) * 10}%;width:${60 + i * 7}px;height:${30 + (i % 2) * 20}px`; s.appendChild(p);
+          requestAnimationFrame(() => requestAnimationFrame(() => { p.style.transform = `translate(${(i - 4) * 60}px,${(i % 3 - 1) * 90}px) rotate(${(i - 4) * 25}deg)`; p.style.opacity = .7; })); } }, 500); return; }
+    if (k === 'rep' || k === 'reset' || k === 'end') { dmg = 0; eng = 0; if (auto) { clearInterval(auto); auto = null; } preview = k !== 'end'; view.classList.remove('dead'); return render(); }
+  });
+}
+CAP.bg({ mode: 'deep', drift: .3 });
+render(); CAP.ready();
+</script>
+</body>
+</html>

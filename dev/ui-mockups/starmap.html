@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>星圖・下令</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="cap-ui.css">
+<style>
+/* 星圖・下令（capcareer_ui.js ccRender／ccCard／ccDock／ccDraw）
+   關係色照遊戲：綠＝你、藍＝你的陣營／友軍、紅＝敵、亮黃＝中立；首都＝白圈；親自指揮的小隊＝光圈＋白框＋★ */
+:root{--rel-own:#3fdf8f;--rel-ally:#4aa8ff;--rel-enemy:#ff4d4d;--rel-neu:#ffd23f}
+#map{position:absolute;inset:0;width:100%;height:100%;z-index:1;cursor:pointer}
+.ui{pointer-events:none}
+.ui > *{pointer-events:auto}
+
+/* top-right: resources + relations + tools */
+.rel{position:absolute;right:60px;top:98px;display:flex;gap:14px;align-items:center;font:500 13px var(--jp);color:var(--dim)}
+.rel .it{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.rel .pie{width:22px;height:22px;border-radius:50%;background:conic-gradient(var(--c) calc(var(--v)*1%),rgba(255,255,255,.12) 0);border:1px solid var(--c)}
+.rel b{font:700 16px var(--en);color:var(--text)}
+.rel .sep{width:1px;height:18px;background:var(--line-2)}
+.tools{position:absolute;right:60px;top:140px;display:flex;gap:10px}
+.tbtn{position:relative;display:flex;align-items:center;gap:8px;height:40px;padding:0 16px;background:rgba(10,16,36,.85);border:1px solid rgba(120,170,230,.25);font:700 15px var(--jp);letter-spacing:.08em;white-space:nowrap;clip-path:polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%)}
+.tbtn:hover{border-color:var(--cyan);background:rgba(30,50,90,.9)}
+.tbtn svg{width:18px;height:18px;stroke:var(--cyan);fill:none;stroke-width:1.8}
+.tbtn .nbadge{transform:scale(.8);margin-left:-2px}
+.tbtn .mono{font:700 15px var(--en);color:var(--cyan)}
+.tbtn kbd{font:700 11px var(--en);border:1px solid var(--dim);padding:0 5px;color:var(--dim)}
+
+/* floating system card */
+.card{position:absolute;width:470px;z-index:5;transition:left .25s cubic-bezier(.2,.8,.2,1),top .25s cubic-bezier(.2,.8,.2,1),opacity .2s}
+.card .panel{position:relative;background:linear-gradient(165deg,rgba(14,22,44,.97),rgba(9,14,30,.96))}
+.card .ph .r{margin-right:28px}
+.card .ph h2 .dot{display:inline-block;width:14px;height:14px;border-radius:50%;margin-right:10px;vertical-align:1px}
+.card .x{position:absolute;right:16px;top:14px;width:30px;height:30px;font:700 18px var(--en);color:var(--dim);text-align:center;z-index:2}
+.card .x:hover{color:var(--red)}
+.card .pb{padding:12px 24px 18px;max-height:600px;overflow:auto;scrollbar-width:thin;scrollbar-color:rgba(90,200,255,.35) transparent}
+.card .kv{font-size:14px;gap:6px 16px}
+.card .kv dd{white-space:normal}
+.card .kv dd small{display:block;color:var(--mute);font-size:12px;line-height:1.4}
+.card .odds2{margin:12px 0 4px;padding:10px 14px;background:rgba(80,20,40,.35);border-left:3px solid var(--red)}
+.card .odds2 h4{font:700 15px var(--jp);color:#ffb0b8}
+.card .odds2 .w{font:900 34px/1.1 var(--en)}
+.card .odds2 small{display:block;font:500 12px var(--jp);color:var(--dim);margin-top:2px}
+.card .sqs{margin-top:10px}
+.card .sqrow{display:flex;justify-content:space-between;gap:10px;padding:6px 10px;margin-top:4px;background:rgba(12,20,42,.7);border-left:3px solid var(--c);font:700 14px var(--jp);color:var(--c)}
+.card .sqrow small{font:500 12px var(--jp);color:var(--dim)}
+.card .for{margin:12px 0 6px;font:500 12px var(--jp);color:var(--dim)}
+.card .for b{color:var(--own)}
+.act{display:block;width:100%;padding:9px 14px;margin-top:6px;background:rgba(14,24,50,.9);border-left:3px solid var(--line);transition:background .15s}
+.act:hover{background:rgba(30,60,110,.95)}
+.act b{display:block;font:700 15px var(--jp);letter-spacing:.06em}
+.act small{display:block;font:500 12px var(--jp);color:var(--dim);margin-top:2px}
+.act.go{border-left-color:var(--cyan)}.act.go b{color:#9fe4ff}
+.act.off{opacity:.45;pointer-events:none}
+
+/* squad dock (bottom-left) */
+.dock{left:34px;bottom:34px;width:600px;height:340px;--pc:var(--own)}
+.dock .tabs{padding:0 18px}
+.dock .tab{padding:10px 16px 8px;font-size:15px}
+.dock .tab.on::after{background:var(--own)}
+.dock .tab .warn{color:var(--red)}
+.dock .pb{padding:12px 22px}
+.dhead{display:flex;justify-content:space-between;align-items:baseline;font:900 18px var(--jp);color:var(--own);letter-spacing:.06em;white-space:nowrap}
+.dhead small{font:500 13px var(--jp);color:var(--dim);letter-spacing:0}
+.srow{display:grid;grid-template-columns:150px 1fr;gap:12px;align-items:center;margin-top:6px;font:700 14px var(--jp);white-space:nowrap}
+.srow .b3{display:grid;gap:2px}.srow .bar{height:4px}
+.threat{margin-top:10px;padding:8px 12px;background:rgba(80,20,40,.45);border-left:3px solid var(--red);font:500 13px var(--jp)}
+.threat b{color:#ff8a96}.threat em{font-style:normal;font:700 17px var(--en)}
+.dbtns{display:flex;gap:8px;margin-top:10px}
+.dfoot{position:absolute;left:22px;right:22px;bottom:12px;font:500 12px var(--jp);color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* end week */
+.endweek{position:absolute;right:34px;bottom:34px;width:380px;height:76px;display:flex;align-items:center;gap:16px;padding:0 26px 0 34px;
+  background:linear-gradient(100deg,rgba(14,22,44,.94),rgba(20,32,62,.94));border:1px solid rgba(160,200,255,.4);clip-path:polygon(6% 0,100% 0,100% 100%,0 100%);transition:background .2s}
+.endweek:hover{background:linear-gradient(100deg,rgba(30,50,90,.95),rgba(40,70,120,.95));border-color:var(--cyan)}
+.endweek b{font:900 24px var(--jp);letter-spacing:.12em;white-space:nowrap}
+.endweek small{display:block;font:700 11px var(--en);letter-spacing:.24em;color:var(--dim)}
+.endweek .w{margin-left:auto;display:flex;align-items:center;gap:6px;padding:4px 10px;background:var(--red);font:700 16px var(--en)}
+.endweek .arrow{font:700 24px var(--en);color:var(--cyan)}
+
+/* legend */
+.legend{position:absolute;right:34px;bottom:124px;width:380px;padding:12px 18px;background:rgba(8,12,26,.82);border:1px solid var(--line-2);font:500 13px var(--jp);color:#cfdaf0;display:grid;grid-template-columns:1fr 1fr;gap:5px 14px}
+.legend h5{grid-column:1/-1;font:700 12px var(--en);letter-spacing:.24em;color:var(--dim);cursor:pointer}
+.legend i{display:inline-block;width:12px;height:12px;margin-right:6px;vertical-align:-1px}
+.legend.min{grid-template-columns:1fr}.legend.min > span{display:none}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="bg"></canvas><canvas id="map" width="1920" height="1080"></canvas><div class="ui" id="ui"></div></div>
+<script src="cap-ui.js"></script>
+<script>
+const { $, fmt, bar, hpCol } = CAP;
+/* ============ 資料（之後換成 capcareer.js 的 S） ============ */
+const FAC = [ { name: '聯盟' }, { name: '帝國' }, { name: '海盜' }, { name: '中立' } ];   // starmap.js SM_FAC
+const REL = { own: 'var(--rel-own)', ally: 'var(--rel-ally)', enemy: 'var(--rel-enemy)', neutral: 'var(--rel-neu)' };
+const RELC = { own: '#3fdf8f', ally: '#4aa8ff', enemy: '#ff4d4d', neutral: '#ffd23f' };
+const TIER = ['荒地', '聚落', '城鎮', '都市', '巨型都市'];
+const SCENE = { belt: '小行星帶', hole: '黑洞邊緣', deep: '深空・恆星', orbit: '行星軌道', nebula: '星雲', station: '太空站周邊' };
+const NAMES = ['阿爾泰', '貝倫', '卡斯托', '德米亞', '埃里多', '法洛斯', '蓋亞斯', '赫利恩', '伊歐拉', '賈納斯', '凱倫', '莉薇拉', '摩頓', '諾瓦', '奧利昂', '佩拉', '奎林', '瑞亞', '賽洛斯', '塔倫', '烏爾', '薇恩', '韋斯塔', '澤菲爾', '亞特', '布蘭'];
+const ST = {
+  week: 12, role: '聯盟艦長', rank: '特戰隊長', fac: 0, money: 18450, merit: 1240, rp: 86, misOpen: 2,
+  fav: 62, fame: [58, 47, 31], cmd: [3, 3],
+  sys: [], sq: [], cur: 0, sel: 14,
+};
+// --- generate the 26 systems (fixed layout so the demo looks the same every time) ---
+(function gen() {
+  let s = 31; const r = () => (s = (s * 9301 + 49297) % 233280) / 233280;
+  const cols = 7, rows = 4; let n = 0;
+  for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) {
+    if (n >= 26 || (cy === 0 && cx === 0) || (cy === 3 && cx === 6)) continue;
+    const x = 170 + cx * 262 + (r() - .5) * 130 + (cy % 2) * 50, y = 260 + cy * 185 + (r() - .5) * 80;
+    const owner = x < 640 ? 0 : x > 1460 && y > 640 ? 2 : x > 1120 ? 1 : (r() < .4 ? 3 : x < 900 ? 0 : 1);
+    ST.sys.push({ id: n, name: NAMES[n], x, y, owner, tier: Math.floor(r() * 5), scene: Object.keys(SCENE)[Math.floor(r() * 6)], def: 1 + Math.floor(r() * 4),
+      yard: r() < .4, depot: r() < .5, defs: owner === 3 ? [] : [['防禦站', .6 + r() * .4], ...(r() < .5 ? [['防禦平台', 1]] : [])], pop: 2 + Math.floor(r() * 9), pro: 30 + Math.floor(r() * 60) });
+    n++;
+  }
+  const S = ST.sys;
+  // lanes: each system to its 2–3 nearest
+  ST.lanes = [];
+  for (const a of S) { const L = S.filter((b) => b !== a).sort((p, q) => Math.hypot(p.x - a.x, p.y - a.y) - Math.hypot(q.x - a.x, q.y - a.y)).slice(0, 3);
+    for (const b of L) if (Math.hypot(b.x - a.x, b.y - a.y) < 330 && !ST.lanes.some(([i, j]) => (i === a.id && j === b.id) || (i === b.id && j === a.id))) ST.lanes.push([a.id, b.id]); }
+  // capitals, base, shops, effects, fog
+  const minBy = (f) => S.reduce((m, x) => (f(x) < f(m) ? x : m));
+  minBy((x) => x.owner === 0 ? x.x : 9e9).cap = true; minBy((x) => x.owner === 1 ? -x.x : 9e9).cap = true; minBy((x) => x.owner === 2 ? -x.y : 9e9).cap = true;
+  S.forEach((x) => { x.seen = x.owner === 0 || x.x < 1350 ? 0 : x.x < 1660 ? 2 + (x.id % 3) : -1; });   // 0＝現在看得到；N＝N 週前；-1＝沒看過
+  S.filter((x) => x.owner === 3)[0].shop = '貿易站'; S.filter((x) => x.owner === 2)[0].shop = '海盜黑市';
+})();
+const S = ST.sys, near = (id) => ST.lanes.filter(([a, b]) => a === id || b === id).map(([a, b]) => (a === id ? b : a));
+// pick a frontline: your squad in an ally system bordering an enemy one
+const front = S.filter((x) => x.owner === 0).sort((a, b) => b.x - a.x);
+const A = front[0], B = front[1] || front[0];
+const T = S.filter((x) => x.owner === 1).sort((p, q) => Math.hypot(p.x - A.x, p.y - A.y) - Math.hypot(q.x - A.x, q.y - A.y))[0];
+if (!near(A.id).includes(T.id)) ST.lanes.push([A.id, T.id]);
+if (!near(B.id).includes(T.id) && Math.hypot(B.x - T.x, B.y - T.y) < 420) ST.lanes.push([B.id, T.id]);
+const C = S.find((x) => x.owner === 0 && x !== A && x !== B && near(x.id).includes(B.id)) || S[2];
+A.base = true; A.yard = true; T.cut = 15; T.intel = true;
+const R = S.find((x) => x.owner === 1 && near(x.id).includes(T.id) && x !== T); if (R) R.recon = true;
+ST.sel = T.id;
+ST.sq = [
+  { name: '第1小隊', rel: 'own', lead: true, sys: A.id, ships: [ { n: '艾爾巴號', k: '重砲艦', hp: .82, sh: 1, ms: .7 }, { n: '雷霆號', k: '突擊艦', hp: .36, sh: .5, ms: .4 }, { n: '穿刺號', k: '電戰艦', hp: 1, sh: 1, ms: 1 } ] },
+  { name: '第2小隊', rel: 'own', sys: B.id, threat: { by: '帝國第3小隊', n: 3, odds: .41, surv: [['支援艦', .45]] }, ships: [ { n: '斷鋒號', k: '支援艦', hp: .9, sh: 1, ms: 1 } ] },
+  { name: '第3小隊', rel: 'own', sys: C.id, to: B.id, ships: [ { n: '迅羽號', k: '突擊艦', hp: 1, sh: 1, ms: 1 }, { n: '霜刃號', k: '突擊艦', hp: .7, sh: .8, ms: .5 } ] },
+  { name: '聯盟第4小隊', rel: 'ally', sys: front[2] ? front[2].id : C.id, n: 4 },
+  { name: '帝國第3小隊', rel: 'enemy', sys: T.id, to: B.id, n: 3 },
+  { name: '帝國第5小隊', rel: 'enemy', sys: T.id, n: 2 },
+  { name: '帝國第1小隊', rel: 'enemy', sys: (R || T).id, n: 5 },
+  { name: '黑帆第2小隊', rel: 'enemy', sys: S.find((x) => x.owner === 2).id, n: 2 },
+];
+const relOf = (x) => x.seen === -1 ? null : x.owner === ST.fac ? 'ally' : x.owner === 3 ? 'neutral' : 'enemy';
+
+/* ============ map drawing ============ */
+const cv = $('map'), g = cv.getContext('2d');
+const base = document.createElement('canvas'); base.width = 1920; base.height = 1080;
+function drawBase() {
+  const c = base.getContext('2d'); c.clearRect(0, 0, 1920, 1080);
+  // territory glow
+  for (const x of S) { const rel = relOf(x); if (!rel) continue; const col = RELC[rel], gr = c.createRadialGradient(x.x, x.y, 0, x.x, x.y, 150);
+    gr.addColorStop(0, col + (x.seen ? '14' : '26')); gr.addColorStop(1, col + '00'); c.fillStyle = gr; c.fillRect(x.x - 150, x.y - 150, 300, 300); }
+  // lanes
+  c.lineWidth = 1.5;
+  for (const [i, j] of ST.lanes) { const a = S[i], b = S[j], cut = a.cut || b.cut; c.strokeStyle = cut ? 'rgba(255,160,60,.55)' : 'rgba(140,180,240,.28)'; c.setLineDash(cut ? [6, 6] : []); c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.stroke(); }
+  c.setLineDash([]);
+  // recon circle
+  for (const x of S) if (x.recon || x.intel) { c.strokeStyle = 'rgba(127,220,255,.55)'; c.setLineDash([10, 8]); c.lineWidth = 2; c.beginPath(); c.arc(x.x, x.y, 260, 0, 7); c.stroke(); c.setLineDash([]); break; }
+  // systems
+  for (const x of S) {
+    const rel = relOf(x), col = rel ? RELC[rel] : '#7d8794', r = 9 + x.tier * 2.2;
+    c.globalAlpha = x.seen > 0 ? .55 : 1;
+    c.fillStyle = '#0a1024'; c.beginPath(); c.arc(x.x, x.y, r + 4, 0, 7); c.fill();
+    c.fillStyle = col; c.beginPath(); c.arc(x.x, x.y, r, 0, 7); c.fill();
+    c.fillStyle = 'rgba(255,255,255,.35)'; c.beginPath(); c.arc(x.x - r * .3, x.y - r * .3, r * .35, 0, 7); c.fill();
+    if (x.cap && x.seen !== -1) { c.strokeStyle = '#fff'; c.lineWidth = 2.5; c.beginPath(); c.arc(x.x, x.y, r + 8, 0, 7); c.stroke(); }
+    c.font = '700 16px "Noto Sans TC"'; c.textAlign = 'center'; c.fillStyle = rel ? '#e8eef8' : '#8a94a8'; c.shadowColor = '#000'; c.shadowBlur = 4;
+    c.fillText(x.seen === -1 ? '？' : x.name, x.x, x.y - r - 14);
+    c.font = '600 12px Rajdhani,"Noto Sans TC"'; c.fillStyle = '#9fb0cf';
+    const tags = [x.seen > 0 ? `${x.seen} 週前` : '', x.shop ? '$' : '', x.base ? '⌂ 據點' : ''].filter(Boolean).join('  ');
+    if (tags) c.fillText(tags, x.x, x.y + r + 46);
+    if (x.cut) { c.fillStyle = '#ffa63c'; c.font = '700 12px "Noto Sans TC"'; c.fillText('補給切斷', x.x, x.y + r + 62); }
+    c.shadowBlur = 0; c.globalAlpha = 1;
+  }
+}
+// squad glyph: arrow pointing right (or toward its destination), size by ship count
+function arrow(x, y, ang, n, col, lead) {
+  const L = 12 + n * 3;
+  g.save(); g.translate(x, y); g.rotate(ang);
+  if (lead) { g.strokeStyle = '#fff'; g.lineWidth = 4; }
+  g.fillStyle = col; g.beginPath(); g.moveTo(L, 0); g.lineTo(-L * .7, -L * .62); g.lineTo(-L * .35, 0); g.lineTo(-L * .7, L * .62); g.closePath();
+  if (lead) g.stroke(); g.fill(); g.restore();
+}
+function frame(t) {
+  g.clearRect(0, 0, 1920, 1080); g.drawImage(base, 0, 0);
+  // selected system ring
+  const sel = S[ST.sel]; if (sel) { g.strokeStyle = 'rgba(60,200,255,.9)'; g.lineWidth = 2; const rr = 26 + Math.sin(t / 300) * 3; g.beginPath(); g.arc(sel.x, sel.y, rr, 0, 7); g.stroke();
+    g.setLineDash([3, 6]); g.beginPath(); g.arc(sel.x, sel.y, rr + 10, t / 900, t / 900 + 5); g.stroke(); g.setLineDash([]); }
+  // enemy intents (known): dashed red line to the target
+  for (const q of ST.sq) if (q.rel === 'enemy' && q.to != null) { const a = S[q.sys], b = S[q.to]; g.strokeStyle = 'rgba(255,77,77,.75)'; g.lineWidth = 2.5; g.setLineDash([10, 7]); g.lineDashOffset = -t / 40;
+    g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke(); g.setLineDash([]); }
+  // squads: parked ones stacked under the system; movers blink mid-lane
+  const stack = {};
+  ST.sq.forEach((q, i) => {
+    const n = q.ships ? q.ships.length : q.n, col = RELC[q.rel], lead = !!q.lead;
+    let x, y, ang = 0;
+    if (q.to != null && q.rel !== 'enemy') { const a = S[q.sys], b = S[q.to]; x = (a.x + b.x) / 2; y = (a.y + b.y) / 2; ang = Math.atan2(b.y - a.y, b.x - a.x); if ((t / 400 | 0) % 2) return; }
+    else { const k = stack[q.sys] = (stack[q.sys] || 0) + 1, s = S[q.sys]; x = s.x - 30 + (k - 1) * 34; y = s.y + 34; }
+    if (lead) { const p = 18 + 8 * (.5 + .5 * Math.sin(t / 260)); g.fillStyle = 'rgba(63,223,143,.22)'; g.beginPath(); g.arc(x, y, p, 0, 7); g.fill(); g.strokeStyle = 'rgba(63,223,143,.7)'; g.lineWidth = 1.5; g.stroke(); }
+    if (i === ST.cur && !lead) { g.strokeStyle = 'rgba(255,255,255,.75)'; g.setLineDash([3, 3]); g.lineWidth = 1.5; g.beginPath(); g.arc(x, y, 20, 0, 7); g.stroke(); g.setLineDash([]); }
+    arrow(x, y, ang, n, col, lead);
+    g.font = '700 13px "Noto Sans TC"'; g.textAlign = 'center';
+    if (lead) { g.fillStyle = '#fff'; g.fillText('★', x, y - 22); }
+    if (q.threat && (t / 300 | 0) % 2) { g.fillStyle = '#ff4d4d'; g.font = '900 20px Rajdhani'; g.fillText('!', x + 18, y - 10); }
+  });
+  requestAnimationFrame(frame);
+}
+cv.addEventListener('click', (e) => {
+  const r = cv.getBoundingClientRect(), k = 1920 / r.width, x = (e.clientX - r.left) * k, y = (e.clientY - r.top) * k;
+  const hit = S.find((s) => Math.hypot(s.x - x, s.y - y) < 28); if (!hit) return;
+  ST.sel = hit.id; renderCard();
+});
+
+/* ============ UI ============ */
+const cur = () => ST.sq[ST.cur];
+function renderTop() {
+  $('ui').innerHTML = `
+    ${CAP.head({ title: '星圖・下令', en: 'STAR MAP ・ ORDERS', crumb: `<b>第 ${ST.week} 週</b>・${ST.role}・${ST.rank}・指揮權 ${ST.cmd[0]}／${ST.cmd[1]} 隊` })}
+    ${CAP.res([['資金', fmt(ST.money), 'var(--gold)', 'money'], ['戰功', fmt(ST.merit), 'var(--own)', 'merit'], ['研究點', ST.rp, 'var(--cyan)', 'rp']])}
+    <div class="rel enter" style="--dy:-10px;--d:.08s">
+      <span class="it" title="上級的好感度：影響任務獎勵"><span class="pie" style="--c:var(--gold);--v:${ST.fav}"></span>好感 <b>${ST.fav}</b></span><span class="sep"></span>
+      ${['聯盟', '帝國', '海盜'].map((f, i) => `<span class="it" title="${f}的聲望"><span class="pie" style="--c:${i ? 'var(--rel-enemy)' : 'var(--rel-ally)'};--v:${ST.fame[i]}"></span>${f} <b>${ST.fame[i]}</b></span>`).join('')}<span class="sep"></span>
+      <span class="it">星系 ${FAC.map((f, i) => `<b style="color:${['var(--rel-ally)', 'var(--rel-enemy)', 'var(--rel-enemy)', 'var(--rel-neu)'][i]}">${S.filter((x) => x.owner === i && x.seen >= 0).length}</b>`).join('／')}</span></div>
+    <div class="tools enter" style="--dy:-10px;--d:.12s">
+      <button class="tbtn" data-act="任務"><svg viewBox="0 0 24 24">${CAP.icon.mission}</svg>任務<span class="nbadge">${ST.misOpen}</span></button>
+      <button class="tbtn" data-act="研發"><svg viewBox="0 0 24 24">${CAP.icon.rp}</svg>研發 <span class="mono">${ST.rp}</span></button>
+      <button class="tbtn" data-act="紀錄"><svg viewBox="0 0 24 24">${CAP.icon.log}</svg>紀錄</button>
+      <button class="tbtn" data-act="回到星系（巡航）"><svg viewBox="0 0 24 24"><path d="M3 12l16-7-5 16-3-6z"/></svg>回到星系<kbd>M</kbd></button></div>
+    <div class="card" id="card"></div>
+    <section class="panel dock enter" style="--dx:-30px;--d:.2s" id="dock"></section>
+    <div class="legend min enter" style="--dx:30px;--d:.25s" id="legend"><h5>圖例 ▸ ／ LEGEND（點開）</h5>
+      <span><i style="background:var(--rel-own);clip-path:polygon(100% 50%,0 0,30% 50%,0 100%)"></i>你的小隊（★＋光圈＝親自指揮）</span>
+      <span><i style="background:var(--rel-ally);border-radius:50%"></i>你的陣營／友軍</span>
+      <span><i style="background:var(--rel-enemy);border-radius:50%"></i>敵對勢力</span>
+      <span><i style="background:var(--rel-neu);border-radius:50%"></i>中立</span>
+      <span><i style="border:2px solid #fff;border-radius:50%"></i>首都</span>
+      <span><i style="border-top:2px dashed #ff4d4d;height:0;margin-bottom:4px"></i>敵軍的預定動向</span>
+      <span><i style="border:2px dashed #7fdcff;border-radius:50%"></i>偵察範圍</span>
+      <span style="color:#ffa63c">補給切斷</span><span>N 週前＝舊情報</span><span>$＝商店</span></div>
+    <button class="endweek enter" style="--dx:30px;--d:.3s" id="end"><div><b>結束這一週</b><small>END WEEK ${ST.week} → ${ST.week + 1}</small></div><span class="w">⚠ 1</span><span class="arrow">→</span></button>`;
+  $('legend').querySelector('h5').onclick = () => $('legend').classList.toggle('min');
+  $('end').onclick = () => { const Q = ST.sq.filter((q) => q.threat && q.to == null);
+    CAP.modal(`<h4>還有小隊會被攻擊</h4><p>這些小隊在駐守，下週敵軍會開進它們所在的星系：</p>${Q.map((q) => `<div class="row alert"><span style="flex:1">${q.name}・${S[q.sys].name}</span><span>駐守勝率 <b class="bad mono" style="font:700 20px var(--en)">${Math.round(q.threat.odds * 100)}%</b></span></div>`).join('')}
+      <div class="mbtns"><button class="btn" onclick="CAP.close()">返回</button><button class="btn pri" onclick="CAP.close();CAP.glitch(400);CAP.toast('第 13 週開始（示意）')">照樣結束這一週</button></div>`); };
+}
+function renderDock() {
+  const Q = cur(), s = S[Q.sys], own = ST.sq.filter((q) => q.rel === 'own');
+  $('dock').innerHTML = `<div class="tabs">${own.map((q) => `<button class="tab ${q === Q ? 'on' : ''}" data-q="${ST.sq.indexOf(q)}">${q.lead ? '★' : ''}${q.name} ${q.ships.length}艘${q.threat && q.to == null ? ' <span class="warn">⚠</span>' : ''}<small>${q.to != null ? 'MOVING' : q.lead ? 'COMMAND' : 'SQUAD'}</small></button>`).join('')}</div>
+    <div class="pb">
+      <div class="dhead"><span>${Q.lead ? '★ ' : ''}${Q.name}・${Q.ships.length} 艘${Q.lead ? '（親自指揮）' : ''}</span><small>在 ${s.name}${Q.to != null ? ` → ${S[Q.to].name}` : ''}</small></div>
+      ${Q.ships.map((c) => `<div class="srow"><span>${c.n}<span class="dim" style="font-weight:500;font-size:12px;margin-left:6px">${c.k}</span></span><div class="b3">${bar(c.hp, hpCol(c.hp))}${bar(c.sh, 'var(--ally)')}${bar(c.ms, 'var(--yellow)')}</div></div>`).join('')}
+      ${Q.threat && Q.to == null ? `<div class="threat"><b>⚠ 下週敵軍來襲</b>：${Q.threat.by}（${Q.threat.n} 艘）<br>駐守的勝率 <em class="bad">${Math.round(Q.threat.odds * 100)}%</em>・存活率 ${Q.threat.surv.map(([k, v]) => `${k} ${Math.round(v * 100)}%`).join('、')}</div>` : ''}
+      <div class="dbtns">${Q.lead ? '' : '<button class="btn sm own" data-act="改為親自指揮">改為親自指揮</button>'}<button class="btn sm" data-act="換船／分隊">換船／分隊</button></div>
+    </div>
+    <div class="dfoot">綠＝船體・藍＝護盾・黃＝飛彈・${ST.rank}・指揮權 ${ST.cmd[0]}／${ST.cmd[1]} 隊・戰功 1600 升遷考核（特戰司令）・船塢：迅羽號（1 週）</div>`;
+  $('dock').querySelectorAll('[data-q]').forEach((b) => b.onclick = () => { ST.cur = +b.dataset.q; renderDock(); renderCard(); });
+}
+function renderCard() {
+  const s = S[ST.sel], Q = cur(), rel = relOf(s), unk = s.seen === -1, el = $('card'), here = ST.sq.filter((q) => q.sys === s.id && q.to == null || (q.rel === 'enemy' && q.sys === s.id));
+  const enemy = rel === 'enemy', qAt = Q.sys === s.id, who = Q.name;
+  const acts = [];
+  if (!qAt) acts.push(Q.to === s.id ? ['取消移動（' + who + '）', '小隊留在原地', ''] : [`${who}移動到這裡`, unk ? '沒有情報：不知道裡面有什麼' : enemy ? '這週結束時開進去：會和軌道防禦、守軍交戰' : '這週結束時抵達', 'go', 'move']);
+  if (qAt) { acts.push([`修理${who}`, '260 資金', '']); acts.push(['補飛彈', '已經滿了', 'off']); }
+  if (enemy && !unk) acts.push([Q.lead ? '執行任務：攔截' : `派出${who}：攔截（計算）`, Q.lead ? '從相鄰的星系滲透出擊・成功：補給線切斷 4 週' : '成功率 62%（基準 90、難 −55、戰力 +12、耐久 +6、偵察 +8、守備小隊 −10）・存活率 突擊艦 94%', 'go']);
+  if (s.shop) acts.push([`${s.shop}：買藍圖、研究資料`, '貨每週換', 'go']);
+  if (s.owner === ST.fac && s.yard) acts.push(['船塢：訂造、預備艦', '迅羽號 1 週後完成', 'go']);
+  if (!unk && s.seen === 0) acts.push(['星球：建設、投資', s.owner === ST.fac ? '強化勢力的建築、蓋你自己的建築' : s.owner === 3 ? '在中立星系蓋你的建築（看中立好感度）' : '看建築與收入', s.owner === ST.fac || s.owner === 3 ? 'go' : '']);
+  const odds = enemy && !unk ? `<div class="odds2"><h4>${who}進攻這裡</h4><span class="w" style="color:var(--yellow)">48%</span><small>${who}存活率：重砲艦 63%、突擊艦 18%、電戰艦 31%・${s.seen ? `照 ${s.seen} 週前的情報估計・` : ''}公式不含親自操艦的技術、地形；開戰前還會再顯示一次</small></div>` : '';
+  el.innerHTML = `<section class="panel" style="--pc:${rel ? RELC[rel] : '#7d8794'}"><button class="x" id="cx">×</button>
+    <div class="ph"><h2><span class="dot" style="background:${rel ? RELC[rel] : '#7d8794'}"></span>${unk ? '？' : s.name}</h2><span class="en">${unk ? 'UNKNOWN' : 'SYSTEM'}</span><span class="r">${unk ? '' : SCENE[s.scene]}</span></div>
+    <div class="pb"><dl class="kv">
+      ${s.seen > 0 ? `<dt>情報</dt><dd style="color:#ffb35a">${s.seen} 週前（第 ${ST.week - s.seen} 週）看到的樣子<small>小隊靠近（相鄰）或偵察才會更新</small></dd>` : unk ? '<dt>情報</dt><dd style="color:#ffb35a">沒有情報：從沒看過這個星系</dd>' : ''}
+      <dt>擁有者</dt><dd>${unk ? '不明' : FAC[s.owner].name}${s.cap && !unk ? '・首都' : ''}${s.base ? '・<b class="good">你的據點</b>' : ''}</dd>
+      ${unk ? '' : `<dt>等級</dt><dd>${TIER[s.tier]}・人口 ${s.pop}・繁榮 ${s.pro}・地面防禦 ${s.def}</dd>
+      <dt>軌道防禦</dt><dd>${s.defs.length ? s.defs.map(([n, v]) => `${n} ${Math.round(v * 100)}%`).join('、') : '沒有'}</dd>
+      <dt>設施</dt><dd>${[s.yard ? '維修船塢（修船、造艦）' : '', s.depot ? '補給站（補飛彈）' : ''].filter(Boolean).join('、') || '沒有'}</dd>
+      <dt>太空</dt><dd>${SCENE[s.scene]}</dd>`}
+      ${s.cut ? `<dt>補給</dt><dd style="color:#ffb35a">切斷到第 ${s.cut} 週<small>不補飛彈、只修一半、防禦不重建</small></dd>` : ''}
+      ${s.intel ? `<dt>情報</dt><dd style="color:#7fdcff">偵察中，到第 ${ST.week + 3} 週</dd>` : ''}
+      ${s === T ? `<dt>任務</dt><dd style="color:#c9a7ff">攔截：帝國補給船隊・剩 2 週</dd>` : ''}</dl>
+      ${odds}
+      <div class="sqs"><div class="lab">小隊${s.seen > 0 ? `（${s.seen} 週前）` : ''}</div>
+        ${here.length ? here.map((q) => `<div class="sqrow" style="--c:${RELC[q.rel]}"><span>${q.lead ? '★' : ''}${q.name}</span><small>${q.ships ? q.ships.length : q.n} 艘・${q.rel === 'enemy' ? (q.to != null ? `預定 → ${S[q.to].name}` : s.seen ? '動向不明' : '駐守') : q.rel === 'ally' ? '友軍（AI）' : '你的小隊'}</small></div>`).join('') : `<div class="dim" style="font-size:13px;margin-top:4px">${unk ? '不明' : '沒有'}</div>`}</div>
+      <div class="for">下面的命令給：<b>${Q.lead ? '★' : ''}${who}</b>（在小隊面板換）</div>
+      ${acts.map(([n, d, cls, k]) => `<button class="act ${cls}" ${k === 'move' ? 'id="mv"' : `data-act="${n}"`}><b>${n}</b><small>${d}</small></button>`).join('')}
+    </div></section>`;
+  // place next to the system, away from the dock and screen edges
+  // beside the system (right if it fits), kept above the end-week button
+  const w = 470, h = el.offsetHeight || 640; let x = s.x + 60 + w <= 1880 ? s.x + 60 : s.x - 60 - w, y = s.y - 160;
+  x = Math.max(40, Math.min(1880 - w, x)); y = Math.max(196, Math.min(950 - h, y));
+  el.style.left = x + 'px'; el.style.top = y + 'px'; el.style.opacity = 1;
+  $('cx').onclick = () => { el.style.opacity = 0; ST.sel = -1; };
+  if ($('mv')) $('mv').onclick = () => { Q.to = s.id; CAP.toast(`${who}：這週結束時移動到 ${s.name}`); renderDock(); renderCard(); };
+}
+CAP.bg({ mode: 'deep', planet: false, drift: .3 });
+drawBase(); renderTop(); renderDock(); renderCard(); requestAnimationFrame(frame);
+CAP.ready();
+</script>
+</body>
+</html>

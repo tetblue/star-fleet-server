@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>任務報告</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="cap-ui.css">
+<style>
+/* 任務報告：左＝評等（大字）＋任務＋各艦狀態；右上＝戰果；右下＝戰功（逐項加上去）；下＝按鈕 */
+.grade{position:absolute;left:34px;top:170px;width:900px;height:470px}
+.gbox{position:absolute;left:30px;top:20px;width:340px;height:340px}
+.gbox svg{position:absolute;inset:0;animation:spin 30s linear infinite}
+.gbox .r2{animation-direction:reverse;animation-duration:18s}
+@keyframes spin{to{transform:rotate(360deg)}}
+.gbox .g{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font:700 250px/1 var(--en);color:var(--gc);text-shadow:0 0 40px color-mix(in srgb,var(--gc) 50%,transparent);animation:stamp .6s cubic-bezier(.2,1.6,.4,1) .4s both}
+.gbox .g.word{font:900 66px/1 var(--jp);letter-spacing:.04em;white-space:nowrap}
+@keyframes stamp{from{transform:scale(2.2);opacity:0}to{transform:none;opacity:1}}
+.gres{position:absolute;left:400px;top:46px;right:20px}
+.gres .en{font:700 14px var(--en);letter-spacing:.34em;color:var(--gc)}
+.gres h2{font:900 56px/1.15 var(--jp);letter-spacing:.12em;white-space:nowrap}
+.gres .mis{margin-top:14px;padding:12px 18px;background:rgba(8,14,30,.72);border-left:3px solid var(--gc);font:500 18px/1.5 var(--jp)}
+.gres .mis b{color:var(--gc);margin-right:6px}
+.gres .why{margin-top:10px;font:500 16px/1.5 var(--jp);color:var(--dim)}
+.gres .flags{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+.gres .flags .tag{font-size:14px;padding:3px 12px}
+.grade .ships{position:absolute;left:30px;right:20px;bottom:0;display:flex;gap:12px}
+.grade .ships .shipcard{flex:1;padding:10px 14px 10px 18px}
+.grade .ships .shipcard .nm{font-size:17px}
+.grade .ships .shipcard.lost{border-left-color:var(--red);opacity:.75}
+.grade .ships .shipcard.lost .nm::after{content:"擊沉";margin-left:8px;font:700 12px var(--jp);color:#fff;background:var(--red);padding:1px 6px}
+
+.res{right:34px;top:150px;width:900px;height:330px}
+.sgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px 30px}
+.sgrid .stat .v{font-size:42px}
+.kills{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+.kills span{padding:4px 12px;background:rgba(255,77,94,.12);border-left:2px solid var(--red);font:500 15px var(--jp);white-space:nowrap}
+.kills span b{font:700 16px var(--en);color:var(--red);margin-left:6px}
+
+.merit{right:34px;top:500px;width:900px;height:360px;--pc:var(--gold)}
+.mtotal{position:absolute;right:30px;top:76px;text-align:right}
+.mtotal b{display:block;font:700 96px/1 var(--en);color:var(--gold);text-shadow:0 0 30px rgba(255,194,74,.35)}
+.mtotal small{font:500 15px var(--jp);color:var(--dim)}
+.mrows{width:470px}
+.mrow{display:flex;align-items:center;gap:12px;padding:8px 14px;background:rgba(12,20,42,.7);opacity:0;translate:-20px 0;transition:opacity .4s,translate .4s}
+.mrow + .mrow{margin-top:6px}
+.mrow.show{opacity:1;translate:0 0}
+.mrow span{font:500 16px var(--jp)}
+.mrow b{margin-left:auto;font:700 22px var(--en);color:var(--gold)}
+.mrow.off{opacity:.35!important}.mrow.off b{color:var(--mute)}
+.macc{position:absolute;right:30px;top:226px;display:flex;gap:40px}
+.macc .stat .v{font-size:26px}
+
+.foot{position:absolute;left:34px;bottom:34px;display:flex;align-items:center;gap:14px}
+.foot .note{font:500 14px var(--jp);color:var(--mute);margin-left:10px;width:420px;line-height:1.5}
+.go{right:34px;top:880px;width:640px;height:160px}
+.go h3{font-size:58px}
+.go.gold{background:repeating-linear-gradient(-60deg,rgba(255,255,255,.07) 0 2px,transparent 2px 22px),linear-gradient(100deg,#ffc24a,#e0952a 60%,#b8681c);color:#2a1500}
+.go.gold .op,.go.gold .sub{color:#3a2200}.go.gold .chev i{background:#3a2200}
+.demo{position:absolute;left:660px;top:56px;display:flex;gap:6px;align-items:center;font:500 12px var(--jp);color:var(--mute)}
+.demo .chip{height:30px;padding:0 12px;font-size:13px}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="bg"></canvas><div class="ui" id="ui"></div></div>
+<script src="cap-ui.js"></script>
+<script>
+const { $, fmt, HULLS, hullSvg, bar, hpCol } = CAP;
+// 資料：captain.js capReport、CAP_MERIT { mission: [150,200,260,330,420], ghost: 150, noLoss: 100 }
+const MERIT = { mission: [150, 200, 260, 330, 420], ghost: 150, noLoss: 100 };
+const CASES = {
+  S: { ok: true, ghost: true, lost: 0, alarmed: false },
+  A: { ok: true, ghost: false, lost: 0, alarmed: true },
+  B: { ok: true, ghost: false, lost: 1, alarmed: true },
+  fail: { ok: false, why: '任務時限用完' },
+  ret: { ok: false, retreat: true, why: '戰況已保留：任務時限剩 8:12，修好船之後可以接續（隨機任務的選單）' },
+};
+const ST = {
+  name: '斬首・群山・普通', li: 1, ships: 3, t: '12:48',
+  mis: { type: '斬首', text: '擊沉敵方指揮艦（儀表上標示「目標」）' },
+  ks: 4, kg: 11, kf: 6, dmg: 18640, shots: 212, msl: 38, battleMerit: 260,
+  kills: [['雷達站', 2], ['飛彈陣地', 3], ['防空砲', 4], ['機動飛彈車', 2], ['突擊艦', 3], ['重砲艦（指揮艦）', 1]],
+  squad: [ { n: '艾爾巴號', t: 'gunship', hp: .64 }, { n: '雷霆號', t: 'assault', hp: .22 }, { n: '穿刺號', t: 'support', hp: .9 } ],
+  total: 4860, wins: 11, sorties: 14,
+  case: 'A',
+};
+
+function render() {
+  const C = CASES[ST.case], ok = C.ok, ret = !!C.retreat, ghost = ok && C.ghost, noLoss = ok && C.lost === 0;
+  const grade = !ok ? (ret ? '躍遷撤退' : '失敗') : ghost && noLoss ? 'S' : ghost || noLoss ? 'A' : 'B';
+  const gc = !ok ? (ret ? 'var(--gold)' : 'var(--red)') : grade === 'S' ? 'var(--gold)' : grade === 'A' ? 'var(--cyan)' : 'var(--own)';
+  const base = ok ? MERIT.mission[ST.li] : 0, gain = ST.battleMerit + base + (ghost ? MERIT.ghost : 0) + (noLoss ? MERIT.noLoss : 0);
+  const rows = [['戰鬥（擊毀）', ST.battleMerit, true], [`任務（${ST.name.split('・').pop()}）`, base, ok], ['無聲完成（全程沒有拉警報）', MERIT.ghost, ghost], ['零損失', MERIT.noLoss, noLoss]];
+  const lost = ok ? C.lost : 1;
+  $('ui').innerHTML = `
+    ${CAP.head({ title: '任務報告', en: 'MISSION REPORT', crumb: `<b>${ST.name}</b>　·　${ST.ships} 艘　·　時間 ${ST.t}`, back: '單人戰鬥' })}
+    <div class="demo">示範：${Object.keys(CASES).map((k) => `<button class="chip ${ST.case === k ? 'on' : ''}" data-c="${k}">${{ S: 'S', A: 'A', B: 'B', fail: '失敗', ret: '撤退' }[k]}</button>`).join('')}</div>
+    <div class="vtext">MISSION REPORT ／ ${grade}</div>
+
+    <section class="grade enter" style="--dx:-40px;--d:.05s;--gc:${gc}">
+      <div class="gbox">
+        <svg viewBox="0 0 340 340"><circle cx="170" cy="170" r="160" fill="none" stroke="${gc}" stroke-width="2" stroke-dasharray="4 10" opacity=".7"/></svg>
+        <svg class="r2" viewBox="0 0 340 340"><circle cx="170" cy="170" r="140" fill="none" stroke="${gc}" stroke-width="8" stroke-dasharray="120 40 30 40" opacity=".45"/></svg>
+        <div class="g ${grade.length > 1 ? 'word' : ''}">${grade}</div></div>
+      <div class="gres"><span class="en">${ok ? 'MISSION COMPLETE' : ret ? 'WARP RETREAT' : 'MISSION FAILED'}</span>
+        <h2>${ok ? `任務成功・評等 ${grade}` : ret ? '躍遷撤退' : '任務失敗'}</h2>
+        <div class="mis"><b>${ST.mis.type}</b>${ST.mis.text}</div>
+        ${C.why ? `<div class="why">${C.why}</div>` : ''}
+        <div class="flags">
+          <span class="tag" style="--tc:${C.alarmed === false ? 'var(--violet)' : 'var(--red)'};color:#fff">${C.alarmed === false ? '全程沒有拉警報' : '敵軍拉響了警報'}</span>
+          <span class="tag" style="--tc:${lost ? 'var(--red)' : 'var(--own)'};${lost ? 'color:#fff' : ''}">損失 ${lost} 艘</span></div></div>
+      <div class="ships">${ST.squad.map((s, i) => { const dead = i === 1 && lost; return `<div class="shipcard ${dead ? 'lost' : ''}"><div class="nm">${i === 0 ? '★ ' : ''}${s.n}<small>${HULLS[s.t].name}</small></div>
+        <div class="bars"><span>HULL</span>${bar(dead ? 0 : s.hp, hpCol(s.hp))}<b>${dead ? 0 : Math.round(s.hp * 100)}%</b></div></div>`; }).join('')}</div>
+    </section>
+
+    <section class="panel res tilt-r enter" style="--dx:40px;--d:.15s;--pc:var(--red)">
+      <div class="ph"><h2>戰果</h2><span class="en">RESULTS</span></div>
+      <div class="pb"><div class="sgrid">
+        <div class="stat"><span class="k">擊沉戰艦</span><span class="v">${ST.ks}<small>艘</small></span></div>
+        <div class="stat"><span class="k">摧毀地面單位</span><span class="v">${ST.kg}<small>個</small></span></div>
+        <div class="stat"><span class="k">擊墜戰機</span><span class="v">${ST.kf}<small>架</small></span></div>
+        <div class="stat"><span class="k">造成傷害</span><span class="v">${fmt(ST.dmg)}</span></div>
+        <div class="stat"><span class="k">主砲</span><span class="v">${ST.shots}<small>發</small></span></div>
+        <div class="stat"><span class="k">飛彈</span><span class="v">${ST.msl}<small>枚</small></span></div></div>
+        <div class="kills">${ST.kills.map(([k, n]) => `<span>${k}<b>×${n}</b></span>`).join('')}</div></div>
+    </section>
+
+    <section class="panel merit tilt-r enter" style="--dx:40px;--d:.25s">
+      <div class="ph"><h2>戰功</h2><span class="en">MERIT</span></div>
+      <div class="pb"><div class="mrows">${rows.map(([k, v, on]) => `<div class="mrow ${on ? '' : 'off'}"><span>${k}</span><b>${on ? '+' : ''}${on ? v : '—'}</b></div>`).join('')}</div>
+        <div class="macc"><div class="stat"><span class="k">累積</span><span class="v">${fmt(ST.total + gain)}</span></div><div class="stat"><span class="k">任務成功</span><span class="v">${ST.wins + (ok ? 1 : 0)}<small>／${ST.sorties + 1}</small></span></div></div>
+        <div class="mtotal"><b id="gain">+0</b><small>這次</small></div></div>
+    </section>
+
+    <div class="foot enter" style="--dy:20px;--d:.35s"><button class="btn" data-act="單人戰鬥">單人戰鬥</button><button class="btn" data-act="小隊編成">小隊編成</button>
+      ${ret ? '<button class="btn" data-act="放棄、出擊新任務">放棄、出擊新任務</button>' : ''}
+      <span class="note">損失的船任務後會修好。艦長模式沒有回放，也不算進指揮官的戰績。</span></div>
+    <button class="bigbtn go ${ret ? 'gold' : ''} enter" style="--dx:60px;--d:.45s" data-act="${ret ? '接續戰鬥' : '出擊新任務'}">
+      <span class="op">${ret ? 'RESUME' : 'NEXT SORTIE'}</span><h3>${ret ? '接續戰鬥' : '出擊新任務'}</h3>
+      <span class="sub">${ret ? '修好船之後回到同一個戰場・敵方剩下的會留著' : '同樣的小隊與設定・隨機的新戰場'}</span><div class="chev"><i></i><i></i><i></i></div></button>`;
+  document.querySelectorAll('[data-c]').forEach((b) => b.onclick = () => { ST.case = b.dataset.c; render(); document.getElementById('stage').classList.add('ready'); });
+  // 戰功：逐項顯示＋總數往上跳
+  const R = [...document.querySelectorAll('.mrow')]; R.forEach((r, i) => setTimeout(() => r.classList.add('show'), 700 + i * 260));
+  const el = $('gain'), t0 = performance.now() + 700, dur = 1300;
+  (function up(n) { const k = Math.max(0, Math.min(1, (n - t0) / dur)); el.textContent = '+' + fmt(gain * (1 - Math.pow(1 - k, 3))); if (k < 1) requestAnimationFrame(up); })(performance.now());
+}
+CAP.bg({ mode: 'deep' }); render(); CAP.ready();
+</script>
+</body>
+</html>

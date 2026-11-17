@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>戰鬥 HUD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="cap-ui.css">
+<style>
+/* 艦長戰鬥 HUD（captain.js capHud／capTopHud／capSquadHud／capShipHud／capRadar／capFeedHud／capWarpHud，capspace.js capSpaceHud）
+   戰鬥中要看得清楚：面板少、線條多；底色只在文字後面墊一點；顏色照遊戲：綠＝我方、紅＝敵、橘＝任務目標、黃＝注意 */
+:root{--tgt:#ff9f40}
+#scene,#own{position:absolute;inset:0;width:100%;height:100%}
+#scene{animation:sway 14s ease-in-out infinite}
+#own{animation:bob 4.2s ease-in-out infinite}
+@keyframes sway{0%,100%{transform:translate(0,0) rotate(0)}50%{transform:translate(-30px,12px) rotate(-.6deg)}}
+@keyframes bob{0%,100%{transform:translate(0,0)}50%{transform:translate(6px,-8px)}}
+.hud{position:absolute;inset:0;z-index:3;pointer-events:none;font-family:var(--jp);text-shadow:0 1px 3px rgba(0,0,0,.9)}
+.hud button,.hud .click{pointer-events:auto}
+.lw{position:absolute;border:1px solid rgba(90,200,255,.45)}
+.mono{font-family:var(--en)}
+
+/* --- top: mission, timer, alert box --- */
+.mis{position:absolute;left:50%;top:26px;translate:-50% 0;text-align:center;white-space:nowrap}
+.mis .t{font:900 22px var(--jp);letter-spacing:.14em}
+.mis .t em{font-style:normal;color:var(--tgt);margin-left:14px;font-family:var(--en);font-size:24px}
+.mis .d{font:500 14px var(--jp);color:#cfdaf0;margin-top:2px}
+.mis .lab{display:block;margin-bottom:2px}
+.alert{position:absolute;left:50%;top:104px;translate:-50% 0;width:340px;padding:8px 18px 10px;text-align:center;background:linear-gradient(90deg,transparent,rgba(6,10,20,.55) 15%,rgba(6,10,20,.55) 85%,transparent);border-top:2px solid var(--ac);border-bottom:1px solid color-mix(in srgb,var(--ac) 40%,transparent)}
+.alert b{display:block;font:900 22px var(--jp);letter-spacing:.24em;color:var(--ac)}
+.alert .det{display:flex;gap:2px;margin:6px 0 4px}
+.alert .det i{flex:1;height:6px;background:rgba(255,255,255,.14)}
+.alert .det i.on{background:var(--ac);box-shadow:0 0 6px var(--ac)}
+.alert small{font:500 13px var(--jp);color:#dfe8fa}
+.timer{position:absolute;right:58px;top:30px;text-align:right}
+.timer b{display:block;font:700 44px/1 var(--en);letter-spacing:.04em}
+.timer .lab{display:block}
+.fcmini{position:absolute;right:58px;top:110px;text-align:right;font:500 13px var(--jp);color:#cfdaf0}
+.fcmini b{font:900 18px var(--jp);color:var(--yellow);letter-spacing:.1em;margin-left:8px}
+.fcmini .mono{font-weight:700;letter-spacing:.2em;color:var(--yellow);margin-left:6px;font-size:12px}
+
+/* --- warp (replaces the alert box) --- */
+.warp{position:absolute;left:50%;top:104px;translate:-50% 0;width:520px;text-align:center;display:none}
+.warp b{font:900 22px var(--jp);letter-spacing:.14em;color:var(--own)}
+.warp b span{font-family:var(--en)}
+.warp .wb{height:8px;margin:8px 60px 4px;background:rgba(255,255,255,.14);clip-path:polygon(6px 0,100% 0,calc(100% - 6px) 100%,0 100%)}
+.warp .wb i{display:block;height:100%;background:var(--own);box-shadow:0 0 10px var(--own)}
+.warp small{font:500 13px var(--jp);color:#dfe8fa}
+.warping .alert{display:none}.warping .warp{display:block}
+#streaks{position:absolute;inset:0;z-index:2;pointer-events:none;opacity:0;transition:opacity .6s;background:repeating-radial-gradient(circle at 50% 50%,transparent 0 60px,rgba(140,255,200,.05) 60px 62px)}
+.warping #streaks{opacity:1;animation:zoom .5s linear infinite}
+@keyframes zoom{from{background-size:100% 100%}to{background-size:130% 130%}}
+
+/* --- crosshair & nose --- */
+.xh{position:absolute;left:960px;top:520px;width:0;height:0}
+.xh .ring{position:absolute;left:-15px;top:-15px;width:30px;height:30px;border:1.6px solid rgba(90,200,255,.85);border-radius:50%}
+.xh .tk{position:absolute;background:rgba(90,200,255,.85)}
+.xh .h1{left:-28px;top:-.8px;width:10px;height:1.6px}.xh .h2{left:18px;top:-.8px;width:10px;height:1.6px}.xh .v1{top:-28px;left:-.8px;width:1.6px;height:10px}.xh .v2{top:18px;left:-.8px;width:1.6px;height:10px}
+.xh .rng{position:absolute;left:0;top:24px;translate:-50% 0;font:600 12px var(--en);color:#dfe8fa;white-space:nowrap}
+.nose{position:absolute;width:0;height:0}
+.nose svg{position:absolute;left:-14px;top:-14px;width:28px;height:28px;overflow:visible}
+
+/* --- world markers --- */
+.mk{position:absolute;width:0;height:0}
+.mk .br{position:absolute;left:-13px;top:-13px;width:26px;height:26px;
+  background:linear-gradient(var(--c),var(--c)) 0 0/8px 2px no-repeat,linear-gradient(var(--c),var(--c)) 0 0/2px 8px no-repeat,
+             linear-gradient(var(--c),var(--c)) 100% 0/8px 2px no-repeat,linear-gradient(var(--c),var(--c)) 100% 0/2px 8px no-repeat,
+             linear-gradient(var(--c),var(--c)) 0 100%/8px 2px no-repeat,linear-gradient(var(--c),var(--c)) 0 100%/2px 8px no-repeat,
+             linear-gradient(var(--c),var(--c)) 100% 100%/8px 2px no-repeat,linear-gradient(var(--c),var(--c)) 100% 100%/2px 8px no-repeat}
+.mk .nm{position:absolute;left:18px;top:-20px;font:600 13px var(--jp);color:var(--c);white-space:nowrap}
+.mk .nm .mono{font-weight:700}
+.mk .hp{position:absolute;left:-12px;top:17px;width:24px;height:3px;background:rgba(0,0,0,.55)}
+.mk .hp i{display:block;height:100%;background:var(--c)}
+.mk.tgt .br{left:-15px;top:-15px;width:30px;height:30px;background:none;border:2px solid var(--c);transform:rotate(45deg) scale(.82)}
+.mk.lock .lk{position:absolute;left:-26px;top:-26px;width:52px;height:52px}
+.mk .lktx{position:absolute;left:-16px;top:28px;font:700 12px var(--en);letter-spacing:.14em;color:var(--red)}
+.mk.ftr .br{left:-6px;top:-6px;width:12px;height:12px;background:none;border:1.5px solid var(--c);clip-path:polygon(0 0,100% 0,50% 100%)}
+.mk.mate .nm{left:0;translate:-50% 0;top:-24px;color:var(--own)}
+.mk.mate .hp{left:-14px;top:-8px;width:28px}.mk.mate .hp i{background:var(--own)}
+.edge{position:absolute;display:flex;align-items:center;gap:8px;font:700 14px var(--jp);color:var(--red);white-space:nowrap}
+.edge svg{width:26px;height:26px}
+.edge.pulse{animation:blink .5s steps(2) infinite}
+@keyframes blink{50%{opacity:.35}}
+
+/* --- hazard (space danger zone) --- */
+.haz{position:absolute;left:50%;top:226px;translate:-50% 0;font:900 20px var(--jp);letter-spacing:.06em;color:var(--hc);white-space:nowrap;animation:hz 1.1s ease-in-out infinite}
+@keyframes hz{50%{opacity:.55}}
+.hzarrow{position:absolute;width:0;height:0}
+.hzarrow svg{position:absolute;left:-18px;top:-14px;width:36px;height:28px}
+.hzarrow span{position:absolute;white-space:nowrap;font:700 14px var(--jp);translate:-50% 0}
+#edgeflash{position:absolute;inset:0;z-index:4;pointer-events:none;border:22px solid var(--hc);opacity:0}
+.inzone #edgeflash{animation:ef .32s ease-in-out infinite alternate}
+@keyframes ef{from{opacity:.25}to{opacity:.45}}
+.misin{position:absolute;left:50%;top:640px;translate:-50% 0;font:900 20px var(--jp);color:var(--red);letter-spacing:.14em;animation:blink .5s steps(2) infinite}
+
+/* --- feed (left middle) --- */
+.feed{position:absolute;left:34px;top:360px;width:520px}
+.feed div{font:500 16px var(--jp);line-height:26px;white-space:nowrap;transition:opacity 1.4s}
+.feed div::before{content:"";display:inline-block;width:14px;height:2px;margin:0 10px 4px 0;background:currentColor;vertical-align:middle}
+.feed .kill{color:#ffcf8a}.feed .bad{color:#ff8a7a}.feed .ok{color:#8fe39a}.feed .info{color:#dfe8fa}
+
+/* --- squad (bottom left) --- */
+.sq{position:absolute;left:34px;bottom:40px;width:330px}
+.fc{display:flex;align-items:baseline;gap:10px;padding:6px 0 8px;border-bottom:1px solid rgba(90,200,255,.35);margin-bottom:8px;white-space:nowrap}
+.fc .lab{font-size:10px}
+.fc b{font:900 19px var(--jp);color:var(--yellow);letter-spacing:.1em}
+.fc .mono{font:700 11px var(--en);letter-spacing:.2em;color:var(--yellow)}
+.fc .ord{margin-left:auto;font:500 13px var(--jp);color:#cfdaf0}
+.mate{position:relative;padding:6px 10px 7px 14px;background:linear-gradient(90deg,rgba(6,10,20,.55),transparent)}
+.mate + .mate{margin-top:4px}
+.mate.cur{background:linear-gradient(90deg,rgba(63,223,143,.22),transparent)}
+.mate.cur::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--own)}
+.mate .n{display:flex;justify-content:space-between;font:700 15px var(--jp);white-space:nowrap}
+.mate .n small{font:600 12px var(--jp)}
+.mate .b2{display:grid;gap:3px;margin-top:5px;width:220px}
+.mate .b2 .bar{height:4px}.mate .b2 .bar.sh{height:3px}
+.mate.dead{opacity:.45}
+.other{width:100%;margin-top:8px;padding:6px 10px 7px 14px;border-left:3px solid var(--ally);background:linear-gradient(90deg,rgba(6,10,20,.5),transparent);font:500 14px var(--jp);color:#9fd8ff;white-space:nowrap;display:flex;justify-content:space-between;align-items:center;gap:16px}
+.other:hover{background:linear-gradient(90deg,rgba(90,168,255,.25),transparent)}
+.other kbd,.wpn kbd,.hint kbd{font:700 11px var(--en);border:1px solid currentColor;padding:0 5px;margin-right:4px}
+
+/* --- own ship (bottom centre) --- */
+.own{position:absolute;left:50%;bottom:40px;translate:-50% 0;width:460px}
+.own .row3{display:grid;grid-template-columns:56px 1fr 60px 64px;align-items:center;gap:4px 10px;font:700 12px var(--en);letter-spacing:.14em;color:#cfdaf0}
+.own .row3 b{font:700 17px var(--en);letter-spacing:.02em;color:var(--text);text-align:right}
+.own .row3 em{font:700 13px var(--jp);font-style:normal;letter-spacing:.04em}
+.own .sbar{height:8px;display:flex;gap:2px}
+.own .sbar i{flex:1;background:rgba(255,255,255,.14)}
+.own .sbar i.on{background:var(--sc)}
+.own .spd{display:flex;justify-content:space-between;margin-top:8px;font:700 16px var(--jp);white-space:nowrap}
+.own .spd .mono{font-size:20px}
+.own .thr{height:4px;margin-top:6px;background:rgba(255,255,255,.12)}
+.own .thr i{display:block;height:100%;background:var(--cyan);box-shadow:0 0 6px var(--cyan)}
+.own .nm{display:flex;align-items:baseline;gap:10px;margin-bottom:6px;font:900 18px var(--jp);letter-spacing:.1em;color:var(--own);white-space:nowrap}
+.own .nm small{font:700 11px var(--en);letter-spacing:.2em;color:var(--dim)}
+
+/* --- weapons (bottom right) --- */
+.wpns{position:absolute;right:34px;bottom:40px;display:flex;gap:8px;align-items:flex-end}
+.wpn{position:relative;width:132px;height:118px;padding:10px 12px;background:linear-gradient(180deg,rgba(10,18,40,.6),rgba(6,10,20,.35));border-top:2px solid var(--wc,var(--cyan));clip-path:polygon(8% 0,100% 0,92% 100%,0 100%)}
+.wpn .k{font:700 11px var(--en);letter-spacing:.14em;color:#cfdaf0}
+.wpn .n{font:700 15px var(--jp);white-space:nowrap;margin-top:2px}
+.wpn .v{position:absolute;left:14px;bottom:8px;font:700 22px var(--en);letter-spacing:.06em;color:var(--wc,var(--cyan))}
+.wpn .v.dim{color:#8fa3c7}
+.wpn svg.cd{position:absolute;right:12px;top:12px;width:30px;height:30px;transform:rotate(-90deg)}
+.wpn .n{padding-right:30px}
+.wpn .rf{position:absolute;left:14px;right:14px;bottom:4px;height:2px;background:rgba(255,255,255,.12)}
+.wpn .rf i{display:block;height:100%;background:var(--yellow)}
+
+/* --- radar (right, above weapons) --- */
+.radar{position:absolute;right:52px;bottom:190px;width:220px;height:220px}
+.radar .disc{position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle,rgba(6,12,26,.6),rgba(6,12,26,.35));border:1.5px solid rgba(90,200,255,.55)}
+.radar .disc::before{content:"";position:absolute;inset:25%;border-radius:50%;border:1px solid rgba(90,200,255,.3)}
+.radar .disc::after{content:"";position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(90,200,255,.18)}
+.radar .sweep{position:absolute;inset:0;border-radius:50%;background:conic-gradient(rgba(90,200,255,.32),transparent 60deg);animation:rot 3.6s linear infinite}
+@keyframes rot{to{transform:rotate(360deg)}}
+.radar svg{position:absolute;inset:0}
+.radar .km{position:absolute;left:50%;bottom:-20px;translate:-50% 0;font:600 12px var(--en);color:#cfdaf0}
+.radar .hz{position:absolute;right:-6px;top:-22px;font:700 12px var(--jp);color:#5fd8ff;white-space:nowrap}
+
+/* --- demo hint --- */
+.hint{position:absolute;left:50%;bottom:6px;translate:-50% 0;z-index:5;font:500 12px var(--jp);color:rgba(200,215,240,.6);white-space:nowrap;display:flex;gap:18px}
+.hint button{color:inherit;font:inherit}
+.hint button:hover{color:var(--cyan)}
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="bg"></canvas>
+  <canvas id="scene" width="1920" height="1080"></canvas>
+  <canvas id="own" width="1920" height="1080"></canvas>
+  <div id="streaks"></div>
+  <div class="hud" id="hud"></div>
+  <div id="edgeflash"></div>
+</div>
+<script src="cap-ui.js"></script>
+<script>
+const { $, fmt } = CAP;
+// 照 captain.js：重砲艦（重粒子主砲 cd 6 秒、飛彈 32 枚 鎖定 1.4 秒、護盾超載 cd 40 秒）；任務時限 CAP_RULE.time 1500 秒、躍遷充能 5 秒
+const ST = {
+  mis: { name: '斬首', prog: '0／1', text: '擊沉敵方指揮艦（儀表上標示「目標」）' },
+  tLim: 1500, t: 412,
+  fc: { name: '手動射擊', en: 'MANUAL', key: 'X' }, order: '集火我的目標',
+  ship: { n: '艾爾巴號', k: '重砲艦', en: 'GUNSHIP', hp: 508, hpMax: 620, sh: 214, shMax: 320, boost: .72 },
+  main: { name: '重粒子主砲', cd: 6 }, msl: { n: 32, left: 21, lockT: 1.4 }, skill: { name: '護盾超載', cd: 40, key: 'F' },
+  mates: [ { n: '艾爾巴號', cur: true, hp: .82, sh: .67, st: ['被偵測', 'var(--yellow)'] },
+           { n: '雷霆號', hp: .36, sh: .2, st: ['暴露', '#ff9a5a'] },
+           { n: '穿刺號', hp: 1, sh: .9, st: ['', ''] } ],
+  other: { name: '第2小隊', n: 1, of: 1 },
+  hazard: { name: '離子風暴', col: '#5fd8ff', km: 1.2 },
+  feed: [
+    ['info', '第1小隊：開始執行「斬首」'], ['ok', '穿刺號：電子干擾 8 秒'], ['kill', '擊沉 帝國突擊艦（+40 戰功）'],
+    ['bad', '雷霆號 船體受損，剩 36%'], ['info', '點防禦攔截飛彈 ×3'], ['kill', '擊墜戰機 ×2'], ['bad', '敵方雷達發現了你'],
+  ],
+};
+let det = .18, alarm = false, warp = null, inZone = false, lockT = 0, mainCd = 2.4, skillCd = 0, fi = 0, t0 = performance.now();
+
+/* ---------- static scene (pre-rendered once) ---------- */
+(function drawScene() {
+  const g = $('scene').getContext('2d'); let s = 11; const r = () => (s = (s * 9301 + 49297) % 233280) / 233280;
+  // ion-storm wall on the right (the zone edge) — soft cyan glow
+  const ion = g.createLinearGradient(1500, 0, 1920, 0); ion.addColorStop(0, 'rgba(95,216,255,0)'); ion.addColorStop(1, 'rgba(95,216,255,.28)'); g.fillStyle = ion; g.fillRect(1500, 0, 420, 1080);
+  // asteroids (bigger = closer)
+  for (let i = 0; i < 26; i++) {
+    const x = r() * 1920, y = 120 + r() * 760, R = 6 + Math.pow(r(), 3) * 120, gr = g.createRadialGradient(x - R * .4, y - R * .4, R * .1, x, y, R);
+    gr.addColorStop(0, '#5a5470'); gr.addColorStop(.7, '#2a2638'); gr.addColorStop(1, '#141220'); g.fillStyle = gr;
+    g.beginPath(); for (let k = 0; k < 9; k++) { const a = k / 9 * Math.PI * 2, rr = R * (.75 + r() * .3); k ? g.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr) : g.moveTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); } g.closePath(); g.fill();
+    g.strokeStyle = 'rgba(160,140,255,.25)'; g.lineWidth = 1.5; g.stroke();
+  }
+  // distant enemy hulls (red rim)
+  const hull = (x, y, L) => { g.fillStyle = '#1b1d2c'; g.beginPath(); g.moveTo(x, y); g.lineTo(x + L, y - L * .08); g.lineTo(x + L * 1.2, y + L * .04); g.lineTo(x + L * .2, y + L * .14); g.closePath(); g.fill(); g.strokeStyle = 'rgba(255,90,90,.6)'; g.lineWidth = 1.2; g.stroke(); g.fillStyle = 'rgba(255,170,120,.9)'; g.fillRect(x - 3, y + L * .03, 4, 3); };
+  hull(1180, 410, 70); hull(720, 330, 46); hull(1390, 560, 36); hull(560, 470, 30);
+  // own ship: rear 3/4 view, bottom centre (kept small: it must not hide targets)
+  const o = $('own').getContext('2d'), cx = 960, cy = 790;
+  o.translate(cx, 880); o.scale(.62, .62); o.translate(-cx, -cy); o.globalAlpha = .92;
+  const body = o.createLinearGradient(0, cy - 120, 0, cy + 90); body.addColorStop(0, '#6b7aa6'); body.addColorStop(.5, '#2c3556'); body.addColorStop(1, '#0d1120');
+  o.fillStyle = body; o.beginPath(); o.moveTo(cx - 260, cy + 40); o.lineTo(cx - 140, cy - 40); o.lineTo(cx - 40, cy - 120); o.lineTo(cx + 40, cy - 120); o.lineTo(cx + 140, cy - 40); o.lineTo(cx + 260, cy + 40); o.lineTo(cx + 160, cy + 90); o.lineTo(cx - 160, cy + 90); o.closePath(); o.fill();
+  o.strokeStyle = 'rgba(160,215,255,.55)'; o.lineWidth = 2; o.stroke();
+  o.fillStyle = '#20283f'; o.fillRect(cx - 50, cy - 170, 100, 60); o.strokeRect(cx - 50, cy - 170, 100, 60);
+  for (const ex of [-110, 0, 110]) { const eg = o.createRadialGradient(cx + ex, cy + 60, 0, cx + ex, cy + 60, 60); eg.addColorStop(0, 'rgba(220,250,255,.95)'); eg.addColorStop(.3, 'rgba(90,200,255,.6)'); eg.addColorStop(1, 'rgba(60,140,255,0)'); o.fillStyle = eg; o.beginPath(); o.arc(cx + ex, cy + 60, 60, 0, 7); o.fill(); }
+  o.fillStyle = '#3fdf8f'; o.fillRect(cx - 120, cy + 4, 70, 4); o.fillRect(cx + 50, cy + 4, 70, 4);
+})();
+
+/* ---------- HUD markup ---------- */
+const segs = (n, on, c) => `<div class="sbar" style="--sc:${c}">${Array.from({ length: n }, (_, i) => `<i class="${i < on ? 'on' : ''}"></i>`).join('')}</div>`;
+const ring = (id, c) => `<svg class="cd" viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" stroke="rgba(255,255,255,.14)" stroke-width="4" fill="none"/><circle id="${id}" cx="20" cy="20" r="16" stroke="${c}" stroke-width="4" fill="none" stroke-dasharray="100.5" stroke-dashoffset="0"/></svg>`;
+$('hud').innerHTML = `
+  <div class="mis"><span class="lab">MISSION ／ 任務</span><div class="t">${ST.mis.name}<em>${ST.mis.prog}</em></div><div class="d">${ST.mis.text}</div></div>
+  <div class="alert" id="alert"><b id="alTx">偵測中</b><div class="det" id="det"></div><small id="alSub">躲進小行星區、星雲，或大石頭後面</small></div>
+  <div class="warp"><b>躍遷撤退充能 <span id="wT">5.0</span> 秒</b><div class="wb"><i id="wB" style="width:0"></i></div><small>按 J 取消</small></div>
+  <div class="timer"><span class="lab">TIME LEFT ／ 剩餘時間</span><b id="timer">00:00</b></div>
+
+  <div class="mk tgt lock" id="m0" style="--c:var(--tgt)"><div class="br"></div><svg class="lk" viewBox="0 0 52 52" style="transform:rotate(-90deg)"><circle id="lkArc" cx="26" cy="26" r="24" stroke="var(--yellow)" stroke-width="2.5" fill="none" stroke-dasharray="150.8" stroke-dashoffset="150.8"/></svg>
+    <span class="nm"><b>TGT 指揮艦・帝國重砲艦</b> <span class="mono">412</span></span><div class="hp"><i style="width:88%"></i></div><span class="lktx" id="lkTx"></span></div>
+  <div class="mk" id="m1" style="--c:var(--red)"><div class="br"></div><span class="nm">帝國突擊艦 <span class="mono">286</span></span><div class="hp"><i style="width:60%"></i></div></div>
+  <div class="mk" id="m2" style="--c:var(--red)"><div class="br"></div><span class="nm">帝國電戰艦 <span class="mono">530</span></span><div class="hp"><i style="width:100%"></i></div></div>
+  <div class="mk ftr" id="m3" style="--c:#ff7a64"><div class="br"></div></div>
+  <div class="mk ftr" id="m4" style="--c:#ff7a64"><div class="br"></div></div>
+  <div class="mk mate" id="m5"><span class="nm">雷霆號</span><div class="hp"><i style="width:36%;background:var(--red)"></i></div></div>
+  <div class="mk mate" id="m6"><span class="nm">穿刺號・干擾中</span><div class="hp"><i style="width:100%"></i></div></div>
+  <div class="edge pulse" style="left:40px;top:250px"><svg viewBox="0 0 26 26"><path d="M2 13l16-10-5 10 5 10z" fill="var(--red)"/></svg>敵軍躍遷 <span class="mono" id="inb">12</span> 秒・640</div>
+
+  <div class="xh"><div class="ring"></div><i class="tk h1"></i><i class="tk h2"></i><i class="tk v1"></i><i class="tk v2"></i><span class="rng">2.1 km</span></div>
+  <div class="nose" style="left:1000px;top:548px"><svg viewBox="-14 -14 28 28"><path d="M-9 0h6M3 0h6M0 -9v6M0 3v6" stroke="#ffffffaa" stroke-width="2" id="noseX"/><circle id="noseArc" r="12" stroke="#ffffffaa" stroke-width="2" fill="none" stroke-dasharray="75.4" stroke-dashoffset="0" transform="rotate(-90)"/></svg></div>
+
+  <div class="haz" id="haz"></div>
+  <div class="hzarrow" id="hzA" style="left:1250px;top:470px"><svg viewBox="0 0 36 28"><path d="M34 14L6 0l6 14-6 14z" fill="#5fd8ff"/></svg><span style="left:0;top:20px;color:#5fd8ff" id="hzAt"></span></div>
+  <div class="hzarrow" id="hzB" style="left:670px;top:570px;display:none"><svg viewBox="0 0 36 28" style="transform:rotate(180deg)"><path d="M34 14L6 0l6 14-6 14z" fill="var(--own)"/></svg><span style="left:0;top:20px;color:var(--own)">脫離方向</span></div>
+  <div class="misin" id="misin" style="display:none">飛彈來襲 ×2</div>
+
+  <div class="feed" id="feed"></div>
+
+  <div class="sq">
+    <div class="fc"><span class="lab">火控 <kbd style="color:#cfdaf0">X</kbd></span><b>${ST.fc.name}</b><span class="mono">${ST.fc.en}</span><span class="ord">僚艦：${ST.order}</span></div>
+    ${ST.mates.map((m) => `<div class="mate ${m.cur ? 'cur' : ''}"><div class="n"><span>${m.cur ? '▶ ' : ''}${m.n}</span><small style="color:${m.st[1]}">${m.st[0]}</small></div>
+      <div class="b2">${CAP.bar(m.hp, m.hp < .35 ? 'var(--red)' : 'var(--own)')}${CAP.bar(m.sh, '#7cc4ff', 'sh')}</div></div>`).join('')}
+    <button class="other click" id="swap"><span>${ST.other.name}（AI）　${ST.other.n}／${ST.other.of} 艘</span><span><kbd>B</kbd>切換</span></button>
+  </div>
+
+  <div class="own">
+    <div class="nm">${ST.ship.n}<small>${ST.ship.en}・${ST.ship.k}</small></div>
+    <div class="row3"><span>HULL</span>${segs(30, 0, 'var(--own)')}<b id="hpN"></b><em></em>
+      <span>SHLD</span>${segs(30, 0, '#7cc4ff')}<b id="shN"></b><em id="shTag" style="color:#7cc4ff"></em>
+      <span>BOOST</span>${segs(30, 0, 'var(--yellow)')}<b></b><em id="bTag" style="color:var(--yellow)"></em></div>
+    <div class="spd"><span>速度 <span class="mono" id="spd">1,240</span> km/h</span><span style="color:#5fd8ff" id="near">離子風暴 1.2 km・小行星區</span></div>
+    <div class="thr"><i id="thr" style="width:70%"></i></div>
+  </div>
+
+  <div class="radar"><div class="disc"></div><div class="sweep"></div>
+    <svg viewBox="0 0 220 220">
+      <circle cx="110" cy="110" r="150" fill="none" stroke="rgba(95,216,255,.95)" stroke-width="2" transform="translate(70 -20)"/>
+      <circle cx="110" cy="110" r="128" fill="none" stroke="rgba(95,216,255,.35)" stroke-dasharray="4 4" transform="translate(70 -20)"/>
+      <circle cx="70" cy="58" r="34" fill="rgba(255,90,70,.07)" stroke="rgba(255,90,70,.3)"/>
+      <circle cx="60" cy="168" r="14" fill="none" stroke="var(--own)" stroke-width="1.5"/>
+      <g fill="var(--red)"><path d="M140 64l4 8h-8z"/><path d="M92 46l4 8h-8z"/><path d="M152 92l4 8h-8z"/></g>
+      <rect x="116" y="38" width="7" height="7" fill="var(--tgt)" transform="rotate(45 119.5 41.5)"/>
+      <g fill="rgba(255,120,100,.9)"><rect x="128" y="80" width="2" height="2"/><rect x="134" y="84" width="2" height="2"/></g>
+      <g fill="var(--own)"><circle cx="100" cy="124" r="2.5"/><circle cx="122" cy="120" r="2.5"/></g><circle cx="110" cy="110" r="3.5" fill="#fff"/>
+    </svg><span class="km">2.1 km</span><span class="hz">— 離子風暴（戰區邊界）</span></div>
+
+  <div class="wpns">
+    <div class="wpn" id="wMain" style="--wc:var(--own)"><div class="k">左鍵</div><div class="n">${ST.main.name}</div><span class="v" id="mainV"></span>${ring('mainR', 'var(--own)')}</div>
+    <div class="wpn" id="wMsl" style="--wc:var(--red)"><div class="k">右鍵</div><div class="n">飛彈 <span id="mslN"></span>／${ST.msl.n}</div><span class="v" id="mslV"></span>${ring('mslR', 'var(--yellow)')}<div class="rf"><i style="width:40%"></i></div></div>
+    <div class="wpn" id="wSk" style="--wc:#7cc4ff"><div class="k">${ST.skill.key}・技能</div><div class="n">${ST.skill.name}</div><span class="v" id="skV"></span>${ring('skR', '#7cc4ff')}</div>
+  </div>`;
+document.getElementById('stage').insertAdjacentHTML('beforeend', `<div class="hint"><button id="hJ">J 躍遷撤退</button><button id="hH">H 進入危險區</button><button id="hF">F 護盾超載</button><button id="hA">A 拉警報</button><span>（示範操作）</span></div>`);
+
+/* ---------- feed ---------- */
+function pushFeed() {
+  const [c, m] = ST.feed[fi++ % ST.feed.length], d = document.createElement('div'); d.className = c; d.textContent = m;
+  const f = $('feed'); f.appendChild(d); while (f.children.length > 6) f.firstChild.remove();
+  setTimeout(() => (d.style.opacity = 0), 6000);
+}
+for (let i = 0; i < 4; i++) pushFeed(); setInterval(pushFeed, 2600);
+
+/* ---------- live values ---------- */
+const P = [ [1180, 410, 'm0'], [740, 330, 'm1'], [1400, 560, 'm2'], [880, 250, 'm3'], [910, 270, 'm4'], [840, 690, 'm5'], [1110, 700, 'm6'] ];
+function setSeg(el, v) { const L = el.querySelectorAll('i'); L.forEach((x, i) => x.classList.toggle('on', i < Math.round(v * L.length))); }
+function fmtT(s) { s = Math.max(0, s); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(Math.floor(s % 60)).padStart(2, '0'); }
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(.1, (now - last) / 1000); last = now; const t = (now - t0) / 1000;
+  $('timer').textContent = fmtT(ST.tLim - ST.t - t);
+  // markers drift with the camera sway
+  for (const [x, y, id] of P) { const k = id.charCodeAt(1); $(id).style.transform = `translate(${x + Math.sin(t * .45 + k) * 14 - 30 * Math.sin(t * Math.PI / 7)}px,${y + Math.cos(t * .5 + k) * 8}px)`; }
+  // detection bar: rises while seen, alarm when full
+  if (!alarm) { det += dt * (Math.sin(t * .3) > -.2 ? .05 : -.08); det = Math.max(0, Math.min(1, det)); if (det >= 1) { alarm = true; CAP.glitch(200); } }
+  const ac = alarm ? 'var(--red)' : det > .02 ? 'var(--yellow)' : 'var(--own)';
+  $('alert').style.setProperty('--ac', ac);
+  $('alTx').textContent = alarm ? '警報中' : det > .02 ? '偵測中' : '未被發現';
+  $('alSub').textContent = alarm ? '增援還有 2 波（35 秒）・位置暴露' : det > .02 ? '躲進小行星區、星雲，或大石頭後面' : '';
+  $('det').style.display = alarm ? 'none' : 'flex';
+  if (!$('det').children.length) $('det').innerHTML = '<i></i>'.repeat(32);
+  setSeg($('det'), det);
+  // own ship bars
+  const S = ST.ship; S.sh = Math.min(S.shMax, S.sh + dt * (skillCd > 32 ? 60 : 4));
+  setSeg(document.querySelectorAll('.own .sbar')[0], S.hp / S.hpMax); setSeg(document.querySelectorAll('.own .sbar')[1], S.sh / S.shMax);
+  S.boost = .55 + .4 * Math.sin(t * .6); setSeg(document.querySelectorAll('.own .sbar')[2], S.boost);
+  $('hpN').textContent = Math.round(S.hp); $('shN').textContent = Math.round(S.sh);
+  $('shTag').textContent = skillCd > 32 ? '超載' : ''; $('bTag').textContent = S.boost > .9 ? '過載' : '';
+  $('spd').textContent = fmt(1100 + 260 * Math.sin(t * .4)); $('thr').style.width = (62 + 18 * Math.sin(t * .4)) + '%';
+  // main gun cooldown
+  mainCd -= dt; if (mainCd <= -1.2) mainCd = ST.main.cd;
+  const mr = mainCd > 0 ? mainCd / ST.main.cd : 0;
+  $('mainV').textContent = mainCd > 0 ? mainCd.toFixed(1) + 's' : 'READY'; $('mainV').className = 'v' + (mainCd > 0 ? ' dim' : '');
+  $('mainR').style.strokeDashoffset = 100.5 * mr; $('noseArc').style.strokeDashoffset = 75.4 * mr;
+  $('noseX').setAttribute('stroke', mainCd > 0 ? '#ffffffaa' : 'var(--own)'); $('noseArc').style.display = mainCd > 0 ? '' : 'none';
+  // missile lock on the target
+  lockT += dt; if (lockT > ST.msl.lockT + 1.6) { lockT = 0; ST.msl.left = Math.max(0, ST.msl.left - 2); if (!ST.msl.left) ST.msl.left = 21; }
+  const L = Math.min(1, lockT / ST.msl.lockT);
+  $('lkArc').style.strokeDashoffset = 150.8 * (1 - L); $('lkArc').setAttribute('stroke', L >= 1 ? 'var(--red)' : 'var(--yellow)');
+  $('lkTx').textContent = L >= 1 ? 'LOCK' : ''; $('mslN').textContent = ST.msl.left;
+  $('mslV').textContent = L >= 1 ? 'LOCK' : Math.round(L * 100) + '%'; $('mslV').className = 'v' + (L >= 1 ? '' : ' dim'); $('mslR').style.strokeDashoffset = 100.5 * (1 - L);
+  // skill
+  skillCd = Math.max(0, skillCd - dt);
+  $('skV').textContent = skillCd > 0 ? Math.ceil(skillCd) + 's' : 'READY'; $('skV').className = 'v' + (skillCd > 0 ? ' dim' : ''); $('skR').style.strokeDashoffset = 100.5 * (skillCd / ST.skill.cd);
+  // warp-in countdown on the edge arrow
+  $('inb').textContent = Math.max(0, 12 - (t % 13)).toFixed(0);
+  // hazard
+  const H = ST.hazard;
+  $('haz').style.setProperty('--hc', inZone ? 'var(--red)' : H.col);
+  $('haz').textContent = inZone ? `${H.name}：船體受損，往綠色箭頭離開！` : `接近戰區邊界：${H.name}（${H.km} km）`;
+  $('hzAt').textContent = inZone ? `${H.name} 受損中` : `${H.name} ${H.km} km`;
+  $('hzB').style.display = inZone ? '' : 'none';
+  if (inZone) S.hp = Math.max(60, S.hp - dt * 12);
+  // incoming missiles blink now and then
+  $('misin').style.display = (t % 9) < 2.2 ? '' : 'none';
+  // warp charge
+  if (warp != null) { const u = Math.min(1, (now - warp) / 5000); $('wT').textContent = Math.max(0, 5 - (now - warp) / 1000).toFixed(1); $('wB').style.width = u * 100 + '%';
+    if (u >= 1) { warp = null; document.getElementById('stage').classList.remove('warping'); CAP.glitch(600); CAP.toast('躍遷完成：任務中止，戰況已保留（示意）'); } }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* ---------- demo controls ---------- */
+const stage = document.getElementById('stage');
+function toggleWarp() { if (warp == null) { warp = performance.now(); stage.classList.add('warping'); } else { warp = null; stage.classList.remove('warping'); CAP.toast('取消躍遷'); } }
+function toggleZone() { inZone = !inZone; stage.classList.toggle('inzone', inZone); }
+function skill() { if (skillCd > 0) return CAP.toast(`${ST.skill.name}：冷卻中`); skillCd = ST.skill.cd; ST.ship.sh = ST.ship.shMax; CAP.toast('護盾超載：護盾充滿，8 秒內受到的傷害減半'); }
+function alarmNow() { det = 1; }
+document.documentElement.style.setProperty('--hc', ST.hazard.col);
+$('hJ').onclick = toggleWarp; $('hH').onclick = toggleZone; $('hF').onclick = skill; $('hA').onclick = alarmNow;
+$('swap').onclick = () => { CAP.glitch(); CAP.toast('切換到第2小隊（第1小隊交給 AI）'); };
+addEventListener('keydown', (e) => { const k = e.key.toLowerCase(); if (k === 'j') toggleWarp(); else if (k === 'h') toggleZone(); else if (k === 'f') skill(); else if (k === 'a') alarmNow(); else if (k === 'b') $('swap').click(); });
+CAP.bg({ mode: 'space', planet: false, drift: .5 });
+CAP.ready();
+</script>
+</body>
+</html>

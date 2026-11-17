@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>艦長模式</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="cap-ui.css">
+<style>
+/* 艦長模式入口：左＝兩張主要模式卡（艦長生涯、隨機任務），下＝還沒開放的模式；右＝小隊展示＋次要入口（戰艦庫、船員、武器配置） */
+.modes{position:absolute;left:34px;top:190px;width:980px;perspective:1600px}
+.mcard{position:relative;display:block;width:100%;height:250px;overflow:hidden;cursor:pointer;color:#0b1430;
+  clip-path:polygon(0 0,calc(100% - 40px) 0,100% 40px,100% 100%,40px 100%,0 calc(100% - 40px));transform:rotateY(6deg);transform-origin:0 50%;transition:filter .2s,transform .2s}
+.mcard + .mcard{margin-top:22px}
+.mcard:hover{filter:brightness(1.12);transform:rotateY(4deg) translateX(8px)}
+.mcard.career{background:repeating-linear-gradient(-60deg,rgba(255,255,255,.07) 0 2px,transparent 2px 22px),linear-gradient(100deg,#29b6ff,#2f86ff 55%,#3a5ad8)}
+.mcard.rand{background:repeating-linear-gradient(-60deg,rgba(255,255,255,.06) 0 2px,transparent 2px 22px),linear-gradient(100deg,#2fcf7f,#1d9e64 55%,#17605a);color:#04180e}
+.mcard::after{content:"";position:absolute;top:-20%;bottom:-20%;width:110px;left:-200px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.45),transparent);transform:skewX(-20deg);animation:shine 5s 1.6s infinite}
+.mcard.rand::after{animation-delay:3.6s}
+.mcard .en{position:absolute;left:44px;top:30px;font:700 15px var(--en);letter-spacing:.32em;opacity:.8}
+.mcard h2{position:absolute;left:40px;top:50px;font:900 78px/1 var(--jp);letter-spacing:.16em;white-space:nowrap}
+.mcard p{position:absolute;left:44px;top:146px;width:620px;font:500 17px/1.55 var(--jp);opacity:.88}
+.mcard .st{position:absolute;left:44px;bottom:22px;display:flex;gap:10px}
+.mcard .st span{padding:3px 12px;background:rgba(6,14,36,.82);color:#dff3ff;font:700 15px var(--jp);letter-spacing:.06em;white-space:nowrap}
+.mcard.rand .st span{background:rgba(3,22,14,.82);color:#d6ffe9}
+.mcard .art{position:absolute;right:40px;top:50%;translate:0 -50%;opacity:.9}
+.mcard .go{position:absolute;right:46px;bottom:26px;display:flex}
+.mcard .go i{width:16px;height:26px;background:currentColor;clip-path:polygon(0 0,50% 0,100% 50%,50% 100%,0 100%,50% 50%);margin-left:-3px;animation:chev 1.2s infinite}
+.mcard .go i:nth-child(2){animation-delay:.15s}.mcard .go i:nth-child(3){animation-delay:.3s}
+.mcard .badge{left:20px;top:16px}
+.soon{position:absolute;left:34px;top:740px;width:980px}
+.soon .lab{margin-bottom:10px}
+.soon .seg{gap:12px}
+.soon .chip{height:58px;padding:0 26px;flex-direction:column;align-items:flex-start;justify-content:center;gap:0;opacity:.55;cursor:default}
+.soon .chip b{font:700 18px var(--jp);letter-spacing:.1em}
+.soon .chip small{font:700 10px var(--en);letter-spacing:.22em;color:var(--dim)}
+.soon .chip em{font-style:normal;font:500 12px var(--jp);color:var(--mute)}
+
+.show{right:34px;top:190px;width:800px;height:430px;--pc:var(--own)}
+.squadline{position:relative;height:250px;margin:8px 0 4px;background:radial-gradient(ellipse at 50% 80%,rgba(63,223,143,.12),transparent 60%);border-bottom:1px solid rgba(63,223,143,.3)}
+.squadline .sh{position:absolute;bottom:26px;text-align:center}
+.squadline .sh b{display:block;font:700 15px var(--jp);color:var(--own);letter-spacing:.1em;margin-top:4px}
+.squadline .sh small{display:block;font:600 11px var(--en);letter-spacing:.2em;color:var(--dim)}
+.squadline .sh svg{animation:bob 4s ease-in-out infinite}
+.squadline .sh:nth-child(2) svg{animation-delay:-1.3s}.squadline .sh:nth-child(3) svg{animation-delay:-2.6s}
+@keyframes bob{50%{transform:translateY(-6px)}}
+.squadline .grid{position:absolute;inset:0;background:repeating-linear-gradient(90deg,rgba(63,223,143,.06) 0 1px,transparent 1px 60px)}
+.subs{position:absolute;right:60px;top:660px;display:grid;grid-template-columns:repeat(2,auto);gap:22px 60px}
+.subs .hexbtn .lab b small{font:500 13px var(--jp);color:var(--dim);margin-left:8px;letter-spacing:.04em}
+.subs .hexbtn .lab span{display:block;font:500 13px var(--jp);color:var(--dim);margin-top:2px;white-space:nowrap}
+.subs .tagn{position:absolute;left:62px;top:2px}
+.last{position:absolute;left:34px;bottom:30px;width:980px;display:flex;align-items:center;gap:22px;padding:14px 26px;background:linear-gradient(90deg,rgba(8,12,28,.85),rgba(8,12,28,.4));border-left:3px solid var(--gold)}
+.last .g{font:900 46px/1 var(--en);color:var(--gold)}
+.last .t{font:500 16px var(--jp);color:var(--dim)}
+.last .t b{color:var(--text);font-weight:700}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="bg"></canvas><div class="ui" id="ui"></div></div>
+<script src="cap-ui.js"></script>
+<script>
+const { $, fmt, HULLS, hullSvg } = CAP;
+// 資料：captain.js capLoad / capSummary / capHubItems、capcareer ccSummary
+const ST = {
+  merit: 4860, sorties: 14, wins: 11,
+  rand: { diff: '普通', fac: '聯盟', squad: ['assault', 'gunship', 'support'] },
+  career: { week: 12, rank: '特戰隊長', money: 18450, squads: 2, saved: true },
+  fallen: 3,
+  last: { grade: 'A', name: '斬首', where: '群山', merit: 410 },
+};
+const SOON = [['主線', 'CAMPAIGN', '特種部隊的劇情戰役'], ['無限戰場', 'ENDLESS', '一場接一場的連續任務'], ['模擬室', 'SIMULATOR', '自由布置敵軍與目標'], ['訓練場', 'TRAINING', '操艦、潛行、火控的教學']];
+
+$('ui').innerHTML = `
+  ${CAP.head({ title: '艦長', en: 'CAPTAIN MODE', crumb: '特種部隊隊長：帶 1～5 艘特製戰艦執行敵後作戰。直接操控戰艦，潛入、破壞、斬首，再撤離', back: '單人戰鬥' })}
+  ${CAP.res([['戰功', fmt(ST.merit), 'var(--gold)', 'merit'], ['出擊', ST.sorties, 'var(--cyan)', 'play'], ['任務成功', `${ST.wins}／${ST.sorties}`, 'var(--own)', 'target']])}
+  <div class="vtext">CAPTAIN ／ SPECIAL OPERATIONS ／ SQUAD</div>
+
+  <div class="modes">
+    <button class="mcard career enter" style="--dx:-50px;--d:.1s" data-act="艦長生涯">
+      <i class="badge"></i>
+      <span class="en">CAPTAIN CAREER</span><h2>艦長生涯</h2>
+      <p>回合制的星圖：所有勢力都是戰艦小隊，小隊戰的結果決定星系的所有權。損傷會留下，小隊全滅＝生涯結束。</p>
+      <div class="st">${ST.career.saved ? `<span>繼續・第 ${ST.career.week} 週</span><span>${ST.career.rank}</span><span>${ST.career.squads} 個小隊</span><span>資金 ${fmt(ST.career.money)}</span>` : '<span>開新局</span>'}</div>
+      <div class="art"><svg width="250" height="150" viewBox="0 0 100 60" fill="none" stroke="#0b1430" stroke-width="1.6" opacity=".55">
+        <path d="M10 48L32 14L64 26L86 8M32 14L44 52L64 26"/><circle cx="10" cy="48" r="4" fill="#0b1430"/><circle cx="32" cy="14" r="4" fill="#0b1430"/><circle cx="64" cy="26" r="5" fill="#dff3ff"/><circle cx="86" cy="8" r="4" fill="#0b1430"/><circle cx="44" cy="52" r="4" fill="#0b1430"/></svg></div>
+      <div class="go"><i></i><i></i><i></i></div>
+    </button>
+    <button class="mcard rand enter" style="--dx:-50px;--d:.2s" data-act="隨機任務">
+      <span class="en">MISSION</span><h2>隨機任務</h2>
+      <p>隨機生成的敵後作戰：潛入、破壞、斬首、全滅，完成後撤離。</p>
+      <div class="st"><span>${ST.rand.diff}</span><span>${ST.rand.fac}</span><span>出擊 ${ST.sorties}</span><span>${ST.rand.squad.map((k) => HULLS[k].name).join('＋')}</span></div>
+      <div class="art">${hullSvg('assault', '#04180e', 230)}</div>
+      <div class="go"><i></i><i></i><i></i></div>
+    </button>
+  </div>
+
+  <div class="soon enter" style="--dy:20px;--d:.35s"><div class="lab">準備中 ／ COMING LATER</div>
+    <div class="seg">${SOON.map(([n, e, d]) => `<div class="chip lock" title="${d}"><b>🔒 ${n}</b><small>${e}</small></div>`).join('')}</div></div>
+
+  <section class="panel show tilt-r enter" style="--dx:40px;--d:.25s">
+    <div class="ph"><h2>我的小隊</h2><span class="en">SQUAD ・ RANDOM MISSION</span><span class="r">${ST.rand.squad.length} 艘・你親自駕駛其中一艘</span></div>
+    <div class="pb"><div class="squadline"><div class="grid"></div>
+      ${ST.rand.squad.map((k, i) => `<div class="sh" style="left:${30 + i * 245}px">${hullSvg(k, i === 0 ? 'var(--own)' : '#8fd8b4', 200)}<b>${i === 0 ? '★ ' : ''}${HULLS[k].name}</b><small>${HULLS[k].en} ・ ${i + 1} 號艦</small></div>`).join('')}</div>
+      <div style="display:flex;gap:40px;margin-top:6px">${ST.rand.squad.map((k) => `<div class="stat"><span class="k">${HULLS[k].name}</span><span class="v">${HULLS[k].hp}<small>＋盾 ${HULLS[k].sh}</small></span></div>`).join('')}</div></div>
+  </section>
+
+  <div class="subs enter" style="--dx:40px;--d:.4s">
+    <button class="hexbtn" data-act="戰艦庫"><div class="hex"><svg viewBox="0 0 24 24">${CAP.icon.yard}</svg></div><div class="lab"><b>戰艦庫</b><small>HANGAR</small><span>小隊的特製戰艦・${ST.rand.squad.map((k) => HULLS[k].name).join('、')}</span></div></button>
+    <button class="hexbtn" data-act="船員" style="position:relative"><div class="hex"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M15 4.8a3.5 3.5 0 010 6.4M17.5 14.5c2.3.8 4 2.8 4 5.5"/></svg></div><div class="lab"><b>船員</b><small>CREW</small><span>各艦的軍官、經歷與紀念牆・陣亡 ${ST.fallen} 人</span></div></button>
+    <button class="hexbtn" data-act="武器配置"><div class="hex"><svg viewBox="0 0 24 24">${CAP.icon.target}</svg></div><div class="lab"><b>武器配置</b><small>LOADOUT</small><span>武器開火、轉向、推進、受損的表現預覽</span></div></button>
+    <button class="hexbtn" data-act="修改按鍵"><div class="hex"><svg viewBox="0 0 24 24">${CAP.icon.gear}</svg></div><div class="lab"><b>按鍵</b><small>CONTROLS</small><span>滑鼠＋鍵盤操艦</span></div></button>
+  </div>
+
+  <div class="last enter" style="--dy:20px;--d:.5s"><span class="g">${ST.last.grade}</span>
+    <div class="t">上一次任務 <b>${ST.last.name}・${ST.last.where}</b>　評等 ${ST.last.grade}・戰功 <b class="gold">+${ST.last.merit}</b></div>
+    <button class="btn sm" style="margin-left:auto" data-act="任務報告">看報告</button></div>`;
+CAP.bg({ mode: 'space' }); CAP.ready();
+</script>
+</body>
+</html>

@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>交戰評估</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="cap-ui.css">
+<style>
+/* 交戰評估（capcareer_ui.js ccBattleAsk）：左＝我方、右＝敵方、中＝勝率與組成；下＝親自指揮／撤退 */
+.lead{position:absolute;left:50%;top:150px;translate:-50% 0;width:1100px;text-align:center;font:500 19px var(--jp);color:#dfe8fa;line-height:1.6}
+.lead b{color:var(--red)}.lead em{font-style:normal;color:var(--own);font-weight:700}
+.ready .lead.enter{translate:-50% 0}
+.side{top:236px;width:540px;height:584px}
+.mine{left:34px;--pc:var(--own)}
+.foe{right:34px;--pc:var(--red);border-color:rgba(255,77,94,.25)}
+.sqt{display:flex;align-items:center;gap:10px;margin:4px 0 10px;font:900 19px var(--jp);letter-spacing:.08em}
+.sqt small{font:500 13px var(--jp);color:var(--dim);letter-spacing:.04em}
+.sqt .ai{margin-left:auto;font:700 11px var(--en);letter-spacing:.2em;color:var(--ally);border:1px solid var(--ally);padding:0 6px}
+.ship{display:grid;grid-template-columns:150px 1fr 74px;gap:4px 14px;align-items:center;padding:10px 14px;background:rgba(12,20,42,.7);border-left:3px solid var(--own)}
+.ship + .ship{margin-top:6px}
+.foe .ship{border-left-color:var(--red);grid-template-columns:150px 1fr 50px}
+.ship .nm{font:700 17px var(--jp);white-space:nowrap}
+.ship .nm small{display:block;font:600 11px var(--en);letter-spacing:.16em;color:var(--dim)}
+.ship .bars{display:grid;gap:4px}
+.ship .bar{height:5px}
+.ship .sv{text-align:right}
+.ship .sv b{display:block;font:700 26px/1 var(--en)}
+.ship .sv small{font:500 11px var(--jp);color:var(--dim)}
+.ship .mk{font:700 15px var(--en);color:var(--gold);text-align:right}
+.defs{margin-top:16px;padding-top:12px;border-top:1px solid var(--line-2)}
+.def{display:flex;align-items:center;gap:12px;font:500 15px var(--jp);margin-top:6px}
+.def .bar{flex:1;height:5px}
+.def b{font:700 15px var(--en);width:44px;text-align:right}
+.sub{margin-top:14px;font:500 13px var(--jp);color:var(--dim);line-height:1.5}
+
+.center{position:absolute;left:600px;top:236px;width:720px;height:570px}
+.ring{position:absolute;left:50%;top:0;translate:-50% 0;width:300px;height:300px}
+.ring svg{position:absolute;inset:0;transform:rotate(-90deg)}
+.ring .in{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.ring .in .lab{margin-bottom:6px}
+.ring .in .odds{font-size:96px}
+.ring .in .verdict{font:700 16px var(--jp);letter-spacing:.2em;margin-top:6px}
+.ring .ticks{position:absolute;inset:-14px;border-radius:50%;background:repeating-conic-gradient(rgba(150,200,255,.35) 0 .6deg,transparent .6deg 6deg);-webkit-mask:radial-gradient(circle,transparent 63%,#000 64%,#000 68%,transparent 69%);mask:radial-gradient(circle,transparent 63%,#000 64%,#000 68%,transparent 69%);animation:rot 40s linear infinite}
+@keyframes rot{to{transform:rotate(360deg)}}
+.fx{position:absolute;left:40px;right:40px;top:322px}
+.fx .ttl{display:flex;justify-content:space-between;margin-bottom:8px}
+.fx .ttl span{font:700 12px var(--en);letter-spacing:.24em}
+.tug{display:grid;grid-template-columns:120px 1fr 120px;align-items:center;gap:12px;margin-top:9px;font:500 15px var(--jp)}
+.tug .k{text-align:center;color:var(--dim);font-size:14px;grid-column:2;grid-row:1;position:relative;z-index:1;text-shadow:0 0 4px #000}
+.tug .a{text-align:right;font:700 18px var(--en);color:var(--own)}
+.tug .b{font:700 18px var(--en);color:var(--red)}
+.tug .track{grid-column:2;grid-row:1;height:22px;display:flex;background:rgba(255,255,255,.06);clip-path:polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%)}
+.tug .track i{display:block;height:100%}
+.tug .track i:first-child{background:linear-gradient(90deg,rgba(63,223,143,.25),rgba(63,223,143,.7))}
+.tug .track i:last-child{background:linear-gradient(90deg,rgba(255,77,94,.7),rgba(255,77,94,.25))}
+.note{margin-top:14px;text-align:center;font:500 13px var(--jp);color:var(--mute)}
+
+.go{left:600px;top:842px;width:720px;height:170px}
+.go .op{top:44px}.go h3{top:60px}
+.flee{position:absolute;right:34px;top:870px;width:540px;height:120px;padding:22px 34px;border:1px solid rgba(255,77,94,.6);background:rgba(40,10,20,.6);clip-path:polygon(16px 0,100% 0,calc(100% - 16px) 100%,0 100%);transition:background .2s}
+.flee:hover{background:rgba(90,20,40,.75)}
+.flee b{display:block;font:900 34px var(--jp);letter-spacing:.2em;color:#ff8a96}
+.flee small{display:block;font:500 15px var(--jp);color:var(--dim);margin-top:4px}
+.flee .en{position:absolute;right:34px;top:24px;font:700 12px var(--en);letter-spacing:.3em;color:var(--red)}
+.calc{position:absolute;left:34px;top:870px;width:540px;font:500 14px var(--jp);color:var(--dim);line-height:1.6}
+.calc label{display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--text);margin-bottom:6px}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="bg"></canvas><div class="ui" id="ui"></div></div>
+<script src="cap-ui.js"></script>
+<script>
+const { $, fmt, bar, hpCol } = CAP;
+// 數字照 capsquad.js 的 capOdds 實戰校正（突擊艦 21%、重砲艦 59%、支援艦 43%、電戰艦 26%）
+const ST = {
+  sys: '薩恩', week: 12, scene: '小行星帶', att: false, money: 18450, merit: 1240, busy: false,
+  win: .46,
+  mine: [
+    { name: '第1小隊', lead: true, ships: [
+      { n: '艾爾巴號', k: '重砲艦', en: 'GUNSHIP', hp: .82, sh: 1, ms: .7, sv: .61 },
+      { n: '雷霆號', k: '突擊艦', en: 'ASSAULT', hp: .36, sh: .5, ms: .4, sv: .14 },
+      { n: '穿刺號', k: '電戰艦', en: 'EW', hp: 1, sh: 1, ms: 1, sv: .29 } ] },
+    { name: '第2小隊', ai: true, ships: [ { n: '斷鋒號', k: '支援艦', en: 'SUPPORT', hp: .9, sh: 1, ms: 1, sv: .45 } ] },
+  ],
+  defs: [ ['防禦站', .92], ['防禦平台', 1] ],
+  foe: [
+    { name: '帝國第3小隊', ships: [ { n: '帝國重砲艦', k: '重砲艦', hp: 1, sh: 1, mk: 'Mk II' }, { n: '帝國突擊艦', k: '突擊艦', hp: .8, sh: .6, mk: 'Mk II' }, { n: '帝國突擊艦', k: '突擊艦', hp: 1, sh: 1, mk: 'Mk I' } ] },
+    { name: '帝國第5小隊', ships: [ { n: '帝國匿蹤艦', k: '匿蹤艦', hp: 1, sh: 1, mk: 'Mk I' }, { n: '帝國電戰艦', k: '電戰艦', hp: .55, sh: .3, mk: 'Mk I' } ] },
+  ],
+  // 勝率的組成（capOdds：ln 戰力 = ln 總火力 + 0.28 ln 總耐久 − 0.09(小隊數−1)；飛彈約 4% 先扣耐久；軌道防禦算成耐久）
+  // [項目, 我方, 敵方, 說明, 我方佔的比例（畫拔河條）]
+  parts: [ ['火力', 8.6, 9.3, '每艘船依艦種給值，乘上 Mk', .48], ['耐久', 2390, 2310, '船體＋護盾×0.12', .51], ['飛彈先制', '−4%', '−6%', '開戰時被對方飛彈先扣的耐久', .55], ['軌道防禦', '+1.8 艘', '—', '防禦站≈1.3 艘突擊艦、平台≈半艘', .78], ['小隊數', '2 隊', '2 隊', '分兩隊戰力略降', .5] ],
+};
+const oddCol = (w) => w >= .6 ? 'var(--own)' : w >= .4 ? 'var(--yellow)' : 'var(--red)';
+const nShips = (L) => L.reduce((a, q) => a + q.ships.length, 0);
+
+function render() {
+  const W = ST.win, col = oddCol(W), C = 2 * Math.PI * 130;
+  $('ui').innerHTML = `
+    ${CAP.head({ title: ST.att ? `進攻：${ST.sys}` : `敵軍來襲：${ST.sys}`, en: 'ENGAGEMENT ・ BATTLE ASSESSMENT', crumb: `<b>第 ${ST.week} 週</b>・太空：${ST.scene}` })}
+    ${CAP.res([['資金', fmt(ST.money), 'var(--gold)', 'money'], ['戰功', fmt(ST.merit), 'var(--own)', 'merit'], ['週', ST.week, 'var(--dim)', 'week']])}
+    <div class="vtext">ENGAGEMENT ／ ${ST.sys} ／ WEEK ${ST.week}</div>
+
+    <div class="lead enter" style="--dy:-10px;--d:.05s"><b>${ST.foe.map((q) => q.name).join('、')}</b> 進攻你所在的 ${ST.sys}。
+      我方 <em>${ST.mine.length} 隊 ${nShips(ST.mine)} 艘</em>，敵方 <b>${ST.foe.length} 隊 ${nShips(ST.foe)} 艘</b>、軌道防禦 ${ST.defs.length} 座（我方）。</div>
+
+    <section class="panel side mine tilt-l enter" style="--dx:-40px;--d:.1s">
+      <div class="ph"><h2>我方</h2><span class="en">YOUR FORCES</span><span class="r"><span class="good">船體</span>・<span style="color:var(--ally)">護盾</span>・<span class="warn">飛彈</span>・右＝存活率</span></div>
+      <div class="pb">
+        ${ST.mine.map((q) => `<div class="sqt" style="color:${q.ai ? 'var(--ally)' : 'var(--own)'}">${q.lead ? '★ ' : ''}${q.name}<small>${q.lead ? '親自指揮' : ''}</small>${q.ai ? '<span class="ai">AI</span>' : ''}</div>
+          ${q.ships.map((c) => `<div class="ship" ${q.ai ? 'style="border-left-color:var(--ally)"' : ''}><div class="nm">${c.n}<small>${c.en}・${c.k}</small></div>
+            <div class="bars">${bar(c.hp, hpCol(c.hp))}${bar(c.sh, 'var(--ally)')}${bar(c.ms, 'var(--yellow)')}</div>
+            <div class="sv"><b style="color:${oddCol(c.sv)}">${Math.round(c.sv * 100)}%</b><small>存活率</small></div></div>`).join('')}`).join('')}
+        <div class="defs"><div class="lab">軌道防禦 ／ ORBITAL DEFENCE</div>
+          ${ST.defs.map(([n, v]) => `<div class="def"><span style="width:90px">${n}</span>${bar(v, 'var(--own)')}<b>${Math.round(v * 100)}%</b></div>`).join('')}</div>
+        <div class="sub">第2小隊由 AI 操控，戰鬥中按 <b class="cy">B</b> 可以切換過去指揮。</div>
+      </div>
+    </section>
+
+    <section class="panel side foe tilt-r enter" style="--dx:40px;--d:.15s">
+      <div class="ph"><h2>敵方</h2><span class="en">HOSTILE</span><span class="r">帝國・2 隊</span></div>
+      <div class="pb">
+        ${ST.foe.map((q) => `<div class="sqt" style="color:var(--red)">${q.name}<small>${q.ships.length} 艘</small></div>
+          ${q.ships.map((c) => `<div class="ship"><div class="nm">${c.n}<small>${c.k}</small></div>
+            <div class="bars">${bar(c.hp, 'var(--red)')}${bar(c.sh, 'var(--ally)')}</div><div class="mk">${c.mk}</div></div>`).join('')}`).join('')}
+      </div>
+    </section>
+
+    <div class="center enter" style="--dy:20px;--d:.2s">
+      <div class="ring"><div class="ticks"></div>
+        <svg viewBox="0 0 300 300"><circle cx="150" cy="150" r="130" stroke="rgba(255,255,255,.1)" stroke-width="14" fill="none"/>
+          <circle id="arc" cx="150" cy="150" r="130" stroke="${col}" stroke-width="14" fill="none" stroke-dasharray="${C}" stroke-dashoffset="${C}" style="transition:stroke-dashoffset 1.2s cubic-bezier(.2,.8,.2,1);filter:drop-shadow(0 0 8px ${col})"/></svg>
+        <div class="in"><span class="lab">評估勝率 ／ WIN ODDS</span><span class="odds" id="oddsN" style="color:${col}">0<small>%</small></span>
+          <span class="verdict" style="color:${col}">${W >= .6 ? '有利' : W >= .4 ? '勢均力敵' : '不利'}</span></div></div>
+      <div class="fx"><div class="ttl"><span class="good">我方</span><span class="dim">勝率的組成</span><span class="bad">敵方</span></div>
+        ${ST.parts.map(([k, a, b, tip, r]) => {
+          return `<div class="tug" title="${tip}"><span class="a">${a}</span><div class="track"><i style="width:${r * 100}%"></i><i style="width:${(1 - r) * 100}%"></i></div><span class="k">${k}</span><span class="b">${b}</span></div>`; }).join('')}
+        <div class="note">公式不含親自操艦的技術、地形。打輸的一方撤到相鄰的己方星系，沒有就投降。</div></div>
+    </div>
+
+    <div class="calc enter" style="--dx:-30px;--d:.35s">
+      <label><input type="checkbox" id="busy" ${ST.busy ? 'checked' : ''}> 示範：這週已經親自打過一場</label>
+      ${ST.busy ? '這週已經打過一場：這場用公式計算，結果照上面的勝率擲出來。' : '親自指揮：進入戰場親自操艦。開戰後隨時可以躍遷撤退。'}</div>
+
+    <button class="bigbtn go enter" style="--dy:30px;--d:.3s" id="fight">
+      <span class="op">${ST.busy ? 'AUTO RESOLVE' : 'TAKE COMMAND'}</span><h3>${ST.busy ? '迎戰（計算）' : '親自指揮'}</h3>
+      <span class="sub">${ST.busy ? '這週已經打過一場：這場用公式計算' : '進入戰場親自操艦（可以隨時躍遷撤退）'}</span>
+      <div class="chev"><i></i><i></i><i></i></div></button>
+    <button class="flee enter" style="--dx:40px;--d:.35s" id="flee"><span class="en">RETREAT</span><b>撤退</b><small>${ST.att ? '取消進攻，回到原本的星系' : '撤到相鄰的己方星系；這裡交給其他守軍'}</small></button>`;
+  // animate the ring + number
+  requestAnimationFrame(() => { $('arc').style.strokeDashoffset = C * (1 - W); });
+  const t0 = performance.now(); (function step(n) { const k = Math.min(1, (n - t0) / 1200), e = 1 - Math.pow(1 - k, 3); $('oddsN').innerHTML = `${Math.round(W * 100 * e)}<small>%</small>`; if (k < 1) requestAnimationFrame(step); })(t0);
+  $('busy').onchange = (e) => { ST.busy = e.target.checked; render(); document.getElementById('stage').classList.add('ready'); };
+  $('fight').onclick = () => { CAP.glitch(500); CAP.toast(ST.busy ? '計算中：照勝率擲出結果（示意）' : '進入戰場：佔領戰（示意）'); };
+  $('flee').onclick = () => CAP.modal(`<h4>撤退？</h4><p>${ST.att ? '取消進攻，小隊回到原本的星系。' : `你的小隊撤到相鄰的己方星系，${ST.sys}交給其他守軍。`}</p>
+    <div class="mbtns"><button class="btn" onclick="CAP.close()">返回</button><button class="btn danger" onclick="CAP.close();CAP.toast('已撤退（示意）')">確定撤退</button></div>`);
+}
+CAP.bg({ mode: 'red' });
+render(); CAP.ready();
+</script>
+</body>
+</html>

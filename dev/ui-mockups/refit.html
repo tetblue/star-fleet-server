@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>改裝</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="cap-ui.css">
+<style>
+/* 改裝：左上＝整修庫預覽（改到的槽位亮紫）；左下＝改裝前後比較；右＝五個槽位的模組與 Mk；右下＝價錢＋送進船塢 */
+:root{--fit:var(--violet)}
+.view{left:34px;top:180px;width:830px;height:360px;--pc:var(--fit);background:linear-gradient(180deg,rgba(40,24,80,.35),rgba(8,12,28,.6))}
+.view .grid{position:absolute;inset:60px 20px 20px;background:repeating-linear-gradient(90deg,rgba(169,123,255,.08) 0 1px,transparent 1px 40px),repeating-linear-gradient(0deg,rgba(169,123,255,.08) 0 1px,transparent 1px 40px)}
+.view .ship{position:absolute;left:50%;top:55%;translate:-50% -50%}
+.pin{position:absolute;display:flex;align-items:center;gap:8px;font:700 13px var(--jp);white-space:nowrap;color:var(--dim)}
+.pin i{width:12px;height:12px;border:2px solid currentColor;transform:rotate(45deg);background:rgba(8,12,28,.9)}
+.pin.chg{color:#d6c2ff}.pin.chg i{background:var(--fit);box-shadow:0 0 12px var(--fit);animation:pulse 1s infinite alternate}
+@keyframes pulse{to{box-shadow:0 0 22px var(--fit)}}
+.view .cap{position:absolute;left:26px;bottom:18px;font:500 15px var(--jp);color:var(--dim)}
+.view .cap b{color:var(--text)}
+
+.cmp{left:34px;top:560px;width:830px;height:420px;--pc:var(--cyan)}
+.crow{display:grid;grid-template-columns:150px 1fr 150px;gap:14px;align-items:center;font:500 15px var(--jp);padding:2px 0;height:29px}
+.crow .k{color:var(--dim)}
+.crow .tr{position:relative;height:10px;background:rgba(255,255,255,.08)}
+.crow .tr i{position:absolute;top:0;bottom:0;left:0}
+.crow .tr .a{background:rgba(160,180,220,.55)}
+.crow .tr .b{height:4px;top:auto;bottom:-6px}
+.crow .v{text-align:right;font:700 17px var(--en);white-space:nowrap}
+.crow .v s{color:var(--mute);text-decoration:none;margin-right:6px;font-weight:600}
+
+.slots{left:900px;top:180px;width:986px;height:600px;--pc:var(--fit)}
+.srow{display:grid;grid-template-columns:120px 1fr 230px;gap:14px;align-items:start;padding:12px 0;border-top:1px solid var(--line-2)}
+.srow:first-child{border-top:0}
+.srow .sn{font:900 18px var(--jp);letter-spacing:.08em;padding-top:6px}
+.srow .sn small{display:block;font:700 10px var(--en);letter-spacing:.2em;color:var(--dim)}
+.srow.chg .sn{color:#d6c2ff}
+.srow .desc{margin-top:6px;font:500 13px var(--jp);color:var(--dim)}
+.srow .desc .w{color:var(--yellow)}
+.chip{height:36px;padding:0 16px;font-size:15px}
+.chip.on{background:var(--fit);color:#140a26}
+.chip.lock{opacity:.4;cursor:not-allowed}
+.mks .chip{padding:0 14px;font-family:var(--en);font-weight:700}
+
+.cost{left:900px;top:800px;width:380px;height:180px;--pc:var(--gold)}
+.cost .kv{font-size:15px;gap:6px 18px}
+.cost .tot{font:700 30px var(--en);color:var(--gold)}
+.go{right:34px;top:800px;width:580px;height:180px;background:repeating-linear-gradient(-60deg,rgba(255,255,255,.07) 0 2px,transparent 2px 22px),linear-gradient(100deg,#b48bff,#7d4ef0 60%,#5b3dcc);color:#140a26}
+.go .op,.go .sub{color:#2a1450}.go .chev i{background:#2a1450}
+.go.dis{filter:grayscale(.8) brightness(.6);cursor:not-allowed}
+.stop{position:absolute;left:900px;top:990px;font:500 14px var(--jp);color:var(--mute)}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="bg"></canvas><div class="ui" id="ui"></div></div>
+<script src="cap-ui.js"></script>
+<script>
+const { $, fmt, hullSvg } = CAP;
+// 資料照 caphulls.js：CAP_SLOTS、CAP_MODS（倍率）、CAP_MK＝[1,1,1.1,1.2]；價錢照 capcareer.js CC_RULE.fit
+const ST = {
+  money: 18450, week: 12, sys: '蓋爾', sq: '第1小隊', name: '艾爾巴號', hull: 'gunship', lv: 3, eta: 2,
+  mkCap: 2, mkRes: 2,                  // 船 Lv3＝Mk II；研發到 Mk II
+  researched: { beam: false, react: false },
+  base: { hp: 620, sh: 320, main: { name: '重粒子主砲', dmg: 85, cd: 6, range: 320, arc: 30 }, tur: { n: 4, dmg: 8, cd: 1.6 }, pd: 2, msl: { n: 32, dmg: 55 }, ftr: 0, max: 8.5, turn: 16 },
+  cur: { mod: { tur: 'heavy', def: 'armor' }, mk: { main: 2, def: 2 } },
+  price: { base: 50, mod: { main: 300, tur: 150, msl: 200, def: 220, eng: 160 }, stock: .5, mk: [0, 0, 250, 450] },
+};
+const SLOTS = [['main', '主砲', 'MAIN GUN'], ['tur', '副砲', 'TURRETS'], ['msl', '飛彈艙／機庫', 'MISSILE BAY'], ['def', '防禦', 'DEFENSE'], ['eng', '引擎', 'ENGINE']];
+const BASE_NAME = { main: '重粒子主砲（原廠）', tur: '原廠砲塔', msl: '原廠飛彈艙', def: '原廠', eng: '原廠引擎' };
+const MODS = {
+  main: { rail: ['磁軌砲', '射得快、單發輕，射界左右各 45°', { cd: 2.2, k: 1, range: 240, arc: 45 }], rapid: ['速射砲', '射界幾乎全方位，單發輕、射程短', { cd: .9, k: .85, range: 200, arc: 150 }], beam: ['光束砲', '持續照射、每秒傷害最高，射程最短', { cd: .35, k: 1.1, range: 170, arc: 60 }, 'beam'] },
+  tur: { heavy: ['重型砲塔', '傷害高、射得慢、比較不準', { dmg: 1.8, cd: 1.5 }], aa: ['防空砲塔', '對艦傷害低；點防禦多 2 座、攔截距離遠，專打飛彈與艦載機', { dmg: .6, pd: 2 }] },
+  msl: { heavy: ['重飛彈', '數量少、一發傷害高，鎖定比較久', { n: .4, dmg: 2.2 }], swarm: ['蜂群飛彈', '數量多、一發傷害低，鎖定快', { n: 2, dmg: .45 }], hangar: ['機庫', '帶 6 架護航機，飛彈只剩三分之一', { n: .35, ftr: 6 }] },
+  def: { armor: ['重裝甲', '船體多 25%，護盾少 10%、速度慢 10%', { hp: 1.25, sh: .9, max: .9 }], shield: ['強化護盾', '護盾多 35%，船體少 15%', { sh: 1.35, hp: .85 }], react: ['反應裝甲', '船體多 5%，飛彈對船體的傷害少 30%', { hp: 1.05 }, 'react'] },
+  eng: { cruise: ['巡航引擎', '均衡：巡航速度、加速都快一點', {}], sprint: ['衝刺引擎', '最高速度快 20%，轉向慢 20%', { max: 1.2, turn: .8 }], agile: ['機動引擎', '轉向快 30%、側移快，最高速度慢 10%', { turn: 1.3, max: .9 }] },
+};
+const LOCK_NAME = { beam: '光束砲', react: '反應裝甲' }, MKN = ['', 'Mk I', 'Mk II', 'Mk III'], MKV = [1, 1, 1.1, 1.2];
+let D = JSON.parse(JSON.stringify(ST.cur));
+D.mod.main = 'rail'; D.mk.eng = 2;   // demo opens with a pending change so the comparison and the button are live
+
+function calc(F) {
+  const B = ST.base, m = (s) => F.mod[s] && MODS[s][F.mod[s]][2] || {}, k = (s) => MKV[F.mk[s] || 1];
+  const mm = m('main'), dps0 = B.main.dmg / B.main.cd, dps = dps0 * (mm.k || 1) * k('main');
+  const tt = m('tur'), ms = m('msl'), df = m('def'), en = m('eng');
+  return {
+    hp: B.hp * (df.hp || 1) * k('def'), sh: B.sh * (df.sh || 1) * k('def'), dps, range: mm.range || B.main.range, arc: mm.arc || B.main.arc,
+    tdps: B.tur.n * B.tur.dmg * (tt.dmg || 1) * k('tur') / (B.tur.cd * (tt.cd || 1)), pd: B.pd + (tt.pd || 0),
+    msl: Math.round(B.msl.n * (ms.n || 1)) * B.msl.dmg * (ms.dmg || 1) * k('msl'), ftr: ms.ftr || 0,
+    max: B.max * (df.max || 1) * (en.max || 1) * k('eng'), turn: B.turn * (en.turn || 1),
+  };
+}
+function cost() {
+  const P = ST.price; let c = 0, any = false;
+  for (const [s] of SLOTS) {
+    const same = (D.mod[s] || '') === (ST.cur.mod[s] || ''), k0 = same ? ST.cur.mk[s] || 1 : 1, k1 = D.mk[s] || 1;
+    if (!same) { c += D.mod[s] ? P.mod[s] : P.mod[s] * P.stock; any = true; }
+    for (let k = k0 + 1; k <= k1; k++) { c += P.mk[k]; any = true; }
+  }
+  return any ? c + P.base : 0;
+}
+const changed = (s) => (D.mod[s] || '') !== (ST.cur.mod[s] || '') || (D.mk[s] || 1) !== (ST.cur.mk[s] || 1);
+
+function render() {
+  const A = calc(ST.cur), B = calc(D), c = cost(), stop = !c ? '還沒選要改的地方' : ST.money < c ? `資金不夠（要 ${c}，有 ${ST.money}）` : '';
+  const f1 = (v) => Math.round(v * 10) / 10;
+  const rows = [['船體', 'hp', Math.round, 1200], ['護盾', 'sh', Math.round, 600], ['主砲每秒傷害', 'dps', f1, 25], ['主砲射程', 'range', Math.round, 400], ['主砲射界（左右各）', 'arc', Math.round, 150],
+    ['副砲每秒傷害', 'tdps', f1, 50], ['點防禦', 'pd', Math.round, 6], ['飛彈總傷害', 'msl', Math.round, 2400], ['護航機', 'ftr', Math.round, 6], ['最高速度', 'max', f1, 12], ['轉向（°／秒）', 'turn', Math.round, 30]];
+  const pins = [['main', '主砲', 63, 30], ['tur', '副砲', 40, 18], ['msl', '飛彈艙', 52, 74], ['def', '防禦', 22, 80], ['eng', '引擎', 2, 46]];
+  $('ui').innerHTML = `
+    ${CAP.head({ title: '改裝', en: 'REFIT', crumb: `${ST.sq}・<b>${ST.name}</b>・重砲艦 Lv${ST.lv}・在 ${ST.sys} 的船塢・Mk 上限 <b>${MKN[ST.mkCap]}</b>` })}
+    ${CAP.res([['資金', fmt(ST.money), 'var(--gold)', 'money'], ['週', ST.week, 'var(--dim)', 'week']])}
+    <section class="panel view enter" style="--dx:-40px;--d:.1s">
+      <div class="ph"><h2>整修庫</h2><span class="en">REFIT BAY</span><span class="r">選零件：船上會裝給你看</span></div>
+      <div class="grid"></div><div class="ship">${CAP.shipImg('gunship', 520)}</div>
+      ${pins.map(([s, n, x, y]) => `<span class="pin ${changed(s) ? 'chg' : ''}" style="left:${12 + x * .8}%;top:${24 + y * .62}%"><i></i>${n}${changed(s) ? ` → ${D.mod[s] ? MODS[s][D.mod[s]][0] : '原廠'} ${MKN[D.mk[s] || 1]}` : ''}</span>`).join('')}
+      <div class="cap">${SLOTS.some(([s]) => changed(s)) ? `改了 <b>${SLOTS.filter(([s]) => changed(s)).length}</b> 個槽位` : '在右邊選零件'}</div>
+    </section>
+    <section class="panel cmp enter" style="--dx:-40px;--d:.2s">
+      <div class="ph"><h2>改裝前後</h2><span class="en">BEFORE → AFTER</span><span class="r">綠＝變好・紅＝變差</span></div>
+      <div class="pb" style="padding-top:10px">${rows.map(([n, k, fm, mx]) => { const a = A[k], b = B[k], d = b - a, col = Math.abs(d) < 1e-6 ? '' : d > 0 ? 'var(--own)' : 'var(--red)';
+        return `<div class="crow"><span class="k">${n}</span><div class="tr"><i class="a" style="width:${Math.min(100, a / mx * 100)}%"></i>${col ? `<i class="b" style="width:${Math.min(100, b / mx * 100)}%;background:${col}"></i>` : ''}</div>
+          <span class="v">${col ? `<s>${fm(a)}</s><span style="color:${col}">${fm(b)}</span>` : fm(a)}</span></div>`; }).join('')}</div>
+    </section>
+    <section class="panel slots tilt-r enter" style="--dx:40px;--d:.15s">
+      <div class="ph"><h2>槽位</h2><span class="en">SLOTS</span><span class="r">換模組＝那個槽位回到 Mk I・Mk 不能降</span></div>
+      <div class="pb" style="padding-top:4px">${SLOTS.map(([s, n, en]) => { const cur = D.mod[s] || '', same = cur === (ST.cur.mod[s] || ''), k0 = same ? ST.cur.mk[s] || 1 : 1, kc = D.mk[s] || 1;
+        const opts = [['', BASE_NAME[s], false, ''], ...Object.entries(MODS[s]).map(([id, M]) => { const lk = M[3] && !ST.researched[M[3]]; return [id, M[0], lk, lk ? `要先研究「${LOCK_NAME[M[3]]}」` : M[1]]; })];
+        const mks = [1, 2, 3].map((k) => [k, k > ST.mkCap ? (k > 2 ? '船要 Lv5' : '要先研究 Mk II 工藝') : k < k0 ? 'Mk 不能降' : `主要數值 ×${MKV[k]}`, k > ST.mkCap || k < k0]);
+        const M = cur && MODS[s][cur];
+        return `<div class="srow ${changed(s) ? 'chg' : ''}"><div class="sn">${n}<small>${en}</small></div>
+          <div><div class="seg">${opts.map(([id, nm, lk, tip]) => `<button class="chip ${id === cur ? 'on' : ''} ${lk ? 'lock' : ''}" data-s="${s}" data-m="${id}" title="${tip}">${lk ? '🔒 ' : ''}${nm}</button>`).join('')}</div>
+            <div class="desc">${M ? M[1] : '原廠'}${!same && (ST.cur.mk[s] || 1) > 1 ? '<span class="w">（換模組＝回到 Mk I）</span>' : ''}</div></div>
+          <div class="seg mks">${mks.map(([k, tip, lk]) => `<button class="chip ${k === kc ? 'on' : ''} ${lk ? 'lock' : ''}" data-s="${s}" data-k="${k}" title="${tip}">${MKN[k]}</button>`).join('')}</div></div>`; }).join('')}</div>
+    </section>
+    <section class="panel cost enter" style="--dy:30px;--d:.25s">
+      <div class="ph"><h2>價錢</h2><span class="en">COST</span><span class="r"><button class="btn sm ghost" id="rs">重選</button></span></div>
+      <div class="pb" style="padding-top:8px;display:flex;align-items:center;gap:26px"><span class="tot">${fmt(c)}</span>
+        <dl class="kv"><dt>工錢</dt><dd>${c ? ST.price.base : 0}</dd><dt>完成</dt><dd>${ST.eta} 週後好</dd></dl></div>
+    </section>
+    <button class="bigbtn go ${stop ? 'dis' : ''} enter" style="--dx:40px;--d:.3s" id="go">
+      <span class="op">SEND TO YARD</span><h3>送進船塢</h3>
+      <span class="sub">${stop || `${fmt(c)} 資金・${ST.eta} 週後好・佔用船塢一週，這段時間不能出戰`}</span><div class="chev"><i></i><i></i><i></i></div></button>
+    <div class="stop">好了回到${ST.sq}（那時還在 ${ST.sys}、沒滿的話；不然停在船塢）</div>`;
+  document.querySelectorAll('[data-m]').forEach((b) => b.onclick = () => { if (b.classList.contains('lock')) return CAP.toast(b.title); const s = b.dataset.s, v = b.dataset.m;
+    if (v) D.mod[s] = v; else delete D.mod[s]; if ((D.mod[s] || '') === (ST.cur.mod[s] || '')) D.mk[s] = ST.cur.mk[s] || 1; else delete D.mk[s]; render(); });
+  document.querySelectorAll('[data-k]').forEach((b) => b.onclick = () => { if (b.classList.contains('lock')) return CAP.toast(b.title); const s = b.dataset.s, k = +b.dataset.k; if (k > 1) D.mk[s] = k; else delete D.mk[s]; render(); });
+  $('rs').onclick = () => { D = JSON.parse(JSON.stringify(ST.cur)); render(); };
+  $('go').onclick = () => { if (stop) return CAP.toast(stop); ST.money -= c; ST.cur = JSON.parse(JSON.stringify(D)); CAP.glitch(); CAP.toast(`${ST.name} 送進船塢：${ST.eta} 週後好`); render(); };
+  document.getElementById('stage').classList.add('ready');
+}
+CAP.bg({ mode: 'hangar' });
+render(); CAP.ready();
+</script>
+</body>
+</html>

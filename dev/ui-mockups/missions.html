@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>任務</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="cap-ui.css">
+<style>
+/* 任務：左＝任務清單；右＝上級的通訊（簡報）＋派出（計算）的成功率明細；右下＝前往／派出 */
+.list{left:34px;top:180px;width:650px;height:800px}
+.mrow{display:block;width:100%;cursor:pointer;padding:14px 18px 14px 20px}
+.mrow .t1{display:flex;align-items:center;gap:10px}
+.mrow .nm{font:900 21px var(--jp);letter-spacing:.06em;white-space:nowrap}
+.mrow .left{margin-left:auto;font:700 20px var(--en);white-space:nowrap}
+.mrow .left small{font:500 13px var(--jp);color:var(--dim);margin-left:3px}
+.mrow .t2{display:flex;gap:18px;margin-top:6px;font:500 14px var(--jp);color:var(--dim);white-space:nowrap}
+.mrow .t2 b{color:var(--text);font-weight:500}
+.mrow .rw{margin-left:auto;color:var(--gold)}
+.mrow.exam{border-left-color:var(--gold)}
+.mrow.done{opacity:.45}
+.sect{display:flex;align-items:center;gap:10px;margin:16px 0 8px;font:700 13px var(--jp);color:var(--dim);letter-spacing:.14em}
+.sect::after{content:"";flex:1;height:1px;background:var(--line-2)}
+
+.comm{left:730px;top:180px;width:1156px;height:440px;--pc:var(--ally)}
+.npc{display:flex;gap:26px;align-items:flex-start}
+.ava{position:relative;flex:none;width:126px;height:146px;background:linear-gradient(160deg,rgba(90,168,255,.35),rgba(10,20,50,.9));clip-path:polygon(0 0,100% 0,100% 86%,86% 100%,0 100%)}
+.ava::before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(255,255,255,.07) 0 1px,transparent 1px 4px);animation:scan 4s linear infinite}
+@keyframes scan{to{background-position:0 40px}}
+.ava b{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font:900 76px var(--jp);color:var(--fc,var(--ally));text-shadow:0 0 22px currentColor}
+.ava .live{position:absolute;left:10px;bottom:10px;font:700 11px var(--en);letter-spacing:.2em;color:#fff}
+.ava .live::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--red);margin-right:6px;animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.2}}
+.say .who{font:900 24px var(--jp);letter-spacing:.1em;color:var(--fc,var(--ally))}
+.say .who small{font:500 14px var(--jp);color:var(--dim);margin-left:12px;letter-spacing:.04em}
+.say .lines{margin-top:12px;min-height:96px;padding:14px 22px;background:#f2f4fa;color:#141826;font:500 19px/1.65 var(--jp);clip-path:polygon(0 0,100% 0,100% 100%,22px 100%,0 calc(100% - 22px));width:880px}
+.caret{display:inline-block;width:2px;height:1em;background:#141826;margin-left:2px;vertical-align:-2px;animation:blink .8s infinite}
+.mkv{display:grid;grid-template-columns:110px 1fr;gap:8px 24px;margin-top:14px;font:500 17px var(--jp)}
+.mkv dt{color:var(--dim)}
+.mkv dd b{font-weight:900}
+.fx{color:#c9a7ff}
+
+.calc{left:730px;top:640px;width:740px;height:340px;--pc:var(--violet)}
+.steps{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;grid-column:1/-1}
+.step{padding:14px 18px;background:rgba(12,20,42,.75);border-left:3px solid var(--mute)}
+.step.cur{border-left-color:var(--cyan)}
+.step b{display:block;font:900 19px var(--jp);letter-spacing:.06em;margin-bottom:6px}
+.step span{font:500 15px/1.65 var(--jp);color:var(--dim)}
+.ava b{font-size:64px}
+.calc .pb{display:grid;grid-template-columns:1fr 200px;gap:20px}
+.parts{display:grid;grid-template-columns:auto 1fr 54px;gap:5px 12px;align-items:center;font:500 14px var(--jp)}
+.parts .bx{position:relative;height:8px;background:rgba(255,255,255,.08)}
+.parts .bx i{position:absolute;top:0;bottom:0}
+.parts b{font:700 16px var(--en);text-align:right}
+.tot{text-align:center;align-self:center}
+.surv{display:flex;gap:6px;justify-content:center;margin-top:8px;font:600 13px var(--en);color:var(--dim)}
+.who-chips{display:flex;gap:8px;margin-top:-4px}
+
+.go{right:34px;top:780px;width:390px;height:200px}
+.go h3{font-size:46px}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="bg"></canvas><div class="ui" id="ui"></div></div>
+<script src="cap-ui.js"></script>
+<script>
+const { $, fmt } = CAP;
+// 資料照 capcareer.js：CC_MIS／CC_OPFX 的文字、CC_OPF 的成功率公式、CC_NPC 上級
+const ST = {
+  week: 12, fac: '聯盟', money: 18450, merit: 1240, fav: 62,
+  npc: { name: '歐文・哈特', role: '聯盟前線指揮部・准將', col: 'var(--ally)' },
+  missions: [
+    { id: 1, type: 'cap', exam: '特戰司令', name: '佔領 維克多', sys: '維克多', owner: '帝國', due: 16, money: 1200, merit: 400,
+      desc: '取得維克多的軌道並讓地面投降（你的小隊要在場）', say: ['維克多 是下一個目標。', '先打下軌道，再圍城或地面突襲讓地面投降。', '這次是你的升遷考核：完成就升任特戰司令。'] },
+    { id: 2, type: 'op', op: '攔截', tier: '難', name: '攔截・歐瑞恩', sys: '歐瑞恩', owner: '帝國', due: 14, money: 600, merit: 220,
+      desc: '在 歐瑞恩 攔截帝國的補給船隊', fx: '帝國在 歐瑞恩 與相鄰星系的補給線切斷 4 週：那裡的小隊不補飛彈、只修一半，軌道防禦不重建；帝國損失資金',
+      say: ['在 歐瑞恩 攔截帝國的補給船隊。', '小隊在 歐瑞恩 或相鄰的星系就能出擊。'],
+      calc: { sq: '第2小隊', parts: [['基準', 90], ['任務難易（難）', -55], ['戰力（6.2，敵方 4）', 7], ['耐久', 3], ['敵方難度', -4], ['偵察', 8], ['守備小隊', -5]],
+        ships: [['斷鋒號', .9], ['迅羽號', .6]] } },
+    { id: 3, type: 'op', op: '偵察', tier: '易', name: '偵察・塔爾', sys: '塔爾', owner: '帝國', due: 15, money: 400, merit: 150,
+      desc: '偵察 塔爾', fx: '塔爾 周圍 2 個航道內 5 週：看得到敵方小隊的預定動向', say: ['偵察 塔爾。', '小隊在 塔爾 或相鄰的星系就能出擊。'],
+      calc: { sq: '第2小隊', parts: [['基準', 90], ['任務難易（易）', 10], ['戰力（6.2，敵方 4）', 7], ['耐久', 3], ['敵方難度', -4]], ships: [['斷鋒號', .9], ['迅羽號', .6]] } },
+    { id: 4, type: 'op', op: '斬首', tier: '易', name: '斬首・帝國第3小隊', sys: '歐瑞恩', owner: '帝國', due: 13, money: 500, merit: 200,
+      desc: '斬首帝國第3小隊的指揮官（目標現在在 歐瑞恩）', fx: '目標小隊指揮中斷 4 週：不會進攻，戰力當作耐久 ×0.7；旗艦重創', say: ['斬首帝國第3小隊的指揮官（目標現在在 歐瑞恩）。', '小隊在 歐瑞恩 或相鄰的星系就能出擊。'],
+      calc: { sq: '第2小隊', parts: [['基準', 90], ['任務難易（易）', 10], ['戰力（6.2，敵方 4）', 7], ['耐久', 3], ['敵方難度', -4], ['守備小隊', -5]], ships: [['斷鋒號', .9], ['迅羽號', .6]] } },
+  ],
+  done: [ ['護送・雷姆', '完成・+300 資金、戰功 +120'], ['破壞・歐瑞恩', '失敗・聯盟好感 −5'] ],
+  squads: ['★ 第1小隊', '第2小隊'],
+};
+let sel = 1, who = 0;
+const M = () => ST.missions.find((m) => m.id === sel);
+const surv = (p, hp) => Math.max(30, Math.min(99, Math.round(90 + 8 * p - 4 + 10 * (hp - .7))));
+
+function render() {
+  const m = M(), left = m.due - ST.week, c = m.calc, P = c ? Math.max(5, Math.min(95, c.parts.reduce((a, x) => a + x[1], 0))) : 0, dispatch = who === 1 && m.type === 'op';
+  $('ui').innerHTML = `
+    ${CAP.head({ title: '任務', en: 'MISSIONS', crumb: `第 ${ST.week} 週・${ST.fac}好感 <b>${ST.fav}</b>・失敗 −5、完成 +2` })}
+    ${CAP.res([['資金', fmt(ST.money), 'var(--gold)', 'money'], ['戰功', fmt(ST.merit), 'var(--own)', 'merit'], ['週', ST.week, 'var(--dim)', 'week']])}
+    <div class="vtext">MISSIONS ／ WEEK ${ST.week}</div>
+    <section class="panel list tilt-l enter" style="--dx:-40px;--d:.1s">
+      <div class="ph"><h2>進行中</h2><span class="en">OPEN</span><span class="r">上級每 3 週交辦・最多 5 個</span></div>
+      <div class="pb">
+        ${ST.missions.map((x) => { const l = x.due - ST.week;
+          return `<button class="row mrow ${x.exam ? 'exam' : ''} ${x.id === sel ? 'on' : ''}" data-m="${x.id}">
+            <div class="t1">${x.exam ? '<span class="tag" style="--tc:var(--gold)">升遷考核</span>' : x.type === 'cap' ? '<span class="tag">佔領</span>' : `<span class="tag" style="--tc:var(--violet)">特戰・${x.tier}</span>`}
+              <span class="nm">${x.name}</span><span class="left ${l <= 2 ? 'bad' : ''}">${l}<small>週</small></span></div>
+            <div class="t2"><span>地點 <b class="bad">${x.sys}</b>（${x.owner}）</span><span class="rw">資金 ${x.money}・戰功 ${x.merit}</span></div></button>`; }).join('')}
+        <div class="sect">最近結束</div>
+        ${ST.done.map(([n, r]) => `<div class="row mrow done"><div class="t1"><span class="nm">${n}</span></div><div class="t2">${r}</div></div>`).join('')}
+      </div>
+    </section>
+
+    <section class="panel comm enter" style="--dx:40px;--d:.2s;--fc:${ST.npc.col}">
+      <div class="ph"><h2>${m.exam ? '新任務・升遷考核' : '任務簡報'}</h2><span class="en">TRANSMISSION</span><span class="r">第 ${ST.week} 週</span></div>
+      <div class="pb">
+        <div class="npc"><div class="ava"><b>${ST.npc.name[0]}</b><span class="live">LIVE</span></div>
+          <div class="say"><div class="who">${ST.npc.name}<small>${ST.npc.role}${m.exam ? '・升遷考核' : ''}</small></div><div class="lines"><span id="say"></span><span class="caret"></span></div></div></div>
+        <dl class="mkv">
+          <dt>任務</dt><dd><b>${m.name}</b>・${m.desc}</dd>
+          <dt>時限</dt><dd class="${left <= 2 ? 'bad' : ''}">${left} 週（到第 ${m.due} 週）</dd>
+          ${m.fx ? `<dt>成功的影響</dt><dd class="fx">${m.fx}</dd>` : ''}
+          <dt>報酬</dt><dd class="gold">資金 ${m.money}、戰功 ${m.merit}${m.exam ? `・升任${m.exam}` : ''}</dd>
+        </dl>
+      </div>
+    </section>
+
+    ${c ? `<section class="panel calc enter" style="--dy:30px;--d:.3s">
+      <div class="ph"><h2>由誰出擊</h2><span class="en">DISPATCH</span><div class="who-chips" style="margin-left:18px">${ST.squads.map((n, i) => `<button class="chip ${i === 0 ? 'own' : ''} ${who === i ? 'on' : ''}" data-w="${i}">${n}${i ? '・派出（計算）' : '・親自出擊'}</button>`).join('')}</div></div>
+      <div class="pb">${dispatch ? `
+        <div class="parts">${c.parts.map(([n, v]) => `<span>${n}</span><div class="bx"><i style="${v >= 0 ? `left:0;width:${Math.min(100, v)}%;background:var(--own)` : `left:0;width:${Math.min(100, -v)}%;background:var(--red)`}"></i></div><b class="${v >= 0 ? 'good' : 'bad'}">${v >= 0 ? '+' : ''}${v}</b>`).join('')}</div>
+        <div class="tot"><div class="lab">SUCCESS</div><div class="odds ${P >= 70 ? 'good' : P >= 40 ? 'warn' : 'bad'}">${P}<small>%</small></div>
+          <div class="surv">${c.ships.map(([n, hp]) => `<span>${n} ${surv(P / 100, hp)}%</span>`).join('')}</div></div>`
+        : `<div style="grid-column:1/-1;font:500 16px/1.7 var(--jp);color:var(--dim)">親自出擊：你的小隊開到 <b style="color:var(--text)">${m.sys}</b> 或相鄰的星系，在星系裡按「出擊」，由你親自操艦。<br>選其他小隊＝派出（計算）：週末照成功率擲出結果，每一項加減都列在這裡。</div>`}</div>
+    </section>` : `<section class="panel calc enter" style="--dy:30px;--d:.3s;--pc:var(--cyan)">
+      <div class="ph"><h2>佔領的兩步</h2><span class="en">CAPTURE</span><span class="r">你的小隊要在場才算</span></div>
+      <div class="pb"><div class="steps">
+        <div class="step cur"><b>① 取得軌道</b><span>打贏 ${m.sys} 的守備小隊與軌道防禦。開戰前會顯示勝率與每艘船的存活率，可以選親自指揮或撤退。</span></div>
+        <div class="step"><b>② 地面投降</b><span>控制軌道後圍城 3 週，或親自打「地面突襲」：成功＝這週結束時投降。投降評分是負數時直接投降。</span></div>
+      </div></div></section>`}
+
+    <button class="bigbtn go ${dispatch && P < 40 ? 'red' : ''} enter" style="--dx:40px;--d:.4s" id="go">
+      <span class="op">${dispatch ? 'DISPATCH' : 'SET COURSE'}</span><h3>${dispatch ? `派出${ST.squads[who]}` : `前往 ${m.sys}`}</h3>
+      <span class="sub">${dispatch ? `成功率 ${P}%・週末計算` : '在星圖上下令移動'}</span><div class="chev"><i></i><i></i><i></i></div></button>`;
+  CAP.type($('say'), m.say.map((l) => `「${l}」`).join(''), 45);
+  document.querySelectorAll('[data-m]').forEach((b) => b.onclick = () => { sel = +b.dataset.m; who = 0; render(); });
+  document.querySelectorAll('[data-w]').forEach((b) => b.onclick = () => { who = +b.dataset.w; render(); });
+  $('go').onclick = () => { CAP.glitch(); CAP.toast(dispatch ? `${ST.squads[who]}已派出：週末計算` : `開啟星圖，選中 ${m.sys}（示意）`); };
+  document.getElementById('stage').classList.add('ready');
+}
+CAP.bg({ mode: 'deep' });
+render(); CAP.ready();
+</script>
+</body>
+</html>
