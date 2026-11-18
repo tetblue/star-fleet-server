@@ -37,7 +37,7 @@ function ccRender() {
   const ri = (k, v, c, ic, id, tip) => `<div class="ccm-ri"${id ? ` id="${id}" style="--c:${c};cursor:pointer"` : ` style="--c:${c}"`}${tip ? ` title="${tip}"` : ''}>${ico(ic)}<span class="k">${k}</span><b>${v}</b></div>`;
   const facIt = (f) => `<span class="it" title="${SM_FAC[f].name}${f === SM_N ? '' : `（${ccFacRelName(S, f)}）`}：已知擁有 ${cnt[f]} 個星系${f === SM_N ? '' : `・聲望 ${Math.round(fame[f])}／100（佔領、交戰、特戰的成敗會改變；影響地面投降的評分）`}">${f === SM_N ? `<span class="dot" style="--c:${ccFacCol(S, f)}"></span>` : `<span class="pie" style="--c:${ccFacCol(S, f)};--v:${Math.round(fame[f])}"></span>`}${SM_FAC[f].name}${f === SM_N ? '' : ` <b>${Math.round(fame[f])}</b>`}<span style="margin-left:2px">・${cnt[f]}</span></span>`;
   const back = S.fin ? ['cc-quit2', CCM_ICON.quit, '離開'] : ['cc-fly2', CCM_ICON.back, `回到星系（${keyText('cap_map')}）`];
-  overlay(`<style>${SMU_CSS}${CC_CSS}${CCM_CSS}</style><div class="sm-wrap ccm" style="--k:${ccmK()}">
+  overlay(`<style>${SMU_CSS}${CC_CSS}${CCM_CSS}${CCD_CSS}</style><div class="sm-wrap ccm" style="--k:${ccmK()}">
     <div class="sm-map" id="cc-map"><canvas id="cc-cv"></canvas><div class="ccm-vig"></div><i class="ccm-cn cn1"></i><i class="ccm-cn cn2"></i><i class="ccm-cn cn3"></i><i class="ccm-cn cn4"></i>
       <div class="ccm-z ccm-head"><button class="ccm-back" id="${back[0]}" title="${back[2]}"><svg viewBox="0 0 24 24">${back[1]}</svg></button>
         <div><span class="ent">STAR MAP ・ ORDERS</span><h1>星圖・下令</h1><span class="crumb"><b>第 ${S.turn} 週</b>・${CC_ROLES[S.role].name}・${ccRankOf(S).name}・指揮權 ${ccOwnCount(S)}／${ccSlots(S)} 隊${P0 ? `・你在 ${S.sys[P0.sys].name}` : ''}</span></div></div>
@@ -52,14 +52,14 @@ function ccRender() {
   gEl('cc-quit').onclick = () => { ccSave(S); ccIdleStop(); window.removeEventListener('resize', ccResize); GAME.spMode = 'captain'; showSingle(); };
   if (gEl('cc-fly')) gEl('cc-fly').onclick = () => ccFly();
   gEl('cc-end').onclick = () => ccEndWeek();
-  gEl('cc-mis').onclick = ccMissionList;
+  gEl('cc-mis').onclick = () => (CC.drw && CC.drw.kind === 'mis' ? ccdClose() : ccdOpen('mis'));   // 任務、紀錄：右側的斜放面板（capinfo_ui.js）
   gEl('cc-leg').onclick = () => { CC.leg = !CC.leg; ccRender(); };
   gEl('cc-tech').onclick = ccTechView;
-  gEl('cc-logb').onclick = () => ccLogView(S.log.slice(-60).reverse(), '紀錄');
+  gEl('cc-logb').onclick = () => (CC.drw && CC.drw.kind === 'log' && CC.drw.arg.mode === 'all' ? ccdClose() : ccdOpen('log', { mode: 'all' }));
   const cv = gEl('cc-cv');
   cv.onclick = (e) => { const r = cv.getBoundingClientRect(), id = ccHit(e.clientX - r.left, e.clientY - r.top); CC.sel = id; ccCard(); };
   window.removeEventListener('resize', ccResize); window.addEventListener('resize', ccResize);
-  ccDock(); ccCard();
+  ccDock(); ccCard(); ccdRestore();
   if (!CC.raf) CC.raf = requestAnimationFrame(ccLoop);
   if (S.fin) ccEndView();
 }
@@ -76,7 +76,7 @@ const CC_CSS = `.cc-ico{width:15px;height:15px;vertical-align:-3px;margin-right:
 .cc-yq{font-size:12px}.cc-yq .g-dim{font-size:12px}.cc-yq button{font-size:11px;padding:1px 6px;margin-left:3px}
 .cc-thr{margin:5px 0;padding:5px 7px;border:1px solid #ff6a5a;border-radius:6px;background:#2a1416}
 .cc-xp{height:6px;background:#1a2433;border-radius:3px;overflow:hidden;margin:3px 0 8px}.cc-xp i{display:block;height:100%;background:#c9a7ff}`;
-function ccResize() { ccmFit(); ccDraw(); const el = gEl('cc-card'); if (el && !el.hidden) CC_place(el); }
+function ccResize() { ccmFit(); ccdRestore(); ccDraw(); const el = gEl('cc-card'); if (el && !el.hidden) CC_place(el); }
 function ccLoop(ts) { if (!gEl('cc-cv') || !CC.S) { CC.raf = 0; return; } ccDraw(ts); CC.raf = requestAnimationFrame(ccLoop); }
 const ccXY = (s) => { const V = CC.view; return [V.ox + s.x * V.k, V.oy + s.y * V.k]; };
 function ccHit(x, y) { let best = -1, bd = 26; for (const s of CC.S.sys) { const [px, py] = ccXY(s), d = Math.hypot(px - x, py - y); if (d < bd) { bd = d; best = s.id; } } return best; }
@@ -455,7 +455,8 @@ function ccSqNote(S, q) {
 }
 function CC_place(el) {
   const mp = gEl('cc-map'), s = CC.S && CC.S.sys[CC.sel]; if (!mp || !s || !CC.view) return;
-  const [x, y] = ccXY(s), W = mp.clientWidth, H = mp.clientHeight, kz = ccmK(), top = 168 * kz, bot = 24 * kz;   // 避開標題、工具列（capmap_ui.js）
+  const [x, y] = ccXY(s), H = mp.clientHeight, kz = ccmK(), top = 168 * kz, bot = 24 * kz;   // 避開標題、工具列（capmap_ui.js）
+  const dr = gEl('cc-drw'), W = dr ? dr.getBoundingClientRect().left - mp.getBoundingClientRect().left - 20 : mp.clientWidth;   // 右側的任務／紀錄面板打開時，卡片不要蓋上去
   const w = el.offsetWidth, L = x + 70 + w < W - 16 ? x + 70 : Math.max(16, x - 70 - w), m0 = mp.getBoundingClientRect();
   let B = H - bot;   // 底部：跟卡片左右重疊的面板（小隊面板、結束這一週、圖例）上緣
   for (const e of [document.querySelector('.ccm .cc-dock'), gEl('cc-end'), gEl('cc-leg')]) { if (!e) continue; const r = e.getBoundingClientRect(); if (r.right - m0.left > L && r.left - m0.left < L + w) B = Math.min(B, r.top - m0.top - 12); }
@@ -601,18 +602,6 @@ function ccLogView(L, title) {
   smuModal(`<h3>${title}</h3><div class="sm-log">${L.length ? L.map((x) => `<div style="color:${col[x.c] || '#aab7c8'}">第 ${x.turn} 週・${smuEsc(x.t)}</div>`).join('') : '<div class="g-dim">沒有紀錄。</div>'}</div><div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`);
   gEl('cc-close').onclick = smuCloseModal;
 }
-function ccMisDone(S) {
-  const L = S.missions.filter((M) => M.state === 'done' && M.res).slice(-5).reverse();
-  return L.length ? `<h4 style="margin:10px 0 4px">最近完成的任務</h4>${L.map((M) => `<div class="g-dim">${ccMisName(M)}：${smuEsc(M.res)}</div>`).join('')}` : '';
-}
-function ccMissionList() {
-  const S = CC.S, L = S.missions.filter((M) => M.state === 'open');
-  smuModal(`<h3>任務</h3>${L.length ? L.map((M) => `<div class="sm-bt"><b>${M.exam ? `<span style="color:#ffd36a">升遷考核（${M.exam}）</span>・` : ''}${ccMisName(M)}</b>：${CC_MIS[M.type].desc(S, M)}${M.type === 'op' ? `<div style="color:#c9a7ff">成功的影響：${CC_OPFX[M.op].fx(S, M)}</div>` : ''}<div class="g-dim">獎勵 ${M.reward.money} 資金、戰功 ${M.reward.merit}・剩 ${M.due - S.turn} 週</div><button class="g-btn" data-goto="${M.sys}">在星圖上看</button></div>`).join('') : '<p class="g-dim">目前沒有任務。每 3 週上級會交辦新任務。</p>'}
-    ${ccMisDone(S)}
-    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`);
-  gEl('cc-close').onclick = smuCloseModal;
-  document.querySelectorAll('[data-goto]').forEach((b) => (b.onclick = () => { smuCloseModal(); CC.sel = +b.dataset.goto; ccCard(); }));
-}
 Object.assign(window.__cap || (window.__cap = {}), { ccNewGame, ccWeekA, ccWeekB, CC_RULE, ccLoad, ccSave, ccShow, ccState: () => CC, ccCard, ccLaunch, ccMissionDone, ccRender, ccPlan, ccTransfer, ccTakeCommand, ccSetTask, ccTaskOdds, ccRunTasks, ccOrder, ccOrderCancel, ccResJoin, ccResPut, ccYardView, ccFitView, ccFitOrder, ccFitCost, ccTechView, ccTechStart, ccT, ccShopView, ccShopBuy, ccShopStock, ccBpDrop, ccProfGain });
 
 // ───── 星圖上的關係：own＝你的小隊、ally＝同勢力、enemy＝敵對、neutral＝其他（顏色同星海生涯的 SMU_REL）─────
@@ -640,7 +629,7 @@ function ccTopChips(S, cnt) {
 }
 // ───── 每週開始（同星海生涯）：上週的戰報 → 每個新任務一張簡報 ─────
 function ccTurnStart(S, rep) {
-  if (rep) { const L = S.log.filter((x) => x.turn >= S.turn - 1).slice(-30).reverse(); if (L.length) smuLater(() => ccLogView(L, `第 ${S.turn - 1} 週的戰報`)); }
+  if (rep) ccdOpen('log', { mode: 'week' });   // 上週的戰報：右側面板，不擋操作（capinfo_ui.js）
   for (const M of S.missions.filter((x) => x.state === 'open' && !x.brief)) smuLater(() => ccBrief(M));
 }
 // 交辦任務的人（每個勢力一位上級）

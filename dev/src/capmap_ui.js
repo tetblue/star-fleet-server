@@ -168,7 +168,8 @@ function ccmFit() { const w = document.querySelector('.ccm'); if (w) w.style.set
 function ccmArea(W, H) {
   const k = ccmK(), top = 168 * k, d = gEl('cc-dock'), dh = d ? d.getBoundingClientRect().height : 0;
   const bot = Math.min(H * 0.4, Math.max(110 * k, dh) + 40 * k);
-  return { x: 40, y: top, w: W - 80, h: H - top - bot };
+  const dr = CC.drw && gEl('cc-drw') ? 640 * k : 0;   // 右側的任務／紀錄面板打開時，星圖往左縮（capinfo_ui.js）
+  return { x: 40, y: top, w: W - 80 - dr, h: H - top - bot };
 }
 // 下週會被進攻、還留在原地的你的小隊（結束這一週的 ⚠）
 const ccmWarnN = (S) => S.fin ? 0 : S.sq.filter((q) => q.pl && q.ships.length && q.to == null && !q.task && ccThreatA(S, q, q.sys).length).length;

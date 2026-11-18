@@ -293,10 +293,10 @@ function cclAct(k) {
   if (k === 'map') return cclToMap();
   if (k === 'end') { cclToMap(); return ccEndWeek(); }
   if (k === 'prio') { const L = cclPrio(S); return (L[CCL.prio] || L[0]).go(); }
-  if (k === 'mis') { cclToMap(); return ccMissionList(); }
+  if (k === 'mis') { cclToMap(); return ccdOpen('mis'); }
   if (k === 'fac' || k === 'help') { CC.leg = k === 'help' ? true : CC.leg; return cclToMap(); }
-  if (k === 'log') { cclToMap(); return ccLogView(S.log.slice(-60).reverse(), '紀錄'); }
-  if (k === 'report') { cclToMap(); const L = S.log.filter((x) => x.turn >= S.turn - 1).slice(-30).reverse(); return ccLogView(L.length ? L : S.log.slice(-30).reverse(), `第 ${S.turn - 1} 週的戰報`); }
+  if (k === 'log') { cclToMap(); return ccdOpen('log', { mode: 'all' }); }
+  if (k === 'report') { cclToMap(); return ccdOpen('log', { mode: 'week' }); }
   if (k === 'gear') return openSettings();
   if (k === 'sq') { CC.cur = P.id; CC.sel = P.sys; cclToMap(); return ccCard(); }
   if (k === 'yard') { if (!(s.owner === S.fac && s.yard)) return toast('這個星系沒有你的勢力的維修船塢', 'warn'); cclToMap(); return ccYardView(s); }
