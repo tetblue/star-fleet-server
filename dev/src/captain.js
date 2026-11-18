@@ -51,6 +51,8 @@ const CAP_AMMO = { calm: 2, msl: 180, ftr: 30 };
 { const k = KEY_ACTIONS.findIndex((a) => a[0] === 'cap_switch'); if (k >= 0 && !KEY_ACTIONS.some((a) => a[0] === 'cap_squad')) KEY_ACTIONS.splice(k + 1, 0, ['cap_squad', '切換小隊（兩個小隊同場時）', '艦長', 'KeyB']); if (SETTINGS.keys.cap_squad == null) SETTINGS.keys.cap_squad = 'KeyB'; }
 { const k = KEY_ACTIONS.findIndex((a) => a[0] === 'cap_view'); if (k >= 0) KEY_ACTIONS[k][1] = '鏡頭：近景／遠景／俯視'; if (k >= 0 && !KEY_ACTIONS.some((a) => a[0] === 'cap_move')) KEY_ACTIONS.splice(k + 1, 0, ['cap_move', '俯視：移動到游標處（選取的僚艦，沒選＝自己的船）', '艦長', 'KeyR']); if (SETTINGS.keys.cap_move == null) SETTINGS.keys.cap_move = 'KeyR'; }
 { const k = KEY_ACTIONS.findIndex((a) => a[0] === 'cap_squad'); if (k >= 0 && !KEY_ACTIONS.some((a) => a[0] === 'cap_map')) KEY_ACTIONS.splice(k + 1, 0, ['cap_map', '星圖（艦長生涯：在星系中巡航時）', '艦長', 'KeyM']); if (SETTINGS.keys.cap_map == null) SETTINGS.keys.cap_map = 'KeyM'; }
+// 艦長生涯：停泊（大廳）／巡航切換（caplobby.js）
+{ const k = KEY_ACTIONS.findIndex((a) => a[0] === 'cap_map'); if (k >= 0 && !KEY_ACTIONS.some((a) => a[0] === 'cap_dock')) KEY_ACTIONS.splice(k + 1, 0, ['cap_dock', '停泊／巡航（艦長生涯：在星系中時）', '艦長', 'KeyH']); if (SETTINGS.keys.cap_dock == null) SETTINGS.keys.cap_dock = 'KeyH'; }
 const CAP_ORDERS = [{ key: 'follow', name: '跟隨' }, { key: 'focus', name: '集火我的目標' }, { key: 'free', name: '自由交戰' }, { key: 'hold', name: '原地防守' }];
 // 難度：n＝敵軍數量倍率、sens＝偵測距離倍率、dmg＝敵方地面單位傷害倍率、hp＝敵方地面單位耐久倍率
 //   foeMax＝任務裡敵方戰艦（巡邏隊、指揮艦）的數量上限：敵艦數照我方船數增加，但不超過上限，
@@ -1675,6 +1677,7 @@ function capKey(e) {
   if (e.repeat) return true;
   CAP.keys.add(k);
   const live = capLive(), is = (id) => plCodeIs(id, k);
+  if (CAP.mis && CAP.mis.idle && cclKey(e, is)) return true;   // 艦長生涯：停泊中的大廳先處理（caplobby.js）
   if (CAP.mis && CAP.mis.idle) {   // 艦長生涯的星系巡航：M 叫出／收起星圖（capcareer_ui.js）
     if (CC.over) { if (k === 'Escape' || is('cap_map')) ccFly(); return true; }
     if (is('cap_map')) { ccMapOpen(); return true; }
@@ -1742,7 +1745,7 @@ addEventListener('mousemove', (e) => {
 document.addEventListener('pointerlockchange', () => {
   if (!CAP.on) return;
   CAP.locked = document.pointerLockElement === canvas;
-  if (!CAP.locked && !capTop()) { CAP.fire.fill(false); CAP.skillHeld = false; if (capLive() && !paused) capPause(true); }
+  if (!CAP.locked && !capTop()) { CAP.fire.fill(false); CAP.skillHeld = false; if (capLive() && !paused && !CCL.on) capPause(true); }   // 停泊中放開滑鼠不算暫停
 });
 function capLock() { if (capTop()) return; try { const r = canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (e) { /* 不支援 */ } }
 function capPause(on) {

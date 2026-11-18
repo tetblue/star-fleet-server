@@ -678,10 +678,12 @@ function ccIdle(S) {
   simEndMid(); overlay(null);
   SIM.m = m; SIM.sel = null; camAnim = null;
   simStart();
+  if (CCL.dock) cclShow();   // 平常是停泊（大廳）；巡航中換場景就接著巡航（caplobby.js）
 }
 // 收起巡航的場景（不算戰鬥、沒有戰果）
 function ccIdleStop() {
   if (!ccIdleOn()) return;
+  cclRemove();
   CC.idle = null; CC.over = false;
   if (paused) { paused = false; updateTimeUI(); }
   setPhase('menu');
@@ -689,6 +691,7 @@ function ccIdleStop() {
 // 巡航中按 M：暫停、疊出星圖
 function ccMapOpen() {
   if (!ccIdleOn()) return;
+  if (CCL.on) cclHide(true);   // 關掉星圖時回到停泊
   paused = true; updateTimeUI(); if (document.pointerLockElement) document.exitPointerLock();
   CC.over = true; CC.S = CC.S || ccLoad(); ccRender();
 }
@@ -697,7 +700,11 @@ function ccFly() {
   const S = CC.S, P = S && ccPl(S); if (!P) return;
   if (gEl('sm-modal')) smuCloseModal();
   window.removeEventListener('resize', ccResize);
-  if (ccIdleOn() && CC.idle && CC.idle.key === ccIdleKey(S, P)) { overlay(null); CC.over = false; capPause(false); return; }
+  if (ccIdleOn() && CC.idle && CC.idle.key === ccIdleKey(S, P)) {
+    overlay(null); CC.over = false;
+    if (CCL.dock) { paused = false; updateTimeUI(); cclShow(); } else capPause(false);   // 回到停泊（大廳）或接著巡航
+    return;
+  }
   ccIdleStop(); ccIdle(S);
 }
 

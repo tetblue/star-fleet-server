@@ -408,6 +408,8 @@ function capFxCam() {
   const L = shipGeo.getAttribute('aScale').array[s.i] * TYPE_LEN3, a = Math.atan2(s.F[0], s.F[2]) + V.yaw, d = V.d * L;
   shipWorldCPU(s.i, _fxa);
   camPersp.position.set(_fxa.x + Math.sin(a) * Math.cos(V.el) * d, _fxa.y + Math.sin(V.el) * d, _fxa.z + Math.cos(a) * Math.cos(V.el) * d);
-  camPersp.lookAt(_fxa.x, _fxa.y, _fxa.z); camPersp.updateMatrixWorld();
+  // sx：把船推到畫面的一側（看的點往鏡頭右邊移，船就往左偏；大廳把右邊留給按鈕）
+  const sx = V.sx || 0, rx = Math.cos(a), rz = -Math.sin(a);   // 鏡頭的右方（水平）
+  camPersp.lookAt(_fxa.x + rx * sx * d, _fxa.y, _fxa.z + rz * sx * d); camPersp.updateMatrixWorld();
 }
 Object.assign(window.__cap || (window.__cap = {}), { CAP_FX, CFX, capFxBuild, CAP_WLOOK, capWKey, CAP_LIVERY, capMuzGroups, capMuzzleAt, cam: () => camPersp });
