@@ -65,7 +65,7 @@ function capOdds(sides, P = CAP_ODDS) {
       return sig(P.surv.b[c.key] + P.surv.c1 * lp + P.surv.c2 * Math.log(Math.max(0.05, fr)) + P.surv.c3 * Math.log(nOwn / nFoe));
     }));
   });
-  return { win: pw, surv };
+  return { win: pw, surv, fem: [a, b] };   // fem：雙方的火力 F、耐久 E、飛彈 M（交戰畫面畫勝率的組成）
 }
 // 戰場上目前的狀況 → capOdds 的輸入（我方難度＝普通，敵方＝這場的難度）
 function capOddsNow() {

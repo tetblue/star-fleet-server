@@ -127,7 +127,38 @@ const CCM_CSS = `
 #g-screen:has(.ccm) .sm-box .sm-pc:hover:not(:disabled){background:rgba(30,60,110,.95);border-left-color:#3cc8ff}
 #g-screen:has(.ccm) .sm-box .sm-pc.go{border-left-color:#3cc8ff}#g-screen:has(.ccm) .sm-box .sm-pc.go b{color:#9fe4ff}
 #g-screen:has(.ccm) .sm-box .cc-sq{border-radius:0;border:0;border-left:3px solid #5d6f92;background:rgba(12,20,42,.7)}
+/* 結束這一週前的警告：有小隊下週會被進攻 */
+#g-screen:has(.ccm) .sm-box.ccm-warn{width:min(760px,94vw);border-color:rgba(255,77,94,.45);background:linear-gradient(165deg,rgba(40,12,24,.96),rgba(10,12,28,.96))}
+#g-screen:has(.ccm) .sm-box.ccm-warn::before{background:#ff4d5e;width:180px}
+.ccm-warn .wh{display:flex;align-items:baseline;gap:14px;margin-bottom:6px}
+.ccm-warn .wh h3{margin:0!important;color:#ff8a96}
+.ccm-warn .wh .en{font:700 12px Rajdhani,Bahnschrift,sans-serif;letter-spacing:.3em;color:#ff4d5e}
+.ccm-warn .wp{color:#8fa3c7;font-size:14px;margin:0 0 14px}
+.ccm-warn .wr{display:grid;grid-template-columns:1fr 120px;gap:4px 18px;align-items:center;padding:12px 16px;background:rgba(12,20,42,.75);border-left:3px solid #ff4d5e}
+.ccm-warn .wr + .wr{margin-top:8px}
+.ccm-warn .wr .n{font:900 18px 'Noto Sans TC','Microsoft JhengHei',sans-serif;letter-spacing:.06em}.ccm-warn .wr .n.me{color:#3fdf8f}
+.ccm-warn .wr .n small{font:500 13px 'Noto Sans TC','Microsoft JhengHei',sans-serif;color:#8fa3c7;margin-left:8px;letter-spacing:0}
+.ccm-warn .wr .d{grid-column:1;font-size:13px;color:#c9d6ee;line-height:1.55}.ccm-warn .wr .d b{color:#ff8a96}
+.ccm-warn .wr .o{grid-column:2;grid-row:1/span 2;text-align:right}
+.ccm-warn .wr .o b{display:block;font:700 34px/1 Rajdhani,Bahnschrift,sans-serif}.ccm-warn .wr .o small{font-size:11px;color:#8fa3c7}
+.ccm-warn .sm-acts{margin-top:16px}
 `;
+// 結束這一週前的警告（ccEndWeek）：每個會被進攻的小隊一列＝敵軍、勝率、最危險的船
+function ccmWarnHtml(S, W) {
+  const P = ccPl(S);
+  const rows = W.map((q) => {
+    const T = ccThreatD(S, q); if (!T) return '';
+    let lo = -1; T.sv.forEach((v, k) => { if (lo < 0 || v < T.sv[lo]) lo = k; });
+    const nf = T.A.reduce((a, x) => a + x.ships.length, 0), defs = T.s.owner === S.fac ? ccDefsAlive(T.s).length : 0;
+    return `<div class="wr"><div class="n${q === P ? ' me' : ''}">${q === P ? '★ ' : ''}${smuEsc(q.name)}<small>駐守 ${T.s.name}</small></div>
+      <div class="o"><b style="color:${ccOddCol(T.w)}">${Math.round(T.w * 100)}%</b><small>駐守的勝率</small></div>
+      <div class="d">敵軍 <b>${T.A.map((x) => smuEsc(x.name)).join('、')}（${nf} 艘）</b>${T.D.length > 1 ? `・一起駐守 ${T.D.slice(1).map((x) => smuEsc(x.name)).join('、')}` : ''}${defs ? `・軌道防禦 ${defs} 座` : ''}
+        ${lo >= 0 ? `<br>最危險：${CAP_HULLS[q.ships[lo].key].name} 存活率 <b style="color:${ccOddCol(T.sv[lo])}">${Math.round(T.sv[lo] * 100)}%</b>` : ''}</div></div>`;
+  }).join('');
+  return `<div class="wh"><h3>⚠ 下週敵軍來襲</h3><span class="en">INCOMING ・ WEEK ${S.turn + 1}</span></div>
+    <p class="wp">這些小隊留在原地駐守，敵軍預定開進。結束這一週就會開戰，開戰後不能取消；要避開就回去移動小隊。</p>${rows}
+    ${smuActs([{ id: 'cc-endgo', cls: 'go', name: '照樣結束這一週', desc: '這些小隊駐守迎戰' }, { id: 'cc-endback', name: '回去下令', desc: '打開星圖重新下命令（移動、進攻）' }], 200)}`;
+}
 const CCM_ICON = { back: '<path d="M15 5l-7 7 7 7"/>', quit: '<path d="M14 4h6v16h-6M4 12h11M9 7l-5 5 5 5"/>' };
 // 介面縮放：以 1920×1080 為準，小視窗等比縮小（卡片不縮，它照星系的螢幕位置擺）
 const ccmK = () => Math.max(0.55, Math.min(1, innerWidth / 1920, innerHeight / 1080));

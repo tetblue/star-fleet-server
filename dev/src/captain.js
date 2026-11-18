@@ -1923,6 +1923,7 @@ function capTopHud(g, W, cx, red, grn, amb, t, top) {
   plFont(g, 11, false); g.fillStyle = 'rgba(220,230,245,.75)';
   g.fillText(M && !M.done ? CAP_MIS[M.type].text(M) : `剩餘時間 ${_fmtT(Math.max(0, CAP.tLim - t))}`, cx, top + 94);
   if (M && (M.done || CAP.warp) && !GAME.result) capWarpHud(g, cx, top + 114, grn, amb, t);
+  if (M && M.inb && !M.inb.done) { capInbHud(g, cx, top, M, t); g.textAlign = 'left'; return; }   // 迎擊戰：敵軍躍遷倒數（艦長生涯交戰畫面同一套紅色）
   // 警戒狀態
   let txt, c, sub = '';
   const seen = Math.max(...CAP.own.filter((o) => !o.dead).map((o) => Math.min(1, o.seen)), 0), known = CAP.own.some((o) => !o.dead && t < o.knownT);
@@ -1941,6 +1942,20 @@ function capTopHud(g, W, cx, red, grn, amb, t, top) {
   else { plFont(g, 11); g.fillStyle = 'rgba(230,236,248,.85)'; g.fillText(sub, cx, by + 33); }
   if (!CAP.alarm && !known && sub) { plFont(g, 11); g.fillStyle = 'rgba(230,236,248,.75)'; g.fillText(sub, cx, by + 56); }
   g.textAlign = 'left';
+}
+function capInbHud(g, cx, top, M, t) {
+  const left = Math.max(0, M.inb.t - t), w = 400, h = 62, x = cx - w / 2, y = top - 4, blink = left < 3 && (t * 4) % 1 < 0.5;
+  g.save();
+  g.beginPath(); g.moveTo(x + 14, y); g.lineTo(x + w, y); g.lineTo(x + w - 14, y + h); g.lineTo(x, y + h); g.closePath();
+  const gr = g.createLinearGradient(x, 0, x + w, 0); gr.addColorStop(0, 'rgba(120,10,28,.85)'); gr.addColorStop(1, 'rgba(40,6,16,.8)'); g.fillStyle = gr; g.fill();
+  g.strokeStyle = blink ? '#fff' : 'rgba(255,90,110,.9)'; g.lineWidth = 1.5; g.stroke();
+  g.fillStyle = '#ff4d5e'; g.fillRect(x + 14, y, 120, 3);
+  g.textAlign = 'left'; g.fillStyle = '#ffb0ba'; g.font = '700 11px Rajdhani, Bahnschrift, sans-serif'; g.fillText('INCOMING  WARP', x + 26, y + 18); plFont(g, 10, false); g.fillStyle = 'rgba(255,220,226,.75)'; g.fillText('紅色箭頭＝來的方向', x + 132, y + 18);
+  plFont(g, 20, true); g.fillStyle = '#fff'; g.fillText('⚠ 敵軍躍遷中', x + 24, y + 42);
+  g.textAlign = 'right'; g.font = '700 40px Rajdhani, Bahnschrift, sans-serif'; g.fillStyle = blink ? '#fff' : '#ff8a96'; g.fillText(left.toFixed(1), x + w - 46, y + 46);
+  plFont(g, 12, false); g.fillStyle = 'rgba(255,220,226,.8)'; g.fillText('秒', x + w - 26, y + 46);
+  capBar(g, x + 24, y + h - 12, w - 60, 4, left / M.inb.t, '#ff4d5e', 'rgba(255,255,255,.14)');
+  g.restore();
 }
 function capBar(g, x, y, w, h, r, c, bg = 'rgba(255,255,255,.12)') { g.fillStyle = bg; g.fillRect(x, y, w, h); g.fillStyle = c; g.fillRect(x, y, w * Math.max(0, Math.min(1, r)), h); }
 function capSquadHud(g, H, ca, red, grn, amb, col, t) {
