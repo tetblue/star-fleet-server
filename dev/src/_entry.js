@@ -27850,7 +27850,7 @@ function ccShipBars(c) { return `<div>${ccBar(c.hp, c.hp < 0.35 ? '#ff6a5a' : '#
 // 船名＋等級（舊情報沒有等級就不顯示）
 const ccShipNm = (c) => `${CAP_HULLS[c.key].name}${c.lv ? ` <span class="cc-lv${c.lv > 1 ? ' up' : ''}">Lv${c.lv}</span>` : ''}${ccMkTag(c)}`;
 // 裝備的最高 Mk（看得出敵方的研發）
-const ccMkTag = (c) => { const m = Math.max(1, ...Object.values(c.mk || {})); return m > 1 ? ` <span class="cc-lv up" title="裝備等級">${CAP_MK_NAME[m]}</span>` : ''; };
+const ccMkTag = (c) => { const m = Math.max(1, ...Object.values(c.mk || {})); ccIcoCss(); return m > 1 ? ` <span class="cc-mk cc-mk${m}" title="裝備等級（最高的槽位）">${CAP_MK_NAME[m]}</span>` : ''; };   // 等階顏色：capicons_ui.js
 // own＝你的小隊：點船名看那艘船的等級、模組、數值
 function ccShipRows(q, own) {
   return q.ships.map((c, k) => `<div class="cc-ship"><b${own ? ` class="cc-shipnm" data-ship="${q.id}:${k}" title="看這艘船的等級與模組"` : ''}>${ccShipNm(c)}</b>${ccShipBars(c)}</div>`).join('') || '<div class="g-dim">（全滅）</div>';
@@ -27860,12 +27860,12 @@ const ccSurvTx = (q, sv) => q.ships.map((c, k) => `${CAP_HULLS[c.key].name} ${Ma
 // 一艘船的等級、經驗、模組與實際數值（研發、改裝的第 1 步：先能看，改裝之後開放）
 function ccShipView(q, k) {
   const c = q && q.ships[k]; if (!c) return;
-  capShipFix(c);
+  capShipFix(c); ccIcoCss();
   const H0 = CAP_HULLS[c.key], H = capProfMod(capHullMod(H0, c), c.mod, CC.S.pl.prof), L = CAP_XP.lv, lv = c.lv, cap = ccMkCap(CC.S, c);
   const lo = L[lv - 1], hi = L[lv], xpTx = hi == null ? `經驗 ${c.xp}（已經是最高等級）` : `經驗 ${c.xp}／${hi}（升到 Lv${lv + 1}${capMkCapLv(lv + 1) > capMkCapLv(lv) ? `，等級上限 ${CAP_MK_NAME[capMkCapLv(lv + 1)]}` : ''}）`;
   const pct = hi == null ? 1 : (c.xp - lo) / (hi - lo);
   const rows = CAP_SLOTS.map(([slot, nm]) => { const id = c.mod[slot], M = id && CAP_MODS[slot][id];
-    return `<tr><td>${nm}</td><td><b>${capModName(H0, slot, id)}</b> ${CAP_MK_NAME[c.mk[slot] || 1]}</td><td class="g-dim">${M ? M.desc : '原廠'}</td><td class="g-dim" title="艦長熟練度">熟練 Lv${capProfLv((CC.S.pl.prof || {})[capProfKey(slot, id)] || 0)}</td></tr>`; }).join('');
+    return `<tr><td><span class="cc-slot">${ccModIco(slot, id, ccMkCol(c.mk[slot]))}${nm}</span></td><td><b>${capModName(H0, slot, id)}</b> ${ccMkBadge(c.mk[slot])}</td><td class="g-dim">${M ? M.desc : '原廠'}</td><td class="g-dim" title="艦長熟練度">熟練 Lv${capProfLv((CC.S.pl.prof || {})[capProfKey(slot, id)] || 0)}</td></tr>`; }).join('');
   const f1 = (v) => Math.round(v * 10) / 10;
   const st = [['船體', Math.round(H.hp)], ['護盾', Math.round(H.sh)], ['主砲', `${H.main.name} ${f1(H.main.dmg)} 傷害／${H.main.cd} 秒（每秒 ${f1(H.main.dmg / H.main.cd)}）・射程 ${H.main.range}・射界左右各 ${H.main.arc}°`],
     ['副砲', `砲塔 ${H.tur.n} 座・${f1(H.tur.dmg)} 傷害／${f1(H.tur.cd)} 秒・點防禦 ${H.pd.n} 座`],
@@ -28002,11 +28002,13 @@ function ccTechView() {
 function ccShopView(s) {
   const S = CC.S, T = CC_SHOP[s.shop], why = ccShopWhy(S, s), L = ccShopStock(S, s), K = ccShopK(S, s);
   const rows = L.map((it, i) => { const got = ccShopBought(S, s, i) || (it.kind === 'bp' && ccHasBp(S, it.k));
-    return `<div class="cc-ship cc-yq" style="grid-template-columns:1fr auto"><span><b>${ccShopItemName(it)}</b>${it.kind === 'bp' ? `<br><span class="g-dim">${CAP_MODS[it.k.split(':')[0]][it.k.split(':')[1]].desc}・買到後在「研發」研究</span>` : ''}</span><button class="g-btn" data-buy="${i}" ${why || got || S.pl.money < it.p ? `disabled title="${smuEsc(why || (got ? '已經買了' : '資金不夠'))}"` : ''}>${got ? '已經買了' : `買（${it.p} 資金）`}</button></div>`; }).join('');
-  smuModal(`<h3>${s.name} 的${T.name}</h3>
-    <div class="g-dim" style="font-size:12px">貨每週換。價格 ×${K.toFixed(2)}（${s.shop === 'black' ? '黑市貴 30%、看海盜' : '看中立勢力'}對你的好感度與你的陣營的聲望）。${s.shop === 'trade' ? '擁有者跟你交戰中就不賣。' : '黑市誰都賣。'}資金 ${S.pl.money}</div>
-    ${why ? `<p style="color:#ff8a7a">${why}</p>` : ''}${rows}
-    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`);
+    return `<div class="cc-ship cc-yq ccs-item${got ? ' got' : ''}" style="grid-template-columns:1fr auto"><span><b>${ccShopItemName(it)}</b>${it.kind === 'bp' ? ' <span class="ccs-tag">藍圖</span>' : ''}${it.kind === 'bp' ? `<br><span class="g-dim">${CAP_MODS[it.k.split(':')[0]][it.k.split(':')[1]].desc}・買到後在「研發」研究</span>` : ''}</span><button class="g-btn" data-buy="${i}" ${why || got || S.pl.money < it.p ? `disabled title="${smuEsc(why || (got ? '已經買了' : '資金不夠'))}"` : ''}>${got ? '已經買了' : `買（${it.p} 資金）`}</button></div>`; }).join('');
+  const blk = s.shop === 'black';
+  ccmSheet(`<h3>${s.name} 的${T.name}<span class="en">${blk ? 'BLACK MARKET' : 'TRADE POST'}</span></h3>
+    <div class="ccs-stat"><div><span>資金</span><b>${S.pl.money}</b></div><div><span>價格</span><b style="color:${K > 1.05 ? 'var(--red)' : K < 0.95 ? 'var(--own)' : '#fff'}">×${K.toFixed(2)}</b></div><div><span>本週貨品</span><b>${L.length}</b></div></div>
+    <div class="ccs-note">貨每週換。價格 ×${K.toFixed(2)}（${s.shop === 'black' ? '黑市貴 30%、看海盜' : '看中立勢力'}對你的好感度與你的陣營的聲望）。${s.shop === 'trade' ? '擁有者跟你交戰中就不賣。' : '黑市誰都賣。'}</div>
+    ${why ? `<div class="ccs-warn">${why}</div>` : ''}<h4>貨品</h4>${rows || '<div class="g-dim">這週沒有貨。</div>'}
+    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`, '', blk ? 'var(--red)' : 'var(--gold)');
   gEl('cc-close').onclick = () => { smuCloseModal(); ccRender(); };
   document.querySelectorAll('[data-buy]').forEach((b) => (b.onclick = () => { const err = ccShopBuy(S, s, +b.dataset.buy); if (err) { toast(err, 'warn'); return; } ccSave(S); ccRender(); ccShopView(s); }));
 }
@@ -28061,13 +28063,14 @@ function ccYardView(s) {
 function ccFitView(src, D) {
   const S = CC.S, F = ccFitSrc(S, src); if (!F) { smuCloseModal(); return; }
   const c = capShipFix(F.c), H0 = CAP_HULLS[c.key], s = S.sys[F.sys], cap = ccMkCap(S, c), capL = capMkCapLv(c.lv);
-  D = D || { mod: { ...c.mod }, mk: { ...c.mk } };
+  D = D || { mod: { ...c.mod }, mk: { ...c.mk } }; ccIcoCss();
+  const hx0 = ccHexNow();   // 六角圖：從上一次的形狀動畫過去
   const rows = CAP_SLOTS.map(([slot, nm]) => {
     const cur = D.mod[slot] || '', same = cur === (c.mod[slot] || ''), k0 = same ? c.mk[slot] || 1 : 1, kc = D.mk[slot] || 1;
-    const opts = [['', capModBase(H0, slot)], ...Object.entries(CAP_MODS[slot]).map(([id, M]) => { const w = ccFitOk(S, H0, slot, id); return [id, M.name + (w ? '🔒' : ''), !!w, w || M.desc]; })];
-    const mks = [1, 2, 3].map((k) => [k, CAP_MK_NAME[k], k > cap || k < k0, k > cap ? (k > capL ? `船要 Lv${k === 2 ? 3 : 5}` : `要先研究 Mk ${k === 2 ? 'II' : 'III'} 工藝`) : k < k0 ? 'Mk 不能降' : `主要數值 ×${CAP_MK[k]}`]);
+    const opts = [['', ccModIco(slot, '') + capModBase(H0, slot)], ...Object.entries(CAP_MODS[slot]).map(([id, M]) => { const w = ccFitOk(S, H0, slot, id); return [id, ccModIco(slot, id) + M.name + (w ? '🔒' : ''), !!w, w || M.desc]; })];
+    const mks = [1, 2, 3].map((k) => [k, ccMkBadge(k), k > cap || k < k0, k > cap ? (k > capL ? `船要 Lv${k === 2 ? 3 : 5}` : `要先研究 Mk ${k === 2 ? 'II' : 'III'} 工藝`) : k < k0 ? 'Mk 不能降' : `主要數值 ×${CAP_MK[k]}`]);
     const M = cur && CAP_MODS[slot][cur], chg = !same || kc !== (c.mk[slot] || 1);
-    return `<tr${chg ? ' class="chg"' : ''}><td>${nm}</td><td>${smuSeg('cc-fm-' + slot, opts, cur)}<div class="g-dim" style="font-size:11px;margin-top:2px">${M ? M.desc : '原廠'}${!same && (c.mk[slot] || 1) > 1 ? `（換模組＝回到 Mk I）` : ''}</div></td><td>${smuSeg('cc-fk-' + slot, mks, kc)}</td></tr>`;
+    return `<tr${chg ? ' class="chg"' : ''}><td><span class="cc-slot">${ccModIco(slot, cur, ccMkCol(kc))}${nm}</span></td><td>${smuSeg('cc-fm-' + slot, opts, cur)}<div class="g-dim" style="font-size:11px;margin-top:2px">${M ? M.desc : '原廠'}${!same && (c.mk[slot] || 1) > 1 ? `（換模組＝回到 Mk I）` : ''}</div></td><td>${smuSeg('cc-fk-' + slot, mks, kc)}</td></tr>`;
   }).join('');
   const A = capProfMod(capHullMod(H0, c), c.mod, S.pl.prof), B = capProfMod(capHullMod(H0, D), D.mod, S.pl.prof), f1 = (v) => Math.round(v * 10) / 10;
   const chg = [], cmp = (nm, a, b, fmt = f1, hi = 1) => { const x = fmt(a), y = fmt(b), d = b - a, col = Math.abs(d) < 1e-6 ? '' : (d > 0) === (hi > 0) ? '#3fdf8f' : '#ff8a7a'; if (col) chg.push(`${nm} ${x} → <b style="color:${col}">${y}</b>`); return `<dt>${nm}</dt><dd>${x}${col ? ` → <b style="color:${col}">${y}</b>` : ''}</dd>`; };
@@ -28082,11 +28085,12 @@ function ccFitView(src, D) {
   ccmSheet(`<h3>改裝：${F.q ? smuEsc(F.q.name) + '・' : '預備艦・'}${H0.name} <span class="cc-lv${c.lv > 1 ? ' up' : ''}" style="font-size:13px">Lv${c.lv}</span><span class="en">REFIT</span></h3>
     <div class="g-dim" style="font-size:12px">在 ${s.name} 的船塢改裝：佔用船塢一週，跟造船排同一個隊（排在還沒開工的造船前面）。改裝中的船離開小隊、不能出戰；${back}。Mk 上限 <b>${CAP_MK_NAME[cap]}</b>（船的等級與研發取低的）。資金 ${S.pl.money}</div>
     <table class="cc-mods cc-fit"><tr><td></td><td class="g-dim">模組</td><td class="g-dim">Mk</td></tr>${rows}</table>
-    <dl class="cc-cmp">${st}</dl>
+    <div class="cc-fitcmp">${ccHexSvg(A, B, H0)}<dl class="cc-cmp">${st}</dl></div>
     <div class="g-dim" style="font-size:12px">價錢：工錢 ${CC_RULE.fit.base}・換模組 ${CC_RULE.fit.mod.main}／${CC_RULE.fit.mod.tur}／${CC_RULE.fit.mod.msl}／${CC_RULE.fit.mod.def}／${CC_RULE.fit.mod.eng}（主砲／副砲／飛彈艙／防禦／引擎，換回原廠半價）・Mk II ${CC_RULE.fit.mk[2]}、Mk III 再 ${CC_RULE.fit.mk[3]}（每個槽位）</div>
     ${stop && cost ? `<div style="color:#ff8a7a;margin-top:6px">${stop}</div>` : ''}
     <div class="sm-btns"><button class="g-btn" id="cc-fit-no">${F.q ? '回到船的資料' : '回到船塢'}</button><button class="g-btn" id="cc-fit-rs" ${cost ? '' : 'disabled'}>重選</button><button class="g-btn primary" id="cc-fit-ok" ${stop ? 'disabled' : ''}>${cost ? `送進船塢（${cost} 資金・${eta} 週後好）` : '送進船塢'}</button></div>`, 'sm-wide cr-side', 'var(--violet)');
   const redo = () => ccFitView(src, D);
+  ccHexAnim(hx0);
   // 整修庫（caprefit.js）：背景照現在的設定擺船；剛選的零件播安裝動畫，下方說明這次的數值變化
   { const ls = D._last, sl = ls && (ls.startsWith('mk:') ? ls.slice(3) : ls), nm = sl && (CAP_SLOTS.find(([k]) => k === sl) || [])[1], md = sl && D.mod[sl] && CAP_MODS[sl][D.mod[sl]];
     const head = nm ? `<b>${nm}：${md ? md.name : '原廠'}${(D.mk[sl] || 1) > 1 ? ' ' + CAP_MK_NAME[D.mk[sl]] : ''}</b>` : `<b>${H0.name}</b>　整修庫`;
@@ -28405,6 +28409,8 @@ function cpView(s) {
   const S = CC.S, V = ccSee(S, s), live = V.live, mine = s.owner === S.fac, nz = cpNzRule(S, s), neu = s.owner === SM_N || nz;
   const R = cpInc(S, s), K = cpRazeK(S), btn = (attr, tx, why) => `<button class="g-btn" ${attr} ${why ? `disabled title="${smuEsc(why)}"` : ''}>${tx}</button>`;
   // 狀況
+  const pc = s.prosp < CP_RULE.riot[0] ? 'var(--red)' : s.prosp < 40 ? '#ffb35a' : 'var(--own)';
+  const strip = live ? `<div class="ccs-stat"><div><span>人口</span><b>${s.pop}<small>／${cpPopCap(s)}</small></b></div><div><span>繁榮</span><b style="color:${pc}">${s.prosp}</b></div><div><span>地面防禦</span><b>${s.def}<small>／${s.def0}</small></b></div><div><span>勢力收入／週</span><b>${Math.round(R.g - R.up)}</b></div><div><span>你的資金</span><b style="color:var(--gold)">${S.pl.money}</b></div></div>` : '';
   const head = live ? `<dl class="sm-kv"><dt>擁有者</dt><dd>${SM_FAC[s.owner].name}・${SM_TIER[s.tier]}${s.tier < 4 ? `（人口到 ${Math.round(SM_TIER_CAP[s.tier] * 0.7)} 可以升級）` : ''}</dd>
       <dt>人口</dt><dd>${s.pop}／${cpPopCap(s)}</dd>
       <dt>繁榮（民心）</dt><dd>${ccBar(s.prosp / 100, s.prosp < CP_RULE.riot[0] ? '#ff6a5a' : s.prosp < 40 ? '#ffb35a' : '#5fd39a')}${s.prosp}${s.riot ? `・<b style="color:#ff7a6b">暴動中</b>（收入歸零、地面防禦 −1，回到 ${CP_RULE.riot[1]} 才平息）` : `・低於 ${CP_RULE.riot[0]} 會暴動`}</dd>
@@ -28435,11 +28441,12 @@ function cpView(s) {
   const build = canPv ? smuActs(CP_PV_ORDER.filter((k) => !(CP_PV[k].neu && !neu)).map((k) => { const P = CP_PV[k], why = cpPvWhy(S, s, k); return { id: 'cp-b-' + k, name: `蓋${P.name}（${P.at === 'g' ? '地表' : '軌道'}）`, desc: why || `${P.cost} 資金・${P.w} 週・每週維護 ${P.up}・${P.desc}`, off: !!why }; }), 150) : '';
   const cap = `己方星系 ${cpPvCount(S, false)}／${cpPvCap(S, false)} 座（${ccRankOf(S).name}，據點的不算）・中立星系 ${cpPvCount(S, true)}／${cpPvCap(S, true)} 座（中立好感度 ${Math.round(ccFavOf(S, SM_N))}：${cpNeuTier(S)[3]}）`;
   const inc = S.pl.inc ? `<div class="g-dim" style="font-size:12px">上週你的收入：薪餉 ${S.pl.inc.sal}・分紅 ${S.pl.inc.div}・你的建築 ${S.pl.inc.pv}（已繳稅 ${S.pl.inc.tax}）・維護 −${S.pl.inc.up}${S.pl.inc.rp ? `・研究點數 +${S.pl.inc.rp}` : ''}</div>` : '';
-  smuModal(`<h3>${s.name} 的星球</h3>
-    <div class="g-dim" style="font-size:12px">基礎建設是${neu ? '中立勢力' : '勢力的上級'}的事；你可以出錢強化你的陣營的建築（好處一半給勢力、一半給你），或在你的區塊蓋自己的建築。星系失守時建築先「接管中」，接管完成前你可以破壞，拿回出的錢的 ${Math.round(K * 100)}%（研發「焦土協定」提高）；接管完成前奪回＝原樣還你。資金 ${S.pl.money}</div>
+  ccmSheet(`<h3>${s.name} 的星球<span class="en">PLANET ・ ${live ? SM_FAC[s.owner].name : 'NO INTEL'}</span></h3>
+    ${strip}${s.riot && live ? '<div class="ccs-warn">暴動中：收入歸零、地面防禦 −1</div>' : ''}
+    <div class="ccs-note">基礎建設是${neu ? '中立勢力' : '勢力的上級'}的事；你可以出錢強化你的陣營的建築（好處一半給勢力、一半給你），或在你的區塊蓋自己的建築。星系失守時建築先「接管中」，接管完成前你可以破壞，拿回出的錢的 ${Math.round(K * 100)}%（研發「焦土協定」提高）；接管完成前奪回＝原樣還你。</div>
     ${inc}${head}${fac}${bq}
     ${canPv || (s.pv || []).length ? `<h4 style="margin:12px 0 4px">你的建築</h4><div class="g-dim" style="font-size:12px">${cap}</div>${pvRows || '<div class="g-dim">還沒有。</div>'}${build}` : ''}
-    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`);
+    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`, '', live ? ccFacCol(S, s.owner) : 'var(--mute)');
   const re = (err) => { if (err) { toast(err, 'warn'); return; } ccSave(S); ccRender(); cpView(s); };
   gEl('cc-close').onclick = () => { smuCloseModal(); ccRender(); };
   document.querySelectorAll('[data-up]').forEach((b) => (b.onclick = () => re(cpUp(S, s, s.bd.find((x) => x.id === +b.dataset.up)))));
@@ -29122,6 +29129,17 @@ const CCS_CSS = `
 .ccm-sheet .ccs-cur{display:flex;align-items:center;gap:14px;padding:12px 14px;background:rgba(40,24,80,.45);border-left:3px solid var(--violet);margin:6px 0}
 .ccm-sheet .ccs-cur .cc-bar{flex:1}
 .ccm-sheet .ccs-big{font:700 30px/1 var(--en);color:var(--violet)}
+/* 數字列（商店、星球）、警告、貨品 */
+.ccm-sheet .ccs-stat{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:4px;margin:4px 0 10px}
+.ccm-sheet .ccs-stat > div{padding:8px 12px;background:rgba(12,20,42,.75);border-top:2px solid var(--sc,var(--cyan));clip-path:polygon(0 0,100% 0,calc(100% - 8px) 100%,0 100%)}
+.ccm-sheet .ccs-stat span{display:block;font-size:12px;color:var(--dim);letter-spacing:.08em}
+.ccm-sheet .ccs-stat b{font:700 26px/1.15 var(--en);color:#fff}
+.ccm-sheet .ccs-stat small{font-size:14px;color:var(--dim);margin-left:2px}
+.ccm-sheet .ccs-warn{padding:8px 12px;margin:6px 0;background:rgba(120,20,30,.45);border-left:3px solid var(--red);color:#ffb0a8;font-weight:700}
+.ccm-sheet .ccs-item{border-left-color:var(--sc,var(--gold))}
+.ccm-sheet .ccs-item.got{opacity:.55}
+.ccm-sheet .ccs-tag{display:inline-block;padding:0 6px;font-size:11px;font-weight:700;color:#1a1200;background:var(--gold);transform:skewX(-12deg)}
+.ccm-sheet .cc-yq .cc-lv{font-size:12px}
 /* 小隊總覽 */
 .ccm-sheet .ccs-sq{padding:12px 14px;margin:10px 0;background:rgba(10,16,34,.65);border-left:3px solid var(--c,var(--own))}
 .ccm-sheet .ccs-sq .h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
@@ -29159,6 +29177,128 @@ function ccSquadsView() {
   document.querySelectorAll('.ccm-sheet [data-swap]').forEach((b) => (b.onclick = () => ccSwapView(ccSqById(+b.dataset.swap))));
 }
 Object.assign(window.__cap || (window.__cap = {}), { ccSquadsView, ccShipView, ccSwapView });
+
+// ═══════════════════════ 艦長生涯：裝備圖示、Mk 等階顏色、改裝前後的六角圖（2026-11-18）═══════════════════════
+// 讓玩家一眼分辨：每個模組（槽位＋型式，原廠＝std）一個小圖示；Mk 等階一個顏色（Mk I 灰白、Mk II 藍、Mk III 金）。
+// 改裝畫面多一張六角雷達圖：灰線＝改裝前、彩色＝改裝後，每次點選零件從上一次的形狀動畫過去。
+// 六個軸都跟「這個船型的原廠 Mk I」比：原廠＝圖的 60%（虛線），+83% 以上頂到外圈。
+const CC_MK_COL = ['#c8d2e0', '#c8d2e0', '#4fb0ff', '#ffc24a'];
+const ccMkCol = (k) => CC_MK_COL[k || 1];
+// 圖示（viewBox 20×20，線條用 currentColor）
+const CC_MODICO = {
+  'main:std': '<circle cx="7" cy="13" r="4"/><path d="M9.5 10.5L17 4"/>',
+  'main:rail': '<path d="M2 13L17 3.5M3.5 16L18.5 6.5"/><path d="M7 11.5l1.6 2.3M11 9l1.6 2.3M15 6.5l1.2 1.8"/>',
+  'main:heavy': '<circle cx="6.5" cy="13.5" r="4"/><path d="M8 9.5l6.5-6 3 3-6 6.5" fill="currentColor" fill-opacity=".35"/>',
+  'main:rapid': '<circle cx="5" cy="15" r="3"/><path d="M6 12L14 4M8 14l8-8M7.5 9.5l8.5-1"/>',
+  'main:beam': '<circle cx="4" cy="10" r="2.6"/><path d="M6.5 10H18" stroke-width="3" stroke-opacity=".45"/><path d="M6.5 10H18"/>',
+  'tur:std': '<path d="M3.5 16a6.5 6.5 0 0 1 13 0z"/><path d="M10 9.5V3"/>',
+  'tur:heavy': '<path d="M3 16.5a7 7 0 0 1 14 0z" fill="currentColor" fill-opacity=".3"/><path d="M8.6 9.5V2.5M11.4 9.5V2.5"/>',
+  'tur:aa': '<path d="M3.5 16a6.5 6.5 0 0 1 13 0z"/><path d="M8.5 9.5L5 3M11.5 9.5L15 3"/><path d="M2 5h2M16 5h2" stroke-opacity=".6"/>',
+  'msl:std': '<path d="M10 2l2.6 3.5V14H7.4V5.5z"/><path d="M7.4 11.5L5 15.5h2.4M12.6 11.5l2.4 4h-2.4M10 15v3"/>',
+  'msl:heavy': '<path d="M10 1.5l3.5 4V14h-7V5.5z" fill="currentColor" fill-opacity=".35"/><path d="M6.5 11L4 16h2.5M13.5 11L16 16h-2.5"/>',
+  'msl:swarm': '<path d="M5 3l1.6 2v6H3.4V5zM10 6l1.6 2v6H8.4V8zM15 3l1.6 2v6h-3.2V5z"/><path d="M5 11v3M10 14v3M15 11v3" stroke-opacity=".6"/>',
+  'msl:hangar': '<path d="M10 2.5l6.5 13-6.5-3-6.5 3z"/><path d="M10 2.5v10"/>',
+  'def:std': '<path d="M10 2l7 2.8V10c0 4-3 6.8-7 8-4-1.2-7-4-7-8V4.8z"/>',
+  'def:armor': '<rect x="3" y="3.5" width="14" height="13" rx="1"/><path d="M3 10h14M10 3.5v13"/><circle cx="6" cy="6.5" r=".8" fill="currentColor"/><circle cx="14" cy="13.5" r=".8" fill="currentColor"/>',
+  'def:shield': '<path d="M10 2l7 2.8V10c0 4-3 6.8-7 8-4-1.2-7-4-7-8V4.8z" fill="currentColor" fill-opacity=".3"/><path d="M6.5 9.5a4.5 4.5 0 0 1 7 0"/>',
+  'def:react': '<path d="M10 2l7 2.8V10c0 4-3 6.8-7 8-4-1.2-7-4-7-8V4.8z"/><path d="M11 5l-3 5.5h3.5L8.5 15" />',
+  'eng:std': '<path d="M5.5 3h9l-2 6.5h-5z"/><path d="M10 11c-2.2 2.6-.4 6.5 0 6.5s2.2-3.9 0-6.5z" fill="currentColor" fill-opacity=".4"/>',
+  'eng:cruise': '<path d="M4 4.5l6 5 6-5M4 10.5l6 5 6-5"/>',
+  'eng:sprint': '<path d="M2 6.5h6M1.5 10h9M2 13.5h6"/><path d="M11 4.5l6.5 5.5-6.5 5.5z" fill="currentColor" fill-opacity=".35"/>',
+  'eng:agile': '<path d="M4 16.5c0-7 4.5-11 12-11"/><path d="M13 2.5l3.2 3-3.2 3.2"/><path d="M4 16.5l-1.5-2.5M4 16.5l2.5-1.3" stroke-opacity=".6"/>',
+};
+// 圖示的 HTML：slot＋id（沒有 id＝原廠）、col＝顏色（不給＝跟著文字顏色）
+function ccModIco(slot, id, col, sz) {
+  const p = CC_MODICO[slot + ':' + (id || 'std')] || CC_MODICO[slot + ':std'] || '';
+  return `<svg class="cc-mico" viewBox="0 0 20 20" width="${sz || 18}" height="${sz || 18}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"${col ? ` style="color:${col}"` : ''}>${p}</svg>`;
+}
+// Mk 徽章：等階的顏色
+const ccMkBadge = (k) => `<span class="cc-mk cc-mk${k || 1}">${CAP_MK_NAME[k || 1]}</span>`;
+
+// ── 六角圖 ──
+const CC_HEX_AX = [
+  ['火力', (H) => H.main.dmg / H.main.cd + (H.tur.n * H.tur.dmg) / H.tur.cd],
+  ['射程', (H) => H.main.range],
+  ['飛彈', (H) => (H.msl ? H.msl.n * H.msl.dmg : 0) + (H.ftr || 0) * 6],
+  ['機動', (H, H0) => H.max / H0.max + H.turn / H0.turn],   // 最高速度與轉向各半
+  ['耐久', (H) => H.hp + H.sh],
+  ['防空', (H) => H.pd.n * (H.pd.far || 1)],
+];
+// 0～1 的半徑：原廠＝0.6，每多（少）1% 外推（內縮）0.8%，小改動也看得出來
+function ccHexVals(H, H0) {
+  return CC_HEX_AX.map(([, f]) => { const b = f(H0, H0), v = f(H, H0); if (!(b > 0)) return v > 0 ? 0.8 : 0; return Math.max(0.06, Math.min(1, 0.6 + (v / b - 1) * 0.48)); });
+}
+const CC_HEX_R = 74, CC_HEX_C = [130, 100];
+function ccHexPts(v) { return v.map((r, i) => { const a = -Math.PI / 2 + i * Math.PI / 3; return `${(CC_HEX_C[0] + Math.cos(a) * r * CC_HEX_R).toFixed(1)},${(CC_HEX_C[1] + Math.sin(a) * r * CC_HEX_R).toFixed(1)}`; }).join(' '); }
+// A＝改裝前、B＝改裝後（capHullMod 算好的數值）；回傳 SVG（id＝cc-hex，動畫用 ccHexAnim）
+function ccHexSvg(A, B, H0) {
+  const a = ccHexVals(A, H0), b = ccHexVals(B, H0), [cx, cy] = CC_HEX_C, R = CC_HEX_R;
+  const ring = (k) => `<polygon points="${ccHexPts([k, k, k, k, k, k])}" class="r${k === 0.6 ? ' base' : ''}"/>`;
+  const up = b.some((x, i) => x > a[i] + 1e-3), dn = b.some((x, i) => x < a[i] - 1e-3), col = up && !dn ? '#3fdf8f' : dn && !up ? '#ff8a7a' : up ? '#c9a7ff' : '#3cc8ff';
+  const lab = CC_HEX_AX.map(([nm, f], i) => {
+    const ang = -Math.PI / 2 + i * Math.PI / 3, x = cx + Math.cos(ang) * (R + 16), y = cy + Math.sin(ang) * (R + 12), fa = f(A, H0), fb = f(B, H0), d = fa > 0 ? (fb - fa) / fa : fb > 0 ? 1 : 0;
+    const anc = Math.abs(Math.cos(ang)) < 0.2 ? 'middle' : Math.cos(ang) > 0 ? 'start' : 'end';
+    const dt = Math.abs(d) < 0.005 ? '' : `<tspan x="${x.toFixed(1)}" dy="13" class="${d > 0 ? 'u' : 'd'}">${d > 0 ? '▲' : '▼'}${Math.round(Math.abs(d) * 100)}%</tspan>`;
+    return `<text x="${x.toFixed(1)}" y="${(y + (i === 0 ? -4 : i === 3 ? 6 : 0)).toFixed(1)}" text-anchor="${anc}">${nm}${dt}</text>`;
+  }).join('');
+  const spokes = [0, 1, 2, 3, 4, 5].map((i) => { const ang = -Math.PI / 2 + i * Math.PI / 3; return `<line x1="${cx}" y1="${cy}" x2="${(cx + Math.cos(ang) * R).toFixed(1)}" y2="${(cy + Math.sin(ang) * R).toFixed(1)}"/>`; }).join('');
+  return `<div class="cc-hexw" style="--hc:${col}"><svg class="cc-hex" id="cc-hex" viewBox="0 0 260 206" data-b="${b.join(',')}">
+    <g class="g">${ring(1)}${ring(0.8)}${ring(0.6)}${ring(0.4)}${ring(0.2)}${spokes}</g>
+    <polygon class="old" points="${ccHexPts(a)}"/><polygon class="new" points="${ccHexPts(b)}"/>
+    ${b.map((r, i) => { const ang = -Math.PI / 2 + i * Math.PI / 3; return `<circle class="dot" r="2.6" cx="${(cx + Math.cos(ang) * r * R).toFixed(1)}" cy="${(cy + Math.sin(ang) * r * R).toFixed(1)}"/>`; }).join('')}
+    <g class="lb">${lab}</g></svg><div class="cc-hexlg"><span><i></i>改裝前</span><span><i class="n"></i>改裝後</span><span>虛線＝原廠</span></div></div>`;
+}
+// 從上一次的形狀（from＝陣列）動畫到現在的形狀
+function ccHexAnim(from) {
+  const el = gEl('cc-hex'); if (!el || !from) return;
+  const to = el.dataset.b.split(',').map(Number), pg = el.querySelector('polygon.new'), dots = el.querySelectorAll('circle.dot');
+  if (from.every((v, i) => Math.abs(v - to[i]) < 1e-3)) return;
+  const t0 = performance.now(), T = 320;
+  const step = (now) => {
+    if (!el.isConnected) return;
+    const u = Math.min(1, (now - t0) / T), e = 1 - Math.pow(1 - u, 3), v = to.map((x, i) => from[i] + (x - from[i]) * e);
+    pg.setAttribute('points', ccHexPts(v));
+    dots.forEach((d, i) => { const ang = -Math.PI / 2 + i * Math.PI / 3; d.setAttribute('cx', CC_HEX_C[0] + Math.cos(ang) * v[i] * CC_HEX_R); d.setAttribute('cy', CC_HEX_C[1] + Math.sin(ang) * v[i] * CC_HEX_R); });
+    if (u < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+const ccHexNow = () => { const el = gEl('cc-hex'); return el ? el.dataset.b.split(',').map(Number) : null; };
+
+// 樣式：第一次用到時掛進 <head>
+let ccIcoCssOn = false;
+function ccIcoCss() {
+  if (ccIcoCssOn) return; ccIcoCssOn = true;
+  const st = document.createElement('style'); st.textContent = `
+.cc-mico{display:inline-block;vertical-align:-4px;margin-right:5px;flex:none}
+.cc-mk{display:inline-block;padding:0 6px;font:700 12px/1.5 Rajdhani,Bahnschrift,'Segoe UI',sans-serif;letter-spacing:.04em;border:1px solid currentColor;transform:skewX(-12deg)}
+.cc-mk1{color:${CC_MK_COL[1]};background:rgba(200,210,224,.08)}
+.cc-mk2{color:${CC_MK_COL[2]};background:rgba(79,176,255,.16);box-shadow:0 0 6px rgba(79,176,255,.35)}
+.cc-mk3{color:${CC_MK_COL[3]};background:rgba(255,194,74,.18);box-shadow:0 0 8px rgba(255,194,74,.5)}
+.cc-fit .sm-seg button .cc-mk{border:0;background:none;box-shadow:none;padding:0;transform:none;font-size:inherit}
+.cc-fit .sm-seg button:has(.cc-mk2):not(:disabled){border-color:rgba(79,176,255,.6)}
+.cc-fit .sm-seg button:has(.cc-mk3):not(:disabled){border-color:rgba(255,194,74,.6)}
+.cc-fit .sm-seg button.on:has(.cc-mk2){background:linear-gradient(100deg,rgba(79,176,255,.55),rgba(40,90,200,.4));border-color:${CC_MK_COL[2]}}
+.cc-fit .sm-seg button.on:has(.cc-mk3){background:linear-gradient(100deg,rgba(255,194,74,.5),rgba(200,120,20,.35));border-color:${CC_MK_COL[3]}}
+.cc-fit .sm-seg button.on .cc-mk{color:#fff}
+.cc-fit .sm-seg button:disabled .cc-mico{opacity:.45}
+.cc-slot{display:flex;align-items:center;gap:2px;white-space:nowrap}
+.cc-fitcmp{display:flex;gap:10px;align-items:stretch;margin:6px 0}
+.cc-fitcmp .cc-cmp,.ccm-sheet .cc-fitcmp .cc-cmp{flex:1;margin:0;align-content:start;grid-template-columns:auto 1fr;padding:8px 12px;font-size:13px}
+.cc-hexw{width:270px;flex:none;background:rgba(12,20,42,.55);padding:6px 4px}
+.cc-hex{width:100%;display:block;overflow:visible}
+.cc-hex .g polygon,.cc-hex .g line{fill:none;stroke:rgba(150,190,240,.16);stroke-width:1}
+.cc-hex .g polygon.base{stroke:rgba(150,190,240,.42);stroke-dasharray:3 3}
+.cc-hex polygon.old{fill:rgba(200,210,224,.1);stroke:rgba(200,210,224,.7);stroke-width:1.2;stroke-dasharray:4 3}
+.cc-hex polygon.new{fill:var(--hc);fill-opacity:.28;stroke:var(--hc);stroke-width:2;filter:drop-shadow(0 0 4px var(--hc))}
+.cc-hex circle.dot{fill:var(--hc)}
+.cc-hex text{font:700 12px 'Noto Sans TC','Microsoft JhengHei',sans-serif;fill:#cfd8e3}
+.cc-hex text .u{fill:#3fdf8f;font:700 11px Rajdhani,Bahnschrift,sans-serif}.cc-hex text .d{fill:#ff8a7a;font:700 11px Rajdhani,Bahnschrift,sans-serif}
+.cc-hexlg{display:flex;gap:12px;justify-content:center;font-size:11px;color:#8fa3c7;margin-top:-2px}
+.cc-hexlg i{display:inline-block;width:14px;height:0;border-top:2px dashed #c8d2e0;vertical-align:middle;margin-right:4px}
+.cc-hexlg i.n{border-top:2px solid var(--hc,#3cc8ff)}
+`; document.head.appendChild(st);
+}
 
 // ═══════════════════════ 艦長生涯：大廳（停泊）2026-11-18 ═══════════════════════
 // 在星系中巡航時，平常是「停泊」：小隊停在星系裡、鏡頭慢慢繞著船轉，畫面上是大廳的介面（這週要做什麼）。

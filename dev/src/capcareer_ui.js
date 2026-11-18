@@ -182,7 +182,7 @@ function ccShipBars(c) { return `<div>${ccBar(c.hp, c.hp < 0.35 ? '#ff6a5a' : '#
 // 船名＋等級（舊情報沒有等級就不顯示）
 const ccShipNm = (c) => `${CAP_HULLS[c.key].name}${c.lv ? ` <span class="cc-lv${c.lv > 1 ? ' up' : ''}">Lv${c.lv}</span>` : ''}${ccMkTag(c)}`;
 // 裝備的最高 Mk（看得出敵方的研發）
-const ccMkTag = (c) => { const m = Math.max(1, ...Object.values(c.mk || {})); return m > 1 ? ` <span class="cc-lv up" title="裝備等級">${CAP_MK_NAME[m]}</span>` : ''; };
+const ccMkTag = (c) => { const m = Math.max(1, ...Object.values(c.mk || {})); ccIcoCss(); return m > 1 ? ` <span class="cc-mk cc-mk${m}" title="裝備等級（最高的槽位）">${CAP_MK_NAME[m]}</span>` : ''; };   // 等階顏色：capicons_ui.js
 // own＝你的小隊：點船名看那艘船的等級、模組、數值
 function ccShipRows(q, own) {
   return q.ships.map((c, k) => `<div class="cc-ship"><b${own ? ` class="cc-shipnm" data-ship="${q.id}:${k}" title="看這艘船的等級與模組"` : ''}>${ccShipNm(c)}</b>${ccShipBars(c)}</div>`).join('') || '<div class="g-dim">（全滅）</div>';
@@ -192,12 +192,12 @@ const ccSurvTx = (q, sv) => q.ships.map((c, k) => `${CAP_HULLS[c.key].name} ${Ma
 // 一艘船的等級、經驗、模組與實際數值（研發、改裝的第 1 步：先能看，改裝之後開放）
 function ccShipView(q, k) {
   const c = q && q.ships[k]; if (!c) return;
-  capShipFix(c);
+  capShipFix(c); ccIcoCss();
   const H0 = CAP_HULLS[c.key], H = capProfMod(capHullMod(H0, c), c.mod, CC.S.pl.prof), L = CAP_XP.lv, lv = c.lv, cap = ccMkCap(CC.S, c);
   const lo = L[lv - 1], hi = L[lv], xpTx = hi == null ? `經驗 ${c.xp}（已經是最高等級）` : `經驗 ${c.xp}／${hi}（升到 Lv${lv + 1}${capMkCapLv(lv + 1) > capMkCapLv(lv) ? `，等級上限 ${CAP_MK_NAME[capMkCapLv(lv + 1)]}` : ''}）`;
   const pct = hi == null ? 1 : (c.xp - lo) / (hi - lo);
   const rows = CAP_SLOTS.map(([slot, nm]) => { const id = c.mod[slot], M = id && CAP_MODS[slot][id];
-    return `<tr><td>${nm}</td><td><b>${capModName(H0, slot, id)}</b> ${CAP_MK_NAME[c.mk[slot] || 1]}</td><td class="g-dim">${M ? M.desc : '原廠'}</td><td class="g-dim" title="艦長熟練度">熟練 Lv${capProfLv((CC.S.pl.prof || {})[capProfKey(slot, id)] || 0)}</td></tr>`; }).join('');
+    return `<tr><td><span class="cc-slot">${ccModIco(slot, id, ccMkCol(c.mk[slot]))}${nm}</span></td><td><b>${capModName(H0, slot, id)}</b> ${ccMkBadge(c.mk[slot])}</td><td class="g-dim">${M ? M.desc : '原廠'}</td><td class="g-dim" title="艦長熟練度">熟練 Lv${capProfLv((CC.S.pl.prof || {})[capProfKey(slot, id)] || 0)}</td></tr>`; }).join('');
   const f1 = (v) => Math.round(v * 10) / 10;
   const st = [['船體', Math.round(H.hp)], ['護盾', Math.round(H.sh)], ['主砲', `${H.main.name} ${f1(H.main.dmg)} 傷害／${H.main.cd} 秒（每秒 ${f1(H.main.dmg / H.main.cd)}）・射程 ${H.main.range}・射界左右各 ${H.main.arc}°`],
     ['副砲', `砲塔 ${H.tur.n} 座・${f1(H.tur.dmg)} 傷害／${f1(H.tur.cd)} 秒・點防禦 ${H.pd.n} 座`],
@@ -395,13 +395,14 @@ function ccYardView(s) {
 function ccFitView(src, D) {
   const S = CC.S, F = ccFitSrc(S, src); if (!F) { smuCloseModal(); return; }
   const c = capShipFix(F.c), H0 = CAP_HULLS[c.key], s = S.sys[F.sys], cap = ccMkCap(S, c), capL = capMkCapLv(c.lv);
-  D = D || { mod: { ...c.mod }, mk: { ...c.mk } };
+  D = D || { mod: { ...c.mod }, mk: { ...c.mk } }; ccIcoCss();
+  const hx0 = ccHexNow();   // 六角圖：從上一次的形狀動畫過去
   const rows = CAP_SLOTS.map(([slot, nm]) => {
     const cur = D.mod[slot] || '', same = cur === (c.mod[slot] || ''), k0 = same ? c.mk[slot] || 1 : 1, kc = D.mk[slot] || 1;
-    const opts = [['', capModBase(H0, slot)], ...Object.entries(CAP_MODS[slot]).map(([id, M]) => { const w = ccFitOk(S, H0, slot, id); return [id, M.name + (w ? '🔒' : ''), !!w, w || M.desc]; })];
-    const mks = [1, 2, 3].map((k) => [k, CAP_MK_NAME[k], k > cap || k < k0, k > cap ? (k > capL ? `船要 Lv${k === 2 ? 3 : 5}` : `要先研究 Mk ${k === 2 ? 'II' : 'III'} 工藝`) : k < k0 ? 'Mk 不能降' : `主要數值 ×${CAP_MK[k]}`]);
+    const opts = [['', ccModIco(slot, '') + capModBase(H0, slot)], ...Object.entries(CAP_MODS[slot]).map(([id, M]) => { const w = ccFitOk(S, H0, slot, id); return [id, ccModIco(slot, id) + M.name + (w ? '🔒' : ''), !!w, w || M.desc]; })];
+    const mks = [1, 2, 3].map((k) => [k, ccMkBadge(k), k > cap || k < k0, k > cap ? (k > capL ? `船要 Lv${k === 2 ? 3 : 5}` : `要先研究 Mk ${k === 2 ? 'II' : 'III'} 工藝`) : k < k0 ? 'Mk 不能降' : `主要數值 ×${CAP_MK[k]}`]);
     const M = cur && CAP_MODS[slot][cur], chg = !same || kc !== (c.mk[slot] || 1);
-    return `<tr${chg ? ' class="chg"' : ''}><td>${nm}</td><td>${smuSeg('cc-fm-' + slot, opts, cur)}<div class="g-dim" style="font-size:11px;margin-top:2px">${M ? M.desc : '原廠'}${!same && (c.mk[slot] || 1) > 1 ? `（換模組＝回到 Mk I）` : ''}</div></td><td>${smuSeg('cc-fk-' + slot, mks, kc)}</td></tr>`;
+    return `<tr${chg ? ' class="chg"' : ''}><td><span class="cc-slot">${ccModIco(slot, cur, ccMkCol(kc))}${nm}</span></td><td>${smuSeg('cc-fm-' + slot, opts, cur)}<div class="g-dim" style="font-size:11px;margin-top:2px">${M ? M.desc : '原廠'}${!same && (c.mk[slot] || 1) > 1 ? `（換模組＝回到 Mk I）` : ''}</div></td><td>${smuSeg('cc-fk-' + slot, mks, kc)}</td></tr>`;
   }).join('');
   const A = capProfMod(capHullMod(H0, c), c.mod, S.pl.prof), B = capProfMod(capHullMod(H0, D), D.mod, S.pl.prof), f1 = (v) => Math.round(v * 10) / 10;
   const chg = [], cmp = (nm, a, b, fmt = f1, hi = 1) => { const x = fmt(a), y = fmt(b), d = b - a, col = Math.abs(d) < 1e-6 ? '' : (d > 0) === (hi > 0) ? '#3fdf8f' : '#ff8a7a'; if (col) chg.push(`${nm} ${x} → <b style="color:${col}">${y}</b>`); return `<dt>${nm}</dt><dd>${x}${col ? ` → <b style="color:${col}">${y}</b>` : ''}</dd>`; };
@@ -416,11 +417,12 @@ function ccFitView(src, D) {
   ccmSheet(`<h3>改裝：${F.q ? smuEsc(F.q.name) + '・' : '預備艦・'}${H0.name} <span class="cc-lv${c.lv > 1 ? ' up' : ''}" style="font-size:13px">Lv${c.lv}</span><span class="en">REFIT</span></h3>
     <div class="g-dim" style="font-size:12px">在 ${s.name} 的船塢改裝：佔用船塢一週，跟造船排同一個隊（排在還沒開工的造船前面）。改裝中的船離開小隊、不能出戰；${back}。Mk 上限 <b>${CAP_MK_NAME[cap]}</b>（船的等級與研發取低的）。資金 ${S.pl.money}</div>
     <table class="cc-mods cc-fit"><tr><td></td><td class="g-dim">模組</td><td class="g-dim">Mk</td></tr>${rows}</table>
-    <dl class="cc-cmp">${st}</dl>
+    <div class="cc-fitcmp">${ccHexSvg(A, B, H0)}<dl class="cc-cmp">${st}</dl></div>
     <div class="g-dim" style="font-size:12px">價錢：工錢 ${CC_RULE.fit.base}・換模組 ${CC_RULE.fit.mod.main}／${CC_RULE.fit.mod.tur}／${CC_RULE.fit.mod.msl}／${CC_RULE.fit.mod.def}／${CC_RULE.fit.mod.eng}（主砲／副砲／飛彈艙／防禦／引擎，換回原廠半價）・Mk II ${CC_RULE.fit.mk[2]}、Mk III 再 ${CC_RULE.fit.mk[3]}（每個槽位）</div>
     ${stop && cost ? `<div style="color:#ff8a7a;margin-top:6px">${stop}</div>` : ''}
     <div class="sm-btns"><button class="g-btn" id="cc-fit-no">${F.q ? '回到船的資料' : '回到船塢'}</button><button class="g-btn" id="cc-fit-rs" ${cost ? '' : 'disabled'}>重選</button><button class="g-btn primary" id="cc-fit-ok" ${stop ? 'disabled' : ''}>${cost ? `送進船塢（${cost} 資金・${eta} 週後好）` : '送進船塢'}</button></div>`, 'sm-wide cr-side', 'var(--violet)');
   const redo = () => ccFitView(src, D);
+  ccHexAnim(hx0);
   // 整修庫（caprefit.js）：背景照現在的設定擺船；剛選的零件播安裝動畫，下方說明這次的數值變化
   { const ls = D._last, sl = ls && (ls.startsWith('mk:') ? ls.slice(3) : ls), nm = sl && (CAP_SLOTS.find(([k]) => k === sl) || [])[1], md = sl && D.mod[sl] && CAP_MODS[sl][D.mod[sl]];
     const head = nm ? `<b>${nm}：${md ? md.name : '原廠'}${(D.mk[sl] || 1) > 1 ? ' ' + CAP_MK_NAME[D.mk[sl]] : ''}</b>` : `<b>${H0.name}</b>　整修庫`;
