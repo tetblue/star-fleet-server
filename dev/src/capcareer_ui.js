@@ -12,22 +12,6 @@ function ccShow() {
   ccRender();
   if (!S.fin && !S.pendB) ccTurnStart(S, false);
 }
-function ccNewDialog() {
-  const meta = ccMetaLoad();
-  overlay(`<style>${SMU_CSS}</style><div class="g-wrap sp-wrap"><div class="g-head"><h2>艦長生涯</h2><span class="crumb">開新局</span><span class="g-sp"></span><button class="g-btn" id="cc-back">← 艦長</button></div>
-    <p class="g-dim">回合制的星圖，每一回合是一週。所有勢力的兵力都是戰艦小隊，沒有艦隊戰：小隊戰的結果決定星系的所有權。你的小隊碰上敵人時，由你親自操艦；其他的戰鬥用公式計算，下令前都看得到勝率與每艘船的存活率。損傷會留到下一場，要回有維修船塢的星系花錢修理。<b>你的小隊全滅，生涯就結束。</b></p>
-    <h3 style="margin:16px 0 4px">角色</h3>
-    ${smuPick('cc-role', Object.entries(CC_ROLES).map(([k, R]) => ({ v: k, name: R.name, desc: R.desc, info: `開局：${R.hulls.map((h) => CAP_HULLS[h].name).join('＋')}・${R.techName}` })), 'emp', 240)}
-    <h3 style="margin:16px 0 4px">開局身分</h3>
-    ${smuPick('cc-start', CC_STARTS.map((X, i) => { const on = meta.best >= X.need; return { v: i, name: on ? X.name : `🔒 ${X.name}`, desc: X.desc, warn: on ? '' : `解鎖：在任何一局升到${CC_RANKS[X.need].name}`, off: !on }; }), 0, 170)}
-    <h3 style="margin:16px 0 4px">難度</h3>
-    ${smuPick('cc-diff', CC_DIFF.map((D, i) => { const on = !D.need || meta.best >= D.need; return { v: i, name: on ? D.name : `🔒 ${D.name}`, desc: D.desc, warn: on ? '' : `解鎖：在任何一局升到${CC_RANKS[D.need].name}`, off: !on }; }), 1, 170)}
-    <p class="g-dim" style="margin-top:8px">第 ${meta.runs + 1} 局・歷來最高軍階：${CC_RANKS[meta.best].name}。升遷：戰功到了上級會發「升遷考核」（佔領任務），完成就升任，能帶的小隊、能造的船型、任務都會變多。</p>
-    <div style="height:12px"></div><button class="g-btn primary" id="cc-go">開始</button></div>`);
-  smuBindUi(gEl('g-screen'));
-  gEl('cc-back').onclick = () => { GAME.spMode = 'captain'; showSingle(); };
-  gEl('cc-go').onclick = () => { const S = ccNewGame({ seed: (Math.random() * 1e9) >>> 0, role: smuVal('cc-role') || 'emp', diff: +smuVal('cc-diff'), start: +smuVal('cc-start') || 0 }); ccSave(S); CC = { S, sel: -1, raf: 0, view: null }; ccRender(); ccTurnStart(S, false); };
-}
 function ccRender() {
   ccFogTick(CC.S);
   const S = CC.S, P = ccPl(S), cnt = [SM_A, SM_E, SM_P, SM_N].map((f) => S.sys.filter((s) => ccSee(S, s).owner === f).length);   // 照所知的情報（迷霧）
@@ -593,13 +577,6 @@ function ccBattleDone() {
   ccSave(S);
   setPhase('menu');
   if (I.kind === 'capture') { S.pendB = null; ccFinishWeek(S); } else { ccRender(); }
-}
-function ccEndView() {
-  const S = CC.S;
-  smuModal(`<h3>艦長生涯結束</h3><p>${smuEsc(S.fin.why)}（第 ${S.fin.turn} 週）。</p><dl class="sm-kv"><dt>軍階</dt><dd>${ccRankOf(S).name}</dd><dt>戰功</dt><dd>${Math.round(S.pl.merit)}</dd><dt>擊沉</dt><dd>${S.pl.kills} 艘</dd><dt>親自佔領</dt><dd>${S.pl.caps} 個星系</dd></dl>
-    <div class="sm-btns"><button class="g-btn" id="cc-close">看星圖</button><button class="g-btn primary" id="cc-new">開新局</button></div>`);
-  gEl('cc-close').onclick = smuCloseModal;
-  gEl('cc-new').onclick = () => { smuCloseModal(); STORE.removeItem(CC_STORE); ccNewDialog(); };
 }
 function ccLogView(L, title) {
   const col = { ok: '#5fd39a', bad: '#ff6a5a', ev: '#c9a7ff' };
