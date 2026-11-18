@@ -27684,13 +27684,24 @@ function ccNewDialog() {
 function ccRender() {
   ccFogTick(CC.S);
   const S = CC.S, P = ccPl(S), cnt = [SM_A, SM_E, SM_P, SM_N].map((f) => S.sys.filter((s) => ccSee(S, s).owner === f).length);   // 照所知的情報（迷霧）
-  const nMis = S.missions.filter((M) => M.state === 'open').length;
-  overlay(`<style>${SMU_CSS}${CC_CSS}</style><div class="sm-wrap">
-    <div class="sm-top"><h2>艦長生涯</h2><span class="sm-chip">第 ${S.turn} 週</span><span class="sm-chip">${CC_ROLES[S.role].name}・${ccRankOf(S).name}</span><span class="sm-chip">資金 ${fmtN(Math.round(S.pl.money))}</span><span class="sm-chip">戰功 ${Math.round(S.pl.merit)}</span>${ccTopChips(S, cnt)}
-      <span class="sm-btnbar"><button class="g-btn" id="cc-mis">任務${nMis ? `<span class="sm-badge">${nMis}</span>` : ''}</button><button class="g-btn" id="cc-tech" title="研究點數與研發樹">研發 <span class="g-dim">${ccT(S) && S.pl.rp}</span>${ccT(S).cur ? '<span class="sm-badge">…</span>' : ''}</button><button class="g-btn" id="cc-logb">紀錄</button><button class="g-btn" id="cc-quit">離開</button>${S.fin ? '' : `<button class="g-btn" id="cc-fly" title="回到${smuEsc(ccPl(S) ? S.sys[ccPl(S).sys].name : '')}的太空（${keyText('cap_map')}）">回到星系 ✈</button>`}<button class="g-btn primary" id="cc-end" ${S.fin ? 'disabled' : ''}>結束這一週 →</button></span></div>
-    <div class="sm-map" id="cc-map"><canvas id="cc-cv"></canvas>
-      <div class="sm-leg" id="cc-leg" style="cursor:pointer;pointer-events:auto">${CC.leg ? `<div><b>圖例 ▾</b></div>${['own', 'ally', 'enemy', 'neutral'].map((k) => `<div><i style="background:${SMU_REL[k].col}"></i>${k === 'own' ? '你的小隊（★＋光圈＝親自指揮，白框＝選中）' : SMU_REL[k].name}</div>`).join('')}<div>箭頭＝一個小隊：越大船越多（1～5 艘）；停在星系下方，閃爍且在航道上＝這週要移動</div><div class="g-dim">星系的顏色＝擁有者跟你的關係：藍＝你的陣營、紅＝敵對、黃＝中立／停戰</div><div>! ＝ 你的小隊下週會被進攻</div><div>◆ 軌道防禦・⚓ 維修船塢・✚ 補給站・$ 商店（貿易站、黑市、商會貿易所）・白圈＝首都</div>${cpNzShow(S) ? '<div><span style="color:#ffd23f">◇</span> 星際商會的據點・<span style="color:#ffd23f">◆</span> 有商船隊（中立好感度 ' + CP_RULE.nzMap + ' 以上才標）</div>' : ''}<div>虛線圈：圍城中・⚔ 這週會交戰</div><div>箭頭：看得到的預定動向（你的小隊周圍、偵察過的星系）</div><div>藍色虛線大圈：偵察中・亂＝指揮中斷</div><div class="g-dim">點星系看詳情；點相鄰的星系下令移動</div>` : '<div><b>圖例 ▸</b></div>'}</div>
+  const nMis = S.missions.filter((M) => M.state === 'open').length, X = ccT(S), nW = ccmWarnN(S), P0 = ccPl(S);
+  const fav = ccFavOf(S, S.fac), fame = S.fame || [50, 50, 50, 50];
+  const ico = (k) => `<svg viewBox="0 0 24 24">${CCL_ICON[k] || CCM_ICON[k]}</svg>`;
+  const ri = (k, v, c, ic, id, tip) => `<div class="ccm-ri"${id ? ` id="${id}" style="--c:${c};cursor:pointer"` : ` style="--c:${c}"`}${tip ? ` title="${tip}"` : ''}>${ico(ic)}<span class="k">${k}</span><b>${v}</b></div>`;
+  const facIt = (f) => `<span class="it" title="${SM_FAC[f].name}${f === SM_N ? '' : `（${ccFacRelName(S, f)}）`}：已知擁有 ${cnt[f]} 個星系${f === SM_N ? '' : `・聲望 ${Math.round(fame[f])}／100（佔領、交戰、特戰的成敗會改變；影響地面投降的評分）`}">${f === SM_N ? `<span class="dot" style="--c:${ccFacCol(S, f)}"></span>` : `<span class="pie" style="--c:${ccFacCol(S, f)};--v:${Math.round(fame[f])}"></span>`}${SM_FAC[f].name}${f === SM_N ? '' : ` <b>${Math.round(fame[f])}</b>`}<span style="margin-left:2px">・${cnt[f]}</span></span>`;
+  const back = S.fin ? ['cc-quit2', CCM_ICON.quit, '離開'] : ['cc-fly2', CCM_ICON.back, `回到星系（${keyText('cap_map')}）`];
+  overlay(`<style>${SMU_CSS}${CC_CSS}${CCM_CSS}</style><div class="sm-wrap ccm" style="--k:${ccmK()}">
+    <div class="sm-map" id="cc-map"><canvas id="cc-cv"></canvas><div class="ccm-vig"></div><i class="ccm-cn cn1"></i><i class="ccm-cn cn2"></i><i class="ccm-cn cn3"></i><i class="ccm-cn cn4"></i>
+      <div class="ccm-z ccm-head"><button class="ccm-back" id="${back[0]}" title="${back[2]}"><svg viewBox="0 0 24 24">${back[1]}</svg></button>
+        <div><span class="ent">STAR MAP ・ ORDERS</span><h1>星圖・下令</h1><span class="crumb"><b>第 ${S.turn} 週</b>・${CC_ROLES[S.role].name}・${ccRankOf(S).name}・指揮權 ${ccOwnCount(S)}／${ccSlots(S)} 隊${P0 ? `・你在 ${S.sys[P0.sys].name}` : ''}</span></div></div>
+      <div class="ccm-z ccm-res">${ri('資金', fmtN(Math.round(S.pl.money)), '#ffc24a', 'money')}${ri('戰功', fmtN(Math.round(S.pl.merit)), '#3fdf8f', 'merit')}${ri('研究點', fmtN(Math.round(S.pl.rp || 0)), '#3cc8ff', 'rp', 'cc-rp', '研究點數與研發樹')}</div>
+      <div class="ccm-z ccm-rel"><span class="it" title="好感（${SM_FAC[S.fac].name}對你）${Math.round(fav)}／100：任務完成 +${CC_RULE.fav.ok}、失敗 −${CC_RULE.fav.fail}。新任務的獎勵 ×${ccFavK(S, S.fac).toFixed(2)}"><span class="pie" style="--c:#ffc24a;--v:${Math.round(fav)}"></span>好感 <b>${Math.round(fav)}</b></span><span class="sep"></span>${[SM_A, SM_E, SM_P, SM_N].map(facIt).join('')}</div>
+      <div class="ccm-z ccm-tools"><button class="ccm-tb" id="cc-mis">${ico('mis')}任務${nMis ? `<span class="nb">${nMis}</span>` : ''}</button><button class="ccm-tb" id="cc-tech" title="研究點數與研發樹">${ico('rp')}研發 <span class="mono">${fmtN(Math.round(S.pl.rp || 0))}</span>${X.cur ? '<span class="busy">研究中</span>' : ''}</button><button class="ccm-tb" id="cc-logb">${ico('log')}紀錄</button>${S.fin ? '' : `<button class="ccm-tb" id="cc-fly" title="回到${smuEsc(P0 ? S.sys[P0.sys].name : '')}的太空">${ico('fly')}回到星系<kbd>${keyText('cap_map')}</kbd></button>`}<button class="ccm-tb q" id="cc-quit">${ico('quit')}離開</button></div>
+      <div class="ccm-z ccm-leg" id="cc-leg">${CC.leg ? `<h5>圖例 ▾ ／ LEGEND</h5>${['own', 'ally', 'enemy', 'neutral'].map((k) => `<div><i style="background:${SMU_REL[k].col}"></i>${k === 'own' ? '你的小隊（★＋光圈＝親自指揮，白框＝選中）' : SMU_REL[k].name}</div>`).join('')}<div>箭頭＝一個小隊：越大船越多（1～5 艘）；停在星系下方，閃爍且在航道上＝這週要移動</div><div class="g-dim">星系的顏色＝擁有者跟你的關係：藍＝你的陣營、紅＝敵對、黃＝中立／停戰</div><div>! ＝ 你的小隊下週會被進攻</div><div>◆ 軌道防禦・⚓ 維修船塢・✚ 補給站・$ 商店（貿易站、黑市、商會貿易所）・白圈＝首都</div>${cpNzShow(S) ? '<div><span style="color:#ffd23f">◇</span> 星際商會的據點・<span style="color:#ffd23f">◆</span> 有商船隊（中立好感度 ' + CP_RULE.nzMap + ' 以上才標）</div>' : ''}<div>虛線圈：圍城中・⚔ 這週會交戰</div><div>箭頭：看得到的預定動向（你的小隊周圍、偵察過的星系）</div><div>藍色虛線大圈：偵察中・亂＝指揮中斷</div><div class="g-dim">點星系看詳情；點相鄰的星系下令移動</div>` : '<h5>圖例 ▸ ／ LEGEND（點開）</h5>'}</div>
+      <button class="ccm-z ccm-end" id="cc-end" ${S.fin ? 'disabled' : ''}><div><b>結束這一週</b><small class="en">END WEEK ${S.turn} → ${S.turn + 1}</small></div>${nW ? `<span class="w" title="${nW} 個小隊留在原地，下週會被進攻">⚠ ${nW}</span>` : ''}<span class="arrow">→</span></button>
       <div class="sm-dock" id="cc-dock"></div><div class="sm-card" id="cc-card" hidden></div></div></div>`);
+  { const b = gEl('cc-fly2') || gEl('cc-quit2'); b.onclick = () => gEl(b.id === 'cc-fly2' ? 'cc-fly' : 'cc-quit').click(); }
+  gEl('cc-rp').onclick = ccTechView;
   gEl('cc-quit').onclick = () => { ccSave(S); ccIdleStop(); window.removeEventListener('resize', ccResize); GAME.spMode = 'captain'; showSingle(); };
   if (gEl('cc-fly')) gEl('cc-fly').onclick = () => ccFly();
   gEl('cc-end').onclick = () => ccEndWeek();
@@ -27716,8 +27727,9 @@ const CC_CSS = `.cc-ico{width:15px;height:15px;vertical-align:-3px;margin-right:
 .cc-cmp{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:2px 10px;font-size:12px;margin:6px 0}.cc-cmp dt{color:#8a96a8}.cc-cmp dd{margin:0}
 .cc-fit .sm-seg{flex-wrap:wrap}.cc-fit .sm-seg button{font-size:11px;padding:2px 6px}.cc-fit tr.chg td:first-child{color:#c9a7ff;font-weight:700}
 .cc-yq{font-size:12px}.cc-yq .g-dim{font-size:12px}.cc-yq button{font-size:11px;padding:1px 6px;margin-left:3px}
+.cc-thr{margin:5px 0;padding:5px 7px;border:1px solid #ff6a5a;border-radius:6px;background:#2a1416}
 .cc-xp{height:6px;background:#1a2433;border-radius:3px;overflow:hidden;margin:3px 0 8px}.cc-xp i{display:block;height:100%;background:#c9a7ff}`;
-function ccResize() { ccDraw(); const el = gEl('cc-card'); if (el && !el.hidden) CC_place(el); }
+function ccResize() { ccmFit(); ccDraw(); const el = gEl('cc-card'); if (el && !el.hidden) CC_place(el); }
 function ccLoop(ts) { if (!gEl('cc-cv') || !CC.S) { CC.raf = 0; return; } ccDraw(ts); CC.raf = requestAnimationFrame(ccLoop); }
 const ccXY = (s) => { const V = CC.view; return [V.ox + s.x * V.k, V.oy + s.y * V.k]; };
 function ccHit(x, y) { let best = -1, bd = 26; for (const s of CC.S.sys) { const [px, py] = ccXY(s), d = Math.hypot(px - x, py - y); if (d < bd) { bd = d; best = s.id; } } return best; }
@@ -27728,11 +27740,11 @@ function ccDraw(ts) {
   const S = CC.S, Q = ccCur(S), own = ccOwn(S), dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight, t = (ts || performance.now()) / 1000;
   if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
   const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const k = Math.min((W - 40) / 100, (H - 140) / 60); CC.view = { k, ox: (W - 100 * k) / 2, oy: Math.max(20, (H - 60 * k) / 2 - 30) };
-  g.fillStyle = '#070b12'; g.fillRect(0, 0, W, H);
+  const A0 = ccmArea(W, H), k = Math.min(A0.w / 100, A0.h / 60); CC.view = { k, ox: A0.x + (A0.w - 100 * k) / 2, oy: A0.y + (A0.h - 60 * k) / 2 };
+  ccmBg(g, W, H);
   const SEE = S.sys.map((s) => ccSee(S, s));
-  for (const s of S.sys) { const o = SEE[s.id].owner; if (o < 0) continue; const fc = ccFacCol(S, o), [x, y] = ccXY(s), r = k * 9, gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, fc + (SEE[s.id].live ? (o === SM_N ? '18' : '2a') : '10')); gr.addColorStop(1, fc + '00'); g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); }
-  g.lineWidth = 1.2; g.strokeStyle = '#243247';
+  for (const s of S.sys) { const o = SEE[s.id].owner; if (o < 0) continue; const fc = ccFacCol(S, o), [x, y] = ccXY(s), r = k * 9, gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, fc + (SEE[s.id].live ? (o === SM_N ? '1c' : '30') : '12')); gr.addColorStop(1, fc + '00'); g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); }
+  g.lineWidth = 1.5; g.strokeStyle = 'rgba(140,180,240,.26)';
   for (const [a, b] of S.edges) { const [x1, y1] = ccXY(S.sys[a]), [x2, y2] = ccXY(S.sys[b]); g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke(); }
   // 你的小隊的移動命令（選中的較粗）
   for (const q of own) if (q.to != null) { const [x1, y1] = ccXY(S.sys[q.sys]), [x2, y2] = ccXY(S.sys[q.to]); g.strokeStyle = '#3fdf8f'; g.lineWidth = q === Q ? 3 : 1.8; g.setLineDash([8, 6]); g.lineDashOffset = -t * 20; g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke(); g.setLineDash([]); }
@@ -27754,13 +27766,16 @@ function ccDraw(ts) {
     if (Q && Q.sys === s.id) { const p = 0.5 + 0.5 * Math.sin(t * 3); g.strokeStyle = `rgba(63,223,143,${0.4 + 0.45 * p})`; g.lineWidth = 3; g.beginPath(); g.arc(x, y, r + 8 + p * 3, 0, 7); g.stroke(); }
     else if (mineHere.length) { g.strokeStyle = 'rgba(63,223,143,.6)'; g.lineWidth = 1.5; g.beginPath(); g.arc(x, y, r + 8, 0, 7); g.stroke(); }
     if (Q && S.adj[Q.sys].includes(s.id) && !S.fin) { g.strokeStyle = 'rgba(63,223,143,.25)'; g.lineWidth = 1; g.beginPath(); g.arc(x, y, r + 5, 0, 7); g.stroke(); }
-    if (s.id === CC.sel) { g.strokeStyle = '#fff'; g.lineWidth = 2; g.setLineDash([4, 3]); g.beginPath(); g.arc(x, y, r + 14, 0, 7); g.stroke(); g.setLineDash([]); }
+    if (s.id === CC.sel) { const rr = r + 14 + Math.sin(t * 3.3) * 2; g.strokeStyle = 'rgba(60,200,255,.95)'; g.lineWidth = 2; g.beginPath(); g.arc(x, y, rr, 0, 7); g.stroke(); g.setLineDash([3, 6]); g.beginPath(); g.arc(x, y, rr + 8, t * 1.1, t * 1.1 + 5); g.stroke(); g.setLineDash([]); }
     if (V.sg) { g.strokeStyle = ccFacCol(S, V.sg.f); g.lineWidth = 2; g.setLineDash([3, 3]); g.beginPath(); g.arc(x, y, r + 3, 0, 7); g.stroke(); g.setLineDash([]); }
-    g.globalAlpha = V.live ? 1 : 0.55; g.fillStyle = V.owner < 0 ? '#3a4352' : ccFacCol(S, V.owner); g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); g.globalAlpha = 1;
-    if (V.owner < 0) { g.fillStyle = '#cfd8e3'; g.font = 'bold 11px sans-serif'; g.fillText('?', x, y + 4); }
-    if (s.cap) { g.strokeStyle = '#ffffff'; g.lineWidth = 1.5; g.beginPath(); g.arc(x, y, r + 1.5, 0, 7); g.stroke(); }   // 首都：白圈（黃色是中立）
+    g.globalAlpha = V.live ? 1 : 0.55; g.fillStyle = '#0a1024'; g.beginPath(); g.arc(x, y, r + 3, 0, 7); g.fill();
+    g.fillStyle = V.owner < 0 ? '#3a4352' : ccFacCol(S, V.owner); g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+    g.fillStyle = 'rgba(255,255,255,.32)'; g.beginPath(); g.arc(x - r * 0.3, y - r * 0.3, r * 0.36, 0, 7); g.fill(); g.globalAlpha = 1;
+    if (V.owner < 0) { g.fillStyle = '#cfd8e3'; g.font = CCM_FONT(700, 11); g.fillText('?', x, y + 4); }
+    if (s.cap) { g.strokeStyle = '#ffffff'; g.lineWidth = 2; g.beginPath(); g.arc(x, y, r + 4.5, 0, 7); g.stroke(); }   // 首都：白圈（黃色是中立）
     const dn = V.defs.length;
-    g.fillStyle = V.live ? '#cfd8e3' : '#7d8794'; g.font = '12px sans-serif'; g.fillText(`${s.name}${V.yard ? ' ⚓' : ''}${V.depot ? ' ✚' : ''}${s.shop && (s.shop !== 'nz' || cpNzShow(S)) ? ' $' : ''}${V.live || V.age == null ? '' : `（${V.age}週前）`}${s.id === S.pl.base ? '［據點］' : ''}`, x, y - r - 6);
+    { const nm = `${s.name}${V.yard ? ' ⚓' : ''}${V.depot ? ' ✚' : ''}${s.shop && (s.shop !== 'nz' || cpNzShow(S)) ? ' $' : ''}${V.live || V.age == null ? '' : `（${V.age}週前）`}${s.id === S.pl.base ? '［據點］' : ''}`;
+      g.font = CCM_FONT(700, 13); g.lineJoin = 'round'; g.lineWidth = 3.5; g.strokeStyle = 'rgba(3,5,12,.85)'; g.strokeText(nm, x, y - r - 8); g.fillStyle = V.live ? '#e8eef8' : '#8a94a8'; g.fillText(nm, x, y - r - 8); }
     if ((s.nz || cpNuAt(S, s.id).length) && cpNzShow(S)) cpNzIco(g, x - r - 10, y, cpNuAt(S, s.id).length, !!s.nz);   // 星際商會（中立好感度夠才標）
     if (dn) { g.fillStyle = V.live ? '#e8eef8' : '#7d8794'; g.font = 'bold 11px sans-serif'; g.textAlign = 'left'; g.fillText('◆' + dn, x + r + 3, y + 4); g.textAlign = 'center'; }
     // 小隊：一隊一個箭頭（不寫數字），越大＝船越多；停著的錯開疊在星系下方，要移動的畫在航道上（迴圈後面畫）
@@ -27860,10 +27875,10 @@ function ccDock() {
   const blds = S.pl.build.filter((b) => (b.sq || S.pl.sq) === Q.id).map((b) => CAP_HULLS[b.key || b].name);
   const yq = S.pl.yq.filter((o) => o.to === Q.id).map((o) => `${o.kind === 'fit' ? '改裝' : ''}${CAP_HULLS[o.key].name}（${ccYqEta(S, o)} 週）`), nRes = S.pl.res.length;
   el.innerHTML = `<div class="cc-dock">${own.length > 1 || slots > 1 ? `<div class="cc-tabs">${own.map((q) => `<button class="cc-tab ${q === Q ? 'on' : ''}" data-sq="${q.id}">${q === P ? '★' : ''}${smuEsc(q.name)} ${q.ships.length}艘${q.to == null && ccThreatA(S, q, q.sys).length ? ' ⚠' : ''}</button>`).join('')}</div>` : ''}
-    <div style="display:flex;justify-content:space-between;gap:8px"><b style="color:#3fdf8f">${Q === P ? '★ ' : ''}${smuEsc(Q.name)}・${Q.ships.length} 艘${Q === P ? '（親自指揮）' : ''}</b><span class="g-dim">在 ${s.name}${Q.to != null ? ` → ${S.sys[Q.to].name}` : ''}</span></div>
+    <div class="dh"><span>${Q === P ? '★ ' : ''}${smuEsc(Q.name)}・${Q.ships.length} 艘${Q === P ? '（親自指揮）' : ''}</span><small>在 ${s.name}${Q.to != null ? ` → ${S.sys[Q.to].name}` : ''}</small></div>
     ${ccShipRows(Q, true)}${tk}${ccThreat(S, Q)}
-    ${Q !== P || mates.length || slots > own.length ? `<div style="display:flex;gap:6px;margin:4px 0">${Q !== P ? `<button class="g-btn" id="cc-cmd" ${P && P.ships.length && P.sys !== Q.sys ? 'disabled title="要和現在指揮的小隊在同一個星系"' : ''}>改為親自指揮</button>` : ''}${mates.length || (slots > ccOwnCount(S) && Q.ships.length > 1) ? '<button class="g-btn" id="cc-swap">換船／分隊</button>' : ''}</div>` : ''}
-    <div class="g-dim" style="font-size:11px">綠＝船體・藍＝護盾・黃＝飛彈・${ccRankOf(S).name}・指揮權 ${ccOwnCount(S)}／${slots} 隊${next ? `・戰功 ${next.merit} 升遷考核（${next.name}）` : ''}${blds.length ? `・下週到：${blds.join('、')}` : ''}${yq.length ? `・船塢：${yq.join('、')}` : ''}${nRes ? `・預備艦 ${nRes} 艘` : ''}${Q === P && S.pl.weekFought ? '・這週已經打過一場' : ''}</div></div>`;
+    ${Q !== P || mates.length || slots > own.length ? `<div style="display:flex;gap:8px;margin:10px 0 2px">${Q !== P ? `<button class="g-btn" id="cc-cmd" ${P && P.ships.length && P.sys !== Q.sys ? 'disabled title="要和現在指揮的小隊在同一個星系"' : ''}>改為親自指揮</button>` : ''}${mates.length || (slots > ccOwnCount(S) && Q.ships.length > 1) ? '<button class="g-btn" id="cc-swap">換船／分隊</button>' : ''}</div>` : ''}
+    <div class="df">綠＝船體・藍＝護盾・黃＝飛彈・${ccRankOf(S).name}・指揮權 ${ccOwnCount(S)}／${slots} 隊${next ? `・戰功 ${next.merit} 升遷考核（${next.name}）` : ''}${blds.length ? `・下週到：${blds.join('、')}` : ''}${yq.length ? `・船塢：${yq.join('、')}` : ''}${nRes ? `・預備艦 ${nRes} 艘` : ''}${Q === P && S.pl.weekFought ? '・這週已經打過一場' : ''}</div></div>`;
   el.querySelectorAll('[data-sq]').forEach((b) => (b.onclick = () => { CC.cur = +b.dataset.sq; ccDock(); ccCard(); }));
   el.querySelectorAll('[data-ship]').forEach((b) => (b.onclick = () => { const [qi, k] = b.dataset.ship.split(':').map(Number); ccShipView(ccSqById(qi), k); }));
   const on = (id, fn) => { const b = gEl(id); if (b) b.onclick = fn; };
@@ -27879,7 +27894,7 @@ function ccThreat(S, Q) {
   if (!A.length || (Q.to != null && s.owner !== S.fac)) return '';   // 開進敵方星系的勝率在星系卡片上
   const D = [Q, ...S.sq.filter((q) => q !== Q && q.fac === S.fac && q.ships.length && !q.task && (q.to != null ? q.to : q.sys) === at)].slice(0, CC_RULE.maxSq);
   const O = ccOdds(S, A.slice(0, CC_RULE.maxSq), D, s.owner === S.fac ? ccDefsAlive(s) : [], 1), w = 1 - O.win;
-  return `<div style="margin:5px 0;padding:5px 7px;border:1px solid #ff6a5a;border-radius:6px;background:#2a1416"><b style="color:#ff8a7a">⚠ 下週敵軍${Q.to != null ? `開進 ${s.name}` : '來襲'}</b>：${A.map((q) => smuEsc(q.name)).join('、')}（${A.reduce((a, q) => a + q.ships.length, 0)} 艘）
+  return `<div class="cc-thr"><b style="color:#ff8a7a">⚠ 下週敵軍${Q.to != null ? `開進 ${s.name}` : '來襲'}</b>：${A.map((q) => smuEsc(q.name)).join('、')}（${A.reduce((a, q) => a + q.ships.length, 0)} 艘）
     <div>駐守的勝率 <b style="color:${ccOddCol(w)}">${Math.round(w * 100)}%</b>・存活率 ${ccSurvTx(Q, (O.surv[1] && O.surv[1][0]) || [])}</div>
     <div class="g-dim" style="font-size:11px">${D.length > 1 ? `一起駐守：${D.slice(1).map((q) => smuEsc(q.name)).join('、')}・` : ''}${s.owner === S.fac && ccDefsAlive(s).length ? `軌道防禦 ${ccDefsAlive(s).length} 座` : ''}</div></div>`;
 }
@@ -27910,11 +27925,12 @@ function ccCard() {
   const defSq = here.filter((q) => q.fac === own0);
   if (Q && own0 >= 0 && ccHostile(S, S.fac, own0) && own0 !== S.fac && (dl.length || defSq.length)) {
     const A = [Q, ...ccOwn(S).filter((q) => q !== Q && (q.to != null ? q.to : q.sys) === s.id && !q.task)].slice(0, CC_RULE.maxSq), O = ccOdds(S, A, defSq.slice(0, 2), dl, 0);
-    odds = `<h4>${A.map((q) => smuEsc(q.name)).join('＋')}進攻這裡</h4><div>勝率 <b class="cc-odds" style="color:${ccOddCol(O.win)}">${Math.round(O.win * 100)}%</b>　${who}存活率：${ccSurvTx(Q, O.surv[0][0])}</div><div class="g-dim" style="font-size:11px">${V.live ? '' : `照 ${V.age} 週前的情報估計・`}${me ? '公式不含親自操艦的技術、地形；開戰前還會再顯示一次' : '不是親自指揮的小隊：照這個機率計算結果'}</div>`;
+    odds = `<div class="cc-oddsbox"><h4>${A.map((q) => smuEsc(q.name)).join('＋')}進攻這裡</h4><div>勝率 <b class="cc-odds" style="color:${ccOddCol(O.win)}">${Math.round(O.win * 100)}%</b>　${who}存活率：${ccSurvTx(Q, O.surv[0][0])}</div><div class="g-dim" style="font-size:11px">${V.live ? '' : `照 ${V.age} 週前的情報估計・`}${me ? '公式不含親自操艦的技術、地形；開戰前還會再顯示一次' : '不是親自指揮的小隊：照這個機率計算結果'}</div></div>`;
   }
   const unk = own0 < 0, intelTx = V.live ? '' : unk ? '<dt>情報</dt><dd style="color:#ffb35a">沒有情報：從沒看過這個星系</dd>' : `<dt>情報</dt><dd style="color:#ffb35a">${V.age} 週前（第 ${S.turn - V.age} 週）看到的樣子・小隊靠近（相鄰）或偵察才會更新</dd>`;
   el.hidden = false;
-  el.innerHTML = `<button class="sm-x" id="cc-x">×</button><h3><span style="color:${unk ? '#7d8794' : ccFacCol(S, own0)}">●</span> ${s.name}</h3>
+  el.style.setProperty('--pc', unk ? '#7d8794' : ccFacCol(S, own0));
+  el.innerHTML = `<button class="sm-x" id="cc-x">×</button><div class="ccm-ch"><h3><i></i>${s.name}</h3><span class="en">${unk ? 'UNKNOWN' : V.live ? 'SYSTEM' : `INTEL −${V.age}W`}</span></div><div class="ccm-cb">
     <dl class="sm-kv">${intelTx}<dt>擁有者</dt><dd>${unk ? '不明' : SM_FAC[own0].name}${s.cap && !unk ? '・首都' : ''}${s.id === S.pl.base ? '・<b style="color:#3fdf8f">你的據點</b>' : ''}</dd>${unk ? '' : `<dt>等級</dt><dd>${SM_TIER[s.tier]}${V.live && s.bd ? `・${cpSum(S, s)}` : ''}・地面防禦 ${V.def}${V.live && s.def0 != null && s.def < s.def0 ? `／${s.def0}（受創，圍城 ${ccSiegeNeed(s)} 週）` : ''}</dd>
       <dt>軌道防禦</dt><dd>${dl.length ? dl.map((d) => `${CAP_UNIT[d.type].name} ${Math.round(d.hp * 100)}%`).join('、') : '沒有'}</dd>
       <dt>設施</dt><dd>${[V.yard ? '維修船塢（修船、造艦）' : '', V.depot ? '補給站（補飛彈）' : ''].filter(Boolean).join('、') || '沒有'}</dd>${V.live && ccYardSum(S, s) ? `<dt>你的船塢</dt><dd>${ccYardSum(S, s)}</dd>` : ''}`}
@@ -27924,9 +27940,9 @@ function ccCard() {
       ${ccIntel(S, s) ? `<dt>情報</dt><dd style="color:#7fdcff">偵察中，到第 ${s.fx.intel} 週</dd>` : ''}
       ${S.missions.filter((M) => M.state === 'open' && M.sys === s.id).map((M) => `<dt>任務</dt><dd style="color:#c9a7ff">${ccMisName(M)}・剩 ${M.due - S.turn} 週</dd>`).join('')}</dl>
     ${odds}
-    ${Q ? `<div class="g-dim" style="font-size:11px;margin-top:6px">下面的命令給：<b style="color:#3fdf8f">${me ? '★' : ''}${who}</b>（在小隊面板換）</div>` : ''}
-    <h4>小隊${V.live ? '' : unk ? '（不明）' : `（${V.age} 週前）`}</h4>${here.length ? here.map((q) => `<div class="cc-sq ${q.pl ? 'pl' : ''}" ${q.pl ? `data-sq="${q.id}" title="選這個小隊下命令"` : ''} ${q === Q ? 'style="border-width:2px"' : ''}><b style="color:${SMU_REL[ccRel(S, q)].col}">${q.id === S.pl.sq ? '★' : ''}${smuEsc(q.name)}</b>${ccSqNote(S, q)}${ccShipRows(q)}</div>`).join('') : (unk ? '<div class="g-dim">不明</div>' : '<div class="g-dim">沒有</div>')}
-    ${acts.length ? smuActs(acts, 150) : ''}`;
+    ${Q ? `<div class="cc-for">下面的命令給：<b>${me ? '★' : ''}${who}</b>（點下面的小隊、或在小隊面板換）</div>` : ''}
+    <h4>小隊${V.live ? '' : unk ? '（不明）' : `（${V.age} 週前）`}</h4>${here.length ? here.map((q) => `<div class="cc-sq ${q.pl ? 'pl' : ''} ${q === Q ? 'cur' : ''}" style="--c:${SMU_REL[ccRel(S, q)].col}" ${q.pl ? `data-sq="${q.id}" title="選這個小隊下命令"` : ''}><b style="color:${SMU_REL[ccRel(S, q)].col}">${q.id === S.pl.sq ? '★' : ''}${smuEsc(q.name)}</b>${ccSqNote(S, q)}${ccShipRows(q)}</div>`).join('') : (unk ? '<div class="g-dim">不明</div>' : '<div class="g-dim">沒有</div>')}
+    ${acts.length ? smuActs(acts, 150) : ''}</div>`;
   CC_place(el);
   const on = (id, fn) => { const b = gEl(id); if (b) b.onclick = fn; };
   const re = () => { ccSave(S); ccDock(); ccCard(); };
@@ -28087,8 +28103,14 @@ function ccSqNote(S, q) {
 }
 function CC_place(el) {
   const mp = gEl('cc-map'), s = CC.S && CC.S.sys[CC.sel]; if (!mp || !s || !CC.view) return;
-  const [x, y] = ccXY(s), W = mp.clientWidth, H = mp.clientHeight, w = el.offsetWidth, h = el.offsetHeight;
-  el.style.left = (x + 80 + w < W - 8 ? x + 80 : Math.max(8, x - 80 - w)) + 'px'; el.style.top = Math.max(8, Math.min(H - h - 8, y - 70)) + 'px';
+  const [x, y] = ccXY(s), W = mp.clientWidth, H = mp.clientHeight, kz = ccmK(), top = 168 * kz, bot = 24 * kz;   // 避開標題、工具列（capmap_ui.js）
+  const w = el.offsetWidth, L = x + 70 + w < W - 16 ? x + 70 : Math.max(16, x - 70 - w), m0 = mp.getBoundingClientRect();
+  let B = H - bot;   // 底部：跟卡片左右重疊的面板（小隊面板、結束這一週、圖例）上緣
+  for (const e of [document.querySelector('.ccm .cc-dock'), gEl('cc-end'), gEl('cc-leg')]) { if (!e) continue; const r = e.getBoundingClientRect(); if (r.right - m0.left > L && r.left - m0.left < L + w) B = Math.min(B, r.top - m0.top - 12); }
+  if (B - top < 360) B = H - bot;   // 放不下就蓋過去
+  el.style.maxHeight = (B - top) + 'px';
+  const h = el.offsetHeight;
+  el.style.left = L + 'px'; el.style.top = Math.max(top, Math.min(B - h, y - 120)) + 'px';
 }
 
 // ───── 結束這一週 ─────
@@ -28456,6 +28478,163 @@ function cpNzRow(S, s, V) {
   const b = s.nz ? s.nz.b.map((k) => CP_NZ[k].name) : [];
   return `<dt>星際商會</dt><dd style="color:#ffd23f">${[...b, ...nu.map((u) => u.name)].join('、')}${V.live && cpNzRule(S, s) ? '<div class="g-dim" style="font-size:11px">辦事處：可以照中立規則蓋你的建築</div>' : ''}${V.live && cpNzDock(S, s) ? '<div class="g-dim" style="font-size:11px">維修站：可以修理、補飛彈（×' + CP_RULE.dockK + '）</div>' : ''}</dd>`;
 }
+
+// ═══════════════════════ 艦長生涯：星圖的外觀（2026-11-18，照 dev/ui-mockups/starmap.html）═══════════════════════
+// 版面：左上標題、右上資源／關係／工具、左下小隊面板、右下結束這一週＋圖例，星系卡片浮在星系旁邊。
+// 只換外觀：命令、按鈕 id、資料都還是 capcareer_ui.js 的（ccRender／ccDock／ccCard／ccDraw）。
+// 樣式全部掛在 .ccm 底下（星海生涯共用的 SMU_CSS 不受影響）；生涯的對話框（sm-modal）也一起換成同一套外框。
+const CCM_CSS = `
+.ccm{--cyan:#3cc8ff;--own:#3fdf8f;--ally:#5aa8ff;--red:#ff4d5e;--yellow:#f3e94b;--gold:#ffc24a;--violet:#a97bff;--line:rgba(90,200,255,.32);--line2:rgba(150,190,240,.18);--text:#eef3ff;--dim:#8fa3c7;--mute:#5d6f92;
+  --jp:'Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif;--en:Rajdhani,Bahnschrift,'Segoe UI',sans-serif;font-family:var(--jp);color:var(--text);background:#03050b;user-select:none}
+.ccm .sm-map{position:absolute;inset:0}
+.ccm button{font-family:inherit}
+.ccm .ccm-vig{position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 55%,transparent 55%,rgba(2,3,10,.72) 100%),linear-gradient(180deg,rgba(3,5,12,.8),transparent 190px)}
+.ccm .ccm-cn{position:absolute;width:56px;height:56px;border:0 solid rgba(90,200,255,.5);pointer-events:none}
+.ccm .cn1{left:8px;top:8px;border-left-width:2px;border-top-width:2px}.ccm .cn2{right:8px;top:8px;border-right-width:2px;border-top-width:2px}
+.ccm .cn3{left:8px;bottom:8px;border-left-width:2px;border-bottom-width:2px}.ccm .cn4{right:8px;bottom:8px;border-right-width:2px;border-bottom-width:2px}
+.ccm .ccm-z{position:absolute;zoom:var(--k,1)}
+.ccm .en{font-family:var(--en)}
+/* 標題 */
+.ccm-head{left:30px;top:24px;display:flex;align-items:center;gap:20px}
+.ccm-back{position:relative;width:66px;height:74px;flex:none;cursor:pointer;border:0;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);background:linear-gradient(160deg,rgba(80,200,255,.75),rgba(40,90,170,.35))}
+.ccm-back::before{content:"";position:absolute;inset:2px;clip-path:inherit;background:linear-gradient(160deg,#18244a,#0b1124 70%)}
+.ccm-back svg{position:absolute;left:50%;top:50%;width:28px;height:28px;transform:translate(-50%,-50%);stroke:#e8f2ff;fill:none;stroke-width:2}
+.ccm-back:hover{background:linear-gradient(160deg,#7fe0ff,#1f8fff)}
+.ccm-head .ent{display:block;font:700 12px var(--en);letter-spacing:.3em;color:var(--cyan)}
+.ccm-head h1{margin:0;font:900 40px/1.1 var(--jp);letter-spacing:.14em;white-space:nowrap;text-shadow:0 3px 12px rgba(0,0,0,.6)}
+.ccm-head .crumb{display:block;font:500 14px var(--jp);color:var(--dim);letter-spacing:.06em;margin-top:2px;white-space:nowrap}
+.ccm-head .crumb b{color:var(--text)}
+/* 資源 */
+.ccm-res{right:40px;top:28px;display:flex;gap:12px}
+.ccm-ri{position:relative;display:flex;align-items:center;gap:9px;height:44px;padding:0 18px 0 16px;white-space:nowrap;background:linear-gradient(90deg,rgba(8,12,28,.92),rgba(14,22,46,.82));clip-path:polygon(5% 0,100% 0,95% 100%,0 100%)}
+.ccm-ri::after{content:"";position:absolute;left:0;right:6px;bottom:0;height:2px;background:var(--c)}
+.ccm-ri svg{width:21px;height:21px;flex:none;stroke:var(--c);fill:none;stroke-width:1.8}
+.ccm-ri .k{font:500 12px var(--jp);color:var(--dim)}
+.ccm-ri b{font:700 22px var(--en);letter-spacing:.04em}
+/* 關係 */
+.ccm-rel{right:40px;top:84px;display:flex;gap:12px;align-items:center;font:500 13px var(--jp);color:var(--dim);white-space:nowrap}
+.ccm-rel .it{display:flex;align-items:center;gap:6px}
+.ccm-rel .pie{width:20px;height:20px;border-radius:50%;background:conic-gradient(var(--c) calc(var(--v)*1%),rgba(255,255,255,.12) 0);border:1px solid var(--c)}
+.ccm-rel .dot{width:10px;height:10px;border-radius:50%;background:var(--c)}
+.ccm-rel b{font:700 16px var(--en);color:var(--text)}
+.ccm-rel .sep{width:1px;height:16px;background:var(--line2)}
+/* 工具列 */
+.ccm-tools{right:40px;top:120px;display:flex;gap:8px}
+.ccm-tb{position:relative;display:flex;align-items:center;gap:8px;height:38px;padding:0 16px;cursor:pointer;color:var(--text);background:rgba(10,16,36,.86);border:1px solid rgba(120,170,230,.25);font:700 15px var(--jp);letter-spacing:.08em;white-space:nowrap;clip-path:polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%)}
+.ccm-tb:hover{border-color:var(--cyan);background:rgba(30,50,90,.92)}
+.ccm-tb svg{width:18px;height:18px;stroke:var(--cyan);fill:none;stroke-width:1.8}
+.ccm-tb .mono{font:700 16px var(--en);color:var(--cyan)}
+.ccm-tb kbd{font:700 11px var(--en);border:1px solid var(--dim);padding:0 5px;color:var(--dim)}
+.ccm-tb .nb{display:inline-block;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:var(--yellow);color:#14130a;font:700 13px/20px var(--en);text-align:center;box-shadow:0 0 8px rgba(243,233,75,.6)}
+.ccm-tb .busy{color:var(--violet);font:700 12px var(--jp)}
+.ccm-tb.q{color:var(--dim)}.ccm-tb.q svg{stroke:var(--dim)}
+/* 結束這一週 */
+.ccm-end{right:30px;bottom:30px;width:400px;height:76px;display:flex;align-items:center;gap:16px;padding:0 26px 0 36px;cursor:pointer;color:var(--text);text-align:left;
+  background:linear-gradient(100deg,rgba(14,22,44,.94),rgba(20,32,62,.94));border:1px solid rgba(160,200,255,.4);clip-path:polygon(6% 0,100% 0,100% 100%,0 100%);transition:background .2s}
+.ccm-end:hover{background:linear-gradient(100deg,rgba(30,50,90,.95),rgba(40,70,120,.95));border-color:var(--cyan)}
+.ccm-end b{display:block;font:900 24px var(--jp);letter-spacing:.12em;white-space:nowrap}
+.ccm-end small{display:block;font:700 11px var(--en);letter-spacing:.24em;color:var(--dim)}
+.ccm-end .w{margin-left:auto;padding:4px 10px;background:var(--red);font:700 16px var(--en);white-space:nowrap}
+.ccm-end .arrow{margin-left:auto;font:700 26px var(--en);color:var(--cyan)}.ccm-end .w + .arrow{margin-left:0}
+.ccm-end:disabled{opacity:.45;cursor:not-allowed}
+/* 圖例 */
+.ccm-leg{right:30px;bottom:120px;width:400px;max-height:calc((100vh - 330px) / var(--k,1));overflow:auto;padding:10px 18px;background:rgba(8,12,26,.84);border:1px solid var(--line2);font:500 13px/1.65 var(--jp);color:#cfdaf0;cursor:pointer;scrollbar-width:thin}
+.ccm-leg h5{margin:0;font:700 12px var(--en);letter-spacing:.24em;color:var(--dim)}
+.ccm-leg i{display:inline-block;width:12px;height:12px;margin-right:6px;vertical-align:-1px;border-radius:50%}
+.ccm-leg .g-dim{color:var(--mute)}
+/* 小隊面板（左下）*/
+.ccm .sm-dock{left:30px;right:auto;bottom:30px;display:block;zoom:var(--k,1)}
+.ccm .cc-dock{position:relative;width:560px;max-height:calc((100vh - 230px) / var(--k,1));overflow:auto;scrollbar-width:thin;padding:0 22px 14px;border:1px solid var(--line2);border-radius:0;
+  background:linear-gradient(165deg,rgba(14,22,44,.92),rgba(10,16,32,.86));clip-path:polygon(0 0,calc(100% - 22px) 0,100% 22px,100% 100%,22px 100%,0 calc(100% - 22px))}
+.ccm .cc-dock::before{content:"";position:absolute;left:0;top:0;width:120px;height:3px;background:var(--own)}
+.ccm .cc-dock .dh{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-top:12px;font:900 18px var(--jp);color:var(--own);letter-spacing:.06em;white-space:nowrap}
+.ccm .cc-dock .dh small{font:500 13px var(--jp);color:var(--dim);letter-spacing:0}
+.ccm .cc-dock .df{margin-top:10px;font:500 12px/1.6 var(--jp);color:var(--mute)}
+.ccm .cc-tabs{display:flex;flex-wrap:wrap;gap:2px;margin:0 -8px 0;border-bottom:1px solid var(--line2)}
+.ccm .cc-tab{position:relative;background:none;border:0;border-radius:0;padding:12px 14px 9px;font:700 14px var(--jp);letter-spacing:.06em;color:var(--dim);cursor:pointer}
+.ccm .cc-tab:hover{color:var(--text)}
+.ccm .cc-tab.on{color:var(--text);background:none}.ccm .cc-tab.on::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:3px;background:var(--own)}
+.ccm .cc-ship{grid-template-columns:170px 1fr;gap:4px 12px;margin:6px 0;font:700 14px var(--jp)}
+.ccm .cc-ship b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ccm .cc-ship > div{display:grid;gap:2px}
+.ccm .cc-bar{height:4px;background:rgba(255,255,255,.12);border-radius:0}
+.ccm .cc-shipnm{text-decoration:none;border-bottom:1px dotted rgba(63,223,143,.55)}
+.ccm .cc-shipnm:hover{color:var(--own)}
+.ccm .cc-lv{border-radius:0;font-family:var(--en);font-size:11px}
+.ccm .g-btn{height:34px;min-height:0;padding:0 18px;border-radius:0;font:700 14px var(--jp);letter-spacing:.08em;color:var(--text);background:rgba(18,28,58,.92);border:1px solid rgba(140,190,240,.35);clip-path:polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%)}
+.ccm .g-btn:hover:not(:disabled){background:rgba(36,60,110,.95);border-color:var(--cyan)}
+.ccm .g-btn:disabled{opacity:.4}
+.ccm .g-dim{color:var(--dim)}
+.ccm .cc-thr{margin:8px 0;padding:8px 12px;background:rgba(80,20,40,.45);border:0;border-left:3px solid var(--red);border-radius:0;font:500 13px/1.6 var(--jp)}
+.ccm .cc-thr > b:first-child{color:#ff8a96}
+/* 星系卡片 */
+.ccm .sm-card{width:440px;padding:0;border:1px solid var(--line2);border-radius:0;box-shadow:0 10px 40px rgba(0,0,0,.6);scrollbar-width:thin;scrollbar-color:rgba(90,200,255,.35) transparent;
+  background:linear-gradient(165deg,rgba(14,22,44,.97),rgba(9,14,30,.96));clip-path:polygon(0 0,calc(100% - 22px) 0,100% 22px,100% 100%,22px 100%,0 calc(100% - 22px))}
+.ccm .sm-card::before{content:"";position:sticky;display:block;top:0;left:0;width:120px;height:3px;background:var(--pc,var(--cyan));z-index:1}
+.ccm .sm-card .ccm-ch{display:flex;align-items:baseline;gap:12px;padding:14px 22px 10px;border-bottom:1px solid var(--line2)}
+.ccm .sm-card .ccm-ch h3{margin:0;font:900 24px var(--jp);letter-spacing:.12em;white-space:nowrap}
+.ccm .sm-card .ccm-ch h3 i{display:inline-block;width:13px;height:13px;border-radius:50%;margin-right:10px;vertical-align:2px;background:var(--pc)}
+.ccm .sm-card .ccm-ch .en{font:700 11px var(--en);letter-spacing:.26em;color:var(--dim)}
+.ccm .sm-card .ccm-cb{padding:10px 22px 18px}
+.ccm .sm-x{right:14px;top:12px;width:30px;height:30px;font:700 20px var(--en);color:var(--dim);z-index:2}.ccm .sm-x:hover{color:var(--red)}
+.ccm .sm-kv{gap:5px 16px;font:500 14px/1.5 var(--jp)}.ccm .sm-kv dt{color:var(--dim);white-space:nowrap}
+.ccm .sm-card h4{margin:14px 0 4px;font:700 12px var(--jp);letter-spacing:.14em;color:var(--dim)}
+.ccm .cc-oddsbox{margin:12px 0 4px;padding:10px 14px;background:rgba(80,20,40,.35);border-left:3px solid var(--red)}
+.ccm .cc-oddsbox h4{margin:0 0 2px;font:700 15px var(--jp);letter-spacing:.04em;color:#ffb0b8}
+.ccm .cc-oddsbox .cc-odds{font:900 34px/1.1 var(--en)}
+.ccm .cc-sq{margin:4px 0;padding:6px 10px;border:0;border-left:3px solid var(--c,#7d8794);border-radius:0;background:rgba(12,20,42,.7)}
+.ccm .cc-sq.pl{border-color:var(--own)}.ccm .cc-sq[data-sq]:hover{background:rgba(28,44,84,.85)}
+.ccm .cc-sq.cur{outline:1px solid var(--own)}
+.ccm .cc-for{margin:12px 0 4px;font:500 12px var(--jp);color:var(--dim)}.ccm .cc-for b{color:var(--own)}
+/* 命令按鈕（smuActs）：一列一個 */
+.ccm .sm-acts{grid-template-columns:1fr;gap:6px;margin-top:8px}
+.ccm .sm-pc{display:block;border:0;border-left:3px solid var(--line);border-radius:0;padding:9px 14px;background:rgba(14,24,50,.9);transition:background .15s}
+.ccm .sm-pc:hover:not(:disabled){background:rgba(30,60,110,.95);border-color:var(--cyan)}
+.ccm .sm-pc b{display:block;font:700 15px var(--jp);letter-spacing:.06em;padding:0}
+.ccm .sm-pc .d,.ccm .sm-pc .k,.ccm .sm-pc .w{display:block;margin-top:2px;font:500 12px/1.5 var(--jp)}
+.ccm .sm-pc.go{border-left-color:var(--cyan)}.ccm .sm-pc.go b{color:#9fe4ff}
+.ccm .sm-pc:disabled{opacity:.45}
+@media (max-width:760px){.ccm .sm-card{width:auto}}
+/* 生涯的對話框：同一套外框（內容之後再一個個換） */
+#g-screen:has(.ccm) .sm-modal{background:rgba(2,4,12,.66);backdrop-filter:blur(2px)}
+#g-screen:has(.ccm) .sm-box{position:relative;border-radius:0;border:1px solid rgba(90,200,255,.32);padding:26px 32px;color:#eef3ff;font-family:'Noto Sans TC','Microsoft JhengHei',sans-serif;
+  background:linear-gradient(160deg,#111b36,#0a1024);clip-path:polygon(0 0,calc(100% - 26px) 0,100% 26px,100% 100%,26px 100%,0 calc(100% - 26px));scrollbar-width:thin;scrollbar-color:rgba(90,200,255,.35) transparent}
+#g-screen:has(.ccm) .sm-box::before{content:"";position:absolute;left:0;top:0;width:140px;height:3px;background:#3cc8ff}
+#g-screen:has(.ccm) .sm-box h3{font:900 24px 'Noto Sans TC','Microsoft JhengHei',sans-serif;letter-spacing:.1em;margin-bottom:12px}
+#g-screen:has(.ccm) .sm-box h4{letter-spacing:.1em;color:#8fa3c7}
+#g-screen:has(.ccm) .sm-box .g-btn{border-radius:0;clip-path:polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%);padding:6px 20px;font-weight:700;letter-spacing:.08em}
+#g-screen:has(.ccm) .sm-box .g-btn.primary{background:linear-gradient(100deg,#29b6ff,#2f86ff);color:#06122a;border-color:transparent}
+#g-screen:has(.ccm) .sm-box .sm-pc{border-radius:0;background:rgba(14,24,50,.9);border:1px solid rgba(150,190,240,.18);border-left:3px solid rgba(90,200,255,.32)}
+#g-screen:has(.ccm) .sm-box .sm-pc:hover:not(:disabled){background:rgba(30,60,110,.95);border-left-color:#3cc8ff}
+#g-screen:has(.ccm) .sm-box .sm-pc.go{border-left-color:#3cc8ff}#g-screen:has(.ccm) .sm-box .sm-pc.go b{color:#9fe4ff}
+#g-screen:has(.ccm) .sm-box .cc-sq{border-radius:0;border:0;border-left:3px solid #5d6f92;background:rgba(12,20,42,.7)}
+`;
+const CCM_ICON = { back: '<path d="M15 5l-7 7 7 7"/>', quit: '<path d="M14 4h6v16h-6M4 12h11M9 7l-5 5 5 5"/>' };
+// 介面縮放：以 1920×1080 為準，小視窗等比縮小（卡片不縮，它照星系的螢幕位置擺）
+const ccmK = () => Math.max(0.55, Math.min(1, innerWidth / 1920, innerHeight / 1080));
+function ccmFit() { const w = document.querySelector('.ccm'); if (w) w.style.setProperty('--k', ccmK()); }
+// 星圖可用的範圍（避開標題、工具列）
+// 底部留給小隊面板與結束這一週（面板量實際的高度，最多佔到 40%）
+function ccmArea(W, H) {
+  const k = ccmK(), top = 168 * k, d = gEl('cc-dock'), dh = d ? d.getBoundingClientRect().height : 0;
+  const bot = Math.min(H * 0.4, Math.max(110 * k, dh) + 40 * k);
+  return { x: 40, y: top, w: W - 80, h: H - top - bot };
+}
+// 下週會被進攻、還留在原地的你的小隊（結束這一週的 ⚠）
+const ccmWarnN = (S) => S.fin ? 0 : S.sq.filter((q) => q.pl && q.ships.length && q.to == null && !q.task && ccThreatA(S, q, q.sys).length).length;
+// 背景：星空（依大小快取）
+let ccmBgC = null;
+function ccmBg(g, W, H) {
+  if (!ccmBgC || ccmBgC.width !== W || ccmBgC.height !== H) {
+    const c = ccmBgC = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
+    const gr = x.createRadialGradient(W * 0.55, H * 0.5, 0, W * 0.55, H * 0.5, Math.max(W, H) * 0.75); gr.addColorStop(0, '#0b1430'); gr.addColorStop(0.6, '#060a1a'); gr.addColorStop(1, '#03050b'); x.fillStyle = gr; x.fillRect(0, 0, W, H);
+    let r = 7; const rnd = () => (r = (r * 9301 + 49297) % 233280) / 233280;
+    for (const [cx, cy, rad, col] of [[0.25, 0.35, 0.35, '60,90,200'], [0.78, 0.62, 0.3, '150,60,170'], [0.55, 0.2, 0.22, '40,140,190']]) { const n = x.createRadialGradient(W * cx, H * cy, 0, W * cx, H * cy, W * rad); n.addColorStop(0, `rgba(${col},.10)`); n.addColorStop(1, `rgba(${col},0)`); x.fillStyle = n; x.fillRect(0, 0, W, H); }
+    for (let i = 0; i < (W * H) / 2600; i++) { const a = rnd(); x.fillStyle = `rgba(${200 + a * 55 | 0},${210 + a * 40 | 0},255,${0.15 + rnd() * 0.55})`; const s = rnd() < 0.06 ? 1.6 : 0.9; x.fillRect(rnd() * W, rnd() * H, s, s); }
+  }
+  g.drawImage(ccmBgC, 0, 0, W, H);
+}
+const CCM_FONT = (w, px) => `${w} ${px}px "Noto Sans TC","Microsoft JhengHei",sans-serif`;
 
 // ═══════════════════════ 艦長生涯：大廳（停泊）2026-11-18 ═══════════════════════
 // 在星系中巡航時，平常是「停泊」：小隊停在星系裡、鏡頭慢慢繞著船轉，畫面上是大廳的介面（這週要做什麼）。
