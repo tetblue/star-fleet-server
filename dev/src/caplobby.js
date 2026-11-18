@@ -298,7 +298,7 @@ function cclAct(k) {
   if (k === 'log') { cclToMap(); return ccdOpen('log', { mode: 'all' }); }
   if (k === 'report') { cclToMap(); return ccdOpen('log', { mode: 'week' }); }
   if (k === 'gear') return openSettings();
-  if (k === 'sq') { CC.cur = P.id; CC.sel = P.sys; cclToMap(); return ccCard(); }
+  if (k === 'sq') { CC.cur = P.id; cclToMap(); return ccSquadsView(); }
   if (k === 'yard') { if (!(s.owner === S.fac && s.yard)) return toast('這個星系沒有你的勢力的維修船塢', 'warn'); cclToMap(); return ccYardView(s); }
   if (k === 'tech') { cclToMap(); return ccTechView(); }
   if (k === 'planet') { cclToMap(); return cpView(s); }

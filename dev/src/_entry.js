@@ -27705,7 +27705,7 @@ function ccRender() {
   const ri = (k, v, c, ic, id, tip) => `<div class="ccm-ri"${id ? ` id="${id}" style="--c:${c};cursor:pointer"` : ` style="--c:${c}"`}${tip ? ` title="${tip}"` : ''}>${ico(ic)}<span class="k">${k}</span><b>${v}</b></div>`;
   const facIt = (f) => `<span class="it" title="${SM_FAC[f].name}${f === SM_N ? '' : `（${ccFacRelName(S, f)}）`}：已知擁有 ${cnt[f]} 個星系${f === SM_N ? '' : `・聲望 ${Math.round(fame[f])}／100（佔領、交戰、特戰的成敗會改變；影響地面投降的評分）`}">${f === SM_N ? `<span class="dot" style="--c:${ccFacCol(S, f)}"></span>` : `<span class="pie" style="--c:${ccFacCol(S, f)};--v:${Math.round(fame[f])}"></span>`}${SM_FAC[f].name}${f === SM_N ? '' : ` <b>${Math.round(fame[f])}</b>`}<span style="margin-left:2px">・${cnt[f]}</span></span>`;
   const back = S.fin ? ['cc-quit2', CCM_ICON.quit, '離開'] : ['cc-fly2', CCM_ICON.back, `回到星系（${keyText('cap_map')}）`];
-  overlay(`<style>${SMU_CSS}${CC_CSS}${CCM_CSS}${CCD_CSS}</style><div class="sm-wrap ccm" style="--k:${ccmK()}">
+  overlay(`<style>${SMU_CSS}${CC_CSS}${CCM_CSS}${CCD_CSS}${CCS_CSS}</style><div class="sm-wrap ccm" style="--k:${ccmK()}">
     <div class="sm-map" id="cc-map"><canvas id="cc-cv"></canvas><div class="ccm-vig"></div><i class="ccm-cn cn1"></i><i class="ccm-cn cn2"></i><i class="ccm-cn cn3"></i><i class="ccm-cn cn4"></i>
       <div class="ccm-z ccm-head"><button class="ccm-back" id="${back[0]}" title="${back[2]}"><svg viewBox="0 0 24 24">${back[1]}</svg></button>
         <div><span class="ent">STAR MAP ・ ORDERS</span><h1>星圖・下令</h1><span class="crumb"><b>第 ${S.turn} 週</b>・${CC_ROLES[S.role].name}・${ccRankOf(S).name}・指揮權 ${ccOwnCount(S)}／${ccSlots(S)} 隊${P0 ? `・你在 ${S.sys[P0.sys].name}` : ''}</span></div></div>
@@ -27871,13 +27871,13 @@ function ccShipView(q, k) {
     ['副砲', `砲塔 ${H.tur.n} 座・${f1(H.tur.dmg)} 傷害／${f1(H.tur.cd)} 秒・點防禦 ${H.pd.n} 座`],
     ['飛彈', H.msl ? `${H.msl.n} 枚・每枚 ${f1(H.msl.dmg)}・鎖定 ${f1(H.msl.lockT)} 秒${H.ftr ? `・護航機 ${H.ftr} 架` : ''}` : '沒有'],
     ['機動', `最高速度 ${f1(H.max)}・轉向 ${Math.round(H.turn)}°／秒`], ['技能', `${H0.skill.name}（船型固定）`]];
-  smuModal(`<h3>${smuEsc(q.name)}・${H0.name} <span class="cc-lv${lv > 1 ? ' up' : ''}" style="font-size:13px">Lv${lv}</span></h3>
+  ccmSheet(`<h3>${smuEsc(q.name)}・${H0.name} <span class="cc-lv${lv > 1 ? ' up' : ''}" style="font-size:13px">Lv${lv}</span><span class="en">SHIP DATA</span></h3>
     <div class="g-dim">${xpTx}</div><div class="cc-xp"><i style="width:${Math.round(pct * 100)}%"></i></div>
     <div>Mk 上限：<b>${CAP_MK_NAME[cap]}</b> <span class="g-dim">（船的等級 Lv1～2＝Mk I、Lv3～4＝Mk II、Lv5＝Mk III，再跟研發到的 ${CAP_MK_NAME[ccMkRes(CC.S)]} 取低的）</span></div>
     <table class="cc-mods">${rows}</table>
     <dl class="sm-kv">${st.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join('')}</dl>
     <p class="g-dim" style="font-size:12px">經驗：參戰 +${CAP_XP.fight}、活下來 +${CAP_XP.live}、擊沉 +10～30（看船型）。船沉了，等級也跟著沒了。改裝與 Mk 升級：在己方有船塢的星系，佔用船塢一週。</p>
-    <div class="sm-btns"><button class="g-btn" id="cc-fit">改裝／升級 Mk</button><button class="g-btn primary" id="cc-close">關閉</button></div>`);
+    <div class="sm-btns"><button class="g-btn" id="cc-fit">改裝／升級 Mk</button><button class="g-btn primary" id="cc-close">關閉</button></div>`, '', 'var(--own)');
   gEl('cc-close').onclick = smuCloseModal;
   gEl('cc-fit').onclick = () => ccFitView({ q: q.id, k });
 }
@@ -27984,17 +27984,17 @@ function ccCard() {
 // 研發（第 4 步）：研究點數、目前的研究、研發樹
 function ccTechView() {
   const S = CC.S, X = ccT(S), cur = X.cur;
-  const curTx = cur ? `<div>研究中：<b>${CC_TECH[cur.id].name}</b>（剩 ${cur.left} 週）</div>${ccBar(1 - cur.left / cur.tot, '#c9a7ff')}` : '<div class="g-dim">目前沒有在研究。</div>';
+  const curTx = cur ? `<div class="ccs-cur"><span>研究中<br><b style="font-size:17px">${CC_TECH[cur.id].name}</b></span>${ccBar(1 - cur.left / cur.tot, '#c9a7ff')}<span class="ccs-big">${cur.left}</span><span class="g-dim">週</span></div>` : '<div class="ccs-cur" style="border-left-color:var(--mute)"><span class="g-dim">目前沒有在研究：在下面挑一項開始。</span></div>';
   const groups = [...new Set(CC_TECH_ORDER.map((id) => CC_TECH[id].g))];
   const body = groups.map((g) => `<h4 style="margin:10px 0 4px">${g}</h4>` + CC_TECH_ORDER.filter((id) => CC_TECH[id].g === g && !(CC_TECH[id].cp && !ccForeignK(S, ccBpKey(CC_TECH[id])))).map((id) => {
     const T = CC_TECH[id], why = ccTechWhy(S, id), done = X.done[id], on = cur && cur.id === id, c = ccTechCost(S, id);
     const bk = ccBpKey(T), tag = done ? '<span style="color:#3fdf8f">✓ 已完成</span>' : on ? '<span style="color:#c9a7ff">研究中</span>' : ccForeignK(S, bk) ? (ccHasBp(S, bk) ? '<span style="color:#ffd34d">有藍圖</span>' : `<span class="g-dim">🔒 要${SM_FAC[CC_ORG[bk]].name}的藍圖</span>`) : '';
     return `<div class="cc-ship cc-yq" style="grid-template-columns:1fr auto"><span><b>${T.name}</b> ${tag}${T.good === S.fac && !done ? ' <span class="g-dim">（你的陣營擅長，便宜 20%）</span>' : ''}<br><span class="g-dim">${T.desc}${T.need ? `・前置：${T.need.map((k) => CC_TECH[k].name).join('、')}` : ''}</span></span>${done || on ? '' : `<button class="g-btn" data-tech="${id}" ${why ? `disabled title="${smuEsc(why)}"` : ''}>研究（${c} 點・${T.w} 週）</button>`}</div>`;
   }).join('')).join('');
-  smuModal(`<h3>研發 <span class="g-dim" style="font-size:14px">研究點數 ${S.pl.rp}</span></h3>
+  ccmSheet(`<h3>研發 <span class="g-dim" style="font-size:14px">研究點數 ${S.pl.rp}</span><span class="en">R&amp;D</span></h3>
     <div class="g-dim" style="font-size:12px">研究點數來源：任務完成（戰功的 1/10）、打贏後打撈殘骸（親自打的每擊沉一艘 ${CC_RP.kill} 點、計算的戰鬥每艘 ${CC_RP.calc} 點）、據點的研究所（每週 ${CC_RP.lab} 點）。一次研究一項，開始時付點數。別的陣營的招牌模組要先拿到藍圖（打贏後打撈、商店買）。船型要軍階＋研發都到；Mk 上限＝船的等級與研發取低的。</div>
     <div style="margin:8px 0">${curTx}</div>${body}${ccProfHtml(S)}
-    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`);
+    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`, '', 'var(--violet)');
   gEl('cc-close').onclick = () => { smuCloseModal(); ccRender(); };
   document.querySelectorAll('[data-tech]').forEach((b) => (b.onclick = () => { const err = ccTechStart(S, b.dataset.tech); if (err) { toast(err, 'warn'); return; } ccSave(S); ccRender(); ccTechView(); }));
 }
@@ -28040,13 +28040,13 @@ function ccYardView(s) {
     return `<div class="cc-ship cc-yq" style="grid-template-columns:1fr auto"><span><b>${n ? `${n + 1}.` : o.kind === 'fit' ? '改裝中' : '建造中'} ${o.kind === 'fit' ? '改裝' : ''}${o.kind === 'fit' ? ccShipNm(o.c) : CAP_HULLS[o.key].name}</b> <span class="g-dim">${o.held ? '<span style="color:#ff8a7a">暫停</span>' : `${ccYqEta(S, o)} 週後${o.kind === 'fit' ? '好' : '完成'}`}・${o.kind === 'fit' ? `${ccFitTx(o.fit, CAP_HULLS[o.key], o.c)}・` : ''}${q ? `${o.kind === 'fit' ? '回到' : '加入'}${smuEsc(q.name)}` : '停在船塢'}</span>${ccBar(1 - o.left / o.tot, '#c9a7ff')}</span><button class="g-btn" data-ycan="${o.id}">取消（退 ${ccYqBack(o)}）</button></div>`; }).join('') : '<div class="g-dim">沒有。</div>';
   const res = R.length ? R.map((x) => `<div class="cc-ship cc-yq" style="grid-template-columns:auto 1fr auto"><b>${ccShipNm(x.c)}</b>${ccShipBars(x.c)}<span>${here.map((q) => `<button class="g-btn" data-rj="${x.id}:${q.id}" ${q.ships.length >= CC_RULE.maxShips ? 'disabled title="那一隊已經滿了"' : ''}>→${smuEsc(q.name)}</button>`).join('')}<button class="g-btn" data-rf="${x.id}" ${yardOk ? '' : 'disabled'}>改裝</button><button class="g-btn" data-rj="${x.id}:new" ${canNew ? '' : `disabled title="指揮權不夠（${ccRankOf(S).name}最多帶 ${ccSlots(S)} 隊）"`}>成立新小隊</button></span></div>`).join('') : '<div class="g-dim">沒有。</div>';
   const put = yardOk && here.length ? `<h4 style="margin:10px 0 4px">小隊的船：改裝、停進船塢</h4>${here.map((q) => `<div class="cc-sq pl"><b style="color:#3fdf8f">${q.id === S.pl.sq ? '★' : ''}${smuEsc(q.name)}</b>${q.ships.map((c, k) => `<div class="cc-ship cc-yq" style="grid-template-columns:auto 1fr auto"><b>${ccShipNm(c)}</b>${ccShipBars(c)}<button class="g-btn" data-rf2="${q.id}:${k}">改裝</button><button class="g-btn" data-rp="${q.id}:${k}" ${q.id === S.pl.sq && q.ships.length <= 1 ? 'disabled title="親自指揮的小隊至少要留一艘"' : ''}>停進船塢</button></div>`).join('')}</div>`).join('')}` : '';
-  smuModal(`<h3>${s.name} 的船塢</h3>
+  ccmSheet(`<h3>${s.name} 的船塢<span class="en">SHIPYARD</span></h3>
     <div class="g-dim" style="font-size:12px">一座船塢一次造一艘，排前面的先造；大船造得久。改裝佔用一週，排在還沒開工的造船前面。造好的船停在船塢當預備艦，在這裡編進小隊。星系失守時，排隊暫停、預備艦與改裝中的船被俘。資金 ${S.pl.money}</div>
     <h4 style="margin:10px 0 4px">訂造</h4>${order}
     <h4 style="margin:10px 0 4px">排隊（${Y.length}／${CC_RULE.yardQ}）</h4>${queue}
     <h4 style="margin:10px 0 4px">預備艦</h4>${res}
     ${put}
-    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`);
+    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`, '', 'var(--gold)');
   const re = (err) => { if (err) { toast(err, 'warn'); return; } ccSave(S); ccRender(); ccYardView(s); };
   gEl('cc-close').onclick = () => { smuCloseModal(); ccRender(); };
   const seg = gEl('cc-yto'); if (seg) seg.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { CC.yto = b.dataset.v === 'res' ? null : +b.dataset.v; }));
@@ -28079,13 +28079,13 @@ function ccFitView(src, D) {
   const last = F.q && F.q.id === S.pl.sq && F.q.ships.length <= 1;
   const stop = why || bad || (last ? '親自指揮的小隊至少要留一艘（先把預備艦編進來，或從別隊調一艘）' : '') || (!cost ? '還沒選要改的地方' : '') || (S.pl.money < cost ? `資金不夠（要 ${cost}，有 ${S.pl.money}）` : '');
   const back = F.q ? `好了回到${smuEsc(F.q.name)}（那時還在 ${s.name}、沒滿的話；不然停在船塢）` : '好了停回船塢（預備艦）';
-  smuModal(`<h3>改裝：${F.q ? smuEsc(F.q.name) + '・' : '預備艦・'}${H0.name} <span class="cc-lv${c.lv > 1 ? ' up' : ''}" style="font-size:13px">Lv${c.lv}</span></h3>
+  ccmSheet(`<h3>改裝：${F.q ? smuEsc(F.q.name) + '・' : '預備艦・'}${H0.name} <span class="cc-lv${c.lv > 1 ? ' up' : ''}" style="font-size:13px">Lv${c.lv}</span><span class="en">REFIT</span></h3>
     <div class="g-dim" style="font-size:12px">在 ${s.name} 的船塢改裝：佔用船塢一週，跟造船排同一個隊（排在還沒開工的造船前面）。改裝中的船離開小隊、不能出戰；${back}。Mk 上限 <b>${CAP_MK_NAME[cap]}</b>（船的等級與研發取低的）。資金 ${S.pl.money}</div>
     <table class="cc-mods cc-fit"><tr><td></td><td class="g-dim">模組</td><td class="g-dim">Mk</td></tr>${rows}</table>
     <dl class="cc-cmp">${st}</dl>
     <div class="g-dim" style="font-size:12px">價錢：工錢 ${CC_RULE.fit.base}・換模組 ${CC_RULE.fit.mod.main}／${CC_RULE.fit.mod.tur}／${CC_RULE.fit.mod.msl}／${CC_RULE.fit.mod.def}／${CC_RULE.fit.mod.eng}（主砲／副砲／飛彈艙／防禦／引擎，換回原廠半價）・Mk II ${CC_RULE.fit.mk[2]}、Mk III 再 ${CC_RULE.fit.mk[3]}（每個槽位）</div>
     ${stop && cost ? `<div style="color:#ff8a7a;margin-top:6px">${stop}</div>` : ''}
-    <div class="sm-btns"><button class="g-btn" id="cc-fit-no">${F.q ? '回到船的資料' : '回到船塢'}</button><button class="g-btn" id="cc-fit-rs" ${cost ? '' : 'disabled'}>重選</button><button class="g-btn primary" id="cc-fit-ok" ${stop ? 'disabled' : ''}>${cost ? `送進船塢（${cost} 資金・${eta} 週後好）` : '送進船塢'}</button></div>`, 'sm-wide cr-side');
+    <div class="sm-btns"><button class="g-btn" id="cc-fit-no">${F.q ? '回到船的資料' : '回到船塢'}</button><button class="g-btn" id="cc-fit-rs" ${cost ? '' : 'disabled'}>重選</button><button class="g-btn primary" id="cc-fit-ok" ${stop ? 'disabled' : ''}>${cost ? `送進船塢（${cost} 資金・${eta} 週後好）` : '送進船塢'}</button></div>`, 'sm-wide cr-side', 'var(--violet)');
   const redo = () => ccFitView(src, D);
   // 整修庫（caprefit.js）：背景照現在的設定擺船；剛選的零件播安裝動畫，下方說明這次的數值變化
   { const ls = D._last, sl = ls && (ls.startsWith('mk:') ? ls.slice(3) : ls), nm = sl && (CAP_SLOTS.find(([k]) => k === sl) || [])[1], md = sl && D.mod[sl] && CAP_MODS[sl][D.mod[sl]];
@@ -28102,9 +28102,9 @@ function ccFitView(src, D) {
 // 換船／分隊：同一個星系的你的小隊之間，不花時間
 function ccSwapView(Q) {
   const S = CC.S, L = S.sq.filter((q) => q.pl && q.ships.length && q.sys === Q.sys), canNew = ccOwnCount(S) < ccSlots(S);
-  smuModal(`<h3>換船／分隊：${S.sys[Q.sys].name}</h3><p class="g-dim">同一個星系的小隊之間可以換船，不花時間。每隊最多 ${CC_RULE.maxShips} 艘；親自指揮的小隊至少留一艘。${canNew ? '「分出」＝用這艘船成立新的小隊。' : `指揮權 ${ccOwnCount(S)}／${ccSlots(S)} 隊${CC_RULE.sqMerit[ccSlots(S)] ? `（戰功 ${CC_RULE.sqMerit[ccSlots(S)]} 可以多帶一隊）` : ''}。`}</p>
+  ccmSheet(`<h3>換船／分隊：${S.sys[Q.sys].name}<span class="en">TRANSFER</span></h3><p class="g-dim">同一個星系的小隊之間可以換船，不花時間。每隊最多 ${CC_RULE.maxShips} 艘；親自指揮的小隊至少留一艘。${canNew ? '「分出」＝用這艘船成立新的小隊。' : `指揮權 ${ccOwnCount(S)}／${ccSlots(S)} 隊${CC_RULE.sqMerit[ccSlots(S)] ? `（戰功 ${CC_RULE.sqMerit[ccSlots(S)]} 可以多帶一隊）` : ''}。`}</p>
     <div class="cc-sw">${L.map((q) => `<div class="cc-sq pl"><b style="color:#3fdf8f">${q.id === S.pl.sq ? '★' : ''}${smuEsc(q.name)}</b>${q.ships.map((c, k) => `<div class="cc-ship"><b>${ccShipNm(c)}</b>${ccShipBars(c)}<span>${L.filter((o) => o !== q).map((o) => `<button class="g-btn" data-mv="${q.id}:${k}:${o.id}">→${smuEsc(o.name)}</button>`).join('')}${canNew && q.ships.length > 1 ? `<button class="g-btn" data-mv="${q.id}:${k}:new">分出</button>` : ''}</span></div>`).join('')}</div>`).join('')}</div>
-    <div id="cc-swmsg" style="color:#ff8a7a;min-height:16px"></div><div class="sm-btns"><button class="g-btn primary" id="cc-close">完成</button></div>`);
+    <div id="cc-swmsg" style="color:#ff8a7a;min-height:16px"></div><div class="sm-btns"><button class="g-btn primary" id="cc-close">完成</button></div>`, '', 'var(--own)');
   document.querySelectorAll('[data-mv]').forEach((b) => (b.onclick = () => {
     const [a, k, to] = b.dataset.mv.split(':'), q = S.sq.find((x) => x.id === +a), w = ccTransfer(S, q, +k, to === 'new' ? 'new' : +to);
     if (w) { gEl('cc-swmsg').textContent = w; return; }
@@ -28124,7 +28124,7 @@ function ccSqNote(S, q) {
 function CC_place(el) {
   const mp = gEl('cc-map'), s = CC.S && CC.S.sys[CC.sel]; if (!mp || !s || !CC.view) return;
   const [x, y] = ccXY(s), H = mp.clientHeight, kz = ccmK(), top = 168 * kz, bot = 24 * kz;   // 避開標題、工具列（capmap_ui.js）
-  const dr = gEl('cc-drw'), W = dr ? dr.getBoundingClientRect().left - mp.getBoundingClientRect().left - 20 : mp.clientWidth;   // 右側的任務／紀錄面板打開時，卡片不要蓋上去
+  const dr = gEl('cc-drw') || document.querySelector('.sm-box.ccm-sheet:not(.cr-side)'), W = dr ? dr.getBoundingClientRect().left - mp.getBoundingClientRect().left - 20 : mp.clientWidth;   // 右側的任務／紀錄面板打開時，卡片不要蓋上去
   const w = el.offsetWidth, L = x + 70 + w < W - 16 ? x + 70 : Math.max(16, x - 70 - w), m0 = mp.getBoundingClientRect();
   let B = H - bot;   // 底部：跟卡片左右重疊的面板（小隊面板、結束這一週、圖例）上緣
   for (const e of [document.querySelector('.ccm .cc-dock'), gEl('cc-end'), gEl('cc-leg')]) { if (!e) continue; const r = e.getBoundingClientRect(); if (r.right - m0.left > L && r.left - m0.left < L + w) B = Math.min(B, r.top - m0.top - 12); }
@@ -28643,7 +28643,7 @@ function ccmFit() { const w = document.querySelector('.ccm'); if (w) w.style.set
 function ccmArea(W, H) {
   const k = ccmK(), top = 168 * k, d = gEl('cc-dock'), dh = d ? d.getBoundingClientRect().height : 0;
   const bot = Math.min(H * 0.4, Math.max(110 * k, dh) + 40 * k);
-  const dr = CC.drw && gEl('cc-drw') ? 640 * k : 0;   // 右側的任務／紀錄面板打開時，星圖往左縮（capinfo_ui.js）
+  const dr = CC.drw && gEl('cc-drw') ? 640 * k : document.querySelector('.sm-box.ccm-sheet:not(.cr-side)') ? 820 * k : 0;   // 右側的任務／紀錄面板、小隊／船塢／研發面板打開時，星圖往左縮
   return { x: 40, y: top, w: W - 80 - dr, h: H - top - bot };
 }
 // 下週會被進攻、還留在原地的你的小隊（結束這一週的 ⚠）
@@ -29066,6 +29066,100 @@ function ccdLogHtml(S, arg) {
       ${wk ? '<button type="button" class="more" data-all="1">看全部紀錄</button>' : ''}</div>`;
 }
 
+// ═══════════════════════ 艦長生涯：小隊／船塢／改裝／研發的面板（2026-11-18）═══════════════════════
+// 照使用者的方向（不佔滿畫面、和停泊大廳一樣斜放）：這些畫面原本是置中的對話框，改成星圖右側的斜放面板，
+// 背景不變暗、星圖照常看得到（面板打開時星圖往左縮）。改裝（cr-side）背景是整修庫，同一套面板放在右邊。
+// 用法：ccmSheet(html, cls) 取代 smuModal；關閉、重畫照舊用 smuCloseModal（對話框的佇列、按鈕都不變）。
+// 內容的樣式（區塊標題、船的列、分段按鈕、表格、數值）全部掛在 .ccm-sheet 底下。
+const CCS_CSS = `
+#g-screen:has(.ccm) .sm-modal:has(.ccm-sheet){background:transparent;backdrop-filter:none;pointer-events:none;justify-content:flex-end;align-items:flex-start;perspective:1600px}
+#g-screen:has(.ccm) .sm-box.ccm-sheet{pointer-events:auto;zoom:var(--k,1);width:760px;max-width:none;margin:150px 30px 0 0;max-height:calc(100vh / var(--k,1) - 350px);padding:24px 30px 22px;
+  transform-origin:100% 50%;transform:translateX(-24px) rotateY(-7deg) rotateZ(-.4deg);background:linear-gradient(165deg,rgba(18,28,58,.94),rgba(8,13,30,.92));border-right:3px solid var(--sc,#3cc8ff);
+  animation:ccsIn .4s cubic-bezier(.2,.8,.2,1) both;backdrop-filter:blur(3px)}
+#g-screen:has(.ccm) .sm-box.ccm-sheet.still{animation:none}
+#g-screen:has(.ccm) .sm-box.ccm-sheet.cr-side{width:700px;max-height:calc(100vh / var(--k,1) - 120px);margin-top:60px;background:linear-gradient(165deg,rgba(18,28,58,.9),rgba(8,13,30,.86))}
+@keyframes ccsIn{from{opacity:0;transform:translateX(50%) rotateY(-7deg) rotateZ(-.4deg)}}
+#g-screen:has(.ccm) .sm-box.ccm-sheet::before{background:var(--sc,#3cc8ff);width:150px}
+.ccm-sheet{--own:#3fdf8f;--ally:#5aa8ff;--red:#ff4d5e;--yellow:#f3e94b;--gold:#ffc24a;--cyan:#3cc8ff;--violet:#a97bff;--dim:#8fa3c7;--mute:#5d6f92;--line:rgba(90,200,255,.32);--line2:rgba(150,190,240,.18);
+  --en:Rajdhani,Bahnschrift,'Segoe UI',sans-serif;font-size:15px}
+.ccm-sheet h3{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 12px;font-size:26px!important;margin:0 0 10px!important}
+.ccm-sheet h3 .en{font:700 12px var(--en);letter-spacing:.3em;color:var(--sc,var(--cyan))}
+.ccm-sheet h3 .cc-lv{font-size:13px!important}
+.ccm-sheet h4{display:flex;align-items:center;gap:10px;margin:18px 0 8px!important;font:900 15px 'Noto Sans TC','Microsoft JhengHei',sans-serif!important;letter-spacing:.14em;color:#dfe8fa!important}
+.ccm-sheet h4::after{content:"";flex:1;height:1px;background:var(--line2)}
+.ccm-sheet .g-dim{color:var(--dim)}
+.ccm-sheet .ccs-note{font-size:13px;color:var(--dim);line-height:1.6;padding:8px 12px;background:rgba(12,20,42,.55);border-left:2px solid var(--mute);margin:4px 0 6px}
+/* 船的列、小隊 */
+.ccm-sheet .cc-ship{padding:7px 12px;margin:4px 0;background:rgba(12,20,42,.72);border-left:3px solid var(--own);gap:4px 12px}
+.ccm-sheet .cc-ship b{font-size:14px}
+.ccm-sheet .cc-sq{padding:10px 12px;margin:8px 0;background:rgba(10,16,34,.6);border:0;border-left:3px solid var(--own);border-radius:0}
+.ccm-sheet .cc-sq > b{font-size:16px}
+.ccm-sheet .cc-sq .cc-ship{background:rgba(18,28,54,.8);border-left-width:2px}
+.ccm-sheet .cc-bar{height:5px;border-radius:0;background:rgba(255,255,255,.1)}
+.ccm-sheet .cc-xp{height:7px;border-radius:0;background:rgba(255,255,255,.1)}
+.ccm-sheet .cc-lv{border-radius:0}
+/* 分段按鈕、行動 */
+.ccm-sheet .sm-seg{border:0;border-radius:0;gap:4px;overflow:visible}
+.ccm-sheet .sm-seg button{border:1px solid var(--line2);background:rgba(14,22,46,.85);color:#cfd8e3;padding:5px 12px;clip-path:polygon(6px 0,100% 0,calc(100% - 6px) 100%,0 100%)}
+.ccm-sheet .sm-seg button:last-child{border-right:1px solid var(--line2)}
+.ccm-sheet .sm-seg button:hover:not(:disabled){background:rgba(30,60,110,.95)}
+.ccm-sheet .sm-seg button.on{background:linear-gradient(100deg,rgba(60,200,255,.45),rgba(47,134,255,.35));color:#fff;border-color:var(--cyan)}
+.ccm-sheet .sm-pc{border-radius:0}
+.ccm-sheet .g-btn{font-size:13px}
+.ccm-sheet .sm-btns{margin-top:16px;padding-top:12px;border-top:1px solid var(--line2);justify-content:flex-end}
+/* 表格、數值 */
+.ccm-sheet .cc-mods{border-collapse:separate;border-spacing:0 4px;font-size:14px}
+.ccm-sheet .cc-mods td{border:0;background:rgba(12,20,42,.7);padding:7px 10px}
+.ccm-sheet .cc-mods td:first-child{border-left:3px solid var(--cyan);color:var(--dim);font-weight:700}
+.ccm-sheet .cc-fit tr.chg td:first-child{border-left-color:var(--violet)}
+.ccm-sheet .sm-kv{gap:6px 16px;font-size:14px;padding:10px 14px;background:rgba(12,20,42,.55)}
+.ccm-sheet .sm-kv dt{color:var(--dim);font-weight:700}
+.ccm-sheet .cc-cmp{gap:5px 14px;font-size:14px;padding:10px 14px;background:rgba(12,20,42,.55)}
+.ccm-sheet .cc-yq button{font-size:12px}
+.ccm-sheet [style*="font-size:12px"]{font-size:13.5px!important}.ccm-sheet [style*="font-size:11px"]{font-size:12.5px!important}
+.ccm-sheet .sm-seg button{font-size:13.5px}.ccm-sheet .cc-yq{font-size:14px}.ccm-sheet .cc-yq .g-dim{font-size:13px}
+/* 研發 */
+.ccm-sheet .ccs-cur{display:flex;align-items:center;gap:14px;padding:12px 14px;background:rgba(40,24,80,.45);border-left:3px solid var(--violet);margin:6px 0}
+.ccm-sheet .ccs-cur .cc-bar{flex:1}
+.ccm-sheet .ccs-big{font:700 30px/1 var(--en);color:var(--violet)}
+/* 小隊總覽 */
+.ccm-sheet .ccs-sq{padding:12px 14px;margin:10px 0;background:rgba(10,16,34,.65);border-left:3px solid var(--c,var(--own))}
+.ccm-sheet .ccs-sq .h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.ccm-sheet .ccs-sq .h b{font:900 18px 'Noto Sans TC','Microsoft JhengHei',sans-serif;color:var(--c,var(--own))}
+.ccm-sheet .ccs-sq .h span{font-size:13px;color:var(--dim)}
+.ccm-sheet .ccs-sq .h .act{margin-left:auto;display:flex;gap:6px}
+.ccm-sheet .ccs-row{display:grid;grid-template-columns:150px 1fr 70px;gap:12px;align-items:center;padding:6px 10px;margin-top:4px;background:rgba(18,28,54,.8);cursor:pointer}
+.ccm-sheet .ccs-row:hover{background:rgba(30,50,90,.9)}
+.ccm-sheet .ccs-row .n{font-weight:700;white-space:nowrap}
+.ccm-sheet .ccs-row .v{text-align:right;font:700 14px var(--en);color:var(--dim)}
+`;
+let ccsLast = 0;
+// 斜放面板：sc＝頂條、右邊條的顏色
+function ccmSheet(html, cls, sc) {
+  if (CC.drw && typeof ccdClose === 'function') ccdClose();   // 右側同一個位置：任務／紀錄面板先收起
+  const now = performance.now(), still = now - ccsLast < 4000 && !!document.querySelector('.sm-box.ccm-sheet'); ccsLast = now;
+  const d = smuModal(html, `ccm-sheet ${cls || ''}${still ? ' still' : ''}`);
+  const b = d.querySelector('.sm-box'); b.style.setProperty('--k', ccmK()); if (sc) b.style.setProperty('--sc', sc);
+  return d;
+}
+// 小隊總覽（停泊大廳的「小隊」）：你的每個小隊、在哪裡、預定動向、每艘船；點船看資料
+function ccSquadsView() {
+  const S = CC.S, L = ccOwn(S);
+  const row = (q, c, k) => `<div class="ccs-row" data-ship="${q.id}:${k}" title="看這艘船的等級與模組"><span class="n">${ccShipNm(c)}</span>${ccShipBars(c)}<span class="v">船體 ${Math.round(c.hp * 100)}%</span></div>`;
+  ccmSheet(`<h3>小隊<span class="en">SQUADS ・ ${L.length}／${ccSlots(S)}</span></h3>
+    <div class="ccs-note">指揮權 ${ccOwnCount(S)}／${ccSlots(S)} 隊・每隊最多 ${CC_RULE.maxShips} 艘。點船看等級、模組與改裝；同一個星系的小隊之間可以換船、分隊。</div>
+    ${L.map((q) => { const s = S.sys[q.sys], me = q.id === S.pl.sq, n = L.filter((o) => o.sys === q.sys).length;
+      return `<div class="ccs-sq" style="--c:${me ? 'var(--own)' : 'var(--ally)'}"><div class="h"><b>${me ? '★ ' : ''}${smuEsc(q.name)}</b><span>${q.ships.length} 艘・在 ${smuEsc(s.name)}${q.task ? '・派出執行任務' : q.to != null ? `・預定 → ${smuEsc(S.sys[q.to].name)}` : ''}${me ? '・親自指揮' : ''}</span>
+        <span class="act"><button type="button" class="g-btn" data-see="${q.id}">在星圖上看</button>${n > 1 || ccOwnCount(S) < ccSlots(S) ? `<button type="button" class="g-btn" data-swap="${q.id}">換船／分隊</button>` : ''}</span></div>
+        ${q.ships.map((c, k) => row(q, c, k)).join('')}${ccThreat(S, q)}</div>`; }).join('')}
+    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`, '', 'var(--own)');
+  gEl('cc-close').onclick = smuCloseModal;
+  document.querySelectorAll('.ccm-sheet [data-ship]').forEach((b) => (b.onclick = () => { const [qi, k] = b.dataset.ship.split(':').map(Number); ccShipView(ccSqById(qi), k); }));
+  document.querySelectorAll('.ccm-sheet [data-see]').forEach((b) => (b.onclick = () => { const q = ccSqById(+b.dataset.see); smuCloseModal(); CC.cur = q.id; CC.sel = q.sys; ccCard(); }));
+  document.querySelectorAll('.ccm-sheet [data-swap]').forEach((b) => (b.onclick = () => ccSwapView(ccSqById(+b.dataset.swap))));
+}
+Object.assign(window.__cap || (window.__cap = {}), { ccSquadsView, ccShipView, ccSwapView });
+
 // ═══════════════════════ 艦長生涯：大廳（停泊）2026-11-18 ═══════════════════════
 // 在星系中巡航時，平常是「停泊」：小隊停在星系裡、鏡頭慢慢繞著船轉，畫面上是大廳的介面（這週要做什麼）。
 // 按 cap_dock（預設 H）或「巡航」切到親自開船；再按一次回到停泊。設計稿：dev/ui-mockups/captain_lobby.html。
@@ -29366,7 +29460,7 @@ function cclAct(k) {
   if (k === 'log') { cclToMap(); return ccdOpen('log', { mode: 'all' }); }
   if (k === 'report') { cclToMap(); return ccdOpen('log', { mode: 'week' }); }
   if (k === 'gear') return openSettings();
-  if (k === 'sq') { CC.cur = P.id; CC.sel = P.sys; cclToMap(); return ccCard(); }
+  if (k === 'sq') { CC.cur = P.id; cclToMap(); return ccSquadsView(); }
   if (k === 'yard') { if (!(s.owner === S.fac && s.yard)) return toast('這個星系沒有你的勢力的維修船塢', 'warn'); cclToMap(); return ccYardView(s); }
   if (k === 'tech') { cclToMap(); return ccTechView(); }
   if (k === 'planet') { cclToMap(); return cpView(s); }

@@ -168,7 +168,7 @@ function ccmFit() { const w = document.querySelector('.ccm'); if (w) w.style.set
 function ccmArea(W, H) {
   const k = ccmK(), top = 168 * k, d = gEl('cc-dock'), dh = d ? d.getBoundingClientRect().height : 0;
   const bot = Math.min(H * 0.4, Math.max(110 * k, dh) + 40 * k);
-  const dr = CC.drw && gEl('cc-drw') ? 640 * k : 0;   // 右側的任務／紀錄面板打開時，星圖往左縮（capinfo_ui.js）
+  const dr = CC.drw && gEl('cc-drw') ? 640 * k : document.querySelector('.sm-box.ccm-sheet:not(.cr-side)') ? 820 * k : 0;   // 右側的任務／紀錄面板、小隊／船塢／研發面板打開時，星圖往左縮
   return { x: 40, y: top, w: W - 80 - dr, h: H - top - bot };
 }
 // 下週會被進攻、還留在原地的你的小隊（結束這一週的 ⚠）
