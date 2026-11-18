@@ -18,6 +18,8 @@ function cpView(s) {
   const S = CC.S, V = ccSee(S, s), live = V.live, mine = s.owner === S.fac, nz = cpNzRule(S, s), neu = s.owner === SM_N || nz;
   const R = cpInc(S, s), K = cpRazeK(S), btn = (attr, tx, why) => `<button class="g-btn" ${attr} ${why ? `disabled title="${smuEsc(why)}"` : ''}>${tx}</button>`;
   // 狀況
+  const pc = s.prosp < CP_RULE.riot[0] ? 'var(--red)' : s.prosp < 40 ? '#ffb35a' : 'var(--own)';
+  const strip = live ? `<div class="ccs-stat"><div><span>人口</span><b>${s.pop}<small>／${cpPopCap(s)}</small></b></div><div><span>繁榮</span><b style="color:${pc}">${s.prosp}</b></div><div><span>地面防禦</span><b>${s.def}<small>／${s.def0}</small></b></div><div><span>勢力收入／週</span><b>${Math.round(R.g - R.up)}</b></div><div><span>你的資金</span><b style="color:var(--gold)">${S.pl.money}</b></div></div>` : '';
   const head = live ? `<dl class="sm-kv"><dt>擁有者</dt><dd>${SM_FAC[s.owner].name}・${SM_TIER[s.tier]}${s.tier < 4 ? `（人口到 ${Math.round(SM_TIER_CAP[s.tier] * 0.7)} 可以升級）` : ''}</dd>
       <dt>人口</dt><dd>${s.pop}／${cpPopCap(s)}</dd>
       <dt>繁榮（民心）</dt><dd>${ccBar(s.prosp / 100, s.prosp < CP_RULE.riot[0] ? '#ff6a5a' : s.prosp < 40 ? '#ffb35a' : '#5fd39a')}${s.prosp}${s.riot ? `・<b style="color:#ff7a6b">暴動中</b>（收入歸零、地面防禦 −1，回到 ${CP_RULE.riot[1]} 才平息）` : `・低於 ${CP_RULE.riot[0]} 會暴動`}</dd>
@@ -48,11 +50,12 @@ function cpView(s) {
   const build = canPv ? smuActs(CP_PV_ORDER.filter((k) => !(CP_PV[k].neu && !neu)).map((k) => { const P = CP_PV[k], why = cpPvWhy(S, s, k); return { id: 'cp-b-' + k, name: `蓋${P.name}（${P.at === 'g' ? '地表' : '軌道'}）`, desc: why || `${P.cost} 資金・${P.w} 週・每週維護 ${P.up}・${P.desc}`, off: !!why }; }), 150) : '';
   const cap = `己方星系 ${cpPvCount(S, false)}／${cpPvCap(S, false)} 座（${ccRankOf(S).name}，據點的不算）・中立星系 ${cpPvCount(S, true)}／${cpPvCap(S, true)} 座（中立好感度 ${Math.round(ccFavOf(S, SM_N))}：${cpNeuTier(S)[3]}）`;
   const inc = S.pl.inc ? `<div class="g-dim" style="font-size:12px">上週你的收入：薪餉 ${S.pl.inc.sal}・分紅 ${S.pl.inc.div}・你的建築 ${S.pl.inc.pv}（已繳稅 ${S.pl.inc.tax}）・維護 −${S.pl.inc.up}${S.pl.inc.rp ? `・研究點數 +${S.pl.inc.rp}` : ''}</div>` : '';
-  smuModal(`<h3>${s.name} 的星球</h3>
-    <div class="g-dim" style="font-size:12px">基礎建設是${neu ? '中立勢力' : '勢力的上級'}的事；你可以出錢強化你的陣營的建築（好處一半給勢力、一半給你），或在你的區塊蓋自己的建築。星系失守時建築先「接管中」，接管完成前你可以破壞，拿回出的錢的 ${Math.round(K * 100)}%（研發「焦土協定」提高）；接管完成前奪回＝原樣還你。資金 ${S.pl.money}</div>
+  ccmSheet(`<h3>${s.name} 的星球<span class="en">PLANET ・ ${live ? SM_FAC[s.owner].name : 'NO INTEL'}</span></h3>
+    ${strip}${s.riot && live ? '<div class="ccs-warn">暴動中：收入歸零、地面防禦 −1</div>' : ''}
+    <div class="ccs-note">基礎建設是${neu ? '中立勢力' : '勢力的上級'}的事；你可以出錢強化你的陣營的建築（好處一半給勢力、一半給你），或在你的區塊蓋自己的建築。星系失守時建築先「接管中」，接管完成前你可以破壞，拿回出的錢的 ${Math.round(K * 100)}%（研發「焦土協定」提高）；接管完成前奪回＝原樣還你。</div>
     ${inc}${head}${fac}${bq}
     ${canPv || (s.pv || []).length ? `<h4 style="margin:12px 0 4px">你的建築</h4><div class="g-dim" style="font-size:12px">${cap}</div>${pvRows || '<div class="g-dim">還沒有。</div>'}${build}` : ''}
-    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`);
+    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`, '', live ? ccFacCol(S, s.owner) : 'var(--mute)');
   const re = (err) => { if (err) { toast(err, 'warn'); return; } ccSave(S); ccRender(); cpView(s); };
   gEl('cc-close').onclick = () => { smuCloseModal(); ccRender(); };
   document.querySelectorAll('[data-up]').forEach((b) => (b.onclick = () => re(cpUp(S, s, s.bd.find((x) => x.id === +b.dataset.up)))));

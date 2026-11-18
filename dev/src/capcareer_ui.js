@@ -334,11 +334,13 @@ function ccTechView() {
 function ccShopView(s) {
   const S = CC.S, T = CC_SHOP[s.shop], why = ccShopWhy(S, s), L = ccShopStock(S, s), K = ccShopK(S, s);
   const rows = L.map((it, i) => { const got = ccShopBought(S, s, i) || (it.kind === 'bp' && ccHasBp(S, it.k));
-    return `<div class="cc-ship cc-yq" style="grid-template-columns:1fr auto"><span><b>${ccShopItemName(it)}</b>${it.kind === 'bp' ? `<br><span class="g-dim">${CAP_MODS[it.k.split(':')[0]][it.k.split(':')[1]].desc}・買到後在「研發」研究</span>` : ''}</span><button class="g-btn" data-buy="${i}" ${why || got || S.pl.money < it.p ? `disabled title="${smuEsc(why || (got ? '已經買了' : '資金不夠'))}"` : ''}>${got ? '已經買了' : `買（${it.p} 資金）`}</button></div>`; }).join('');
-  smuModal(`<h3>${s.name} 的${T.name}</h3>
-    <div class="g-dim" style="font-size:12px">貨每週換。價格 ×${K.toFixed(2)}（${s.shop === 'black' ? '黑市貴 30%、看海盜' : '看中立勢力'}對你的好感度與你的陣營的聲望）。${s.shop === 'trade' ? '擁有者跟你交戰中就不賣。' : '黑市誰都賣。'}資金 ${S.pl.money}</div>
-    ${why ? `<p style="color:#ff8a7a">${why}</p>` : ''}${rows}
-    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`);
+    return `<div class="cc-ship cc-yq ccs-item${got ? ' got' : ''}" style="grid-template-columns:1fr auto"><span><b>${ccShopItemName(it)}</b>${it.kind === 'bp' ? ' <span class="ccs-tag">藍圖</span>' : ''}${it.kind === 'bp' ? `<br><span class="g-dim">${CAP_MODS[it.k.split(':')[0]][it.k.split(':')[1]].desc}・買到後在「研發」研究</span>` : ''}</span><button class="g-btn" data-buy="${i}" ${why || got || S.pl.money < it.p ? `disabled title="${smuEsc(why || (got ? '已經買了' : '資金不夠'))}"` : ''}>${got ? '已經買了' : `買（${it.p} 資金）`}</button></div>`; }).join('');
+  const blk = s.shop === 'black';
+  ccmSheet(`<h3>${s.name} 的${T.name}<span class="en">${blk ? 'BLACK MARKET' : 'TRADE POST'}</span></h3>
+    <div class="ccs-stat"><div><span>資金</span><b>${S.pl.money}</b></div><div><span>價格</span><b style="color:${K > 1.05 ? 'var(--red)' : K < 0.95 ? 'var(--own)' : '#fff'}">×${K.toFixed(2)}</b></div><div><span>本週貨品</span><b>${L.length}</b></div></div>
+    <div class="ccs-note">貨每週換。價格 ×${K.toFixed(2)}（${s.shop === 'black' ? '黑市貴 30%、看海盜' : '看中立勢力'}對你的好感度與你的陣營的聲望）。${s.shop === 'trade' ? '擁有者跟你交戰中就不賣。' : '黑市誰都賣。'}</div>
+    ${why ? `<div class="ccs-warn">${why}</div>` : ''}<h4>貨品</h4>${rows || '<div class="g-dim">這週沒有貨。</div>'}
+    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`, '', blk ? 'var(--red)' : 'var(--gold)');
   gEl('cc-close').onclick = () => { smuCloseModal(); ccRender(); };
   document.querySelectorAll('[data-buy]').forEach((b) => (b.onclick = () => { const err = ccShopBuy(S, s, +b.dataset.buy); if (err) { toast(err, 'warn'); return; } ccSave(S); ccRender(); ccShopView(s); }));
 }

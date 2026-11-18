@@ -54,6 +54,17 @@ const CCS_CSS = `
 .ccm-sheet .ccs-cur{display:flex;align-items:center;gap:14px;padding:12px 14px;background:rgba(40,24,80,.45);border-left:3px solid var(--violet);margin:6px 0}
 .ccm-sheet .ccs-cur .cc-bar{flex:1}
 .ccm-sheet .ccs-big{font:700 30px/1 var(--en);color:var(--violet)}
+/* 數字列（商店、星球）、警告、貨品 */
+.ccm-sheet .ccs-stat{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:4px;margin:4px 0 10px}
+.ccm-sheet .ccs-stat > div{padding:8px 12px;background:rgba(12,20,42,.75);border-top:2px solid var(--sc,var(--cyan));clip-path:polygon(0 0,100% 0,calc(100% - 8px) 100%,0 100%)}
+.ccm-sheet .ccs-stat span{display:block;font-size:12px;color:var(--dim);letter-spacing:.08em}
+.ccm-sheet .ccs-stat b{font:700 26px/1.15 var(--en);color:#fff}
+.ccm-sheet .ccs-stat small{font-size:14px;color:var(--dim);margin-left:2px}
+.ccm-sheet .ccs-warn{padding:8px 12px;margin:6px 0;background:rgba(120,20,30,.45);border-left:3px solid var(--red);color:#ffb0a8;font-weight:700}
+.ccm-sheet .ccs-item{border-left-color:var(--sc,var(--gold))}
+.ccm-sheet .ccs-item.got{opacity:.55}
+.ccm-sheet .ccs-tag{display:inline-block;padding:0 6px;font-size:11px;font-weight:700;color:#1a1200;background:var(--gold);transform:skewX(-12deg)}
+.ccm-sheet .cc-yq .cc-lv{font-size:12px}
 /* 小隊總覽 */
 .ccm-sheet .ccs-sq{padding:12px 14px;margin:10px 0;background:rgba(10,16,34,.65);border-left:3px solid var(--c,var(--own))}
 .ccm-sheet .ccs-sq .h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
