@@ -74,6 +74,7 @@ body.ccl-on #battlehud, body.ccl-on #labels, body.ccl-on #caphud{visibility:hidd
 #ccl .ri b{font:700 22px Rajdhani,Bahnschrift,sans-serif;letter-spacing:.04em}
 #ccl .ib{position:absolute;top:40px;width:56px;height:52px;background:rgba(10,16,34,.86);border:1px solid rgba(120,170,230,.25);display:flex;align-items:center;justify-content:center}
 #ccl .ib:hover{border-color:#3cc8ff}
+#ccl .ib.q:hover{border-color:#ff4d5e}#ccl .ib.q:hover svg{stroke:#ff8a96}
 #ccl .ib svg{width:26px;height:26px;stroke:#e8f2ff;fill:none;stroke-width:1.7}
 #ccl .ib .nb{right:-10px;top:-10px;transform:scale(.8)}
 #ccl .prio{position:absolute;left:258px;top:186px;width:528px;height:116px;cursor:pointer;clip-path:polygon(0 12%,100% 0,100% 100%,0 100%);transition:filter .2s}
@@ -167,6 +168,7 @@ const CCL_ICON = {
   merit: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>',
   mail: '<rect x="3" y="6" width="18" height="13"/><path d="M3 7l9 6 9-6"/>',
   gear: '<circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>',
+  quit: '<path d="M14 4h6v16h-6M4 12h11M9 7l-5 5 5 5"/>',
   sq: '<path d="M3 15l9-9 9 9M6 19l6-6 6 6"/>',
   yard: '<path d="M3 20h18M5 20V9l7-5 7 5v11M9 20v-6h6v6"/>',
   planet: '<circle cx="12" cy="12" r="6"/><ellipse cx="12" cy="12" rx="11" ry="4" transform="rotate(-20 12 12)"/>',
@@ -250,8 +252,9 @@ function cclRender() {
         <button class="ri" data-ccl="map" style="--c:#f3e94b"><svg viewBox="0 0 24 24">${CCL_ICON.money}</svg><span class="k">資金</span><b>${fmtN(Math.round(S.pl.money))}</b></button>
         <button class="ri" data-ccl="tech" style="--c:#3cc8ff"><svg viewBox="0 0 24 24">${CCL_ICON.rp}</svg><span class="k">研究點</span><b>${fmtN(Math.round(S.pl.rp || 0))}</b></button>
         <div class="ri" style="--c:#3fdf8f"><svg viewBox="0 0 24 24">${CCL_ICON.merit}</svg><span class="k">戰功</span><b>${fmtN(Math.round(mer))}</b></div></div>
-      <button class="ib enter" data-ccl="report" style="left:654px;--dy:-20px;--d:.15s" title="上週的戰報"><svg viewBox="0 0 24 24">${CCL_ICON.mail}</svg></button>
-      <button class="ib enter" data-ccl="gear" style="left:722px;--dy:-20px;--d:.18s" title="設定"><svg viewBox="0 0 24 24">${CCL_ICON.gear}</svg></button>
+      <button class="ib enter" data-ccl="report" style="left:586px;--dy:-20px;--d:.15s" title="上週的戰報"><svg viewBox="0 0 24 24">${CCL_ICON.mail}</svg></button>
+      <button class="ib enter" data-ccl="gear" style="left:654px;--dy:-20px;--d:.18s" title="設定"><svg viewBox="0 0 24 24">${CCL_ICON.gear}</svg></button>
+      <button class="ib q enter" data-ccl="quit" style="left:722px;--dy:-20px;--d:.21s" title="存檔離開（回到選擇作戰，可以玩其他模式）"><svg viewBox="0 0 24 24">${CCL_ICON.quit}</svg></button>
       <div class="prio enter ${Pr.k}" data-ccl="prio" style="--dx:60px;--d:.3s"><span class="t">${Pr.tag}</span>${Pr.left ? `<span class="left">${Pr.left}</span>` : ''}<h2>${smuEsc(Pr.title)}</h2><p>${smuEsc(Pr.sub)}</p>${prio.length > 1 ? `<div class="dots">${prio.map((_, i) => `<i class="${i === CCL.prio ? 'on' : ''}"></i>`).join('')}</div>` : ''}</div>
       <button class="main enter" data-ccl="map" style="--dx:80px;--d:.4s">
         <div class="ico"><svg class="r1" viewBox="0 0 128 128"><circle cx="64" cy="64" r="60" stroke="#0b1430" stroke-width="3" stroke-dasharray="4 6" fill="none"/></svg>
@@ -298,6 +301,7 @@ function cclAct(k) {
   if (k === 'log') { cclToMap(); return ccdOpen('log', { mode: 'all' }); }
   if (k === 'report') { cclToMap(); return ccdOpen('log', { mode: 'week' }); }
   if (k === 'gear') return openSettings();
+  if (k === 'quit') { cclToMap(); const q = gEl('cc-quit'); if (q) q.click(); return; }   // 存檔離開：走星圖的「離開」（存檔、停掉巡航、回到選擇作戰）
   if (k === 'sq') { CC.cur = P.id; cclToMap(); return ccSquadsView(); }
   if (k === 'yard') { if (!(s.owner === S.fac && s.yard)) return toast('這個星系沒有你的勢力的維修船塢', 'warn'); cclToMap(); return ccYardView(s); }
   if (k === 'tech') { cclToMap(); return ccTechView(); }

@@ -27702,7 +27702,7 @@ function ccRender() {
         <div><span class="ent">STAR MAP ・ ORDERS</span><h1>星圖・下令</h1><span class="crumb"><b>第 ${S.turn} 週</b>・${CC_ROLES[S.role].name}・${ccRankOf(S).name}・指揮權 ${ccOwnCount(S)}／${ccSlots(S)} 隊${P0 ? `・你在 ${S.sys[P0.sys].name}` : ''}</span></div></div>
       <div class="ccm-z ccm-res">${ri('資金', fmtN(Math.round(S.pl.money)), '#ffc24a', 'money')}${ri('戰功', fmtN(Math.round(S.pl.merit)), '#3fdf8f', 'merit', 'cc-rank', '軍階：每一階解鎖什麼、離下一階還差多少')}${ri('研究點', fmtN(Math.round(S.pl.rp || 0)), '#3cc8ff', 'rp', 'cc-rp', '研究點數與研發樹')}</div>
       <div class="ccm-z ccm-rel"><span class="it" title="好感（${SM_FAC[S.fac].name}對你）${Math.round(fav)}／100：任務完成 +${CC_RULE.fav.ok}、失敗 −${CC_RULE.fav.fail}。新任務的獎勵 ×${ccFavK(S, S.fac).toFixed(2)}"><span class="pie" style="--c:#ffc24a;--v:${Math.round(fav)}"></span>好感 <b>${Math.round(fav)}</b></span><span class="sep"></span>${[SM_A, SM_E, SM_P, SM_N].map(facIt).join('')}</div>
-      <div class="ccm-z ccm-tools"><button class="ccm-tb" id="cc-mis">${ico('mis')}任務${nMis ? `<span class="nb">${nMis}</span>` : ''}</button><button class="ccm-tb" id="cc-tech" title="研究點數與研發樹">${ico('rp')}研發 <span class="mono">${fmtN(Math.round(S.pl.rp || 0))}</span>${X.cur ? '<span class="busy">研究中</span>' : ''}</button><button class="ccm-tb" id="cc-logb">${ico('log')}紀錄</button>${S.fin ? '' : `<button class="ccm-tb" id="cc-fly" title="回到${smuEsc(P0 ? S.sys[P0.sys].name : '')}的太空">${ico('fly')}回到星系<kbd>${keyText('cap_map')}</kbd></button>`}<button class="ccm-tb q" id="cc-quit">${ico('quit')}離開</button></div>
+      <div class="ccm-z ccm-tools"><button class="ccm-tb" id="cc-mis">${ico('mis')}任務${nMis ? `<span class="nb">${nMis}</span>` : ''}</button><button class="ccm-tb" id="cc-tech" title="研究點數與研發樹">${ico('rp')}研發 <span class="mono">${fmtN(Math.round(S.pl.rp || 0))}</span>${X.cur ? '<span class="busy">研究中</span>' : ''}</button><button class="ccm-tb" id="cc-logb">${ico('log')}紀錄</button>${S.fin ? '' : `<button class="ccm-tb" id="cc-fly" title="回到${smuEsc(P0 ? S.sys[P0.sys].name : '')}的太空">${ico('fly')}回到星系<kbd>${keyText('cap_map')}</kbd></button>`}<button class="ccm-tb q" id="cc-quit" title="存檔、回到選擇作戰（可以玩其他模式）">${ico('quit')}存檔離開</button></div>
       <div class="ccm-z ccm-leg" id="cc-leg">${CC.leg ? `<h5>圖例 ▾ ／ LEGEND</h5>${['own', 'ally', 'enemy', 'neutral'].map((k) => `<div><i style="background:${SMU_REL[k].col}"></i>${k === 'own' ? '你的小隊（★＋光圈＝親自指揮，白框＝選中）' : SMU_REL[k].name}</div>`).join('')}<div>箭頭＝一個小隊：越大船越多（1～5 艘）；停在星系下方，閃爍且在航道上＝這週要移動</div><div class="g-dim">星系的顏色＝擁有者跟你的關係：藍＝你的陣營、紅＝敵對、黃＝中立／停戰</div><div>! ＝ 你的小隊下週會被進攻</div><div>◆ 軌道防禦・⚓ 維修船塢・✚ 補給站・$ 商店（貿易站、黑市、商會貿易所）・白圈＝首都</div>${cpNzShow(S) ? '<div><span style="color:#ffd23f">◇</span> 星際商會的據點・<span style="color:#ffd23f">◆</span> 有商船隊（中立好感度 ' + CP_RULE.nzMap + ' 以上才標）</div>' : ''}<div>虛線圈：圍城中・⚔ 這週會交戰</div><div>箭頭：看得到的預定動向（你的小隊周圍、偵察過的星系）</div><div>藍色虛線大圈：偵察中・亂＝指揮中斷</div><div class="g-dim">點星系看詳情；點相鄰的星系下令移動</div>` : '<h5>圖例 ▸ ／ LEGEND（點開）</h5>'}</div>
       <button class="ccm-z ccm-end" id="cc-end" ${S.fin ? 'disabled' : ''}><div><b>結束這一週</b><small class="en">END WEEK ${S.turn} → ${S.turn + 1}</small></div>${nW ? `<span class="w" title="${nW} 個小隊留在原地，下週會被進攻">⚠ ${nW}</span>` : ''}<span class="arrow">→</span></button>
       <div class="sm-dock" id="cc-dock"></div><div class="sm-card" id="cc-card" hidden></div></div></div>`);
@@ -29837,6 +29837,7 @@ body.ccl-on #battlehud, body.ccl-on #labels, body.ccl-on #caphud{visibility:hidd
 #ccl .ri b{font:700 22px Rajdhani,Bahnschrift,sans-serif;letter-spacing:.04em}
 #ccl .ib{position:absolute;top:40px;width:56px;height:52px;background:rgba(10,16,34,.86);border:1px solid rgba(120,170,230,.25);display:flex;align-items:center;justify-content:center}
 #ccl .ib:hover{border-color:#3cc8ff}
+#ccl .ib.q:hover{border-color:#ff4d5e}#ccl .ib.q:hover svg{stroke:#ff8a96}
 #ccl .ib svg{width:26px;height:26px;stroke:#e8f2ff;fill:none;stroke-width:1.7}
 #ccl .ib .nb{right:-10px;top:-10px;transform:scale(.8)}
 #ccl .prio{position:absolute;left:258px;top:186px;width:528px;height:116px;cursor:pointer;clip-path:polygon(0 12%,100% 0,100% 100%,0 100%);transition:filter .2s}
@@ -29930,6 +29931,7 @@ const CCL_ICON = {
   merit: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>',
   mail: '<rect x="3" y="6" width="18" height="13"/><path d="M3 7l9 6 9-6"/>',
   gear: '<circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>',
+  quit: '<path d="M14 4h6v16h-6M4 12h11M9 7l-5 5 5 5"/>',
   sq: '<path d="M3 15l9-9 9 9M6 19l6-6 6 6"/>',
   yard: '<path d="M3 20h18M5 20V9l7-5 7 5v11M9 20v-6h6v6"/>',
   planet: '<circle cx="12" cy="12" r="6"/><ellipse cx="12" cy="12" rx="11" ry="4" transform="rotate(-20 12 12)"/>',
@@ -30013,8 +30015,9 @@ function cclRender() {
         <button class="ri" data-ccl="map" style="--c:#f3e94b"><svg viewBox="0 0 24 24">${CCL_ICON.money}</svg><span class="k">資金</span><b>${fmtN(Math.round(S.pl.money))}</b></button>
         <button class="ri" data-ccl="tech" style="--c:#3cc8ff"><svg viewBox="0 0 24 24">${CCL_ICON.rp}</svg><span class="k">研究點</span><b>${fmtN(Math.round(S.pl.rp || 0))}</b></button>
         <div class="ri" style="--c:#3fdf8f"><svg viewBox="0 0 24 24">${CCL_ICON.merit}</svg><span class="k">戰功</span><b>${fmtN(Math.round(mer))}</b></div></div>
-      <button class="ib enter" data-ccl="report" style="left:654px;--dy:-20px;--d:.15s" title="上週的戰報"><svg viewBox="0 0 24 24">${CCL_ICON.mail}</svg></button>
-      <button class="ib enter" data-ccl="gear" style="left:722px;--dy:-20px;--d:.18s" title="設定"><svg viewBox="0 0 24 24">${CCL_ICON.gear}</svg></button>
+      <button class="ib enter" data-ccl="report" style="left:586px;--dy:-20px;--d:.15s" title="上週的戰報"><svg viewBox="0 0 24 24">${CCL_ICON.mail}</svg></button>
+      <button class="ib enter" data-ccl="gear" style="left:654px;--dy:-20px;--d:.18s" title="設定"><svg viewBox="0 0 24 24">${CCL_ICON.gear}</svg></button>
+      <button class="ib q enter" data-ccl="quit" style="left:722px;--dy:-20px;--d:.21s" title="存檔離開（回到選擇作戰，可以玩其他模式）"><svg viewBox="0 0 24 24">${CCL_ICON.quit}</svg></button>
       <div class="prio enter ${Pr.k}" data-ccl="prio" style="--dx:60px;--d:.3s"><span class="t">${Pr.tag}</span>${Pr.left ? `<span class="left">${Pr.left}</span>` : ''}<h2>${smuEsc(Pr.title)}</h2><p>${smuEsc(Pr.sub)}</p>${prio.length > 1 ? `<div class="dots">${prio.map((_, i) => `<i class="${i === CCL.prio ? 'on' : ''}"></i>`).join('')}</div>` : ''}</div>
       <button class="main enter" data-ccl="map" style="--dx:80px;--d:.4s">
         <div class="ico"><svg class="r1" viewBox="0 0 128 128"><circle cx="64" cy="64" r="60" stroke="#0b1430" stroke-width="3" stroke-dasharray="4 6" fill="none"/></svg>
@@ -30061,6 +30064,7 @@ function cclAct(k) {
   if (k === 'log') { cclToMap(); return ccdOpen('log', { mode: 'all' }); }
   if (k === 'report') { cclToMap(); return ccdOpen('log', { mode: 'week' }); }
   if (k === 'gear') return openSettings();
+  if (k === 'quit') { cclToMap(); const q = gEl('cc-quit'); if (q) q.click(); return; }   // 存檔離開：走星圖的「離開」（存檔、停掉巡航、回到選擇作戰）
   if (k === 'sq') { CC.cur = P.id; cclToMap(); return ccSquadsView(); }
   if (k === 'yard') { if (!(s.owner === S.fac && s.yard)) return toast('這個星系沒有你的勢力的維修船塢', 'warn'); cclToMap(); return ccYardView(s); }
   if (k === 'tech') { cclToMap(); return ccTechView(); }
