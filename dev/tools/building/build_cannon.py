@@ -12,7 +12,7 @@ HZ, H, X0, X1 = 6.83, 18.32, -3.66, 10.0
 CX = (X0 + X1) / 2
 A8, F8 = pi / 8, 0.9239
 PV, EL, LG = V(CX, 8.6, 0), 35.6 * D, 15.55            # 耳軸、仰角、耳軸到砲口的長度
-M = Machine('cannon', '重製_行星防禦砲', tex=2048, bevel=1.6)
+M = Machine('cannon', '重製_行星防禦砲', tex=4096, bevel=1.6)
 C0 = Tm(CX, 0, 0)
 
 P = Pal()

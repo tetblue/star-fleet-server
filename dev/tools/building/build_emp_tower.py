@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from bdkit import *
 
 HX, HZ, H = 4.72, 4.87, 20.0
-M = Machine('emp_tower', '重製_帝國巨塔', tex=2048, bevel=1.6)
+M = Machine('emp_tower', '重製_帝國巨塔', tex=4096, bevel=1.6)
 
 
 def window(P, Mf, x, y0, y1, w, d):

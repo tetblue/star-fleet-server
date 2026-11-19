@@ -11,7 +11,7 @@ from bdkit import *
 HX, HZ, H = 6.36, 6.8, 20.0
 A8 = pi / 8                                            # 八角形轉 22.5°：平的面朝 ±x、±z
 F8 = 0.9239                                            # 外接圓半徑 → 面到中心的距離
-M = Machine('all_tower', '重製_聯盟巨塔', tex=2048, bevel=1.6)
+M = Machine('all_tower', '重製_聯盟巨塔', tex=4096, bevel=1.6)
 
 
 def emblem(P, Mf, y, d, k=1.0):

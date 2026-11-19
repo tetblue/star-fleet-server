@@ -7,6 +7,8 @@
 # 截面（直線）：x ±4.6 是柏油車道，4.6～7 是人行道（高一階），交界有一道矮護欄（藍色燈條），人行道外緣一條管線，每邊兩支路燈
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bdkit
+bdkit.PANEL[0] = 0.62                                 # 道路是遊戲單位：外板分小塊一點（人行道的鋪面）
 from bdkit import *
 
 T, YR, YS, RW, TOP = 7.0, 1.87, 2.05, 4.6, 6.566       # 半寬、路面、人行道面、車道半寬、燈柱頂
@@ -86,7 +88,7 @@ if '--bridge' in ARGS:
     done(M, '重製_天橋', dict(size=[28, H, 9.97], deck=YD))
 elif '--cross' in ARGS:
     # 零件表：Base 路基；Road 柏油與標線（四邊各一組斑馬線）；Corners 四個角的人行道、緣石、控制箱；Lamps 四個角各一支雙臂路燈
-    M = Machine('road_x', '重製_十字路口', tex=1024, bevel=1.5)
+    M = Machine('road_x', '重製_十字路口', tex=2048, bevel=1.5)
     P = Pal()
     base(P)
     M.part('Base', 'Root', P)
@@ -125,7 +127,7 @@ elif '--cross' in ARGS:
 elif '--corner' in ARGS:
     # 零件表：Base 路基；Road 彎道的柏油與標線；Walks 內側的扇形人行道、外側的人行道與外角的鋪面、護欄；Lamps 路燈、管線
     CX, CZ, A0, A1 = T, -T, pi / 2, pi                 # 圓心在 (+x, −z) 那個角；中線半徑 7
-    M = Machine('road_cn', '重製_轉角道路', tex=1024, bevel=1.5)
+    M = Machine('road_cn', '重製_轉角道路', tex=2048, bevel=1.5)
     P = Pal()
     base(P)
     M.part('Base', 'Root', P)
@@ -163,7 +165,7 @@ elif '--corner' in ARGS:
     done(M, '重製_轉角道路', dict(size=[14, TOP, 14], road=YR))
 else:
     # 零件表：Base 路基；Road 柏油與標線；Walks 兩邊的人行道、緣石、矮護欄與燈條、設備箱；Lamps 每邊兩支路燈、人行道外緣的管線
-    M = Machine('road_st', '重製_直線道路', tex=1024, bevel=1.5)
+    M = Machine('road_st', '重製_直線道路', tex=2048, bevel=1.5)
     P = Pal()
     base(P)
     M.part('Base', 'Root', P)

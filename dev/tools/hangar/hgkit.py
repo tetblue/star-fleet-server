@@ -154,6 +154,7 @@ def railing(bm, pts, h=1.1, r=0.035, mid=True):
 # 材質（程序材質，之後烘成貼圖）：白漆、海軍藍漆、鋼、鍍鉻、橡膠、橘漆、黃黑警示、發光
 # ----------------------------------------------------------------------------------------------
 MATS = {}
+BASE_ONLY = [False]                                      # [True]＝只烘底色（建築的著色器不吃法線與 ORM，省掉兩張貼圖；bdkit.py 會打開）
 EMIT = ['glow', 'lamp']                                  # 不烘、保留發光的材質（建築的工具 bdkit.py 會再加）
 BEV = dict(white=0.018, navy=0.014, steel=0.008, chrome=0.004, rubber=0.006, orange=0.006, hazard=0.012, yellow=0.012, glow=0.0, lamp=0.0, dark=0.012)
 
@@ -563,7 +564,7 @@ class Machine:
             bpy.context.view_layer.objects.active = self.arm if rigged else MESH
             path = os.path.join(OUTD, self.glb + '.glb')
             bpy.ops.export_scene.gltf(filepath=path, export_format='GLB', use_selection=True, export_apply=False, export_skins=rigged, export_yup=True,
-                                      export_animations=rigged, export_animation_mode='NLA_TRACKS', export_force_sampling=True, export_frame_step=1, export_tangents=baked,
+                                      export_animations=rigged, export_animation_mode='NLA_TRACKS', export_force_sampling=True, export_frame_step=1, export_tangents=baked and not BASE_ONLY[0],
                                       export_image_format='JPEG', export_jpeg_quality=90, export_extras=True, export_optimize_animation_size=True,
                                       export_optimize_animation_keep_anim_armature=False, export_anim_slide_to_zero=True)
             print('GLB', self.glb, os.path.getsize(path) // 1024, 'KB')
@@ -626,10 +627,11 @@ class Machine:
                 nt.nodes.remove(em)
 
         emit_bake('base', 'Base Color', True)
-        emit_bake('rough', 'Roughness', False)
-        emit_bake('metal', 'Metallic', False)
-        target('normal')
-        bpy.ops.object.bake(type='NORMAL', normal_space='TANGENT', margin=6, use_clear=False)
+        if not BASE_ONLY[0]:
+            emit_bake('rough', 'Roughness', False)
+            emit_bake('metal', 'Metallic', False)
+            target('normal')
+            bpy.ops.object.bake(type='NORMAL', normal_space='TANGENT', margin=6, use_clear=False)
         scn.cycles.samples = 64
         target('ao')
         bpy.ops.object.bake(type='AO', margin=6, use_clear=False)
@@ -666,11 +668,14 @@ class Machine:
         nm = nt.nodes.new('ShaderNodeNormalMap')
         nm.uv_map = 'UV_Atlas'
         nt.links.new(imgs['basecolor'].outputs['Color'], b.inputs['Base Color'])
-        nt.links.new(imgs['orm'].outputs['Color'], sep.inputs['Color'])
-        nt.links.new(sep.outputs['Green'], b.inputs['Roughness'])
-        nt.links.new(sep.outputs['Blue'], b.inputs['Metallic'])
-        nt.links.new(imgs['normal'].outputs['Color'], nm.inputs['Color'])
-        nt.links.new(nm.outputs['Normal'], b.inputs['Normal'])
+        if BASE_ONLY[0]:
+            b.inputs['Roughness'].default_value = 0.8
+        else:
+            nt.links.new(imgs['orm'].outputs['Color'], sep.inputs['Color'])
+            nt.links.new(sep.outputs['Green'], b.inputs['Roughness'])
+            nt.links.new(sep.outputs['Blue'], b.inputs['Metallic'])
+            nt.links.new(imgs['normal'].outputs['Color'], nm.inputs['Color'])
+            nt.links.new(nm.outputs['Normal'], b.inputs['Normal'])
         me = MESH.data
         new, remap = [], []
         for m in list(me.materials):

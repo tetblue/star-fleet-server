@@ -10,7 +10,7 @@ from bdkit import *
 HX, HZ, H = 8.8, 10.0, 10.86
 YD = 1.5                                               # 平台面
 PX, PZ0, PZ1 = 3.4, -8.2, 6.0                          # 乾塢的凹槽
-M = Machine('dock', '重製_星艦船塢', tex=2048, bevel=1.6)
+M = Machine('dock', '重製_星艦船塢', tex=4096, bevel=1.6)
 
 
 def truss(P, a, b, h, w, n):

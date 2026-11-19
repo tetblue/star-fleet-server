@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from bdkit import *
 
 HX, HZ, H = 4.47, 12.0, 6.15
-M = Machine('ark', '重製_方舟堡壘', tex=2048, bevel=1.6)
+M = Machine('ark', '重製_方舟堡壘', tex=4096, bevel=1.6)
 
 
 def ring(z, hw, y0, y1, c):

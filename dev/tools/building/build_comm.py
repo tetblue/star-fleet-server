@@ -9,7 +9,7 @@ from bdkit import *
 
 HX, HZ, H = 5.49, 5.57, 20.0
 A8, F8 = pi / 8, 0.9239
-M = Machine('comm', '重製_通訊塔', tex=2048, bevel=1.6)
+M = Machine('comm', '重製_通訊塔', tex=4096, bevel=1.6)
 
 P = Pal()
 box(P['concrete'], -HX, HX, 0.0, 0.7, -HZ, HZ)

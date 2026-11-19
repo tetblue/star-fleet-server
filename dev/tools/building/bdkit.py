@@ -10,8 +10,93 @@ import hgkit
 from hgkit import *
 
 hgkit.OUTD = OUTD = os.path.join(HERE_B, 'out')
+PANEL = [1.0]
 BMODELS = os.path.normpath(os.path.join(HERE_B, '..', '..', '..', 'models', '建築'))
 _reset0 = hgkit.reset
+hgkit.BASE_ONLY[0] = True                              # 建築只烘底色貼圖（省下法線、ORM 兩張，底色解析度可以開大）
+
+
+def add_panels(name, size, width=0.05, dark=0.5, tint=0.08, brick=False, accent=None, rate=0.16):
+    """在材質的底色上疊一層「分塊」：沿物件座標每隔 size 一條深色的縫，每一塊的明暗隨機差一點（tint）。brick＝一排一排錯開半塊（砌石、瓦）。
+    貼圖上的細節：不用多做幾何，烘出來就有一塊一塊的外板／石塊。跟某個軸垂直的面不畫那個軸的縫（不然整面會剛好落在縫裡變黑）。"""
+    nt = MATS[name].node_tree
+    L, b = nt.links.new, nt.nodes['Principled BSDF']
+    bc = b.inputs['Base Color']
+    if bc.is_linked:
+        src = bc.links[0].from_socket
+    else:
+        rgb = nt.nodes.new('ShaderNodeRGB')
+        rgb.outputs[0].default_value = tuple(bc.default_value)
+        src = rgb.outputs[0]
+
+    def mth(op, a, c=None):
+        n = nt.nodes.new('ShaderNodeMath')
+        n.operation = op
+        for i, v in enumerate((a, c)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                n.inputs[i].default_value = v
+            else:
+                L(v, n.inputs[i])
+        return n.outputs[0]
+
+    tc = nt.nodes.new('ShaderNodeTexCoord')
+    sc, sn = nt.nodes.new('ShaderNodeSeparateXYZ'), nt.nodes.new('ShaderNodeSeparateXYZ')
+    L(tc.outputs['Object'], sc.inputs[0])
+    L(tc.outputs['Normal'], sn.inputs[0])
+    odd = mth('ABSOLUTE', mth('MODULO', mth('FLOOR', mth('DIVIDE', mth('ADD', sc.outputs[1], 0.0137), size[1])), 2.0))
+    mask, cells, inner = None, [], None
+    for i in range(3):
+        c = mth('ADD', sc.outputs[i], 0.37 * size[i] if i != 1 else 0.0137)
+        if brick and i != 1:
+            c = mth('ADD', c, mth('MULTIPLY', odd, 0.5 * size[i]))
+        q = mth('DIVIDE', c, size[i])
+        f = mth('FRACT', q)
+        line = mth('LESS_THAN', mth('MINIMUM', f, mth('SUBTRACT', 1.0, f)), width / 2 / size[i])
+        valid = mth('LESS_THAN', mth('ABSOLUTE', sn.outputs[i]), 0.9)
+        li = mth('MULTIPLY', line, valid)
+        ins = mth('MAXIMUM', mth('LESS_THAN', mth('ABSOLUTE', mth('SUBTRACT', f, 0.5)), 0.27), mth('SUBTRACT', 1.0, valid))      # 這一塊中間的區域（給艙蓋用）
+        inner = ins if inner is None else mth('MULTIPLY', inner, ins)
+        mask = li if mask is None else mth('MAXIMUM', mask, li)
+        cells.append(mth('FLOOR', q))
+    cb = nt.nodes.new('ShaderNodeCombineXYZ')
+    for i in range(3):
+        L(cells[i], cb.inputs[i])
+    wn = nt.nodes.new('ShaderNodeTexWhiteNoise')
+    wn.noise_dimensions = '3D'
+    L(cb.outputs[0], wn.inputs['Vector'])
+    tv = mth('ADD', mth('MULTIPLY', wn.outputs['Value'], tint * 1.5), 1.0 - tint)
+    m1 = nt.nodes.new('ShaderNodeMixRGB')
+    m1.blend_type = 'MULTIPLY'
+    m1.inputs['Fac'].default_value = 1.0
+    L(src, m1.inputs['Color1'])
+    L(tv, m1.inputs['Color2'])
+    m2 = nt.nodes.new('ShaderNodeMixRGB')
+    m2.blend_type = 'MULTIPLY'
+    m2.inputs['Fac'].default_value = 1.0
+    m2.inputs['Color2'].default_value = (dark, dark, dark * 1.05, 1)
+    L(m1.outputs['Color'], m2.inputs['Color1'])
+    m3 = nt.nodes.new('ShaderNodeMixRGB')
+    L(mask, m3.inputs['Fac'])
+    L(m1.outputs['Color'], m3.inputs['Color1'])
+    L(m2.outputs['Color'], m3.inputs['Color2'])
+    out = m3.outputs['Color']
+    if accent:                                         # 隨機挑一些塊，中間畫一片別的顏色（艙蓋、檢修板、通風口）
+        wn2 = nt.nodes.new('ShaderNodeTexWhiteNoise')
+        wn2.noise_dimensions = '3D'
+        sh = nt.nodes.new('ShaderNodeVectorMath')
+        sh.operation = 'ADD'
+        sh.inputs[1].default_value = (17.3, 5.1, 9.7)
+        L(cb.outputs[0], sh.inputs[0])
+        L(sh.outputs[0], wn2.inputs['Vector'])
+        m4 = nt.nodes.new('ShaderNodeMixRGB')
+        m4.inputs['Color2'].default_value = (*accent, 1)
+        L(mth('MULTIPLY', mth('MULTIPLY', inner, mth('LESS_THAN', wn2.outputs['Value'], rate)), 0.9), m4.inputs['Fac'])
+        L(out, m4.inputs['Color1'])
+        out = m4.outputs['Color']
+    L(out, bc)
+
 
 
 def _reset():
@@ -29,6 +114,14 @@ def _reset():
     mat_plain('ember', (1.0, 0.42, 0.1), 0.0, 0.3, emit=(1.0, 0.42, 0.1), strength=1.6)      # 帝國：橘紅的窗與火盆
     mat_plain('beacon', (1.0, 0.12, 0.08), 0.0, 0.3, emit=(1.0, 0.12, 0.08), strength=3.0)   # 紅色警示燈
     BEV.update(stone=0.02, stone2=0.02, crimson=0.012, gold=0.006, asphalt=0.0, concrete=0.02, tan=0.012, glass=0.004, ember=0.0, beacon=0.0)
+    PS = PANEL[0]                                      # 分塊的大小倍率（道路用遊戲單位，塊小一點）
+    add_panels('white', (1.2 * PS, 0.9 * PS, 1.2 * PS), 0.045, 0.45, 0.08, accent=(0.05, 0.09, 0.2), rate=0.13)
+    add_panels('navy', (0.9 * PS, 0.7 * PS, 0.9 * PS), 0.04, 0.5, 0.14, accent=(0.45, 0.47, 0.5), rate=0.1)
+    add_panels('stone', (0.8, 0.4, 0.8), 0.04, 0.45, 0.2, True)
+    add_panels('stone2', (0.6, 0.3, 0.6), 0.035, 0.5, 0.12, True)
+    add_panels('crimson', (0.3, 0.22, 0.3), 0.035, 0.5, 0.2, True)
+    add_panels('concrete', (2.0 * PS, 2.0, 2.0 * PS), 0.05, 0.6, 0.06)
+    add_panels('dark', (1.0, 1.0, 1.0), 0.04, 0.6, 0.15)
     for k in ('ember', 'beacon'):
         if k not in EMIT:
             EMIT.append(k)
