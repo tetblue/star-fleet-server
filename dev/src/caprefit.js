@@ -586,7 +586,7 @@ function crFrame() {
   C.position.copy(CR.cam); C.lookAt(CR.look);
   const ox = CR.mode === 'fit' ? -CB.W * 0.2 : 0;   // 改裝視窗在右邊：船往左挪
   C.setViewOffset(CB.W, CB.H, -ox, 0, CB.W, CB.H); C.updateProjectionMatrix(); C.updateMatrixWorld();
-  CB.r.render(CB.scene, C);
+  cbRender(C);   // 跟戰艦庫一樣描邊（capbay.js）
 }
 if (typeof requestAnimationFrame === 'function') CR.raf = requestAnimationFrame(crFrame);
 Object.assign(window.__cap || (window.__cap = {}), { CR, CB, crShow, crHide, crRepair, crEnsure, crMakeShip, crRigArm, crRigAim, crRigStep, crRigTip, THREE, hgProp, getModel });   // THREE、hgProp、getModel：測試腳本用

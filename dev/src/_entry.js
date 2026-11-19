@@ -25353,9 +25353,11 @@ function smuBindUi(root, onSeg) {
   root.querySelectorAll('.sm-seg, .sm-pick').forEach((g) => g.querySelectorAll('button').forEach((b) => (b.onclick = () => { if (b.disabled) return; g.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); g.dataset.val = b.dataset.v; if (onSeg) onSeg(g.id, b.dataset.v); })));
   root.querySelectorAll('.sm-tog').forEach((b) => (b.onclick = () => b.classList.toggle('on')));
 }
-function smuModal(html, cls) { const old = gEl('sm-modal'); if (old) old.remove(); const d = document.createElement('div'); d.className = 'sm-modal'; d.id = 'sm-modal'; d.innerHTML = `<div class="sm-box ${cls || ''}">${html}</div>`; gEl('g-screen').appendChild(d); smuBindUi(d); return d; }
+function smuModal(html, cls) { const old = gEl('sm-modal'); if (old) old.remove(); smuSheetGone(old); const d = document.createElement('div'); d.className = 'sm-modal'; d.id = 'sm-modal'; d.innerHTML = `<div class="sm-box ${cls || ''}">${html}</div>`; gEl('g-screen').appendChild(d); smuBindUi(d); return d; }
 // 關掉對話框；排隊的下一個（例如回合開始的任務簡報）接著出來
-function smuCloseModal() { const d = gEl('sm-modal'); if (d) d.remove(); if (SMU.q.length) SMU.q.shift()(); }
+function smuCloseModal() { const d = gEl('sm-modal'); if (d) d.remove(); if (SMU.q.length) SMU.q.shift()(); smuSheetGone(d); }
+// 艦長生涯：右側的斜放面板（ccmSheet）關掉後，星圖與星系卡片重新排（capinfo_ui.js 的 ccdRefit）
+function smuSheetGone(d) { if (d && d.querySelector('.ccm-sheet') && !document.querySelector('#sm-modal .ccm-sheet') && typeof ccdRefit === 'function') ccdRefit(); }
 function smuLater(fn) { if (gEl('sm-modal')) SMU.q.push(fn); else fn(); }
 // 確認框：smuAsk('標題', '內容', '確定的文字', 確定後做的事)
 function smuAsk(title, body, ok, fn, danger) {
@@ -28118,7 +28120,8 @@ function CC_place(el) {
   const mp = gEl('cc-map'), s = CC.S && CC.S.sys[CC.sel]; if (!mp || !s || !CC.view) return;
   const [x, y] = ccXY(s), H = mp.clientHeight, kz = ccmK(), top = 168 * kz, bot = 24 * kz;   // 避開標題、工具列（capmap_ui.js）
   const dr = gEl('cc-drw') || document.querySelector('.sm-box.ccm-sheet:not(.cr-side)'), W = dr ? dr.getBoundingClientRect().left - mp.getBoundingClientRect().left - 20 : mp.clientWidth;   // 右側的任務／紀錄面板打開時，卡片不要蓋上去
-  const w = el.offsetWidth, L = x + 70 + w < W - 16 ? x + 70 : Math.max(16, x - 70 - w), m0 = mp.getBoundingClientRect();
+  const m0 = mp.getBoundingClientRect(), rp = mp.querySelector('#cce-side.rep') || document.querySelector('#g-screen > #cce-side.rep'), X0 = rp ? rp.getBoundingClientRect().right - m0.left + 12 : 16;   // 左側的戰報打開時，卡片不要蓋上去
+  const w = el.offsetWidth, L = x + 70 + w < W - 16 ? x + 70 : Math.max(X0, x - 70 - w);
   let B = H - bot;   // 底部：跟卡片左右重疊的面板（小隊面板、結束這一週、圖例）上緣
   for (const e of [document.querySelector('.ccm .cc-dock'), gEl('cc-end'), gEl('cc-leg')]) { if (!e) continue; const r = e.getBoundingClientRect(); if (r.right - m0.left > L && r.left - m0.left < L + w) B = Math.min(B, r.top - m0.top - 12); }
   if (B - top < 360) B = H - bot;   // 放不下就蓋過去
@@ -29017,7 +29020,7 @@ function cceRepRestore() {
   const p = document.createElement('div'); p.id = 'cce-side'; p.className = 'rep' + (space ? ' sp' : ''); p.style.setProperty('--k', ccmK()); p.style.setProperty('--rc', rc);
   p.innerHTML = `<div class="tilt${anim ? '' : ' still'}"><div class="hd"><h3>戰報</h3><span class="en">${en}</span><button type="button" class="x" title="收起">✕</button></div><div class="bd">${body}</div></div>`;
   (onMap ? gEl('g-screen') : document.body).appendChild(p);
-  p.querySelector('.x').onclick = () => { if (onMap) { if (X) X.map = false; p.remove(); ccDraw(); } else { CC.rshow = false; cceRepRestore(); } };
+  p.querySelector('.x').onclick = () => { if (onMap) { if (X) X.map = false; p.remove(); ccdRefit(); } else { CC.rshow = false; cceRepRestore(); } };
   const gm = gEl('cce-gomap'); if (gm) gm.onclick = ccPostLeave;
 }
 // 星系裡（巡航、戰鬥剛結束）的側邊按鈕「戰報」：和交戰評估同一個位置
@@ -29253,6 +29256,7 @@ function ccmSheet(html, cls, sc) {
   const now = performance.now(), still = now - ccsLast < 4000 && !!document.querySelector('.sm-box.ccm-sheet'); ccsLast = now;
   const d = smuModal(html, `ccm-sheet ${cls || ''}${still ? ' still' : ''}`);
   const b = d.querySelector('.sm-box'); b.style.setProperty('--k', ccmK()); if (sc) b.style.setProperty('--sc', sc);
+  if (!b.classList.contains('cr-side') && typeof ccdRefit === 'function') { ccdRefit(); setTimeout(() => { if (d.isConnected) ccdRefit(); }, 450); }   // 星圖往左縮、星系卡片讓開（滑進來的動畫結束再排一次）
   return d;
 }
 // 小隊總覽（停泊大廳的「小隊」）：你的每個小隊、在哪裡、預定動向、每艘船；點船看資料
@@ -30724,6 +30728,9 @@ function cbBuildHangar(k, H = CB_HALL) {
     for (const G2 of Gs) { const I = caMake(G2); G.add(I.root); if (G2.lim.hatch) { caPose({ G: G2, bones: I.bones, ang: { hatch: G2.lim.hatch.rest } }); caStill(I.root); } }
     for (const o of old) o.visible = false;
     li.intensity = 380; blue.intensity = 120;   // 設計圖的機庫裡面是深色的：燈收斂一點（舊機庫的白牆才需要那麼亮）
+    if (tag === '戰艦庫') caGlb('50_天車_戰艦庫').then((G2) => {   // 天車（設計圖的剖面：機庫後段的屋頂下）。停在船尾後面，吊車開到左邊、吊鉤收起來
+      const I = caMake(G2); I.root.position.set(0, Y0 + H.h * 0.8 - 0.8, H.z0 + 6); G.add(I.root); caPose({ G: G2, bones: I.bones, ang: { trolley: -11, hook: 0 } }); caStill(I.root);
+    }).catch(() => {});
     if (tag === '戰艦庫') {                      // 停機坪上的機庫編號（地板的模型五座共用，編號貼在上面）
       const nt = hgTex(256, 128, (g, w, h) => { g.clearRect(0, 0, w, h); g.fillStyle = 'rgba(232,236,242,.92)'; g.font = 'bold 104px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(`0${k + 1}`, w / 2, h / 2 + 6); });
       const nm = new THREE.Mesh(new THREE.PlaneGeometry(6, 3), new THREE.MeshBasicMaterial({ map: nt, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
@@ -30837,7 +30844,37 @@ function cbStep() {
   if (C.near !== near) C.near = near;
   C.position.copy(CB.cp); C.lookAt(CB.cl);
   C.setViewOffset(CB.W, CB.H, CB.ox, CB.oy, CB.W, CB.H); C.updateProjectionMatrix(); C.updateMatrixWorld();
-  CB.r.render(CB.scene, C);
+  cbRender(C);
+}
+// ── 描邊（設計圖是卡通描邊的畫風）：整個場景先畫到一張有深度的畫布，再用深度的二階差分找出輪廓與折角，疊上深色的線 ──
+// 深度緩衝的值在平面上對螢幕座標是線性的，二階差分＝0，所以大片的牆和地板不會被誤判；除以（1 − 深度）＝看相對變化，遠近的線一樣清楚
+const CB_INK = { on: true, rt: null, mat: null, scene: null, cam: null, v: new THREE.Vector2() };
+function cbRender(C) {
+  const r = CB.r, K = CB_INK;
+  if (!K.on) { r.render(CB.scene, C); return; }
+  const sz = r.getDrawingBufferSize(K.v);
+  if (!K.rt) {
+    K.rt = new THREE.WebGLRenderTarget(sz.x, sz.y, { type: THREE.HalfFloatType, samples: 4, depthTexture: new THREE.DepthTexture(sz.x, sz.y) });
+    K.mat = new THREE.ShaderMaterial({
+      uniforms: { tC: { value: K.rt.texture }, tD: { value: K.rt.depthTexture }, px: { value: new THREE.Vector2() } }, depthTest: false, depthWrite: false,
+      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+      fragmentShader: `uniform sampler2D tC, tD; uniform vec2 px; varying vec2 vUv;
+        float dz(vec2 o) { return texture2D(tD, vUv + o * px).x; }
+        void main() {
+          vec4 c = texture2D(tC, vUv);
+          float d = dz(vec2(0.0)), a = dz(vec2(1.7, 0.0)), b = dz(vec2(-1.7, 0.0)), e = dz(vec2(0.0, 1.7)), f = dz(vec2(0.0, -1.7));
+          float lap = abs(a + b - 2.0 * d) + abs(e + f - 2.0 * d), near = min(d, min(min(a, b), min(e, f)));
+          float k = smoothstep(0.004, 0.02, lap / (1.0 - near + 1e-7));
+          gl_FragColor = vec4(mix(c.rgb, vec3(0.012, 0.016, 0.03), k * 0.92), 1.0);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+        }`,
+    });
+    K.scene = new THREE.Scene(); K.scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), K.mat)); K.cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  }
+  if (K.rt.width !== sz.x || K.rt.height !== sz.y) K.rt.setSize(sz.x, sz.y);
+  K.mat.uniforms.px.value.set(1 / sz.x, 1 / sz.y);
+  r.setRenderTarget(K.rt); r.render(CB.scene, C); r.setRenderTarget(null); r.render(K.scene, K.cam);
 }
 function cbFrame() {
   CB.raf = 0;
@@ -30899,7 +30936,7 @@ function showCapBay() {
   document.querySelectorAll('[data-ch]').forEach((b) => (b.onclick = () => { p.slots[sel] = b.dataset.ch; if (!p.slots.some(Boolean)) p.slots[sel] = 'assault'; redo(); }));
   cbAttach(p, sel);
 }
-Object.assign(window.__cap || (window.__cap = {}), { showCapBay });   // 截圖腳本用（dev/tools/arm/bay-screen.mjs）
+Object.assign(window.__cap || (window.__cap = {}), { showCapBay, CB_INK });   // 截圖腳本用（dev/tools/arm/bay-screen.mjs）
 
 // ═══════════════════════ 艦長生涯：整修庫（改裝預覽、維修動畫，2026-11-15） ═══════════════════════
 // 用戰艦庫（capbay.js）的場景，另外蓋第 6 座機庫（1～5 號是隨機任務的）。
@@ -31489,7 +31526,7 @@ function crFrame() {
   C.position.copy(CR.cam); C.lookAt(CR.look);
   const ox = CR.mode === 'fit' ? -CB.W * 0.2 : 0;   // 改裝視窗在右邊：船往左挪
   C.setViewOffset(CB.W, CB.H, -ox, 0, CB.W, CB.H); C.updateProjectionMatrix(); C.updateMatrixWorld();
-  CB.r.render(CB.scene, C);
+  cbRender(C);   // 跟戰艦庫一樣描邊（capbay.js）
 }
 if (typeof requestAnimationFrame === 'function') CR.raf = requestAnimationFrame(crFrame);
 Object.assign(window.__cap || (window.__cap = {}), { CR, CB, crShow, crHide, crRepair, crEnsure, crMakeShip, crRigArm, crRigAim, crRigStep, crRigTip, THREE, hgProp, getModel });   // THREE、hgProp、getModel：測試腳本用

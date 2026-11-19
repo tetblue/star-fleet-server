@@ -111,6 +111,8 @@ if 'shell' in ONLY:
     sy = Y0 + HH * 0.42
     plate(P['navy'], [(-HW - 4.6, sy), (-HW - 0.9, sy), (-HW - 0.9, sy + 5.2), (-HW - 2.75, sy + 6.6), (-HW - 4.6, sy + 5.2)], Z1 + 2, Z1 + 2.1)
     chevrons(P['white'], -HW - 2.75, sy + 0.9, 3, 1.3, Z1 + 2.1, Z1 + 2.16, None, 1.35)
+    box(P['navy'], -XP - 0.12, -XP, BAND[1], YP - CP, ZP, Z1 + 2)                       # 設計圖：左邊門柱的側面上半和斜角是深藍色
+    plate(P['navy'], [(-(XP - CP), YP), (-(XP - CP) - 0.085, YP + 0.085), (-XP - 0.085, YP - CP + 0.085), (-XP, YP - CP)], ZP, Z1 + 2)
     M.part('Portal', 'Root', P)
     M.finish(dict(hw=HW, z0=Z0, z1=Z1, h=HH, hatch_hinge=[0, YT, HZ], opening=[2 * XH, HLEN]))
 
@@ -190,6 +192,30 @@ if 'fit' in ONLY:
         box(P['lamp'], -XH * 0.8, XH * 0.8, YR - 0.3, YR - 0.2, (za + zb) / 2 - 0.4, (za + zb) / 2 + 0.4)
         box(P['steel'], -XH * 0.85, XH * 0.85, YR - 0.2, YR, (za + zb) / 2 - 0.6, (za + zb) / 2 + 0.6)
     M.part('Back_Fit', 'Root', P)
+    if not REFIT:                                                                       # 設計圖：左牆有一座武器架工作站（門形架、工作台上一門拆下來的砲）
+        P = Pal()
+        SY, SZ = Y0, ZC + 0.5
+        for z0, z1 in ((SZ - 3.6, SZ - 2.8), (SZ + 2.8, SZ + 3.6)):
+            box(P['white'], -HW + 1.7, -HW + 2.8, SY, SY + 9.0, z0, z1)
+            box(P['navy'], -HW + 2.8, -HW + 2.83, SY + 1.0, SY + 8.0, z0 + 0.2, z1 - 0.2)
+            box(P['hazard'], -HW + 2.8, -HW + 2.812, SY, SY + 0.8, z0, z1)
+            box(P['glow'], -HW + 3.4, -HW + 3.42, SY + 9.45, SY + 9.95, z0 - 0.1, z1 + 0.1)        # 橫樑兩頭的藍燈
+        box(P['white'], -HW + 1.5, -HW + 3.4, SY + 9.0, SY + 10.4, SZ - 3.8, SZ + 3.8)  # 橫樑
+        box(P['navy'], -HW + 3.4, -HW + 3.43, SY + 9.3, SY + 10.1, SZ - 2.2, SZ + 2.2)
+        box(P['steel'], -HW + 1.6, -HW + 4.6, SY + 3.6, SY + 3.9, SZ - 2.7, SZ + 2.7)   # 工作台
+        for z in (SZ - 2.5, SZ + 2.5):
+            beam(P['steel'], V(-HW + 4.4, SY, z), V(-HW + 4.4, SY + 3.6, z), 0.22)
+            beam(P['steel'], V(-HW + 4.4, SY + 2.0, z), V(-HW + 2.8, SY + 3.6, z), 0.12)
+        box(P['navy'], -HW + 2.3, -HW + 3.9, SY + 3.9, SY + 5.1, SZ - 2.2, SZ - 0.4)    # 砲身
+        box(P['white'], -HW + 2.5, -HW + 3.7, SY + 5.1, SY + 5.4, SZ - 2.0, SZ - 0.8)
+        for x in (-HW + 2.75, -HW + 3.45):
+            cylZ(P['steel'], x, SY + 4.55, SZ - 0.4, SZ + 2.5, 0.17, 14)
+            cylZ(P['steel'], x, SY + 4.55, SZ + 2.2, SZ + 2.6, 0.23, 14)
+        box(P['steel'], -HW + 2.4, -HW + 3.8, SY + 3.9, SY + 4.3, SZ + 0.6, SZ + 1.0)   # 砲管的托座
+        box(P['steel'], -HW + 1.6, -HW + 4.2, SY + 1.2, SY + 1.4, SZ - 2.6, SZ + 2.6)   # 下層的架子與料箱
+        for z in (SZ - 1.8, SZ - 0.3, SZ + 1.2):
+            box(P['yellow'], -HW + 2.0, -HW + 3.8, SY + 1.4, SY + 2.3, z, z + 1.1)
+        M.part('Weapon_Station', 'Root', P)
     M.finish(dict(mezzanine=[MX0, MY, MZ1]))
 
 # ==============================================================================================

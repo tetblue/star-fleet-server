@@ -12,7 +12,9 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hgkit import *
 
-SPAN, TRAV, DROP, HK0 = 59.0, 26.0, 26.0, 4.2          # 樑長、吊車行程、吊鉤行程、吊鉤滑輪座在靜止時比樑頂低多少
+BAY = '--bay' in ARGS                                   # 戰艦庫的版本：跨度短（機庫內寬 38，兩邊的桁架柱之間 35）→ 整備庫_50_天車_戰艦庫
+SPAN, TRAV, DROP, HK0 = (35.0, 14.0, 12.0, 4.2) if BAY else (59.0, 26.0, 26.0, 4.2)      # 樑長、吊車行程、吊鉤行程、吊鉤滑輪座在靜止時比樑頂低多少
+NR = int((SPAN / 2 - 1.0) / 3.0)                        # 加勁肋每 3 公尺一片
 DEPTH = 1.6                                             # 樑高
 
 
@@ -23,7 +25,7 @@ def fk(ang):
     return W
 
 
-M = Machine('crane', '整備庫_26_天車', [('trolley', '吊車位置', -TRAV, TRAV, 0.0), ('hook', '吊鉤下放', 0.0, DROP, 0.0)],
+M = Machine('crane_bay' if BAY else 'crane', '整備庫_50_天車_戰艦庫' if BAY else '整備庫_26_天車', [('trolley', '吊車位置', -TRAV, TRAV, 0.0), ('hook', '吊鉤下放', 0.0, DROP, 0.0)],
             dict(Root=None, Trolley='Root', Hook='Trolley'), fk, dict(trolley=['Trolley'], hook=['Hook']), tex=2048)
 h = SPAN / 2
 
@@ -32,13 +34,13 @@ P = Pal()
 box(P['white'], -h, h, -0.12, 0.0, -0.6, 0.6)
 box(P['white'], -h, h, -DEPTH + 0.12, -0.12, -0.06, 0.06)
 box(P['white'], -h, h, -DEPTH, -DEPTH + 0.12, -0.5, 0.5)
-for i in range(-9, 10):                                 # 加勁肋（只在腹板上半，下翼板留給吊車的輪子）
+for i in range(-NR, NR + 1):                            # 加勁肋（只在腹板上半，下翼板留給吊車的輪子）
     for s in (1, -1):
         box(P['steel'], i * 3.0 - 0.03, i * 3.0 + 0.03, -0.9, -0.12, min(s * 0.06, s * 0.56), max(s * 0.06, s * 0.56))
 for s in (1, -1):
     box(P['navy'], -h + 1.5, h - 1.5, -0.105, -0.015, min(s * 0.6, s * 0.612), max(s * 0.6, s * 0.612))
     for x0 in (-h + 2.0, 6.0):                          # 兩段燈條
-        box(P['glow'], x0, x0 + 21.5, -0.075, -0.045, min(s * 0.612, s * 0.62), max(s * 0.612, s * 0.62))
+        box(P['glow'], x0, x0 + h - 8.0, -0.075, -0.045, min(s * 0.612, s * 0.62), max(s * 0.612, s * 0.62))
 M.part('Girder', 'Root', P)
 P = Pal()
 for s in (1, -1):
@@ -53,9 +55,9 @@ for s in (1, -1):
 M.part('End_Trucks', 'Root', P)
 P = Pal()
 box(P['steel'], -h + 1.2, h - 1.2, -0.3, -0.2, 0.92, 1.0)                  # 電纜滑軌
-for i in range(-9, 10):
+for i in range(-NR, NR + 1):
     box(P['steel'], i * 3.0 - 0.04, i * 3.0 + 0.04, -0.2, -0.12, 0.6, 1.0)
-for i in range(9):                                      # 一串垂下來的電纜（收在右半邊）
+for i in range(int((h - 4.7) / 2.7)):                   # 一串垂下來的電纜（收在右半邊）
     x = 3.5 + i * 2.7
     box(P['steel'], x - 0.06, x + 0.06, -0.42, -0.3, 0.9, 1.02)
     hose(P['rubber'], [V(x, -0.42, 0.96), V(x + 0.35, -1.2, 0.96), V(x + 1.35, -1.45, 0.96), V(x + 2.35, -1.2, 0.96), V(x + 2.7, -0.42, 0.96)], 0.04, 6)
