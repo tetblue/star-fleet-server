@@ -1677,6 +1677,7 @@ function capKey(e) {
   if (e.repeat) return true;
   CAP.keys.add(k);
   const live = capLive(), is = (id) => plCodeIs(id, k);
+  if (CC.post) { if (k === 'Escape' || is('cap_map')) ccPostLeave(); return true; }   // 艦長生涯：戰鬥剛結束，戰場暫停中（capengage_ui.js）
   if (CAP.mis && CAP.mis.idle && cclKey(e, is)) return true;   // 艦長生涯：停泊中的大廳先處理（caplobby.js）
   if (CAP.mis && CAP.mis.idle) {   // 艦長生涯的星系巡航：M 叫出／收起星圖（capcareer_ui.js）
     if (CC.over) { if (k === 'Escape' || is('cap_map')) ccFly(); return true; }
@@ -1928,6 +1929,7 @@ function capTopHud(g, W, cx, red, grn, amb, t, top) {
   let txt, c, sub = '';
   const seen = Math.max(...CAP.own.filter((o) => !o.dead).map((o) => Math.min(1, o.seen)), 0), known = CAP.own.some((o) => !o.dead && t < o.knownT);
   if (M && M.inb && !M.inb.done) { txt = `敵軍躍遷中 ${Math.max(0, M.inb.t - t).toFixed(1)}`; c = red; sub = '紅色箭頭＝敵軍躍遷進來的方向，先占好位置'; }
+  else if (GAME.result) { const R = GAME.result, ok = !!R.capOk; txt = ok ? '戰鬥結束・勝利' : R.retreat ? '戰鬥結束・撤退' : '戰鬥結束'; c = ok ? grn : amb; sub = typeof CC !== 'undefined' && CC.post ? `戰場已暫停・按 ${keyText('cap_map')} 打開星圖` : '戰場已暫停'; }
   else if (M && M.idle) { txt = '巡航中'; c = grn; sub = `沒有敵人・按 ${keyText('cap_map')} 打開星圖`; }
   else if (M && M.type === 'capture') { txt = '交戰中'; c = '#ff9a5a'; const O = capOddsNow(); sub = O ? `目前評估：勝率 ${Math.round(O.win * 100)}%` : ''; }
   else if (CAP.alarm) { txt = '警報中'; c = red; sub = `${CAP.waves > 0 && capCommAlive() ? `增援還有 ${CAP.waves} 波${CAP.nextWave > t ? `（${Math.ceil(CAP.nextWave - t)} 秒）` : ''}` : '沒有更多增援'}${known ? '・位置暴露' : '・敵軍在搜索'}`; }
@@ -2057,7 +2059,9 @@ function capRadar(g, W, H, s, ca, red, grn, amb, col, t) {
   plFont(g, 10, false, true); g.fillStyle = 'rgba(220,230,245,.6)'; g.textAlign = 'center'; g.fillText(`${Math.round(range * GROUND_KM)} km`, cx, cy + R + 12); g.textAlign = 'left';
 }
 function capFeedHud(g, H) {
-  const now = performance.now(), x = 18, y0 = H * 0.36;
+  const now = performance.now(), y0 = H * 0.36;
+  // 艦長生涯的左側按鈕、面板（交戰評估／戰報，capengage_ui.js）打開時，訊息往右讓開
+  let x = 18; for (const id of ['cce-side', 'cce-tab', 'cce-rtab']) { const e = document.getElementById(id), r = e && e.getBoundingClientRect(); if (r && r.width) x = Math.max(x, r.right + 14); }
   plFont(g, 13);
   CAP.feed.forEach((f, k) => {
     const age = (now - f.t) / 1000; if (age > 7) return;

@@ -43,7 +43,7 @@ function ccRender() {
   const cv = gEl('cc-cv');
   cv.onclick = (e) => { const r = cv.getBoundingClientRect(), id = ccHit(e.clientX - r.left, e.clientY - r.top); CC.sel = id; ccCard(); };
   window.removeEventListener('resize', ccResize); window.addEventListener('resize', ccResize);
-  ccDock(); ccCard(); ccdRestore();
+  ccDock(); ccCard(); ccdRestore(); cceRepRestore();
   if (!CC.raf) CC.raf = requestAnimationFrame(ccLoop);
   if (S.fin) ccEndView();
 }
@@ -60,7 +60,7 @@ const CC_CSS = `.cc-ico{width:15px;height:15px;vertical-align:-3px;margin-right:
 .cc-yq{font-size:12px}.cc-yq .g-dim{font-size:12px}.cc-yq button{font-size:11px;padding:1px 6px;margin-left:3px}
 .cc-thr{margin:5px 0;padding:5px 7px;border:1px solid #ff6a5a;border-radius:6px;background:#2a1416}
 .cc-xp{height:6px;background:#1a2433;border-radius:3px;overflow:hidden;margin:3px 0 8px}.cc-xp i{display:block;height:100%;background:#c9a7ff}`;
-function ccResize() { ccmFit(); ccdRestore(); ccDraw(); const el = gEl('cc-card'); if (el && !el.hidden) CC_place(el); }
+function ccResize() { ccmFit(); ccdRestore(); cceRepRestore(); ccDraw(); const el = gEl('cc-card'); if (el && !el.hidden) CC_place(el); }
 function ccLoop(ts) { if (!gEl('cc-cv') || !CC.S) { CC.raf = 0; return; } ccDraw(ts); CC.raf = requestAnimationFrame(ccLoop); }
 const ccXY = (s) => { const V = CC.view; return [V.ox + s.x * V.k, V.oy + s.y * V.k]; };
 function ccHit(x, y) { let best = -1, bd = 26; for (const s of CC.S.sys) { const [px, py] = ccXY(s), d = Math.hypot(px - x, py - y); if (d < bd) { bd = d; best = s.id; } } return best; }
@@ -497,6 +497,7 @@ function ccSkipPlayerBattle(S, why) {
 function ccShipSt(c) { return { hp: c.hp, sh: c.sh, msl: c.msl, mod: c.mod, mk: c.mk }; }
 const ccShipStP = (c) => ({ ...ccShipSt(c), prof: CC.S && CC.S.pl.prof });   // 你的船：再帶艦長熟練度   // mod、mk：模組與 Mk（capHullMod）
 function ccLaunch(S, kind, o) {
+  CC.brep = null; CC.rshow = false; cceRepOff();
   const s = S.sys[o.sys], P = ccPl(S), R = CC_ROLES[S.role], li = CC_DIFF[S.diff].li, fac = SM_FAC[S.fac].game === 0 ? 0 : 1;
   const seed = ccSeedOf(S, s);
   let m, info = { kind, sys: s.id, own: [], foe: [], defIdx: [], mis: o.mis };
@@ -544,6 +545,7 @@ function ccBattleDone() {
   const S = CC.S || ccLoad(); CC.S = S;
   const C = SIM.m.captain, I = C.cc;
   const R = GAME.result || {}, s = S.sys[I.sys], st = CAP.stats || { ks: 0, merit: 0 };
+  const rep = I.kind === 'idle' ? null : cceRepSnap(S, I);   // 戰報（capengage_ui.js）
   const put = (ids, L) => {
     const sqs = ids.map(ccSqById);
     for (const x of L) { const q = sqs[x.sq], c = q && q.ships[x.slot]; if (!c) continue; if (x.dead || !ships.alive[x.i]) { c.dead = true; continue; } c.hp = Math.max(0.02, ships.hp[x.i] / maxHp(x.i)); c.sh = ships.shMax[x.i] ? ships.sh[x.i] / ships.shMax[x.i] : 0; c.msl = x.H.msl ? x.mslN / x.H.msl.n : 0; if (q) ccXp(S, q, c, (I.kind === 'idle' ? 0 : CAP_XP.fight + CAP_XP.live) + (x.kxp || 0)); }
@@ -574,9 +576,13 @@ function ccBattleDone() {
     const M = S.missions.find((x) => x.id === I.mis);
     if (M && ok) ccMissionDone(S, M, true); else ccLog(S, `${s.name}：特戰任務${ret ? '中止（任務還在，可以再出擊）' : '失敗'}`, 'bad');
   }
+  if (rep) CC.brep = cceRepDone(S, rep, R, st);
+  const wk = I.kind === 'capture';
+  if (wk) { S.pendB = null; if (!S.fin) ccWeekB(S); }   // 這週先結算完（中途離開也不會壞檔）
   ccSave(S);
-  setPhase('menu');
-  if (I.kind === 'capture') { S.pendB = null; ccFinishWeek(S); } else { ccRender(); }
+  // 畫面留在戰場（暫停），戰報出現在左邊交戰評估的位置；M／Esc／星圖按鈕才打開星圖（ccPostLeave，capengage_ui.js）
+  CC.post = { week: wk }; CC.rshow = true;
+  cceRepTab(); cceRepRestore();
 }
 function ccLogView(L, title) {
   const col = { ok: '#5fd39a', bad: '#ff6a5a', ev: '#c9a7ff' };
@@ -660,12 +666,13 @@ function ccIdle(S) {
   simEndMid(); overlay(null);
   SIM.m = m; SIM.sel = null; camAnim = null;
   simStart();
+  cceRepTab();   // 側邊的「戰報」（capengage_ui.js）
   if (CCL.dock) cclShow();   // 平常是停泊（大廳）；巡航中換場景就接著巡航（caplobby.js）
 }
 // 收起巡航的場景（不算戰鬥、沒有戰果）
 function ccIdleStop() {
   if (!ccIdleOn()) return;
-  cclRemove();
+  cclRemove(); cceRepOff();
   CC.idle = null; CC.over = false;
   if (paused) { paused = false; updateTimeUI(); }
   setPhase('menu');
@@ -683,7 +690,7 @@ function ccFly() {
   if (gEl('sm-modal')) smuCloseModal();
   window.removeEventListener('resize', ccResize);
   if (ccIdleOn() && CC.idle && CC.idle.key === ccIdleKey(S, P)) {
-    overlay(null); CC.over = false;
+    overlay(null); CC.over = false; cceRepTab(); cceRepRestore();
     if (CCL.dock) { paused = false; updateTimeUI(); cclShow(); } else capPause(false);   // 回到停泊（大廳）或接著巡航
     return;
   }

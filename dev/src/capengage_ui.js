@@ -218,7 +218,7 @@ body.ccl-on #cce-tab,body:has(#game:not([hidden])) #cce-tab,body.ccl-on #cce-sid
 #cce-side .ft{margin-top:10px;font-size:11px;color:#5d6f92;line-height:1.5}`;
 function cceTab(S) {
   cceTabOff(); if (!S.pendB) return;
-  if (!gEl('cce-tab-css')) { const st = document.createElement('style'); st.id = 'cce-tab-css'; st.textContent = CCE_TAB_CSS; document.head.appendChild(st); }
+  if (!gEl('cce-tab-css')) { const st = document.createElement('style'); st.id = 'cce-tab-css'; st.textContent = CCE_TAB_CSS + CCE_REP_CSS; document.head.appendChild(st); }
   const b = document.createElement('button'); b.type = 'button'; b.id = 'cce-tab'; b.title = '交戰評估：雙方兵力與勝率（戰鬥不會暫停）';
   b.innerHTML = '<i>⚠</i><b>交戰評估</b><small>ASSESSMENT</small>';
   b.onclick = () => (gEl('cce-side') ? cceSideOff() : cceOpen(S));
@@ -295,3 +295,106 @@ function cceOpen(S) {
   };
   upd(); p.dataset.iv = setInterval(upd, 500);
 }
+
+// ───── 戰報（2026-11-19）：戰鬥打完回到星圖，左側同一個位置、同一套樣式（#cce-side）的斜放面板 ─────
+// cceRepSnap：開戰時的勝率、雙方每艘船最後的狀態（含擊沉）、小隊名稱、戰前的資金／戰功／研究點數／紀錄長度
+// cceRepDone：結算後補上結果與這一場的收穫；CC.brep 保存，ccRender 之後 cceRepRestore 重新掛上（✕ 收起、下一場出擊清掉）
+function cceRepSnap(S, I) {
+  let L = null; try { L = cceLive(); } catch (e) { L = null; }
+  const nm = (ids) => ids.map((id) => { const q = ccSqById(id); return q ? q.name : null; });
+  let win = null; try { if (S.pendB) win = cceData(S).win; } catch (e) { win = null; }
+  return { kind: I.kind, sys: I.sys, att: !!I.att, win, L, own: nm(I.own), foe: nm(I.foe), money: S.pl.money, merit: S.pl.merit, rp: S.pl.rp || 0, n0: S.log.length, t: (GAME.result && GAME.result.t) || 0 };
+}
+function cceRepDone(S, X, R, st) {
+  const P = ccPl(S), wiped = !P || !P.ships.length, ok = !!R.capOk, ret = !!R.retreat || R.why === '超過任務時限';
+  X.res = wiped ? 'wipe' : ok ? 'win' : ret ? 'ret' : 'lose';
+  X.ks = st.ks || 0; X.dm = Math.round(S.pl.merit - X.merit); X.dmo = Math.round(S.pl.money - X.money); X.drp = Math.round((S.pl.rp || 0) - X.rp);
+  X.notes = S.log.slice(X.n0).map((x) => ({ t: x.t, c: x.c }));
+  X.week = S.turn; X.anim = true;
+  return X;
+}
+// 掛上戰報面板。兩個地方：星圖上（#g-screen，CC.brep 有、還沒收起）；星系裡（body：戰鬥剛結束 CC.post、或巡航時按側邊的「戰報」CC.rshow）
+// 星系裡的版本多一段「這一回合的大事」（上週＋這週的紀錄）；戰鬥剛結束的版本多一顆「打開星圖」
+const cceInSpace = () => !gEl('cc-map') && CAP.on && !!(CC.post || (CAP.mis && CAP.mis.idle));
+function cceRepRestore() {
+  const S = CC.S, old = gEl('cce-side');
+  if (old && !old.classList.contains('rep')) return;   // 交戰評估（戰鬥中）優先
+  const onMap = !!gEl('cc-map'), space = !onMap && cceInSpace();
+  const X = CC.brep && S && CC.brep.week >= S.turn - 1 ? CC.brep : null;
+  const show = onMap ? !!(X && X.map !== false) : space && !!CC.rshow;
+  if (old) old.remove();
+  const tb = gEl('cce-rtab'); if (tb) tb.classList.toggle('on', space && show);
+  if (!show || !S) return;
+  if (!gEl('cce-tab-css')) { const st = document.createElement('style'); st.id = 'cce-tab-css'; st.textContent = CCE_TAB_CSS + CCE_REP_CSS; document.head.appendChild(st); }
+  const ncol = { ok: 'var(--own)', bad: '#ff8a7a', ev: '#c9a7ff' };
+  let body = '', rc = 'var(--cyan)', en = 'ROUND REPORT', anim = !old;
+  if (X) {
+    const L = X.L;
+    const RES = { win: ['勝利', X.kind === 'capture' ? 'VICTORY' : 'MISSION COMPLETE', 'var(--own)'], ret: ['撤退', 'WITHDRAWN', 'var(--yellow)'], lose: ['敗北', 'DEFEAT', 'var(--red)'], wipe: ['全滅', 'SQUAD LOST', 'var(--red)'] }[X.res];
+    const KIND = { capture: X.att ? '進攻' : '迎擊', raid: '地面突襲', op: '特戰任務' }[X.kind] || '戰鬥';
+    const row = (r, cls, v) => `<div class="sh ${cls}${r.dead ? ' dead' : ''}"><span class="nm">${CAP_HULLS[r.key].name}</span><div class="bars">${cceBar(r.hp, cls === 'f' || r.hp < 0.35 ? 'var(--red)' : 'var(--own)')}${cceBar(r.sh, 'var(--ally)')}</div><span class="v">${v}</span></div>`;
+    const by = (R) => { const m = new Map(); for (const r of R) { if (!m.has(r.sq)) m.set(r.sq, []); m.get(r.sq).push(r); } return [...m.entries()].sort((a, b) => a[0] - b[0]); };
+    const defRow = (D, f) => D.length ? `<div class="sq" style="color:${f ? '#ff8a96' : 'var(--own)'}">${f ? '敵方' : '我方'}軌道防禦 ${D.filter((d) => d.hp > 0).length}／${D.length} 座</div>` + D.map((d) => `<div class="sh ${f ? 'f' : ''}${d.hp > 0 ? '' : ' dead'}"><span class="nm">${cceDefNm(d.type)}</span><div class="bars">${cceBar(d.hp, f ? 'var(--red)' : 'var(--own)')}</div><span class="v">${d.hp > 0 ? Math.round(d.hp * 100) + '%' : '摧毀'}</span></div>`).join('') : '';
+    const mine = L ? by(L.own).map(([i, R]) => `<div class="sq" style="color:${i === 0 ? 'var(--own)' : 'var(--ally)'}">${i === 0 ? '★ ' : ''}${X.own[i] ? smuEsc(X.own[i]) : `第 ${i + 1} 隊`}</div>` + R.map((r) => row(r, i ? 'ai' : '', r.dead ? '<span style="color:var(--red)">擊沉</span>' : Math.round(r.hp * 100) + '%')).join('')).join('') + defRow(L.defsA, false) : '';
+    const foe = L ? by(L.foe).map(([i, R]) => `<div class="sq" style="color:#ff8a96">${X.foe[i] ? smuEsc(X.foe[i]) : `敵方第 ${i + 1} 隊`}</div>` + R.map((r) => row(r, 'f', r.dead ? '<span style="color:var(--dim)">擊沉</span>' : r.inb ? '<span style="color:#ff8a96">沒到</span>' : Math.round(r.hp * 100) + '%')).join('')).join('') + defRow(L.defsB, true) : '';
+    const lost = L ? L.own.filter((r) => r.dead).length : 0, nOwn = L ? L.own.length : 0, nFoe = L ? L.foe.length : 0;
+    const sgn = (v) => (v > 0 ? '+' : '') + v.toLocaleString();
+    rc = RES[2]; en = `BATTLE REPORT ・ ${smuEsc(S.sys[X.sys].name)}`;
+    body += `<div class="res"><div class="big">${RES[0]}</div><div class="sub"><span class="en2">${RES[1]}</span><span>${KIND}・第 ${X.week} 週・${_fmtT(X.t)}</span>${X.win != null ? `<span>開戰時勝率 <b style="color:${cceOddCol(X.win)}">${Math.round(X.win * 100)}%</b></span>` : ''}</div></div>
+      <div class="kpi"><div><span>擊沉</span><b>${X.ks}<small>／${nFoe}</small></b></div><div><span>損失</span><b style="color:${lost ? 'var(--red)' : '#fff'}">${lost}<small>／${nOwn}</small></b></div><div><span>戰功</span><b style="color:var(--gold)">${sgn(X.dm)}</b></div><div><span>資金</span><b>${sgn(X.dmo)}</b></div>${X.drp ? `<div><span>研究點</span><b style="color:#c9a7ff">${sgn(X.drp)}</b></div>` : ''}</div>
+      ${X.notes.length ? `<div class="lab"><span>結果</span></div>${X.notes.map((n) => `<div class="nt" style="--nc:${ncol[n.c] || 'var(--dim)'}">${smuEsc(n.t)}</div>`).join('')}` : ''}
+      <div class="lab"><span style="color:var(--own)">我方・戰後的狀態</span><span>船體</span></div>${mine || '<div class="ft">沒有資料</div>'}
+      <div class="lab"><span style="color:#ff8a96">敵方</span></div>${foe || '<div class="ft">沒有資料</div>'}`;
+  } else body += `<div class="ft" style="margin:2px 0 4px">這一回合你沒有親自打仗。</div>`;
+  if (space) {   // 這一回合的大事（上週＋這週）
+    const W = S.log.filter((x) => x.turn >= S.turn - 1 && !(X && X.notes.some((n) => n.t === x.t))).slice(-40).reverse();
+    const g = []; for (const x of W) { const l = g[g.length - 1]; if (l && l.t === x.turn) l.L.push(x); else g.push({ t: x.turn, L: [x] }); }
+    body += `<div class="lab"><span>這一回合的大事</span><span>${W.length} 件</span></div>${g.length ? g.map((G) => `<div class="sq">第 ${G.t} 週</div>${G.L.map((x) => `<div class="nt" style="--nc:${ncol[x.c] || 'var(--dim)'}">${smuEsc(x.t)}</div>`).join('')}`).join('') : '<div class="ft">沒有大事。</div>'}`;
+  }
+  body += CC.post && space ? `<button type="button" class="gomap" id="cce-gomap">打開星圖<kbd>${keyText('cap_map')}</kbd></button><div class="ft">戰場已經暫停。損傷會留到下一場：回有維修船塢的星系修理。</div>`
+    : `<div class="ft">損傷會留到下一場：回有維修船塢的星系修理。全部的事記在星圖的「紀錄」裡。</div>`;
+  const p = document.createElement('div'); p.id = 'cce-side'; p.className = 'rep' + (space ? ' sp' : ''); p.style.setProperty('--k', ccmK()); p.style.setProperty('--rc', rc);
+  p.innerHTML = `<div class="tilt${anim ? '' : ' still'}"><div class="hd"><h3>戰報</h3><span class="en">${en}</span><button type="button" class="x" title="收起">✕</button></div><div class="bd">${body}</div></div>`;
+  (onMap ? gEl('g-screen') : document.body).appendChild(p);
+  p.querySelector('.x').onclick = () => { if (onMap) { if (X) X.map = false; p.remove(); ccDraw(); } else { CC.rshow = false; cceRepRestore(); } };
+  const gm = gEl('cce-gomap'); if (gm) gm.onclick = ccPostLeave;
+}
+// 星系裡（巡航、戰鬥剛結束）的側邊按鈕「戰報」：和交戰評估同一個位置
+function cceRepTab() {
+  const old = gEl('cce-rtab'); if (old) old.remove();
+  if (!cceInSpace()) return;
+  if (!gEl('cce-tab-css')) { const st = document.createElement('style'); st.id = 'cce-tab-css'; st.textContent = CCE_TAB_CSS + CCE_REP_CSS; document.head.appendChild(st); }
+  const b = document.createElement('button'); b.type = 'button'; b.id = 'cce-rtab'; b.title = '這一回合的戰報（戰鬥結果、上週與這週的大事）';
+  b.innerHTML = '<i>▤</i><b>戰報</b><small>REPORT</small>';
+  b.onclick = () => { CC.rshow = !CC.rshow; cceRepRestore(); };
+  document.body.appendChild(b);
+}
+function cceRepOff() { const b = gEl('cce-rtab'); if (b) b.remove(); const p = gEl('cce-side'); if (p && p.classList.contains('rep')) p.remove(); }
+// 戰鬥剛結束：離開戰場、打開星圖（M、Esc、星圖按鈕、面板上的按鈕）
+function ccPostLeave() {
+  const Q = CC.post; if (!Q) return;
+  CC.post = null; CC.rshow = false; cceRepOff();
+  if (paused) { paused = false; updateTimeUI(); }
+  setPhase('menu');
+  const S = CC.S; CC.sel = -1; ccRender();
+  if (Q.week && !S.fin) ccTurnStart(S, true);
+}
+const CCE_REP_CSS = `body:has(#game:not([hidden])) #cce-side.rep{display:block}body.ccl-on #cce-side.rep{display:none}#g-screen > #cce-side.rep{top:128px}
+#cce-rtab{position:fixed;left:0;top:44%;z-index:7;pointer-events:auto;display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 9px 14px 7px;border:1px solid rgba(90,200,255,.6);border-left:0;cursor:pointer;background:linear-gradient(90deg,rgba(14,60,110,.88),rgba(8,24,52,.82));color:#fff;clip-path:polygon(0 0,100% 10px,100% calc(100% - 10px),0 100%);font-family:'Noto Sans TC','Microsoft JhengHei',sans-serif}
+#cce-rtab:hover,#cce-rtab.on{background:linear-gradient(90deg,#1f8ad8,#14407a)}
+#cce-rtab b{writing-mode:vertical-rl;font-size:15px;font-weight:900;letter-spacing:.3em}#cce-rtab small{writing-mode:vertical-rl;font:700 10px Rajdhani,Bahnschrift,sans-serif;letter-spacing:.24em;color:#a9dcff}#cce-rtab i{font-style:normal;font:700 13px Rajdhani,Bahnschrift,sans-serif;color:#7fdcff}
+body.ccl-on #cce-rtab,body:has(#game:not([hidden])) #cce-rtab{display:none}
+#cce-side.rep.sp{left:52px}#cce-side.rep.sp .tilt{max-height:calc(100vh / var(--k,1) - 400px)}
+#cce-side.rep .gomap{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;margin-top:14px;padding:10px;border:0;cursor:pointer;font:900 16px var(--jp);letter-spacing:.2em;color:#04122a;background:linear-gradient(100deg,#2f86ff,#3cc8ff);clip-path:polygon(10px 0,100% 0,calc(100% - 10px) 100%,0 100%)}
+#cce-side.rep .gomap:hover{filter:brightness(1.15)}#cce-side.rep .gomap kbd{font:700 12px var(--en);padding:1px 6px;border:1px solid rgba(4,18,42,.5);letter-spacing:0}
+#cce-side.rep .tilt{border-left-color:var(--rc)}#cce-side.rep .tilt::before{background:var(--rc)}#cce-side.rep .tilt.still{animation:none}
+#cce-side.rep .hd .en{color:var(--rc)}
+#cce-side.rep .res{display:flex;align-items:center;gap:16px;padding:4px 0 10px}
+#cce-side.rep .res .big{font:900 46px/1 var(--jp);letter-spacing:.14em;color:var(--rc);text-shadow:0 0 18px color-mix(in srgb,var(--rc) 45%,transparent)}
+#cce-side.rep .res .sub{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--dim)}
+#cce-side.rep .res .en2{font:700 11px var(--en);letter-spacing:.26em;color:var(--rc)}
+#cce-side.rep .kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(70px,1fr));gap:3px}
+#cce-side.rep .kpi > div{padding:6px 8px;background:rgba(12,20,42,.7);border-top:2px solid var(--rc);clip-path:polygon(0 0,100% 0,calc(100% - 6px) 100%,0 100%)}
+#cce-side.rep .kpi span{display:block;font-size:11px;color:var(--dim)}
+#cce-side.rep .kpi b{font:700 22px/1.15 var(--en);color:#fff}#cce-side.rep .kpi small{font-size:12px;color:var(--dim)}
+#cce-side.rep .nt{font-size:12.5px;line-height:1.5;padding:4px 8px;margin-top:3px;background:rgba(12,20,42,.55);border-left:2px solid var(--nc);color:#dfe8fa}`;

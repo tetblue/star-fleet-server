@@ -169,7 +169,8 @@ function ccmArea(W, H) {
   const k = ccmK(), top = 168 * k, d = gEl('cc-dock'), dh = d ? d.getBoundingClientRect().height : 0;
   const bot = Math.min(H * 0.4, Math.max(110 * k, dh) + 40 * k);
   const dr = CC.drw && gEl('cc-drw') ? 640 * k : document.querySelector('.sm-box.ccm-sheet:not(.cr-side)') ? 820 * k : 0;   // 右側的任務／紀錄面板、小隊／船塢／研發面板打開時，星圖往左縮
-  return { x: 40, y: top, w: W - 80 - dr, h: H - top - bot };
+  const lf = CC.brep && gEl('cce-side') ? 500 * k : 0;   // 左側的戰報打開時，星圖往右縮
+  return { x: 40 + lf, y: top, w: W - 80 - dr - lf, h: H - top - bot };
 }
 // 下週會被進攻、還留在原地的你的小隊（結束這一週的 ⚠）
 const ccmWarnN = (S) => S.fin ? 0 : S.sq.filter((q) => q.pl && q.ships.length && q.to == null && !q.task && ccThreatA(S, q, q.sys).length).length;
