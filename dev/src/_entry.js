@@ -11734,6 +11734,7 @@ function buildBattleHud() {
   gEl('bh-quit').onclick = (e) => {
     if (GAME.replaying) { endReplay(); return; }
     if (NET.on) { mpQuitBattle(e.currentTarget); return; }   // 多人：投降（要按兩次）／離開觀戰
+    if (CAP.on && CC.post) { ccPostLeave(); return; }   // 艦長生涯：戰鬥剛結束
     if (CAP.on && CAP.mis && CAP.mis.idle) { ccMapOpen(); return; }   // 艦長生涯的星系巡航：打開星圖
     quitBattle();
   };
@@ -11789,7 +11790,7 @@ function gameFrame(dt) {
   pb.title = NET.on ? '多人對戰不能暫停' : `${paused ? '繼續' : '暫停'}（${keyText('pause')}）`;
   gEl('bh-speed').textContent = NET.on ? `×${NET.speed}${NET.lag ? ' …' : ''}` : cmdSlowOn ? `×${effSpeed()}` : '×' + SPEEDS[speedIdx]; gEl('bh-speed').classList.toggle('slow', cmdSlowOn);
   gEl('bh-speed').title = NET.on ? (NET.lag ? '等待連線…' : '遊戲速度（房主決定）') : cmdSlowOn ? '下令中：自動放慢' : `遊戲速度（${keyText('speed_up')}／${keyText('speed_down')}）`;
-  if (!gEl('bh-quit').dataset.sure) gEl('bh-quit').textContent = CAP.on && CAP.mis && CAP.mis.idle ? `星圖（${keyText('cap_map')}）` : GAME.replaying ? '結束回放' : NET.on ? (NET.spec ? '離開觀戰' : '投降') : GAME.watch ? '結束觀摩' : GAME.pilot ? '結束出擊' : GAME.captain ? '結束任務' : sim ? '結束模擬' : GAME.sc && GAME.sc.tut ? '結束教學' : '撤退';
+  if (!gEl('bh-quit').dataset.sure) gEl('bh-quit').textContent = CAP.on && ((CAP.mis && CAP.mis.idle) || CC.post) ? `星圖（${keyText('cap_map')}）` : GAME.replaying ? '結束回放' : NET.on ? (NET.spec ? '離開觀戰' : '投降') : GAME.watch ? '結束觀摩' : GAME.pilot ? '結束出擊' : GAME.captain ? '結束任務' : sim ? '結束模擬' : GAME.sc && GAME.sc.tut ? '結束教學' : '撤退';
   if (gEl('bh-ctl')) gEl('bh-ctl').textContent = `切換 → ${simSideName(SIM.m, simNextSide())}`;
   gEl('bh-3d').textContent = mode3D ? '2D' : '3D';
   gEl('bh-br').title = `${BR.on ? '離開艦橋' : '艦橋視角'}（${keyText('bridge')}）`; gEl('bh-br').classList.toggle('on', BR.on);
@@ -21933,6 +21934,7 @@ function capKey(e) {
   if (e.repeat) return true;
   CAP.keys.add(k);
   const live = capLive(), is = (id) => plCodeIs(id, k);
+  if (CC.post) { if (k === 'Escape' || is('cap_map')) ccPostLeave(); return true; }   // 艦長生涯：戰鬥剛結束，戰場暫停中（capengage_ui.js）
   if (CAP.mis && CAP.mis.idle && cclKey(e, is)) return true;   // 艦長生涯：停泊中的大廳先處理（caplobby.js）
   if (CAP.mis && CAP.mis.idle) {   // 艦長生涯的星系巡航：M 叫出／收起星圖（capcareer_ui.js）
     if (CC.over) { if (k === 'Escape' || is('cap_map')) ccFly(); return true; }
@@ -22184,6 +22186,7 @@ function capTopHud(g, W, cx, red, grn, amb, t, top) {
   let txt, c, sub = '';
   const seen = Math.max(...CAP.own.filter((o) => !o.dead).map((o) => Math.min(1, o.seen)), 0), known = CAP.own.some((o) => !o.dead && t < o.knownT);
   if (M && M.inb && !M.inb.done) { txt = `敵軍躍遷中 ${Math.max(0, M.inb.t - t).toFixed(1)}`; c = red; sub = '紅色箭頭＝敵軍躍遷進來的方向，先占好位置'; }
+  else if (GAME.result) { const R = GAME.result, ok = !!R.capOk; txt = ok ? '戰鬥結束・勝利' : R.retreat ? '戰鬥結束・撤退' : '戰鬥結束'; c = ok ? grn : amb; sub = typeof CC !== 'undefined' && CC.post ? `戰場已暫停・按 ${keyText('cap_map')} 打開星圖` : '戰場已暫停'; }
   else if (M && M.idle) { txt = '巡航中'; c = grn; sub = `沒有敵人・按 ${keyText('cap_map')} 打開星圖`; }
   else if (M && M.type === 'capture') { txt = '交戰中'; c = '#ff9a5a'; const O = capOddsNow(); sub = O ? `目前評估：勝率 ${Math.round(O.win * 100)}%` : ''; }
   else if (CAP.alarm) { txt = '警報中'; c = red; sub = `${CAP.waves > 0 && capCommAlive() ? `增援還有 ${CAP.waves} 波${CAP.nextWave > t ? `（${Math.ceil(CAP.nextWave - t)} 秒）` : ''}` : '沒有更多增援'}${known ? '・位置暴露' : '・敵軍在搜索'}`; }
@@ -22313,7 +22316,9 @@ function capRadar(g, W, H, s, ca, red, grn, amb, col, t) {
   plFont(g, 10, false, true); g.fillStyle = 'rgba(220,230,245,.6)'; g.textAlign = 'center'; g.fillText(`${Math.round(range * GROUND_KM)} km`, cx, cy + R + 12); g.textAlign = 'left';
 }
 function capFeedHud(g, H) {
-  const now = performance.now(), x = 18, y0 = H * 0.36;
+  const now = performance.now(), y0 = H * 0.36;
+  // 艦長生涯的左側按鈕、面板（交戰評估／戰報，capengage_ui.js）打開時，訊息往右讓開
+  let x = 18; for (const id of ['cce-side', 'cce-tab', 'cce-rtab']) { const e = document.getElementById(id), r = e && e.getBoundingClientRect(); if (r && r.width) x = Math.max(x, r.right + 14); }
   plFont(g, 13);
   CAP.feed.forEach((f, k) => {
     const age = (now - f.t) / 1000; if (age > 7) return;
@@ -27711,7 +27716,7 @@ function ccRender() {
   const cv = gEl('cc-cv');
   cv.onclick = (e) => { const r = cv.getBoundingClientRect(), id = ccHit(e.clientX - r.left, e.clientY - r.top); CC.sel = id; ccCard(); };
   window.removeEventListener('resize', ccResize); window.addEventListener('resize', ccResize);
-  ccDock(); ccCard(); ccdRestore();
+  ccDock(); ccCard(); ccdRestore(); cceRepRestore();
   if (!CC.raf) CC.raf = requestAnimationFrame(ccLoop);
   if (S.fin) ccEndView();
 }
@@ -27728,7 +27733,7 @@ const CC_CSS = `.cc-ico{width:15px;height:15px;vertical-align:-3px;margin-right:
 .cc-yq{font-size:12px}.cc-yq .g-dim{font-size:12px}.cc-yq button{font-size:11px;padding:1px 6px;margin-left:3px}
 .cc-thr{margin:5px 0;padding:5px 7px;border:1px solid #ff6a5a;border-radius:6px;background:#2a1416}
 .cc-xp{height:6px;background:#1a2433;border-radius:3px;overflow:hidden;margin:3px 0 8px}.cc-xp i{display:block;height:100%;background:#c9a7ff}`;
-function ccResize() { ccmFit(); ccdRestore(); ccDraw(); const el = gEl('cc-card'); if (el && !el.hidden) CC_place(el); }
+function ccResize() { ccmFit(); ccdRestore(); cceRepRestore(); ccDraw(); const el = gEl('cc-card'); if (el && !el.hidden) CC_place(el); }
 function ccLoop(ts) { if (!gEl('cc-cv') || !CC.S) { CC.raf = 0; return; } ccDraw(ts); CC.raf = requestAnimationFrame(ccLoop); }
 const ccXY = (s) => { const V = CC.view; return [V.ox + s.x * V.k, V.oy + s.y * V.k]; };
 function ccHit(x, y) { let best = -1, bd = 26; for (const s of CC.S.sys) { const [px, py] = ccXY(s), d = Math.hypot(px - x, py - y); if (d < bd) { bd = d; best = s.id; } } return best; }
@@ -28165,6 +28170,7 @@ function ccSkipPlayerBattle(S, why) {
 function ccShipSt(c) { return { hp: c.hp, sh: c.sh, msl: c.msl, mod: c.mod, mk: c.mk }; }
 const ccShipStP = (c) => ({ ...ccShipSt(c), prof: CC.S && CC.S.pl.prof });   // 你的船：再帶艦長熟練度   // mod、mk：模組與 Mk（capHullMod）
 function ccLaunch(S, kind, o) {
+  CC.brep = null; CC.rshow = false; cceRepOff();
   const s = S.sys[o.sys], P = ccPl(S), R = CC_ROLES[S.role], li = CC_DIFF[S.diff].li, fac = SM_FAC[S.fac].game === 0 ? 0 : 1;
   const seed = ccSeedOf(S, s);
   let m, info = { kind, sys: s.id, own: [], foe: [], defIdx: [], mis: o.mis };
@@ -28212,6 +28218,7 @@ function ccBattleDone() {
   const S = CC.S || ccLoad(); CC.S = S;
   const C = SIM.m.captain, I = C.cc;
   const R = GAME.result || {}, s = S.sys[I.sys], st = CAP.stats || { ks: 0, merit: 0 };
+  const rep = I.kind === 'idle' ? null : cceRepSnap(S, I);   // 戰報（capengage_ui.js）
   const put = (ids, L) => {
     const sqs = ids.map(ccSqById);
     for (const x of L) { const q = sqs[x.sq], c = q && q.ships[x.slot]; if (!c) continue; if (x.dead || !ships.alive[x.i]) { c.dead = true; continue; } c.hp = Math.max(0.02, ships.hp[x.i] / maxHp(x.i)); c.sh = ships.shMax[x.i] ? ships.sh[x.i] / ships.shMax[x.i] : 0; c.msl = x.H.msl ? x.mslN / x.H.msl.n : 0; if (q) ccXp(S, q, c, (I.kind === 'idle' ? 0 : CAP_XP.fight + CAP_XP.live) + (x.kxp || 0)); }
@@ -28242,9 +28249,13 @@ function ccBattleDone() {
     const M = S.missions.find((x) => x.id === I.mis);
     if (M && ok) ccMissionDone(S, M, true); else ccLog(S, `${s.name}：特戰任務${ret ? '中止（任務還在，可以再出擊）' : '失敗'}`, 'bad');
   }
+  if (rep) CC.brep = cceRepDone(S, rep, R, st);
+  const wk = I.kind === 'capture';
+  if (wk) { S.pendB = null; if (!S.fin) ccWeekB(S); }   // 這週先結算完（中途離開也不會壞檔）
   ccSave(S);
-  setPhase('menu');
-  if (I.kind === 'capture') { S.pendB = null; ccFinishWeek(S); } else { ccRender(); }
+  // 畫面留在戰場（暫停），戰報出現在左邊交戰評估的位置；M／Esc／星圖按鈕才打開星圖（ccPostLeave，capengage_ui.js）
+  CC.post = { week: wk }; CC.rshow = true;
+  cceRepTab(); cceRepRestore();
 }
 function ccLogView(L, title) {
   const col = { ok: '#5fd39a', bad: '#ff6a5a', ev: '#c9a7ff' };
@@ -28328,12 +28339,13 @@ function ccIdle(S) {
   simEndMid(); overlay(null);
   SIM.m = m; SIM.sel = null; camAnim = null;
   simStart();
+  cceRepTab();   // 側邊的「戰報」（capengage_ui.js）
   if (CCL.dock) cclShow();   // 平常是停泊（大廳）；巡航中換場景就接著巡航（caplobby.js）
 }
 // 收起巡航的場景（不算戰鬥、沒有戰果）
 function ccIdleStop() {
   if (!ccIdleOn()) return;
-  cclRemove();
+  cclRemove(); cceRepOff();
   CC.idle = null; CC.over = false;
   if (paused) { paused = false; updateTimeUI(); }
   setPhase('menu');
@@ -28351,7 +28363,7 @@ function ccFly() {
   if (gEl('sm-modal')) smuCloseModal();
   window.removeEventListener('resize', ccResize);
   if (ccIdleOn() && CC.idle && CC.idle.key === ccIdleKey(S, P)) {
-    overlay(null); CC.over = false;
+    overlay(null); CC.over = false; cceRepTab(); cceRepRestore();
     if (CCL.dock) { paused = false; updateTimeUI(); cclShow(); } else capPause(false);   // 回到停泊（大廳）或接著巡航
     return;
   }
@@ -28628,7 +28640,8 @@ function ccmArea(W, H) {
   const k = ccmK(), top = 168 * k, d = gEl('cc-dock'), dh = d ? d.getBoundingClientRect().height : 0;
   const bot = Math.min(H * 0.4, Math.max(110 * k, dh) + 40 * k);
   const dr = CC.drw && gEl('cc-drw') ? 640 * k : document.querySelector('.sm-box.ccm-sheet:not(.cr-side)') ? 820 * k : 0;   // 右側的任務／紀錄面板、小隊／船塢／研發面板打開時，星圖往左縮
-  return { x: 40, y: top, w: W - 80 - dr, h: H - top - bot };
+  const lf = CC.brep && gEl('cce-side') ? 500 * k : 0;   // 左側的戰報打開時，星圖往右縮
+  return { x: 40 + lf, y: top, w: W - 80 - dr - lf, h: H - top - bot };
 }
 // 下週會被進攻、還留在原地的你的小隊（結束這一週的 ⚠）
 const ccmWarnN = (S) => S.fin ? 0 : S.sq.filter((q) => q.pl && q.ships.length && q.to == null && !q.task && ccThreatA(S, q, q.sys).length).length;
@@ -28866,7 +28879,7 @@ body.ccl-on #cce-tab,body:has(#game:not([hidden])) #cce-tab,body.ccl-on #cce-sid
 #cce-side .ft{margin-top:10px;font-size:11px;color:#5d6f92;line-height:1.5}`;
 function cceTab(S) {
   cceTabOff(); if (!S.pendB) return;
-  if (!gEl('cce-tab-css')) { const st = document.createElement('style'); st.id = 'cce-tab-css'; st.textContent = CCE_TAB_CSS; document.head.appendChild(st); }
+  if (!gEl('cce-tab-css')) { const st = document.createElement('style'); st.id = 'cce-tab-css'; st.textContent = CCE_TAB_CSS + CCE_REP_CSS; document.head.appendChild(st); }
   const b = document.createElement('button'); b.type = 'button'; b.id = 'cce-tab'; b.title = '交戰評估：雙方兵力與勝率（戰鬥不會暫停）';
   b.innerHTML = '<i>⚠</i><b>交戰評估</b><small>ASSESSMENT</small>';
   b.onclick = () => (gEl('cce-side') ? cceSideOff() : cceOpen(S));
@@ -28943,6 +28956,109 @@ function cceOpen(S) {
   };
   upd(); p.dataset.iv = setInterval(upd, 500);
 }
+
+// ───── 戰報（2026-11-19）：戰鬥打完回到星圖，左側同一個位置、同一套樣式（#cce-side）的斜放面板 ─────
+// cceRepSnap：開戰時的勝率、雙方每艘船最後的狀態（含擊沉）、小隊名稱、戰前的資金／戰功／研究點數／紀錄長度
+// cceRepDone：結算後補上結果與這一場的收穫；CC.brep 保存，ccRender 之後 cceRepRestore 重新掛上（✕ 收起、下一場出擊清掉）
+function cceRepSnap(S, I) {
+  let L = null; try { L = cceLive(); } catch (e) { L = null; }
+  const nm = (ids) => ids.map((id) => { const q = ccSqById(id); return q ? q.name : null; });
+  let win = null; try { if (S.pendB) win = cceData(S).win; } catch (e) { win = null; }
+  return { kind: I.kind, sys: I.sys, att: !!I.att, win, L, own: nm(I.own), foe: nm(I.foe), money: S.pl.money, merit: S.pl.merit, rp: S.pl.rp || 0, n0: S.log.length, t: (GAME.result && GAME.result.t) || 0 };
+}
+function cceRepDone(S, X, R, st) {
+  const P = ccPl(S), wiped = !P || !P.ships.length, ok = !!R.capOk, ret = !!R.retreat || R.why === '超過任務時限';
+  X.res = wiped ? 'wipe' : ok ? 'win' : ret ? 'ret' : 'lose';
+  X.ks = st.ks || 0; X.dm = Math.round(S.pl.merit - X.merit); X.dmo = Math.round(S.pl.money - X.money); X.drp = Math.round((S.pl.rp || 0) - X.rp);
+  X.notes = S.log.slice(X.n0).map((x) => ({ t: x.t, c: x.c }));
+  X.week = S.turn; X.anim = true;
+  return X;
+}
+// 掛上戰報面板。兩個地方：星圖上（#g-screen，CC.brep 有、還沒收起）；星系裡（body：戰鬥剛結束 CC.post、或巡航時按側邊的「戰報」CC.rshow）
+// 星系裡的版本多一段「這一回合的大事」（上週＋這週的紀錄）；戰鬥剛結束的版本多一顆「打開星圖」
+const cceInSpace = () => !gEl('cc-map') && CAP.on && !!(CC.post || (CAP.mis && CAP.mis.idle));
+function cceRepRestore() {
+  const S = CC.S, old = gEl('cce-side');
+  if (old && !old.classList.contains('rep')) return;   // 交戰評估（戰鬥中）優先
+  const onMap = !!gEl('cc-map'), space = !onMap && cceInSpace();
+  const X = CC.brep && S && CC.brep.week >= S.turn - 1 ? CC.brep : null;
+  const show = onMap ? !!(X && X.map !== false) : space && !!CC.rshow;
+  if (old) old.remove();
+  const tb = gEl('cce-rtab'); if (tb) tb.classList.toggle('on', space && show);
+  if (!show || !S) return;
+  if (!gEl('cce-tab-css')) { const st = document.createElement('style'); st.id = 'cce-tab-css'; st.textContent = CCE_TAB_CSS + CCE_REP_CSS; document.head.appendChild(st); }
+  const ncol = { ok: 'var(--own)', bad: '#ff8a7a', ev: '#c9a7ff' };
+  let body = '', rc = 'var(--cyan)', en = 'ROUND REPORT', anim = !old;
+  if (X) {
+    const L = X.L;
+    const RES = { win: ['勝利', X.kind === 'capture' ? 'VICTORY' : 'MISSION COMPLETE', 'var(--own)'], ret: ['撤退', 'WITHDRAWN', 'var(--yellow)'], lose: ['敗北', 'DEFEAT', 'var(--red)'], wipe: ['全滅', 'SQUAD LOST', 'var(--red)'] }[X.res];
+    const KIND = { capture: X.att ? '進攻' : '迎擊', raid: '地面突襲', op: '特戰任務' }[X.kind] || '戰鬥';
+    const row = (r, cls, v) => `<div class="sh ${cls}${r.dead ? ' dead' : ''}"><span class="nm">${CAP_HULLS[r.key].name}</span><div class="bars">${cceBar(r.hp, cls === 'f' || r.hp < 0.35 ? 'var(--red)' : 'var(--own)')}${cceBar(r.sh, 'var(--ally)')}</div><span class="v">${v}</span></div>`;
+    const by = (R) => { const m = new Map(); for (const r of R) { if (!m.has(r.sq)) m.set(r.sq, []); m.get(r.sq).push(r); } return [...m.entries()].sort((a, b) => a[0] - b[0]); };
+    const defRow = (D, f) => D.length ? `<div class="sq" style="color:${f ? '#ff8a96' : 'var(--own)'}">${f ? '敵方' : '我方'}軌道防禦 ${D.filter((d) => d.hp > 0).length}／${D.length} 座</div>` + D.map((d) => `<div class="sh ${f ? 'f' : ''}${d.hp > 0 ? '' : ' dead'}"><span class="nm">${cceDefNm(d.type)}</span><div class="bars">${cceBar(d.hp, f ? 'var(--red)' : 'var(--own)')}</div><span class="v">${d.hp > 0 ? Math.round(d.hp * 100) + '%' : '摧毀'}</span></div>`).join('') : '';
+    const mine = L ? by(L.own).map(([i, R]) => `<div class="sq" style="color:${i === 0 ? 'var(--own)' : 'var(--ally)'}">${i === 0 ? '★ ' : ''}${X.own[i] ? smuEsc(X.own[i]) : `第 ${i + 1} 隊`}</div>` + R.map((r) => row(r, i ? 'ai' : '', r.dead ? '<span style="color:var(--red)">擊沉</span>' : Math.round(r.hp * 100) + '%')).join('')).join('') + defRow(L.defsA, false) : '';
+    const foe = L ? by(L.foe).map(([i, R]) => `<div class="sq" style="color:#ff8a96">${X.foe[i] ? smuEsc(X.foe[i]) : `敵方第 ${i + 1} 隊`}</div>` + R.map((r) => row(r, 'f', r.dead ? '<span style="color:var(--dim)">擊沉</span>' : r.inb ? '<span style="color:#ff8a96">沒到</span>' : Math.round(r.hp * 100) + '%')).join('')).join('') + defRow(L.defsB, true) : '';
+    const lost = L ? L.own.filter((r) => r.dead).length : 0, nOwn = L ? L.own.length : 0, nFoe = L ? L.foe.length : 0;
+    const sgn = (v) => (v > 0 ? '+' : '') + v.toLocaleString();
+    rc = RES[2]; en = `BATTLE REPORT ・ ${smuEsc(S.sys[X.sys].name)}`;
+    body += `<div class="res"><div class="big">${RES[0]}</div><div class="sub"><span class="en2">${RES[1]}</span><span>${KIND}・第 ${X.week} 週・${_fmtT(X.t)}</span>${X.win != null ? `<span>開戰時勝率 <b style="color:${cceOddCol(X.win)}">${Math.round(X.win * 100)}%</b></span>` : ''}</div></div>
+      <div class="kpi"><div><span>擊沉</span><b>${X.ks}<small>／${nFoe}</small></b></div><div><span>損失</span><b style="color:${lost ? 'var(--red)' : '#fff'}">${lost}<small>／${nOwn}</small></b></div><div><span>戰功</span><b style="color:var(--gold)">${sgn(X.dm)}</b></div><div><span>資金</span><b>${sgn(X.dmo)}</b></div>${X.drp ? `<div><span>研究點</span><b style="color:#c9a7ff">${sgn(X.drp)}</b></div>` : ''}</div>
+      ${X.notes.length ? `<div class="lab"><span>結果</span></div>${X.notes.map((n) => `<div class="nt" style="--nc:${ncol[n.c] || 'var(--dim)'}">${smuEsc(n.t)}</div>`).join('')}` : ''}
+      <div class="lab"><span style="color:var(--own)">我方・戰後的狀態</span><span>船體</span></div>${mine || '<div class="ft">沒有資料</div>'}
+      <div class="lab"><span style="color:#ff8a96">敵方</span></div>${foe || '<div class="ft">沒有資料</div>'}`;
+  } else body += `<div class="ft" style="margin:2px 0 4px">這一回合你沒有親自打仗。</div>`;
+  if (space) {   // 這一回合的大事（上週＋這週）
+    const W = S.log.filter((x) => x.turn >= S.turn - 1 && !(X && X.notes.some((n) => n.t === x.t))).slice(-40).reverse();
+    const g = []; for (const x of W) { const l = g[g.length - 1]; if (l && l.t === x.turn) l.L.push(x); else g.push({ t: x.turn, L: [x] }); }
+    body += `<div class="lab"><span>這一回合的大事</span><span>${W.length} 件</span></div>${g.length ? g.map((G) => `<div class="sq">第 ${G.t} 週</div>${G.L.map((x) => `<div class="nt" style="--nc:${ncol[x.c] || 'var(--dim)'}">${smuEsc(x.t)}</div>`).join('')}`).join('') : '<div class="ft">沒有大事。</div>'}`;
+  }
+  body += CC.post && space ? `<button type="button" class="gomap" id="cce-gomap">打開星圖<kbd>${keyText('cap_map')}</kbd></button><div class="ft">戰場已經暫停。損傷會留到下一場：回有維修船塢的星系修理。</div>`
+    : `<div class="ft">損傷會留到下一場：回有維修船塢的星系修理。全部的事記在星圖的「紀錄」裡。</div>`;
+  const p = document.createElement('div'); p.id = 'cce-side'; p.className = 'rep' + (space ? ' sp' : ''); p.style.setProperty('--k', ccmK()); p.style.setProperty('--rc', rc);
+  p.innerHTML = `<div class="tilt${anim ? '' : ' still'}"><div class="hd"><h3>戰報</h3><span class="en">${en}</span><button type="button" class="x" title="收起">✕</button></div><div class="bd">${body}</div></div>`;
+  (onMap ? gEl('g-screen') : document.body).appendChild(p);
+  p.querySelector('.x').onclick = () => { if (onMap) { if (X) X.map = false; p.remove(); ccDraw(); } else { CC.rshow = false; cceRepRestore(); } };
+  const gm = gEl('cce-gomap'); if (gm) gm.onclick = ccPostLeave;
+}
+// 星系裡（巡航、戰鬥剛結束）的側邊按鈕「戰報」：和交戰評估同一個位置
+function cceRepTab() {
+  const old = gEl('cce-rtab'); if (old) old.remove();
+  if (!cceInSpace()) return;
+  if (!gEl('cce-tab-css')) { const st = document.createElement('style'); st.id = 'cce-tab-css'; st.textContent = CCE_TAB_CSS + CCE_REP_CSS; document.head.appendChild(st); }
+  const b = document.createElement('button'); b.type = 'button'; b.id = 'cce-rtab'; b.title = '這一回合的戰報（戰鬥結果、上週與這週的大事）';
+  b.innerHTML = '<i>▤</i><b>戰報</b><small>REPORT</small>';
+  b.onclick = () => { CC.rshow = !CC.rshow; cceRepRestore(); };
+  document.body.appendChild(b);
+}
+function cceRepOff() { const b = gEl('cce-rtab'); if (b) b.remove(); const p = gEl('cce-side'); if (p && p.classList.contains('rep')) p.remove(); }
+// 戰鬥剛結束：離開戰場、打開星圖（M、Esc、星圖按鈕、面板上的按鈕）
+function ccPostLeave() {
+  const Q = CC.post; if (!Q) return;
+  CC.post = null; CC.rshow = false; cceRepOff();
+  if (paused) { paused = false; updateTimeUI(); }
+  setPhase('menu');
+  const S = CC.S; CC.sel = -1; ccRender();
+  if (Q.week && !S.fin) ccTurnStart(S, true);
+}
+const CCE_REP_CSS = `body:has(#game:not([hidden])) #cce-side.rep{display:block}body.ccl-on #cce-side.rep{display:none}#g-screen > #cce-side.rep{top:128px}
+#cce-rtab{position:fixed;left:0;top:44%;z-index:7;pointer-events:auto;display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 9px 14px 7px;border:1px solid rgba(90,200,255,.6);border-left:0;cursor:pointer;background:linear-gradient(90deg,rgba(14,60,110,.88),rgba(8,24,52,.82));color:#fff;clip-path:polygon(0 0,100% 10px,100% calc(100% - 10px),0 100%);font-family:'Noto Sans TC','Microsoft JhengHei',sans-serif}
+#cce-rtab:hover,#cce-rtab.on{background:linear-gradient(90deg,#1f8ad8,#14407a)}
+#cce-rtab b{writing-mode:vertical-rl;font-size:15px;font-weight:900;letter-spacing:.3em}#cce-rtab small{writing-mode:vertical-rl;font:700 10px Rajdhani,Bahnschrift,sans-serif;letter-spacing:.24em;color:#a9dcff}#cce-rtab i{font-style:normal;font:700 13px Rajdhani,Bahnschrift,sans-serif;color:#7fdcff}
+body.ccl-on #cce-rtab,body:has(#game:not([hidden])) #cce-rtab{display:none}
+#cce-side.rep.sp{left:52px}#cce-side.rep.sp .tilt{max-height:calc(100vh / var(--k,1) - 400px)}
+#cce-side.rep .gomap{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;margin-top:14px;padding:10px;border:0;cursor:pointer;font:900 16px var(--jp);letter-spacing:.2em;color:#04122a;background:linear-gradient(100deg,#2f86ff,#3cc8ff);clip-path:polygon(10px 0,100% 0,calc(100% - 10px) 100%,0 100%)}
+#cce-side.rep .gomap:hover{filter:brightness(1.15)}#cce-side.rep .gomap kbd{font:700 12px var(--en);padding:1px 6px;border:1px solid rgba(4,18,42,.5);letter-spacing:0}
+#cce-side.rep .tilt{border-left-color:var(--rc)}#cce-side.rep .tilt::before{background:var(--rc)}#cce-side.rep .tilt.still{animation:none}
+#cce-side.rep .hd .en{color:var(--rc)}
+#cce-side.rep .res{display:flex;align-items:center;gap:16px;padding:4px 0 10px}
+#cce-side.rep .res .big{font:900 46px/1 var(--jp);letter-spacing:.14em;color:var(--rc);text-shadow:0 0 18px color-mix(in srgb,var(--rc) 45%,transparent)}
+#cce-side.rep .res .sub{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--dim)}
+#cce-side.rep .res .en2{font:700 11px var(--en);letter-spacing:.26em;color:var(--rc)}
+#cce-side.rep .kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(70px,1fr));gap:3px}
+#cce-side.rep .kpi > div{padding:6px 8px;background:rgba(12,20,42,.7);border-top:2px solid var(--rc);clip-path:polygon(0 0,100% 0,calc(100% - 6px) 100%,0 100%)}
+#cce-side.rep .kpi span{display:block;font-size:11px;color:var(--dim)}
+#cce-side.rep .kpi b{font:700 22px/1.15 var(--en);color:#fff}#cce-side.rep .kpi small{font-size:12px;color:var(--dim)}
+#cce-side.rep .nt{font-size:12.5px;line-height:1.5;padding:4px 8px;margin-top:3px;background:rgba(12,20,42,.55);border-left:2px solid var(--nc);color:#dfe8fa}`;
 
 // ═══════════════════════ 艦長生涯：任務／戰報／紀錄（2026-11-18）═══════════════════════
 // 照使用者對交戰評估的決定：不佔滿畫面，從星圖右側滑出一塊斜放的面板（和停泊大廳右側面板同一種傾斜），星圖照常可以點。
@@ -30770,6 +30886,7 @@ const CR_PROP_SET = [
   ['20_小型機械爪', -24, 8, Math.PI / 2, 60, 0.6], ['22_登艦梯', 8, -43, Math.PI, 60, 0.6], ['22_登艦梯', -8, -43, Math.PI, 60, 0.6],
   ['02_天車', 0, -44, 0, 1, 0, 0],   // 停在後面的另一台天車（x、y 縮放在 crEnsure 照機庫算）
 ];
+const CR_NEW = { '04_飛彈架': '28_飛彈架', '16_雙管砲塔': '29_雙管砲塔', '12_雙推進器艙': '30_雙推進器艙', '22_登艦梯': '31_登艦梯', '13_照明塔A': '32_照明塔A', '14_照明塔B': '33_照明塔B', '11_加工站': '34_加工站', '15_氣瓶組': '35_氣瓶組' };   // 舊模型 → dev/tools/hangar 重建的
 // 模型上的一點（原始單位）：pick(頂點陣列) 回傳一個點；模型載入後才算得出來
 function crPropPt(name, pick) {
   return hgProp(name).then((src) => {
@@ -30826,20 +30943,84 @@ function crRigSrc(name) {
     return { R, geos, mat: mesh.material, S, E, W, T, L1: S.distanceTo(E), L2: E.distanceTo(W), L3: W.distanceTo(T), a1: ang(S, E), a2: ang(E, W), a3: ang(W, T), dir: Math.sign(T.x - S.x) || 1 };
   }));
 }
-// 一座會彎的機械臂（模型原始單位；外面再縮放）。回傳的 A.ok 在模型載入後變 true
-function crRigArm(name) {
-  const A = { root: new THREE.Group(), yaw: new THREE.Group(), sh: new THREE.Group(), el: new THREE.Group(), wr: new THREE.Group(), ok: false, q: [0, 0, 0, 0], goal: null, rig: null };
+// ───── 重型機械臂（models/機庫/整備庫_24_重型機械臂.glb；由 dev/tools/arm/blender/build_arm.py 在 Blender 裡建的，2026-11-19）─────
+// 一個蒙皮網格、14 根骨頭、烘焙貼圖。六段參數動作（yaw／sh／el／wr／roll／grip，每段 1 秒，t＝參數 0～1）：肩、肘的油壓缸對準已經烘在動作裡。
+// 這裡不用 AnimationMixer：照每個參數直接從動作的關鍵格取骨頭的轉動。尺寸、關節範圍寫在 GLB 的 extras。
+// 這個檔載入失敗的話，退回上面切出來的 TRIPO 機械臂（06／07／08）。
+const CA = { src: null, D2R: Math.PI / 180 };
+// 用 Blender 腳本建的模型（dev/tools/arm/blender、dev/tools/hangar）：{ scene, clips＝{參數: [每根骨頭的關鍵格]}, lim＝{參數: {min,max,rest}}, X＝檔案裡帶的數字 }
+function caGlb(file) {
+  return CA[file] || (CA[file] = (async () => {
+    const r = await fetch(`models/${encodeURIComponent('機庫')}/${encodeURIComponent(`整備庫_${file}.glb`)}`);
+    if (!r.ok) throw new Error(file + '：HTTP ' + r.status);
+    if (!MODEL_LOAD.loader) MODEL_LOAD.loader = new GLTFLoader();
+    const g = await MODEL_LOAD.loader.parseAsync(await r.arrayBuffer(), '');
+    const clips = {}, lim = {}, X = {};
+    for (const c of g.animations) clips[c.name.replace('_param', '')] = c.tracks.filter((t) => !t.name.endsWith('.scale')).map((t) => ({ bone: t.name.split('.')[0], pos: t.name.endsWith('.position'), v: t.values, n: t.times.length }));
+    g.scene.traverse((o) => { if (o.isMesh) o.frustumCulled = false; for (const k in o.userData) { const v = o.userData[k]; if (typeof v === 'string') try { X[k] = JSON.parse(v); } catch (e) { /* 不是數字資料 */ } } });
+    for (const j of X.joints || []) lim[j.key] = j;
+    return { scene: g.scene, clips, lim, X };
+  })());
+}
+function caSrc() {
+  return CA.src || (CA.src = caGlb('24_重型機械臂').then((G) => { G.D = G.X.dim; if (!G.D || !G.clips.sh) throw new Error('重型機械臂：檔案裡沒有關節資料'); return G; }));
+}
+// 一座新的（骨架各自一份，網格與貼圖共用）
+function caMake(G) {
+  const root = G.scene.clone(true), bones = {}, sk = []; let S = null;
+  root.traverse((o) => { if (o.isBone) bones[o.name] = o; if (o.isSkinnedMesh) sk.push(o); });
+  for (const m of sk) { if (!S) S = new THREE.Skeleton(m.skeleton.bones.map((b) => bones[b.name]), m.skeleton.boneInverses); m.bind(S, m.bindMatrix); m.frustumCulled = false; }
+  return { root, bones };
+}
+const _caQ = [0, 0, 0, 1];
+function caPose(C) {
+  for (const k in C.G.clips) {
+    const L = C.G.lim[k], p = Math.max(0, Math.min(1, (C.ang[k] - L.min) / (L.max - L.min)));
+    for (const T of C.G.clips[k]) {
+      const f = p * (T.n - 1), i = Math.min(T.n - 2, Math.floor(f)), u = f - i, B = C.bones[T.bone];
+      if (T.pos) B.position.set(T.v[i * 3] + (T.v[i * 3 + 3] - T.v[i * 3]) * u, T.v[i * 3 + 1] + (T.v[i * 3 + 4] - T.v[i * 3 + 1]) * u, T.v[i * 3 + 2] + (T.v[i * 3 + 5] - T.v[i * 3 + 2]) * u);   // 會平移的骨頭（升降車的平台、天車的吊車與吊鉤）
+      else { THREE.Quaternion.slerpFlat(_caQ, 0, T.v, i * 4, T.v, i * 4 + 4, u); B.quaternion.fromArray(_caQ); }
+    }
+  }
+}
+// 反向運動學：工具中心點到世界座標 P，工具往下壓 tilt（弧度）。夾爪收起來當焊槍用
+function caAim(C, P, tilt) {
+  const D = C.G.D, k = CA.D2R; C.root.updateWorldMatrix(true, false);
+  const p = C.root.worldToLocal(P.clone()), r = Math.hypot(p.x, p.z), wx = r - D.L3 * Math.cos(tilt), wy = p.y - D.H + D.L3 * Math.sin(tilt);
+  const d0 = Math.hypot(wx, wy), d = Math.max(Math.abs(D.L1 - D.L2) + 1e-3, Math.min(D.L1 + D.L2 - 1e-3, d0));
+  const sh = (Math.atan2(wy, wx) + Math.acos((D.L1 * D.L1 + d * d - D.L2 * D.L2) / (2 * D.L1 * d))) / k, el = -(180 - Math.acos((D.L1 * D.L1 + D.L2 * D.L2 - d * d) / (2 * D.L1 * D.L2)) / k);
+  C.goal = { yaw: Math.atan2(-p.z, p.x) / k, sh, el, wr: -tilt / k - sh - el, roll: 0, grip: C.G.lim.grip.min + 5 };
+  return d0 <= D.L1 + D.L2;
+}
+function caRest(C, yaw) { C.goal = {}; for (const key in C.G.lim) C.goal[key] = C.G.lim[key].rest; C.goal.yaw = yaw / CA.D2R; }
+function caStep(C, k) {
+  if (!C.goal) return;
+  for (const key in C.goal) { const L = C.G.lim[key]; C.ang[key] += (Math.max(L.min, Math.min(L.max, C.goal[key])) - C.ang[key]) * k; }
+  caPose(C);
+}
+
+// 一座會彎的機械臂（外面再縮放）。回傳的 A.ok 在模型載入後變 true。
+// side＝站在船的哪一邊（-1 左、+1 右；手臂要朝船）。先試重型機械臂（A.ca），沒有那個檔才用切出來的 TRIPO 機械臂（A.rig）
+function crRigArm(name, side = -1) {
+  const A = { root: new THREE.Group(), yaw: new THREE.Group(), sh: new THREE.Group(), el: new THREE.Group(), wr: new THREE.Group(), ok: false, q: [0, 0, 0, 0], goal: null, rig: null, ca: null };
   A.root.add(A.yaw); A.yaw.add(A.sh); A.sh.add(A.el); A.el.add(A.wr);
-  crRigSrc(name).then((G) => {
+  const tower = name.startsWith('08');
+  caSrc().then((G) => {
+    // 外面是照 TRIPO 模型的原始單位縮放的；重型機械臂的單位是公尺，這裡除回來。08 的手臂朝 −x、06／07 朝 +x，照原本的朝向擺
+    const I = caMake(G); I.root.scale.setScalar((tower ? CR_ARM.caT : CR_ARM.ca) / A.root.scale.x); I.root.rotation.y = tower || side > 0 ? Math.PI : 0; A.root.add(I.root);
+    A.ca = { G, root: I.root, bones: I.bones, ang: {}, goal: null }; for (const key in G.lim) A.ca.ang[key] = G.lim[key].rest;
+    caPose(A.ca); A.ok = true;
+  }).catch(() => crRigSrc(name).then((G) => {
     A.rig = G; const m = (k, par) => { if (G.geos[k]) par.add(new THREE.Mesh(G.geos[k], G.mat)); };
     m(0, A.root); A.yaw.position.set(G.S.x, 0, 0); A.sh.position.set(0, G.S.y, 0); m(1, A.sh);
     A.el.position.set(G.E.x - G.S.x, G.E.y - G.S.y, 0); m(2, A.el); A.wr.position.set(G.W.x - G.E.x, G.W.y - G.E.y, 0); m(3, A.wr);
     A.ok = true;
-  }).catch(() => {});
+  }).catch(() => {}));
   return A;
 }
 // 反向運動學：讓工具尖端到世界座標 P；tilt＝工具往下壓的角度。回傳到不到得了
 function crRigAim(A, P, tilt = 0.5) {
+  if (A.ca) return caAim(A.ca, P, tilt);
   const G = A.rig; if (!G) return false;
   A.root.updateWorldMatrix(true, false);
   const p = A.root.worldToLocal(P.clone()), dx = p.x - G.S.x, dz = p.z, s0 = G.dir;
@@ -30854,32 +31035,38 @@ function crRigAim(A, P, tilt = 0.5) {
   return d0 <= G.L1 + G.L2 + G.L3 * 0.1;
 }
 // 收起來的姿勢：手臂立起來、前臂往前垂
-function crRigRest(A, yaw = 0) { A.goal = [yaw, 0.15 * (A.rig ? A.rig.dir : 1), -0.35 * (A.rig ? A.rig.dir : 1), 0]; }
+function crRigRest(A, yaw = 0) { if (A.ca) return caRest(A.ca, yaw); A.goal = [yaw, 0.15 * (A.rig ? A.rig.dir : 1), -0.35 * (A.rig ? A.rig.dir : 1), 0]; }
 function crRigStep(A, k) {
+  if (A.ca) return caStep(A.ca, k);
   if (!A.goal) return;
   for (let j = 0; j < 4; j++) { let d = A.goal[j] - A.q[j]; if (j === 0) d = Math.atan2(Math.sin(d), Math.cos(d)); A.q[j] += d * k; }
   A.yaw.rotation.y = A.q[0]; A.sh.rotation.z = A.q[1]; A.el.rotation.z = A.q[2]; A.wr.rotation.z = A.q[3];
 }
 function crRigTip(A, out = new THREE.Vector3()) {
+  if (A.ca) { const b = A.ca.bones.TCP; b.updateWorldMatrix(true, false); return out.setFromMatrixPosition(b.matrixWorld); }
   const G = A.rig; if (!G) return A.root.getWorldPosition(out);
   A.wr.updateWorldMatrix(true, false); return out.set(G.T.x - G.W.x, G.T.y - G.W.y, 0).applyMatrix4(A.wr.matrixWorld);
 }
 
 // 機械臂工作車：剪式升降車（17）上站一座會彎的機械臂（06／07）；整台沿著船邊開到要裝的位置，升降車撐高，手臂彎過去對準
 // 固定的機械臂：升降工作台（10）上站一座軌道機械臂（08），搆得到就幫忙
-const CR_ARM = { lift: 80, arm: 110, deck: 0.071, tower: 110, tarm: 130 };   // 縮放、升降車平台的高度（原始單位）
+const CR_ARM = { lift: 80, arm: 110, deck: 0.071, tower: 110, tarm: 130, ca: 1.15, caT: 1.5, craneY: 1.0 };   // 縮放、升降車平台的高度（原始單位）；ca、caT＝重型機械臂在工作車上、在升降工作台上的大小（1＝肩高 3.2）
 function crArmUnit(name, side, z) {
   const U = new THREE.Group(), cx = cbX(CR_K); U.position.set(cx + side * 16, 0.6, z); CB.scene.add(U);
   const lift = new THREE.Group(); lift.scale.setScalar(CR_ARM.lift); U.add(lift);
-  hgProp('17_剪式升降車').then((s) => lift.add(s.clone(true))).catch(() => {});
-  const R = crRigArm(name), arm = R.root; arm.scale.setScalar(CR_ARM.arm); U.add(arm);
+  // 新的升降車（25）：真的剪刀架，用 lift 參數（平台地板的高度）驅動；沒有那個檔才用舊的（靠拉長模型升高）
+  caGlb('25_剪式升降車').then((G) => { const I = caMake(G); U.add(I.root); A.L = { G, root: I.root, bones: I.bones, ang: { lift: G.lim.lift.rest } }; caPose(A.L); })
+    .catch(() => hgProp('17_剪式升降車').then((s) => lift.add(s.clone(true))).catch(() => {}));
+  const R = crRigArm(name, side), arm = R.root; arm.scale.setScalar(CR_ARM.arm); U.add(arm);
   const A = { U, lift, arm, R, side, mobile: true, home: U.position.clone(), ys: 1, goal: null, ysGoal: 1, aim: null };
   CR.arms.push(A); return A;
 }
 function crArmTower(side, z) {
   const cx = cbX(CR_K), x = cx + side * 22, top = 0.1089 * CR_ARM.tower + 0.6;
-  hgPlaceProps(CB.scene, [['10_升降工作台', x, z, Math.PI / 2, 1, 0.6]], CR_ARM.tower);
-  const R = crRigArm('08_軌道機械臂'), arm = R.root; arm.scale.setScalar(CR_ARM.tarm); arm.position.set(x - side * 0.5, top, z);
+  // 新的升降工作台（27）：平台夠深，機械臂站在正中間的安裝環上；沒有那個檔才用舊的
+  caGlb('27_升降工作台').then((G) => { const I = caMake(G); I.root.position.set(x, 0.6, z); I.root.rotation.y = Math.PI / 2; CB.scene.add(I.root); arm.position.set(x, 0.6 + G.X.top, z); })
+    .catch(() => hgPlaceProps(CB.scene, [['10_升降工作台', x, z, Math.PI / 2, 1, 0.6]], CR_ARM.tower));
+  const R = crRigArm('08_軌道機械臂', side), arm = R.root; arm.scale.setScalar(CR_ARM.tarm); arm.position.set(x - side * 0.5, top, z);
   // 08 的手臂往 −x 伸：右邊那座不用轉，左邊那座轉半圈朝船
   arm.rotation.y = side < 0 ? Math.PI : 0; CB.scene.add(arm);
   const A = { U: arm, arm, R, side, mobile: false, aim: null };
@@ -30893,10 +31080,10 @@ function crArmGo(A, P) {
   if (!A.mobile) return;
   if (!P) { A.goal = A.home.clone(); A.ysGoal = 1; return; }
   const u = CR.ship && CR.ship.userData.cr, cx = cbX(CR_K), hw = u ? ((u.bb.max.x - u.bb.min.x) * u.L) / 2 : 5, H = CR_HALL;
-  const reach = 0.045 * CR_ARM.arm, deck = CR_ARM.deck * CR_ARM.lift;
+  const ca = A.R.ca, reach = ca ? 6.2 * CR_ARM.ca : 0.045 * CR_ARM.arm, deck = CR_ARM.deck * CR_ARM.lift;   // 工作車停在離目標多遠、肩膀要撐多高
   const x = A.side < 0 ? Math.min(cx - hw - 2.5, P.x - reach) : Math.max(cx + hw + 2.5, P.x + reach);
   A.goal = new THREE.Vector3(Math.max(cx - H.hw + 4, Math.min(cx + H.hw - 4, x)), 0.6, Math.max(H.z0 + 6, Math.min(H.z1 - 4, P.z)));
-  A.ysGoal = Math.max(0.35, Math.min(3, (P.y - 0.6 - 0.04 * CR_ARM.arm) / deck));
+  A.ysGoal = Math.max(0.35, Math.min(3, (P.y - 0.6 - (ca ? 3.4 * CR_ARM.ca : 0.04 * CR_ARM.arm)) / deck));
 }
 function crArmsStep(dt) {
   const k = 1 - Math.exp(-dt * 2.4), deck = CR_ARM.deck * CR_ARM.lift, kq = 1 - Math.exp(-dt * 3.2), t = crNow();
@@ -30905,7 +31092,8 @@ function crArmsStep(dt) {
     if (A.mobile) {
       if (A.goal) A.U.position.lerp(A.goal, k);
       A.ys += (A.ysGoal - A.ys) * k;
-      A.lift.scale.y = CR_ARM.lift * A.ys; A.arm.position.y = deck * A.ys;
+      if (A.L) { const J = A.L.G.lim.lift, h = Math.max(J.min, Math.min(J.max, deck * A.ys)); A.L.ang.lift = h; caPose(A.L); A.arm.position.y = h; }
+      else { A.lift.scale.y = CR_ARM.lift * A.ys; A.arm.position.y = deck * A.ys; }
     }
     // 手臂：有目標＝彎過去（焊接時臂尖小幅畫圈）；沒有＝收起來，朝船
     if (A.aim) {
@@ -30926,8 +31114,22 @@ function crEnsure() {
   cbBuildHangar(CR_K, CR_HALL);
   const cx = cbX(CR_K), H = CR_HALL, CW = 0.3746, KY = 0.6, K = 120, KX = (H.hw * 2 - 1) / CW;   // 天車：橫跨整座機庫（模型寬 0.3746）
   for (const [name, x, z, ry, s, y = 0, sy] of CR_PROP_SET) {
-    if (name === '02_天車') { const [h] = hgPlaceProps(CB.scene, [[name, cx + x, z, ry, 1, H.h - 0.3 - 0.133 * K * KY]], 1); h.scale.set(KX, K * KY, K); continue; }
-    const [h] = hgPlaceProps(CB.scene, [[name, cx + x, z, ry, 1, y]], s); if (sy) h.scale.y *= sy;
+    if (name === '02_天車') {   // 停在後面的另一台：新的天車（26）照機庫的跨度建，不用拉寬；沒有那個檔才用舊的
+      caGlb('26_天車').then((G) => { const I = caMake(G); I.root.position.set(cx + x, H.h - CR_ARM.craneY, z); CB.scene.add(I.root); caPose({ G, bones: I.bones, ang: { trolley: 14, hook: 0 } }); })
+        .catch(() => { const [h] = hgPlaceProps(CB.scene, [[name, cx + x, z, ry, 1, H.h - 0.3 - 0.133 * K * KY]], 1); h.scale.set(KX, K * KY, K); });
+      continue;
+    }
+    if (name === '20_小型機械爪') {   // 牆邊的小機械爪：兩座縮小的重型機械臂，各擺一個姿勢；沒有那個檔才用舊的
+      caSrc().then((G) => [[-1.8, { yaw: 28, sh: 62, el: -112, wr: -30, grip: 22 }], [1.8, { yaw: -22, sh: 96, el: -82, wr: -68, grip: 0 }]].forEach(([dz, pose]) => {
+        const I = caMake(G), ang = {}; for (const key in G.lim) ang[key] = G.lim[key].rest;
+        I.root.scale.setScalar(0.38); I.root.position.set(cx + x, y, z + dz); I.root.rotation.y = x < 0 ? 0 : Math.PI; CB.scene.add(I.root); caPose({ G, bones: I.bones, ang: Object.assign(ang, pose) });
+      })).catch(() => hgPlaceProps(CB.scene, [[name, cx + x, z, ry, 1, y]], s));
+      continue;
+    }
+    const old = () => { const [h] = hgPlaceProps(CB.scene, [[name, cx + x, z, ry, 1, y]], s); if (sy) h.scale.y *= sy; };
+    // 重建過的靜態物件（單位是公尺，不用縮放；尺寸、朝向跟舊模型一樣）；沒有那個檔才用舊的
+    if (CR_NEW[name]) caGlb(CR_NEW[name]).then((G) => { const I = caMake(G); I.root.position.set(cx + x, y, z); I.root.rotation.y = ry; CB.scene.add(I.root); }).catch(old);
+    else old();
   }
   for (const it of CB_PROP_SET) if (it[2] > H.z1 + 6 || Math.abs(it[1]) > H.hw + 6) hgPlaceProps(CB.scene, [[it[0], cx + it[1] * (H.hw / CB_HALL.hw), it[2] + (H.z1 - CB_HALL.z1), it[3], 1, it[5] || 0]], it[4]);   // 機庫外面的（跟著機庫的大小往外挪）
   crArmUnit('06_機械臂A', -1, CR_SHIP_Z + 4); crArmUnit('07_機械臂B', 1, CR_SHIP_Z - 8);
@@ -30935,14 +31137,19 @@ function crEnsure() {
   // 天車（02）：橫跨機庫、掛在屋頂下，沿 z 開到要裝的位置；吊鉤下面一條鋼索吊著砲塔（舊的、新的）或飛彈架
   const g = CR.crane = new THREE.Group();
   const cr = new THREE.Group(); cr.scale.set(KX, K * KY, K); cr.position.y = H.h - 0.3 - 0.133 * K * KY; g.add(cr);
-  hgProp('02_天車').then((s) => cr.add(s.clone(true))).catch(() => {});
   g.userData.hookY = cr.position.y; g.userData.cr = cr;
-  crPropPt('02_天車', (v) => { const c = v.filter((p) => Math.abs(p.x) < 0.04); const my = Math.min(...c.map((p) => p.y)); return crMean(c.filter((p) => p.y < my + 0.006)); })
+  // 新的天車（26）：樑留在機庫中線，吊車沿著樑走、吊鉤升降（參數 trolley、hook），鋼索在模型裡；沒有那個檔才用舊的
+  caGlb('26_天車').then((G) => { const I = caMake(G); I.root.position.y = H.h - CR_ARM.craneY; g.add(I.root); g.userData.N = { G, root: I.root, bones: I.bones, ang: { trolley: 0, hook: 0 } }; g.userData.hookY = I.root.position.y + G.X.hook_y; caPose(g.userData.N); })
+    .catch(() => {
+      hgProp('02_天車').then((s) => cr.add(s.clone(true))).catch(() => {});
+      crPropPt('02_天車', (v) => { const c = v.filter((p) => Math.abs(p.x) < 0.04); const my = Math.min(...c.map((p) => p.y)); return crMean(c.filter((p) => p.y < my + 0.006)); })
     .then((p) => { cr.position.x = -p.x * KX; cr.position.z = -p.z * K; g.userData.hookY = cr.position.y + p.y * K * KY; }).catch(() => {});
+    });
   const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1, 6), new THREE.MeshStandardMaterial({ color: 0x2a2f38, metalness: 0.7, roughness: 0.4 }));
   cable.geometry.translate(0, 0.5, 0); cable.visible = false; g.add(cable); g.userData.cable = cable;
   const crate = new THREE.Group(); crate.scale.setScalar(85); crate.visible = false; g.add(crate); g.userData.crate = crate;
-  hgProp('04_飛彈架').then((s) => crate.add(s.clone(true))).catch(() => {});
+  caGlb(CR_NEW['04_飛彈架']).then((G) => { const I = caMake(G); I.root.scale.setScalar(1 / 85); crate.add(I.root); })   // 外面那層是照舊模型縮放 85 的，新的除回來
+    .catch(() => hgProp('04_飛彈架').then((s) => crate.add(s.clone(true))).catch(() => {}));
   g.position.set(cx, 0, H.z0 + 12); CB.scene.add(g);
   // 焊接火花：一池點（位置、速度在 JS 算）
   const N = 320, pos = new Float32Array(N * 3), col = new Float32Array(N * 3), geo = new THREE.BufferGeometry();
@@ -31051,6 +31258,8 @@ function crCrane(x, y, z, k = 1) {
   const C = CR.crane; if (!C) return;
   C.position.x += (x - C.position.x) * k; C.position.z += (z - C.position.z) * k;
   const top = C.userData.hookY, cb = C.userData.cable; cb.position.y = y; cb.scale.y = Math.max(0.05, top - y); cb.visible = top - y > 0.3;
+  const N = C.userData.N;   // 新的天車：C 的位置是「吊鉤在哪」，樑往回挪到機庫中線，差的那一段由吊車走
+  if (N) { const cx = cbX(CR_K), J = N.G.lim; N.root.position.x = cx - C.position.x; N.ang.trolley = Math.max(J.trolley.min, Math.min(J.trolley.max, C.position.x - cx)); N.ang.hook = Math.max(0, Math.min(J.hook.max, top - y)); caPose(N); cb.visible = false; }
   C.userData.crate.position.y = y - 0.028 * 85;
 }
 function crCaption(t) {

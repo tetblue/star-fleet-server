@@ -1,0 +1,51 @@
+<!doctype html><meta charset="utf-8"><title>機械臂 demo</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+html,body{margin:0;height:100%;background:#1a1e26;color:#e8ecf2;font:13px "Microsoft JhengHei",sans-serif;overflow:hidden}
+canvas{display:block}
+.pan{position:fixed;background:#0b0f16cc;border:1px solid #2c3a52;border-radius:8px;padding:10px 12px}
+#ui{left:10px;top:10px;width:290px}
+#hud{right:10px;top:10px;width:300px}
+h1{font-size:15px;margin:0 0 2px}
+.sub{color:#8fa0b8;font-size:12px;margin-bottom:8px;line-height:1.5}
+.row{display:flex;gap:6px;margin:6px 0;flex-wrap:wrap}
+button{font:inherit;background:#2b3140;color:#e8ecf2;border:1px solid #4a5468;border-radius:4px;padding:4px 10px;cursor:pointer}
+button.on{background:#2f6fc0;border-color:#6da6f0}
+button:hover{border-color:#8fb4e8}
+.j{display:grid;grid-template-columns:64px 1fr 62px;gap:6px;align-items:center;margin:3px 0}
+.j span:last-child{text-align:right;color:#9fd0ff;font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:#3f8ff0}
+.bar{height:8px;background:#232b3a;border-radius:4px;overflow:hidden;margin:3px 0 8px}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,#2f6fc0,#57c3ff)}
+.k{color:#8fa0b8}
+#res{white-space:pre-wrap;line-height:1.6;margin-top:8px;border-top:1px solid #2c3a52;padding-top:8px;max-height:46vh;overflow:auto}
+.ok{color:#6fe08a}.bad{color:#ff7b6b}
+#tip{left:50%;transform:translateX(-50%);bottom:10px;color:#8fa0b8;font-size:12px;padding:5px 12px}
+</style>
+<script type="importmap">{"imports":{"three":"/three/build/three.module.js","three/addons/":"/three/examples/jsm/"}}</script>
+<div id="ui" class="pan">
+  <h1 id="ttl">重型機械臂</h1>
+  <div class="sub">照 AnyMachine 的做法：零件、關節、油壓缸全部由腳本建出來，沒有用現成模型。Blender 版有烘焙貼圖，程式碼版是純色。</div>
+  <div class="row">
+    <button id="m-auto" class="on">自動作業</button>
+    <button id="m-manual">手動</button>
+    <button id="m-ik">拖曳目標</button>
+    <button id="b-pause">暫停</button>
+  </div>
+  <div id="joints"></div>
+  <div class="j" id="phi-row" style="display:none"><span>工具角度</span><input id="phi" type="range" min="-90" max="0" step="1" value="-90"><span id="phi-v">-90°</span></div>
+  <div class="row">
+    <button id="b-check">執行檢查</button>
+    <button id="b-glb">匯出 GLB</button>
+    <button id="b-col">碰撞盒</button>
+    <button id="b-ver">程式碼版</button>
+  </div>
+</div>
+<div id="hud" class="pan">
+  <div><span class="k">肩油壓缸</span> <span id="a-sh"></span></div><div class="bar"><i id="g-sh"></i></div>
+  <div><span class="k">肘油壓缸</span> <span id="a-el"></span></div><div class="bar"><i id="g-el"></i></div>
+  <div id="stat" class="k"></div>
+  <div id="res">按「執行檢查」：掃過每個關節、整段示範動作，找互穿、油壓缸脫出、撞地板。</div>
+</div>
+<div id="tip" class="pan">左鍵拖曳旋轉 · 右鍵平移 · 滾輪縮放</div>
+<script type="module" src="/demo.js"></script>

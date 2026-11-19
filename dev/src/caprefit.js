@@ -37,6 +37,7 @@ const CR_PROP_SET = [
   ['20_小型機械爪', -24, 8, Math.PI / 2, 60, 0.6], ['22_登艦梯', 8, -43, Math.PI, 60, 0.6], ['22_登艦梯', -8, -43, Math.PI, 60, 0.6],
   ['02_天車', 0, -44, 0, 1, 0, 0],   // 停在後面的另一台天車（x、y 縮放在 crEnsure 照機庫算）
 ];
+const CR_NEW = { '04_飛彈架': '28_飛彈架', '16_雙管砲塔': '29_雙管砲塔', '12_雙推進器艙': '30_雙推進器艙', '22_登艦梯': '31_登艦梯', '13_照明塔A': '32_照明塔A', '14_照明塔B': '33_照明塔B', '11_加工站': '34_加工站', '15_氣瓶組': '35_氣瓶組' };   // 舊模型 → dev/tools/hangar 重建的
 // 模型上的一點（原始單位）：pick(頂點陣列) 回傳一個點；模型載入後才算得出來
 function crPropPt(name, pick) {
   return hgProp(name).then((src) => {
@@ -93,20 +94,84 @@ function crRigSrc(name) {
     return { R, geos, mat: mesh.material, S, E, W, T, L1: S.distanceTo(E), L2: E.distanceTo(W), L3: W.distanceTo(T), a1: ang(S, E), a2: ang(E, W), a3: ang(W, T), dir: Math.sign(T.x - S.x) || 1 };
   }));
 }
-// 一座會彎的機械臂（模型原始單位；外面再縮放）。回傳的 A.ok 在模型載入後變 true
-function crRigArm(name) {
-  const A = { root: new THREE.Group(), yaw: new THREE.Group(), sh: new THREE.Group(), el: new THREE.Group(), wr: new THREE.Group(), ok: false, q: [0, 0, 0, 0], goal: null, rig: null };
+// ───── 重型機械臂（models/機庫/整備庫_24_重型機械臂.glb；由 dev/tools/arm/blender/build_arm.py 在 Blender 裡建的，2026-11-19）─────
+// 一個蒙皮網格、14 根骨頭、烘焙貼圖。六段參數動作（yaw／sh／el／wr／roll／grip，每段 1 秒，t＝參數 0～1）：肩、肘的油壓缸對準已經烘在動作裡。
+// 這裡不用 AnimationMixer：照每個參數直接從動作的關鍵格取骨頭的轉動。尺寸、關節範圍寫在 GLB 的 extras。
+// 這個檔載入失敗的話，退回上面切出來的 TRIPO 機械臂（06／07／08）。
+const CA = { src: null, D2R: Math.PI / 180 };
+// 用 Blender 腳本建的模型（dev/tools/arm/blender、dev/tools/hangar）：{ scene, clips＝{參數: [每根骨頭的關鍵格]}, lim＝{參數: {min,max,rest}}, X＝檔案裡帶的數字 }
+function caGlb(file) {
+  return CA[file] || (CA[file] = (async () => {
+    const r = await fetch(`models/${encodeURIComponent('機庫')}/${encodeURIComponent(`整備庫_${file}.glb`)}`);
+    if (!r.ok) throw new Error(file + '：HTTP ' + r.status);
+    if (!MODEL_LOAD.loader) MODEL_LOAD.loader = new GLTFLoader();
+    const g = await MODEL_LOAD.loader.parseAsync(await r.arrayBuffer(), '');
+    const clips = {}, lim = {}, X = {};
+    for (const c of g.animations) clips[c.name.replace('_param', '')] = c.tracks.filter((t) => !t.name.endsWith('.scale')).map((t) => ({ bone: t.name.split('.')[0], pos: t.name.endsWith('.position'), v: t.values, n: t.times.length }));
+    g.scene.traverse((o) => { if (o.isMesh) o.frustumCulled = false; for (const k in o.userData) { const v = o.userData[k]; if (typeof v === 'string') try { X[k] = JSON.parse(v); } catch (e) { /* 不是數字資料 */ } } });
+    for (const j of X.joints || []) lim[j.key] = j;
+    return { scene: g.scene, clips, lim, X };
+  })());
+}
+function caSrc() {
+  return CA.src || (CA.src = caGlb('24_重型機械臂').then((G) => { G.D = G.X.dim; if (!G.D || !G.clips.sh) throw new Error('重型機械臂：檔案裡沒有關節資料'); return G; }));
+}
+// 一座新的（骨架各自一份，網格與貼圖共用）
+function caMake(G) {
+  const root = G.scene.clone(true), bones = {}, sk = []; let S = null;
+  root.traverse((o) => { if (o.isBone) bones[o.name] = o; if (o.isSkinnedMesh) sk.push(o); });
+  for (const m of sk) { if (!S) S = new THREE.Skeleton(m.skeleton.bones.map((b) => bones[b.name]), m.skeleton.boneInverses); m.bind(S, m.bindMatrix); m.frustumCulled = false; }
+  return { root, bones };
+}
+const _caQ = [0, 0, 0, 1];
+function caPose(C) {
+  for (const k in C.G.clips) {
+    const L = C.G.lim[k], p = Math.max(0, Math.min(1, (C.ang[k] - L.min) / (L.max - L.min)));
+    for (const T of C.G.clips[k]) {
+      const f = p * (T.n - 1), i = Math.min(T.n - 2, Math.floor(f)), u = f - i, B = C.bones[T.bone];
+      if (T.pos) B.position.set(T.v[i * 3] + (T.v[i * 3 + 3] - T.v[i * 3]) * u, T.v[i * 3 + 1] + (T.v[i * 3 + 4] - T.v[i * 3 + 1]) * u, T.v[i * 3 + 2] + (T.v[i * 3 + 5] - T.v[i * 3 + 2]) * u);   // 會平移的骨頭（升降車的平台、天車的吊車與吊鉤）
+      else { THREE.Quaternion.slerpFlat(_caQ, 0, T.v, i * 4, T.v, i * 4 + 4, u); B.quaternion.fromArray(_caQ); }
+    }
+  }
+}
+// 反向運動學：工具中心點到世界座標 P，工具往下壓 tilt（弧度）。夾爪收起來當焊槍用
+function caAim(C, P, tilt) {
+  const D = C.G.D, k = CA.D2R; C.root.updateWorldMatrix(true, false);
+  const p = C.root.worldToLocal(P.clone()), r = Math.hypot(p.x, p.z), wx = r - D.L3 * Math.cos(tilt), wy = p.y - D.H + D.L3 * Math.sin(tilt);
+  const d0 = Math.hypot(wx, wy), d = Math.max(Math.abs(D.L1 - D.L2) + 1e-3, Math.min(D.L1 + D.L2 - 1e-3, d0));
+  const sh = (Math.atan2(wy, wx) + Math.acos((D.L1 * D.L1 + d * d - D.L2 * D.L2) / (2 * D.L1 * d))) / k, el = -(180 - Math.acos((D.L1 * D.L1 + D.L2 * D.L2 - d * d) / (2 * D.L1 * D.L2)) / k);
+  C.goal = { yaw: Math.atan2(-p.z, p.x) / k, sh, el, wr: -tilt / k - sh - el, roll: 0, grip: C.G.lim.grip.min + 5 };
+  return d0 <= D.L1 + D.L2;
+}
+function caRest(C, yaw) { C.goal = {}; for (const key in C.G.lim) C.goal[key] = C.G.lim[key].rest; C.goal.yaw = yaw / CA.D2R; }
+function caStep(C, k) {
+  if (!C.goal) return;
+  for (const key in C.goal) { const L = C.G.lim[key]; C.ang[key] += (Math.max(L.min, Math.min(L.max, C.goal[key])) - C.ang[key]) * k; }
+  caPose(C);
+}
+
+// 一座會彎的機械臂（外面再縮放）。回傳的 A.ok 在模型載入後變 true。
+// side＝站在船的哪一邊（-1 左、+1 右；手臂要朝船）。先試重型機械臂（A.ca），沒有那個檔才用切出來的 TRIPO 機械臂（A.rig）
+function crRigArm(name, side = -1) {
+  const A = { root: new THREE.Group(), yaw: new THREE.Group(), sh: new THREE.Group(), el: new THREE.Group(), wr: new THREE.Group(), ok: false, q: [0, 0, 0, 0], goal: null, rig: null, ca: null };
   A.root.add(A.yaw); A.yaw.add(A.sh); A.sh.add(A.el); A.el.add(A.wr);
-  crRigSrc(name).then((G) => {
+  const tower = name.startsWith('08');
+  caSrc().then((G) => {
+    // 外面是照 TRIPO 模型的原始單位縮放的；重型機械臂的單位是公尺，這裡除回來。08 的手臂朝 −x、06／07 朝 +x，照原本的朝向擺
+    const I = caMake(G); I.root.scale.setScalar((tower ? CR_ARM.caT : CR_ARM.ca) / A.root.scale.x); I.root.rotation.y = tower || side > 0 ? Math.PI : 0; A.root.add(I.root);
+    A.ca = { G, root: I.root, bones: I.bones, ang: {}, goal: null }; for (const key in G.lim) A.ca.ang[key] = G.lim[key].rest;
+    caPose(A.ca); A.ok = true;
+  }).catch(() => crRigSrc(name).then((G) => {
     A.rig = G; const m = (k, par) => { if (G.geos[k]) par.add(new THREE.Mesh(G.geos[k], G.mat)); };
     m(0, A.root); A.yaw.position.set(G.S.x, 0, 0); A.sh.position.set(0, G.S.y, 0); m(1, A.sh);
     A.el.position.set(G.E.x - G.S.x, G.E.y - G.S.y, 0); m(2, A.el); A.wr.position.set(G.W.x - G.E.x, G.W.y - G.E.y, 0); m(3, A.wr);
     A.ok = true;
-  }).catch(() => {});
+  }).catch(() => {}));
   return A;
 }
 // 反向運動學：讓工具尖端到世界座標 P；tilt＝工具往下壓的角度。回傳到不到得了
 function crRigAim(A, P, tilt = 0.5) {
+  if (A.ca) return caAim(A.ca, P, tilt);
   const G = A.rig; if (!G) return false;
   A.root.updateWorldMatrix(true, false);
   const p = A.root.worldToLocal(P.clone()), dx = p.x - G.S.x, dz = p.z, s0 = G.dir;
@@ -121,32 +186,38 @@ function crRigAim(A, P, tilt = 0.5) {
   return d0 <= G.L1 + G.L2 + G.L3 * 0.1;
 }
 // 收起來的姿勢：手臂立起來、前臂往前垂
-function crRigRest(A, yaw = 0) { A.goal = [yaw, 0.15 * (A.rig ? A.rig.dir : 1), -0.35 * (A.rig ? A.rig.dir : 1), 0]; }
+function crRigRest(A, yaw = 0) { if (A.ca) return caRest(A.ca, yaw); A.goal = [yaw, 0.15 * (A.rig ? A.rig.dir : 1), -0.35 * (A.rig ? A.rig.dir : 1), 0]; }
 function crRigStep(A, k) {
+  if (A.ca) return caStep(A.ca, k);
   if (!A.goal) return;
   for (let j = 0; j < 4; j++) { let d = A.goal[j] - A.q[j]; if (j === 0) d = Math.atan2(Math.sin(d), Math.cos(d)); A.q[j] += d * k; }
   A.yaw.rotation.y = A.q[0]; A.sh.rotation.z = A.q[1]; A.el.rotation.z = A.q[2]; A.wr.rotation.z = A.q[3];
 }
 function crRigTip(A, out = new THREE.Vector3()) {
+  if (A.ca) { const b = A.ca.bones.TCP; b.updateWorldMatrix(true, false); return out.setFromMatrixPosition(b.matrixWorld); }
   const G = A.rig; if (!G) return A.root.getWorldPosition(out);
   A.wr.updateWorldMatrix(true, false); return out.set(G.T.x - G.W.x, G.T.y - G.W.y, 0).applyMatrix4(A.wr.matrixWorld);
 }
 
 // 機械臂工作車：剪式升降車（17）上站一座會彎的機械臂（06／07）；整台沿著船邊開到要裝的位置，升降車撐高，手臂彎過去對準
 // 固定的機械臂：升降工作台（10）上站一座軌道機械臂（08），搆得到就幫忙
-const CR_ARM = { lift: 80, arm: 110, deck: 0.071, tower: 110, tarm: 130 };   // 縮放、升降車平台的高度（原始單位）
+const CR_ARM = { lift: 80, arm: 110, deck: 0.071, tower: 110, tarm: 130, ca: 1.15, caT: 1.5, craneY: 1.0 };   // 縮放、升降車平台的高度（原始單位）；ca、caT＝重型機械臂在工作車上、在升降工作台上的大小（1＝肩高 3.2）
 function crArmUnit(name, side, z) {
   const U = new THREE.Group(), cx = cbX(CR_K); U.position.set(cx + side * 16, 0.6, z); CB.scene.add(U);
   const lift = new THREE.Group(); lift.scale.setScalar(CR_ARM.lift); U.add(lift);
-  hgProp('17_剪式升降車').then((s) => lift.add(s.clone(true))).catch(() => {});
-  const R = crRigArm(name), arm = R.root; arm.scale.setScalar(CR_ARM.arm); U.add(arm);
+  // 新的升降車（25）：真的剪刀架，用 lift 參數（平台地板的高度）驅動；沒有那個檔才用舊的（靠拉長模型升高）
+  caGlb('25_剪式升降車').then((G) => { const I = caMake(G); U.add(I.root); A.L = { G, root: I.root, bones: I.bones, ang: { lift: G.lim.lift.rest } }; caPose(A.L); })
+    .catch(() => hgProp('17_剪式升降車').then((s) => lift.add(s.clone(true))).catch(() => {}));
+  const R = crRigArm(name, side), arm = R.root; arm.scale.setScalar(CR_ARM.arm); U.add(arm);
   const A = { U, lift, arm, R, side, mobile: true, home: U.position.clone(), ys: 1, goal: null, ysGoal: 1, aim: null };
   CR.arms.push(A); return A;
 }
 function crArmTower(side, z) {
   const cx = cbX(CR_K), x = cx + side * 22, top = 0.1089 * CR_ARM.tower + 0.6;
-  hgPlaceProps(CB.scene, [['10_升降工作台', x, z, Math.PI / 2, 1, 0.6]], CR_ARM.tower);
-  const R = crRigArm('08_軌道機械臂'), arm = R.root; arm.scale.setScalar(CR_ARM.tarm); arm.position.set(x - side * 0.5, top, z);
+  // 新的升降工作台（27）：平台夠深，機械臂站在正中間的安裝環上；沒有那個檔才用舊的
+  caGlb('27_升降工作台').then((G) => { const I = caMake(G); I.root.position.set(x, 0.6, z); I.root.rotation.y = Math.PI / 2; CB.scene.add(I.root); arm.position.set(x, 0.6 + G.X.top, z); })
+    .catch(() => hgPlaceProps(CB.scene, [['10_升降工作台', x, z, Math.PI / 2, 1, 0.6]], CR_ARM.tower));
+  const R = crRigArm('08_軌道機械臂', side), arm = R.root; arm.scale.setScalar(CR_ARM.tarm); arm.position.set(x - side * 0.5, top, z);
   // 08 的手臂往 −x 伸：右邊那座不用轉，左邊那座轉半圈朝船
   arm.rotation.y = side < 0 ? Math.PI : 0; CB.scene.add(arm);
   const A = { U: arm, arm, R, side, mobile: false, aim: null };
@@ -160,10 +231,10 @@ function crArmGo(A, P) {
   if (!A.mobile) return;
   if (!P) { A.goal = A.home.clone(); A.ysGoal = 1; return; }
   const u = CR.ship && CR.ship.userData.cr, cx = cbX(CR_K), hw = u ? ((u.bb.max.x - u.bb.min.x) * u.L) / 2 : 5, H = CR_HALL;
-  const reach = 0.045 * CR_ARM.arm, deck = CR_ARM.deck * CR_ARM.lift;
+  const ca = A.R.ca, reach = ca ? 6.2 * CR_ARM.ca : 0.045 * CR_ARM.arm, deck = CR_ARM.deck * CR_ARM.lift;   // 工作車停在離目標多遠、肩膀要撐多高
   const x = A.side < 0 ? Math.min(cx - hw - 2.5, P.x - reach) : Math.max(cx + hw + 2.5, P.x + reach);
   A.goal = new THREE.Vector3(Math.max(cx - H.hw + 4, Math.min(cx + H.hw - 4, x)), 0.6, Math.max(H.z0 + 6, Math.min(H.z1 - 4, P.z)));
-  A.ysGoal = Math.max(0.35, Math.min(3, (P.y - 0.6 - 0.04 * CR_ARM.arm) / deck));
+  A.ysGoal = Math.max(0.35, Math.min(3, (P.y - 0.6 - (ca ? 3.4 * CR_ARM.ca : 0.04 * CR_ARM.arm)) / deck));
 }
 function crArmsStep(dt) {
   const k = 1 - Math.exp(-dt * 2.4), deck = CR_ARM.deck * CR_ARM.lift, kq = 1 - Math.exp(-dt * 3.2), t = crNow();
@@ -172,7 +243,8 @@ function crArmsStep(dt) {
     if (A.mobile) {
       if (A.goal) A.U.position.lerp(A.goal, k);
       A.ys += (A.ysGoal - A.ys) * k;
-      A.lift.scale.y = CR_ARM.lift * A.ys; A.arm.position.y = deck * A.ys;
+      if (A.L) { const J = A.L.G.lim.lift, h = Math.max(J.min, Math.min(J.max, deck * A.ys)); A.L.ang.lift = h; caPose(A.L); A.arm.position.y = h; }
+      else { A.lift.scale.y = CR_ARM.lift * A.ys; A.arm.position.y = deck * A.ys; }
     }
     // 手臂：有目標＝彎過去（焊接時臂尖小幅畫圈）；沒有＝收起來，朝船
     if (A.aim) {
@@ -193,8 +265,22 @@ function crEnsure() {
   cbBuildHangar(CR_K, CR_HALL);
   const cx = cbX(CR_K), H = CR_HALL, CW = 0.3746, KY = 0.6, K = 120, KX = (H.hw * 2 - 1) / CW;   // 天車：橫跨整座機庫（模型寬 0.3746）
   for (const [name, x, z, ry, s, y = 0, sy] of CR_PROP_SET) {
-    if (name === '02_天車') { const [h] = hgPlaceProps(CB.scene, [[name, cx + x, z, ry, 1, H.h - 0.3 - 0.133 * K * KY]], 1); h.scale.set(KX, K * KY, K); continue; }
-    const [h] = hgPlaceProps(CB.scene, [[name, cx + x, z, ry, 1, y]], s); if (sy) h.scale.y *= sy;
+    if (name === '02_天車') {   // 停在後面的另一台：新的天車（26）照機庫的跨度建，不用拉寬；沒有那個檔才用舊的
+      caGlb('26_天車').then((G) => { const I = caMake(G); I.root.position.set(cx + x, H.h - CR_ARM.craneY, z); CB.scene.add(I.root); caPose({ G, bones: I.bones, ang: { trolley: 14, hook: 0 } }); })
+        .catch(() => { const [h] = hgPlaceProps(CB.scene, [[name, cx + x, z, ry, 1, H.h - 0.3 - 0.133 * K * KY]], 1); h.scale.set(KX, K * KY, K); });
+      continue;
+    }
+    if (name === '20_小型機械爪') {   // 牆邊的小機械爪：兩座縮小的重型機械臂，各擺一個姿勢；沒有那個檔才用舊的
+      caSrc().then((G) => [[-1.8, { yaw: 28, sh: 62, el: -112, wr: -30, grip: 22 }], [1.8, { yaw: -22, sh: 96, el: -82, wr: -68, grip: 0 }]].forEach(([dz, pose]) => {
+        const I = caMake(G), ang = {}; for (const key in G.lim) ang[key] = G.lim[key].rest;
+        I.root.scale.setScalar(0.38); I.root.position.set(cx + x, y, z + dz); I.root.rotation.y = x < 0 ? 0 : Math.PI; CB.scene.add(I.root); caPose({ G, bones: I.bones, ang: Object.assign(ang, pose) });
+      })).catch(() => hgPlaceProps(CB.scene, [[name, cx + x, z, ry, 1, y]], s));
+      continue;
+    }
+    const old = () => { const [h] = hgPlaceProps(CB.scene, [[name, cx + x, z, ry, 1, y]], s); if (sy) h.scale.y *= sy; };
+    // 重建過的靜態物件（單位是公尺，不用縮放；尺寸、朝向跟舊模型一樣）；沒有那個檔才用舊的
+    if (CR_NEW[name]) caGlb(CR_NEW[name]).then((G) => { const I = caMake(G); I.root.position.set(cx + x, y, z); I.root.rotation.y = ry; CB.scene.add(I.root); }).catch(old);
+    else old();
   }
   for (const it of CB_PROP_SET) if (it[2] > H.z1 + 6 || Math.abs(it[1]) > H.hw + 6) hgPlaceProps(CB.scene, [[it[0], cx + it[1] * (H.hw / CB_HALL.hw), it[2] + (H.z1 - CB_HALL.z1), it[3], 1, it[5] || 0]], it[4]);   // 機庫外面的（跟著機庫的大小往外挪）
   crArmUnit('06_機械臂A', -1, CR_SHIP_Z + 4); crArmUnit('07_機械臂B', 1, CR_SHIP_Z - 8);
@@ -202,14 +288,19 @@ function crEnsure() {
   // 天車（02）：橫跨機庫、掛在屋頂下，沿 z 開到要裝的位置；吊鉤下面一條鋼索吊著砲塔（舊的、新的）或飛彈架
   const g = CR.crane = new THREE.Group();
   const cr = new THREE.Group(); cr.scale.set(KX, K * KY, K); cr.position.y = H.h - 0.3 - 0.133 * K * KY; g.add(cr);
-  hgProp('02_天車').then((s) => cr.add(s.clone(true))).catch(() => {});
   g.userData.hookY = cr.position.y; g.userData.cr = cr;
-  crPropPt('02_天車', (v) => { const c = v.filter((p) => Math.abs(p.x) < 0.04); const my = Math.min(...c.map((p) => p.y)); return crMean(c.filter((p) => p.y < my + 0.006)); })
+  // 新的天車（26）：樑留在機庫中線，吊車沿著樑走、吊鉤升降（參數 trolley、hook），鋼索在模型裡；沒有那個檔才用舊的
+  caGlb('26_天車').then((G) => { const I = caMake(G); I.root.position.y = H.h - CR_ARM.craneY; g.add(I.root); g.userData.N = { G, root: I.root, bones: I.bones, ang: { trolley: 0, hook: 0 } }; g.userData.hookY = I.root.position.y + G.X.hook_y; caPose(g.userData.N); })
+    .catch(() => {
+      hgProp('02_天車').then((s) => cr.add(s.clone(true))).catch(() => {});
+      crPropPt('02_天車', (v) => { const c = v.filter((p) => Math.abs(p.x) < 0.04); const my = Math.min(...c.map((p) => p.y)); return crMean(c.filter((p) => p.y < my + 0.006)); })
     .then((p) => { cr.position.x = -p.x * KX; cr.position.z = -p.z * K; g.userData.hookY = cr.position.y + p.y * K * KY; }).catch(() => {});
+    });
   const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1, 6), new THREE.MeshStandardMaterial({ color: 0x2a2f38, metalness: 0.7, roughness: 0.4 }));
   cable.geometry.translate(0, 0.5, 0); cable.visible = false; g.add(cable); g.userData.cable = cable;
   const crate = new THREE.Group(); crate.scale.setScalar(85); crate.visible = false; g.add(crate); g.userData.crate = crate;
-  hgProp('04_飛彈架').then((s) => crate.add(s.clone(true))).catch(() => {});
+  caGlb(CR_NEW['04_飛彈架']).then((G) => { const I = caMake(G); I.root.scale.setScalar(1 / 85); crate.add(I.root); })   // 外面那層是照舊模型縮放 85 的，新的除回來
+    .catch(() => hgProp('04_飛彈架').then((s) => crate.add(s.clone(true))).catch(() => {}));
   g.position.set(cx, 0, H.z0 + 12); CB.scene.add(g);
   // 焊接火花：一池點（位置、速度在 JS 算）
   const N = 320, pos = new Float32Array(N * 3), col = new Float32Array(N * 3), geo = new THREE.BufferGeometry();
@@ -318,6 +409,8 @@ function crCrane(x, y, z, k = 1) {
   const C = CR.crane; if (!C) return;
   C.position.x += (x - C.position.x) * k; C.position.z += (z - C.position.z) * k;
   const top = C.userData.hookY, cb = C.userData.cable; cb.position.y = y; cb.scale.y = Math.max(0.05, top - y); cb.visible = top - y > 0.3;
+  const N = C.userData.N;   // 新的天車：C 的位置是「吊鉤在哪」，樑往回挪到機庫中線，差的那一段由吊車走
+  if (N) { const cx = cbX(CR_K), J = N.G.lim; N.root.position.x = cx - C.position.x; N.ang.trolley = Math.max(J.trolley.min, Math.min(J.trolley.max, C.position.x - cx)); N.ang.hook = Math.max(0, Math.min(J.hook.max, top - y)); caPose(N); cb.visible = false; }
   C.userData.crate.position.y = y - 0.028 * 85;
 }
 function crCaption(t) {
