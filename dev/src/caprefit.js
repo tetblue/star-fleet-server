@@ -373,7 +373,7 @@ function crMakeShip(c, D, fac) {
   const raw = mountsOf(key).filter((m) => getModel(m.hk[0] + 'w' + m.w)), slots = capMountSlots(raw), mounts = [];
   raw.forEach((m0, j) => {
     const sl = slots[j], W = crWeapon(m0, sl, CAP_FX.look ? D.mod : W0), Wm = getModel(W.key); if (!Wm) return;
-    const o = new THREE.Mesh(Wm.lods[Math.min(1, Wm.lods.length - 1)], Wm.mat); setMountObj(o, W.m); body.add(o);
+    const o = new THREE.Mesh(Wm.lods[Math.min(1, Wm.lods.length - 1)], cbInkMat(Wm.mat)); setMountObj(o, W.m); body.add(o);
     const gk = (WEAPON_GK['eamcrib'.indexOf(m0.hk[0])] || '')[m0.w]; mounts.push({ o, slot: sl || (gk === 'x' ? 'msl' : null), key: W.key, home: o.position.clone() });
   });
   const geo = M.lods[0]; if (!geo.boundingBox) geo.computeBoundingBox(); if (!geo.attributes.normal) geo.computeVertexNormals();

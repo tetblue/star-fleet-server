@@ -30772,8 +30772,8 @@ function cbMakeShip(hull, fac) {
   const H = CAP_HULLS[hull]; if (!H) return null;
   const fk = FAC_KEY[fac] || 'e', key = fk + H.look, M = getModel(key) || getModel('e' + H.look); if (!M) return null;
   const L = CB_LEN[hull] || 30, g = new THREE.Group(), body = new THREE.Group();
-  body.add(new THREE.Mesh(M.lods[0], M.mat));
-  for (const m of mountsOf(key)) { const W = getModel(fk + 'w' + m.w); if (!W) continue; const o = new THREE.Mesh(W.lods[Math.min(1, W.lods.length - 1)], W.mat); setMountObj(o, m); body.add(o); }
+  body.add(new THREE.Mesh(M.lods[0], cbInkMat(M.mat)));
+  for (const m of mountsOf(key)) { const W = getModel(fk + 'w' + m.w); if (!W) continue; const o = new THREE.Mesh(W.lods[Math.min(1, W.lods.length - 1)], cbInkMat(W.mat)); setMountObj(o, m); body.add(o); }
   const geo = M.lods[0]; geo.computeBoundingBox(); const bb = geo.boundingBox;
   const cx = (bb.min.x + bb.max.x) / 2, cz = (bb.min.z + bb.max.z) / 2, y0 = 0.3 + CB_CRADLE;
   body.scale.setScalar(L); g.add(body);
@@ -30848,6 +30848,15 @@ function cbStep() {
 }
 // ── 描邊（設計圖是卡通描邊的畫風）：整個場景先畫到一張有深度的畫布，再用深度的二階差分找出輪廓與折角，疊上深色的線 ──
 // 深度緩衝的值在平面上對螢幕座標是線性的，二階差分＝0，所以大片的牆和地板不會被誤判；除以（1 − 深度）＝看相對變化，遠近的線一樣清楚
+// 船的材質：複製一份，畫的時候透明度寫 0.5 當記號（不透明的材質不混色，這個值只有描邊那一關會讀）。描邊看到整片都是 0.5 就知道是船身內部
+const CB_INK_MATS = new WeakMap();
+function cbInkMat(src) {
+  let m = CB_INK_MATS.get(src); if (m) return m;
+  m = src.clone(); const base = src.onBeforeCompile, key = src.customProgramCacheKey;
+  m.onBeforeCompile = (sh, r) => { if (base) base.call(m, sh, r); sh.fragmentShader = sh.fragmentShader.replace('#include <dithering_fragment>', '#include <dithering_fragment>\n  gl_FragColor.a = 0.5;'); };
+  m.customProgramCacheKey = () => (key ? key.call(src) : '') + '|ink';
+  CB_INK_MATS.set(src, m); return m;
+}
 const CB_INK = { on: true, rt: null, mat: null, scene: null, cam: null, v: new THREE.Vector2() };
 function cbRender(C) {
   const r = CB.r, K = CB_INK;
@@ -30860,11 +30869,13 @@ function cbRender(C) {
       vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
       fragmentShader: `uniform sampler2D tC, tD; uniform vec2 px; varying vec2 vUv;
         float dz(vec2 o) { return texture2D(tD, vUv + o * px).x; }
+        float al(vec2 o) { return texture2D(tC, vUv + o * px).a; }
         void main() {
           vec4 c = texture2D(tC, vUv);
           float d = dz(vec2(0.0)), a = dz(vec2(1.7, 0.0)), b = dz(vec2(-1.7, 0.0)), e = dz(vec2(0.0, 1.7)), f = dz(vec2(0.0, -1.7));
           float lap = abs(a + b - 2.0 * d) + abs(e + f - 2.0 * d), near = min(d, min(min(a, b), min(e, f)));
-          float k = smoothstep(0.004, 0.02, lap / (1.0 - near + 1e-7));
+          float sa = abs(c.a - 0.5) + abs(al(vec2(1.7, 0.0)) - 0.5) + abs(al(vec2(-1.7, 0.0)) - 0.5) + abs(al(vec2(0.0, 1.7)) - 0.5) + abs(al(vec2(0.0, -1.7)) - 0.5);   // 五個點都在船身上（透明度 0.5）＝船的內部
+          float rel = lap / (1.0 - near + 1e-7), k = sa < 0.05 ? smoothstep(0.3, 0.6, rel) : smoothstep(0.004, 0.02, rel);   // 船身裡面的折角不描（細節太多會整艘發黑），只留外輪廓
           gl_FragColor = vec4(mix(c.rgb, vec3(0.012, 0.016, 0.03), k * 0.92), 1.0);
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
@@ -31313,7 +31324,7 @@ function crMakeShip(c, D, fac) {
   const raw = mountsOf(key).filter((m) => getModel(m.hk[0] + 'w' + m.w)), slots = capMountSlots(raw), mounts = [];
   raw.forEach((m0, j) => {
     const sl = slots[j], W = crWeapon(m0, sl, CAP_FX.look ? D.mod : W0), Wm = getModel(W.key); if (!Wm) return;
-    const o = new THREE.Mesh(Wm.lods[Math.min(1, Wm.lods.length - 1)], Wm.mat); setMountObj(o, W.m); body.add(o);
+    const o = new THREE.Mesh(Wm.lods[Math.min(1, Wm.lods.length - 1)], cbInkMat(Wm.mat)); setMountObj(o, W.m); body.add(o);
     const gk = (WEAPON_GK['eamcrib'.indexOf(m0.hk[0])] || '')[m0.w]; mounts.push({ o, slot: sl || (gk === 'x' ? 'msl' : null), key: W.key, home: o.position.clone() });
   });
   const geo = M.lods[0]; if (!geo.boundingBox) geo.computeBoundingBox(); if (!geo.attributes.normal) geo.computeVertexNormals();
