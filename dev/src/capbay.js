@@ -24,8 +24,8 @@ function cbInit() {
   const r = CB.r = new THREE.WebGLRenderer({ canvas: CB.cv, antialias: true });
   r.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5)); r.outputColorSpace = THREE.SRGBColorSpace;
   r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.1;
-  const S = CB.scene = new THREE.Scene(); S.background = new THREE.Color(0x8e9db0); S.fog = new THREE.Fog(0x8e9db0, 180, 480);   // 白天的基地（參考圖是明亮的）
-  CB.cam = new THREE.PerspectiveCamera(36, 2, 0.5, 900);
+  const S = CB.scene = new THREE.Scene(); cbSky(S);   // 背景：宇宙
+  CB.cam = new THREE.PerspectiveCamera(36, 2, 0.5, 1800);
   CB.glowTex = typeof dockGlowTex === 'function' ? dockGlowTex() : null;
   S.add(new THREE.HemisphereLight(0xdfe8f6, 0x4a4640, 1.5), new THREE.AmbientLight(0x505868, 0.8));
   const sun = new THREE.DirectionalLight(0xfff4e4, 2.6); sun.position.set(60, 120, 90); S.add(sun);
@@ -50,6 +50,28 @@ function cbSize() {
   CB.W = b.width; CB.H = b.height; CB.r.setSize(b.width, b.height, false); CB.cam.aspect = b.width / b.height; CB.cam.updateProjectionMatrix();
 }
 
+// ── 背景：宇宙。基地在一顆沒有大氣的衛星上：天是黑的、滿天星，遠方一顆行星和一顆小衛星；地面照樣被太陽照亮，遠處淡進黑暗 ──
+function cbSky(S) {
+  let sd = 7; const rnd = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+  const sky = hgTex(2048, 1024, (g, w, h) => {
+    g.fillStyle = '#05070c'; g.fillRect(0, 0, w, h);
+    const band = g.createLinearGradient(0, h * 0.2, 0, h * 0.62); band.addColorStop(0, 'rgba(40,60,110,0)'); band.addColorStop(0.55, 'rgba(60,84,150,.2)'); band.addColorStop(1, 'rgba(30,44,80,0)');
+    g.fillStyle = band; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 2800; i++) {
+      const x = rnd() * w, y = rnd() * h * 0.6, r = rnd() < 0.04 ? 1.7 : rnd() * 0.9 + 0.3;
+      g.fillStyle = `rgba(${200 + rnd() * 55 | 0},${212 + rnd() * 43 | 0},255,${0.35 + rnd() * 0.65})`; g.beginPath(); g.arc(x, y, r, 0, 6.3); g.fill();
+    }
+  });
+  sky.mapping = THREE.EquirectangularReflectionMapping; S.background = sky; S.fog = new THREE.Fog(0x0a0d14, 260, 760);
+  const pt = hgTex(512, 256, (g, w, h) => {
+    for (let y = 0; y < h; y += 2) { const t = y / h, k = 0.5 + 0.5 * Math.sin(t * 38 + Math.sin(t * 9) * 3); g.fillStyle = `rgb(${60 + 70 * k | 0},${110 + 60 * k | 0},${170 + 50 * k | 0})`; g.fillRect(0, y, w, 2); }
+    for (let i = 0; i < 160; i++) { g.fillStyle = `rgba(235,242,255,${0.05 + rnd() * 0.12})`; g.beginPath(); g.ellipse(rnd() * w, rnd() * h, 14 + rnd() * 46, 2 + rnd() * 5, 0, 0, 6.3); g.fill(); }
+  });
+  const planet = new THREE.Mesh(new THREE.SphereGeometry(190, 48, 32), new THREE.MeshStandardMaterial({ map: pt, roughness: 1, metalness: 0, fog: false }));
+  planet.position.set(cbX(2) - 330, 150, -640); planet.rotation.z = 0.35; S.add(planet);
+  const moon = new THREE.Mesh(new THREE.SphereGeometry(26, 24, 16), new THREE.MeshStandardMaterial({ color: 0xb9b4ac, roughness: 1, fog: false }));
+  moon.position.set(cbX(2) + 380, 250, -520); S.add(moon);
+}
 // ── 基地地面：大片水泥停機坪 ──
 function cbBuildSite() {
   const S = CB.scene;
@@ -65,10 +87,11 @@ function cbBuildSite() {
 // H＝機庫的尺寸（整修庫比較大）
 function cbBuildHangar(k, H = CB_HALL) {
   const S = CB.scene, M = HG.mats, G = new THREE.Group(); G.position.x = cbX(k); S.add(G);
+  const old = [];   // 用方塊蓋的機庫本體：新模型載入後收起來（載入失敗就留著）
   const white = new THREE.MeshStandardMaterial({ color: 0xdfe4ea, metalness: 0.25, roughness: 0.55 }), navy = new THREE.MeshStandardMaterial({ color: 0x24375e, metalness: 0.3, roughness: 0.5 });
   const frameM = new THREE.MeshStandardMaterial({ color: 0x5d6675, metalness: 0.45, roughness: 0.45 }), floorM = new THREE.MeshStandardMaterial({ color: 0x4a515c, metalness: 0.3, roughness: 0.7 });
-  const box = (w, h, d, x, y, z, m) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.position.set(x, y, z); G.add(o); return o; };
-  const plane = (w, h, x, y, z, ry, mat) => { const o = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat); o.position.set(x, y, z); o.rotation.y = ry; G.add(o); return o; };
+  const box = (w, h, d, x, y, z, m) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.position.set(x, y, z); G.add(o); old.push(o); return o; };
+  const plane = (w, h, x, y, z, ry, mat) => { const o = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat); o.position.set(x, y, z); o.rotation.y = ry; G.add(o); old.push(o); return o; };
   const L = H.z1 - H.z0, zc = (H.z0 + H.z1) / 2, T = 3, Y0 = 0.6;
   // 底座：比機庫大一圈的平台，前方是停機坪（黃框、警示條、V 標誌、編號）
   const pad = hgTex(512, 704, (g, w, h) => {
@@ -79,10 +102,10 @@ function cbBuildHangar(k, H = CB_HALL) {
     hgChevron(g, w / 2, 545, 40, '#e8ecf2');
     g.fillStyle = 'rgba(232,236,242,.85)'; g.font = 'bold 54px sans-serif'; g.textAlign = 'center'; g.fillText(`0${k + 1}`, w - 70, 455);
   });
-  const base = new THREE.Mesh(new THREE.BoxGeometry(H.hw * 2 + 12, Y0, L + 24), [floorM, floorM, new THREE.MeshStandardMaterial({ map: pad, metalness: 0.25, roughness: 0.7 }), floorM, floorM, floorM]); base.position.set(0, Y0 / 2, (H.z0 + H.z1) / 2 + 8); G.add(base);
+  const base = new THREE.Mesh(new THREE.BoxGeometry(H.hw * 2 + 12, Y0, L + 24), [floorM, floorM, new THREE.MeshStandardMaterial({ map: pad, metalness: 0.25, roughness: 0.7 }), floorM, floorM, floorM]); base.position.set(0, Y0 / 2, (H.z0 + H.z1) / 2 + 8); G.add(base); old.push(base);
   // 機庫內地板：深一點的鋼板＋托架區的白框
   const inner = hgTex(256, 512, (g, w, h) => { g.fillStyle = '#3c434d'; g.fillRect(0, 0, w, h); g.strokeStyle = 'rgba(232,236,242,.7)'; g.lineWidth = 4; g.strokeRect(40, 70, w - 80, h - 120); g.strokeStyle = '#d6a21e'; g.lineWidth = 3; g.beginPath(); g.moveTo(20, h - 24); g.lineTo(w - 20, h - 24); g.stroke(); });
-  const fl = new THREE.Mesh(new THREE.PlaneGeometry(H.hw * 2, L), new THREE.MeshStandardMaterial({ map: inner, metalness: 0.3, roughness: 0.6 })); fl.rotation.x = -Math.PI / 2; fl.position.set(0, Y0 + 0.02, zc); G.add(fl);
+  const fl = new THREE.Mesh(new THREE.PlaneGeometry(H.hw * 2, L), new THREE.MeshStandardMaterial({ map: inner, metalness: 0.3, roughness: 0.6 })); fl.rotation.x = -Math.PI / 2; fl.position.set(0, Y0 + 0.02, zc); G.add(fl); old.push(fl);
   // 牆：兩側與後牆（實心白牆，外側與內側貼牆板）
   for (const sd of [-1, 1]) {
     box(T, H.h, L, sd * (H.hw + T / 2), H.h / 2 + Y0, zc, white);
@@ -100,7 +123,7 @@ function cbBuildHangar(k, H = CB_HALL) {
   // 屋頂：後段與前段固定，中間的大艙蓋往上掀開（鉸鏈在後）
   box(H.hw * 2 + T * 2, 2, 10, 0, H.h + 1.6, H.z0 + 5, white); box(H.hw * 2 + T * 2, 2, 6, 0, H.h + 1.6, H.z1 - 3, white);
   const hatch = hgTex(512, 512, (g, w) => { g.fillStyle = '#dfe4ea'; g.fillRect(0, 0, w, w); g.fillStyle = '#24375e'; g.fillRect(w * 0.36, 0, w * 0.28, w); hgChevron(g, w / 2, w * 0.42, 50, '#e8ecf2'); g.strokeStyle = 'rgba(60,70,90,.4)'; g.lineWidth = 4; for (let y = 128; y < w; y += 128) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); } });
-  const hg = new THREE.Group(); hg.position.set(0, H.h + 2.6, H.z0 + 10); hg.rotation.x = -0.42; G.add(hg);
+  const hg = new THREE.Group(); hg.position.set(0, H.h + 2.6, H.z0 + 10); hg.rotation.x = -0.42; G.add(hg); old.push(hg);
   const hm = new THREE.Mesh(new THREE.BoxGeometry(H.hw * 2 + 6, 1.6, L - 15), [white, white, new THREE.MeshStandardMaterial({ map: hatch, metalness: 0.25, roughness: 0.55 }), white, white, white]); hm.position.z = (L - 15) / 2; hg.add(hm);
   for (const sd of [-1, 1]) { const p = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 10, 10), frameM); p.position.set(sd * (H.hw - 1), -3, 9); p.rotation.x = 0.55; hg.add(p); }   // 液壓桿
   // 機庫內的燈：屋頂下的燈條＋後方的藍光
@@ -108,6 +131,12 @@ function cbBuildHangar(k, H = CB_HALL) {
   const li = new THREE.PointLight(0xe8f0ff, 900, 70 * H.hw / 19, 1.6); li.position.set(0, H.h - 3, zc); G.add(li);
   const blue = new THREE.PointLight(0x5aa8ff, 500, 40, 1.6); blue.position.set(0, 8, H.z0 + 6); G.add(blue);
   if (CB.glowTex) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: CB.glowTex, color: 0x5aa8ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false })); s.scale.setScalar(16); s.position.set(0, 8, H.z0 + 4); G.add(s); }
+  // 照設計圖用 Blender 腳本建的機庫（dev/tools/hangar/build_hall.py）：殼、內部設備、地板、會掀開的屋頂艙蓋。四個檔都載入了才換
+  const n0 = H.hw > 25 ? 46 : 42, tag = H.hw > 25 ? '整修庫' : '戰艦庫';
+  Promise.all(['殼', '內部', '地板', '艙蓋'].map((p, i) => caGlb(`${n0 + i}_${tag}_${p}`))).then((Gs) => {
+    for (const G2 of Gs) { const I = caMake(G2); G.add(I.root); if (G2.lim.hatch) { caPose({ G: G2, bones: I.bones, ang: { hatch: G2.lim.hatch.rest } }); caStill(I.root); } }
+    for (const o of old) o.visible = false;
+  }).catch(() => {});
   for (const sd of [-1, 1]) hgLamp(G, sd * (H.hw + 4), H.h + 5, H.z1 + 2, 0xff5a3a, 30, 20);   // 門口兩側的警示燈
   // 地勤人員：船旁邊站幾個人當比例尺（單艦視角時才看得出船有多大）
   for (const [x, z, ry, c] of [[2.6, -3, 2.6, 0], [3.4, -3.8, -2.2, 1], [-5, -14, 1.2, 0], [4, -19, -0.4, 2], [-2, 3, 0.3, 1], [-13, 7, 1.6, 2], [9, -24, 3.0, 0], [-9, 26, -2.4, 1]]) cbCrew(G, x, Y0, z, ry, c);
@@ -158,6 +187,13 @@ function cbMakeShip(hull, fac) {
     const top = y0 + (lo - bb.min.y) * L, h = top - 0.3, w = Math.min(7, hw * L * 0.7);
     const c = new THREE.Mesh(new THREE.BoxGeometry(w, h, 2.2), HG.mats.metal); c.position.set(0, 0.3 + h / 2, (zc - cz) * L); g.add(c);
     const pad = new THREE.Mesh(new THREE.BoxGeometry(w + 1.2, 0.5, 3), HG.mats.dark); pad.position.set(0, 0.55, (zc - cz) * L); g.add(pad);
+    // 新的剪式托架（41）：托面升到船底的高度；船窄、或船底很低時整座縮小。沒有那個檔就留著上面的方塊
+    const zr = (zc - cz) * L;
+    caGlb('41_托架').then((G2) => {
+      const J = G2.lim.height, kk = Math.max(0.4, Math.min(1, (w + 1.2) / 5.8, (top - 0.3) / J.min)), I = caMake(G2);
+      I.root.scale.setScalar(kk); I.root.position.set(0, 0.3, zr); g.add(I.root);
+      caPose({ G: G2, bones: I.bones, ang: { height: Math.max(J.min, Math.min(J.max, (top - 0.3) / kk)) } }); caStill(I.root); c.visible = pad.visible = false;
+    }).catch(() => {});
   }
   g.userData = { hl: (bb.max.z - bb.min.z) / 2 * L, hw: hw * L, bot: y0, top: y0 + (bb.max.y - bb.min.y) * L };   // 單艦視角用：半長、半寬、船底、船頂
   return g;

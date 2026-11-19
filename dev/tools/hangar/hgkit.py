@@ -154,7 +154,7 @@ def railing(bm, pts, h=1.1, r=0.035, mid=True):
 # 材質（程序材質，之後烘成貼圖）：白漆、海軍藍漆、鋼、鍍鉻、橡膠、橘漆、黃黑警示、發光
 # ----------------------------------------------------------------------------------------------
 MATS = {}
-BEV = dict(white=0.018, navy=0.014, steel=0.008, chrome=0.004, rubber=0.006, orange=0.006, hazard=0.012, yellow=0.012, glow=0.0, lamp=0.0)
+BEV = dict(white=0.018, navy=0.014, steel=0.008, chrome=0.004, rubber=0.006, orange=0.006, hazard=0.012, yellow=0.012, glow=0.0, lamp=0.0, dark=0.012)
 
 
 def _nodes(name):
@@ -300,6 +300,7 @@ def reset():
     mat_plain('rubber', (0.018, 0.018, 0.02), 0.0, 0.82, noise=0.08, nscale=30.0, bump=0.25)
     mat_paint('orange', (0.80, 0.22, 0.03), 0.6, wear=0.7)
     mat_paint('yellow', (0.80, 0.50, 0.03), 0.5, wear=1.0)
+    mat_paint('dark', (0.085, 0.095, 0.115), 0.55, wear=0.6)      # 機庫裡面的深色牆與地板
     mat_hazard('hazard')
     mat_plain('glow', (0.01, 0.03, 0.08), 0.0, 0.3, emit=(0.16, 0.55, 1.0), strength=5.0)
     mat_plain('lamp', (0.2, 0.2, 0.18), 0.0, 0.3, emit=(1.0, 0.93, 0.78), strength=6.0)      # 探照燈的燈面（暖白）
@@ -471,7 +472,7 @@ class Machine:
                 c['lo'], c['hi'], c['tree'] = c['w'].min(0), c['w'].max(0), None
             out = []
             for i, a in enumerate(CK):
-                if floor and a['lo'][1] < -1e-4:
+                if floor and a['bone'] != 'Root' and a['lo'][1] < -1e-4:      # 底座本來就貼著地
                     out.append((a['name'], '地板'))
                 for b in CK[i + 1:]:
                     if a['bone'] == b['bone'] or (a['lo'] > b['hi']).any() or (b['lo'] > a['hi']).any():
