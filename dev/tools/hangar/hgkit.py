@@ -300,7 +300,7 @@ def reset():
     mat_plain('rubber', (0.018, 0.018, 0.02), 0.0, 0.82, noise=0.08, nscale=30.0, bump=0.25)
     mat_paint('orange', (0.80, 0.22, 0.03), 0.6, wear=0.7)
     mat_paint('yellow', (0.80, 0.50, 0.03), 0.5, wear=1.0)
-    mat_paint('dark', (0.085, 0.095, 0.115), 0.55, wear=0.6)      # 機庫裡面的深色牆與地板
+    mat_paint('dark', (0.034, 0.038, 0.048), 0.55, wear=0.6)      # 機庫裡面的深色牆與地板
     mat_hazard('hazard')
     mat_plain('glow', (0.01, 0.03, 0.08), 0.0, 0.3, emit=(0.16, 0.55, 1.0), strength=5.0)
     mat_plain('lamp', (0.2, 0.2, 0.18), 0.0, 0.3, emit=(1.0, 0.93, 0.78), strength=6.0)      # 探照燈的燈面（暖白）

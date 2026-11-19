@@ -29113,7 +29113,9 @@ const CCD_LOGC = [['ok', '好事', '#3fdf8f'], ['bad', '損失', '#ff4d5e'], ['e
 const ccdCat = (x) => (x.c === 'ok' || x.c === 'bad' || x.c === 'ev' ? x.c : '');
 const ccdK = () => (typeof ccmK === 'function' ? ccmK() : 1);
 // kind：'mis'（arg＝{ tab: 'open'|'end' }）、'log'（arg＝{ mode: 'week'|'all', f: 篩選 }）
-function ccdOpen(kind, arg) { CC.drw = { kind, arg: arg || {} }; ccdDraw(); ccdRefit(); }
+function ccdOpen(kind, arg) {
+  if (document.querySelector('.sm-box.ccm-sheet') && typeof smuCloseModal === 'function') smuCloseModal();   // 右側同一個位置：小隊／船塢／研發等面板先收起
+  CC.drw = { kind, arg: arg || {} }; ccdDraw(); ccdRefit(); }
 function ccdClose() { CC.drw = null; const d = gEl('cc-drw'); if (d) d.remove(); ccdRefit(); }
 // 星圖的可用範圍跟著面板變（ccmArea），卡片重新定位
 function ccdRefit() { if (!gEl('cc-cv')) return; ccDraw(); const el = gEl('cc-card'); if (el && !el.hidden) CC_place(el); }
@@ -30615,7 +30617,7 @@ function cbInit() {
   CB.cv.addEventListener('pointerdown', (e) => { CB.drag = { x: e.clientX, y: e.clientY }; CB.cv.setPointerCapture(e.pointerId); });
   CB.cv.addEventListener('pointermove', (e) => {
     const d = CB.drag; if (!d) return;
-    if (CB.focus) { const F = CB.fo; F.base -= (e.clientX - d.x) * 0.005; F.h = Math.max(0.5, Math.min(CB_HALL.h - 3, F.h - (e.clientY - d.y) * 0.03)); F.user = cbNow(); }
+    if (CB.focus) { const F = CB.fo; F.base -= (e.clientX - d.x) * 0.005; F.h = Math.max(0.5, Math.min(CB_HALL.h - 5, F.h - (e.clientY - d.y) * 0.03)); F.user = cbNow(); }
     else { const O = CB.orb; O.base -= (e.clientX - d.x) * 0.006; O.yaw = O.base; O.pitch = Math.max(0.05, Math.min(1.2, O.pitch + (e.clientY - d.y) * 0.005)); O.user = cbNow(); }
     d.x = e.clientX; d.y = e.clientY;
   });
@@ -30635,12 +30637,19 @@ function cbSky(S) {
     g.fillStyle = '#05070c'; g.fillRect(0, 0, w, h);
     const band = g.createLinearGradient(0, h * 0.2, 0, h * 0.62); band.addColorStop(0, 'rgba(40,60,110,0)'); band.addColorStop(0.55, 'rgba(60,84,150,.2)'); band.addColorStop(1, 'rgba(30,44,80,0)');
     g.fillStyle = band; g.fillRect(0, 0, w, h);
-    for (let i = 0; i < 2800; i++) {
-      const x = rnd() * w, y = rnd() * h * 0.6, r = rnd() < 0.04 ? 1.7 : rnd() * 0.9 + 0.3;
-      g.fillStyle = `rgba(${200 + rnd() * 55 | 0},${212 + rnd() * 43 | 0},255,${0.35 + rnd() * 0.65})`; g.beginPath(); g.arc(x, y, r, 0, 6.3); g.fill();
-    }
   });
   sky.mapping = THREE.EquirectangularReflectionMapping; S.background = sky; S.fog = new THREE.Fog(0x0a0d14, 260, 760);
+  // 星星：天球上的點（不隨距離縮放，每顆固定幾個像素；畫在貼圖上的話鏡頭一拉近就糊成方塊）。只放地平線以上
+  for (const [n, size, lo] of [[2600, 1.5, 0.3], [420, 2.4, 0.7], [60, 3.4, 0.9]]) {
+    const pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const y = rnd() * 0.98 + 0.01, a = rnd() * 6.2832, r = Math.sqrt(1 - y * y), b = lo + rnd() * (1 - lo), t = rnd();
+      pos.set([Math.cos(a) * r * 1500, y * 1500, Math.sin(a) * r * 1500], i * 3);
+      col.set([b * (0.8 + 0.2 * t), b * (0.86 + 0.1 * t), b * (1 - 0.12 * t)], i * 3);
+    }
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    const pts = new THREE.Points(geo, new THREE.PointsMaterial({ size, sizeAttenuation: false, vertexColors: true, fog: false, depthWrite: false })); pts.frustumCulled = false; pts.renderOrder = -1; S.add(pts);
+  }
   const pt = hgTex(512, 256, (g, w, h) => {
     for (let y = 0; y < h; y += 2) { const t = y / h, k = 0.5 + 0.5 * Math.sin(t * 38 + Math.sin(t * 9) * 3); g.fillStyle = `rgb(${60 + 70 * k | 0},${110 + 60 * k | 0},${170 + 50 * k | 0})`; g.fillRect(0, y, w, 2); }
     for (let i = 0; i < 160; i++) { g.fillStyle = `rgba(235,242,255,${0.05 + rnd() * 0.12})`; g.beginPath(); g.ellipse(rnd() * w, rnd() * h, 14 + rnd() * 46, 2 + rnd() * 5, 0, 0, 6.3); g.fill(); }
@@ -30708,14 +30717,20 @@ function cbBuildHangar(k, H = CB_HALL) {
   for (const z of [H.z0 + 6, zc + 4]) box(H.hw * 1.6, 0.4, 1, 0, H.h - 0.5, z, M.glow(0xdfe8ff, 1.4));
   const li = new THREE.PointLight(0xe8f0ff, 900, 70 * H.hw / 19, 1.6); li.position.set(0, H.h - 3, zc); G.add(li);
   const blue = new THREE.PointLight(0x5aa8ff, 500, 40, 1.6); blue.position.set(0, 8, H.z0 + 6); G.add(blue);
-  if (CB.glowTex) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: CB.glowTex, color: 0x5aa8ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false })); s.scale.setScalar(16); s.position.set(0, 8, H.z0 + 4); G.add(s); }
+  if (CB.glowTex) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: CB.glowTex, color: 0x5aa8ff, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false })); s.scale.setScalar(16); s.position.set(0, 8, H.z0 + 4); G.add(s); old.push(s); }
   // 照設計圖用 Blender 腳本建的機庫（dev/tools/hangar/build_hall.py）：殼、內部設備、地板、會掀開的屋頂艙蓋。四個檔都載入了才換
   const n0 = H.hw > 25 ? 46 : 42, tag = H.hw > 25 ? '整修庫' : '戰艦庫';
   Promise.all(['殼', '內部', '地板', '艙蓋'].map((p, i) => caGlb(`${n0 + i}_${tag}_${p}`))).then((Gs) => {
     for (const G2 of Gs) { const I = caMake(G2); G.add(I.root); if (G2.lim.hatch) { caPose({ G: G2, bones: I.bones, ang: { hatch: G2.lim.hatch.rest } }); caStill(I.root); } }
     for (const o of old) o.visible = false;
+    li.intensity = 380; blue.intensity = 120;   // 設計圖的機庫裡面是深色的：燈收斂一點（舊機庫的白牆才需要那麼亮）
+    if (tag === '戰艦庫') {                      // 停機坪上的機庫編號（地板的模型五座共用，編號貼在上面）
+      const nt = hgTex(256, 128, (g, w, h) => { g.clearRect(0, 0, w, h); g.fillStyle = 'rgba(232,236,242,.92)'; g.font = 'bold 104px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(`0${k + 1}`, w / 2, h / 2 + 6); });
+      const nm = new THREE.Mesh(new THREE.PlaneGeometry(6, 3), new THREE.MeshBasicMaterial({ map: nt, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+      nm.rotation.x = -Math.PI / 2; nm.position.set(-H.hw - 0.5, Y0 + 0.07, H.z1 + 8.6); G.add(nm);
+    }
   }).catch(() => {});
-  for (const sd of [-1, 1]) hgLamp(G, sd * (H.hw + 4), H.h + 5, H.z1 + 2, 0xff5a3a, 30, 20);   // 門口兩側的警示燈
+  for (const sd of [-1, 1]) hgLamp(G, sd * (H.hw - 1), H.h + 5.2, H.z1 + 2, 0xff5a3a, 30, 20);   // 門框頂上兩側的警示燈
   // 地勤人員：船旁邊站幾個人當比例尺（單艦視角時才看得出船有多大）
   for (const [x, z, ry, c] of [[2.6, -3, 2.6, 0], [3.4, -3.8, -2.2, 1], [-5, -14, 1.2, 0], [4, -19, -0.4, 2], [-2, 3, 0.3, 1], [-13, 7, 1.6, 2], [9, -24, 3.0, 0], [-9, 26, -2.4, 1]]) cbCrew(G, x, Y0, z, ry, c);
 }
@@ -30736,7 +30751,7 @@ function cbCrew(G, x, y, z, ry, c) {
 const CB_PROP_SET = [
   ['06_機械臂A', -12.5, -16, Math.PI / 2, 95, 0.6], ['07_機械臂B', 12.5, -16, -Math.PI / 2, 95, 0.6], ['07_機械臂B', -12.5, 2, Math.PI / 2, 95, 0.6], ['06_機械臂A', 12.5, 2, -Math.PI / 2, 95, 0.6],
   ['15_氣瓶組', -16, 11, 0, 70, 0.6], ['11_加工站', -14.5, -25, 0, 60, 0.6],
-  ['01_管制塔', 33, -14, -Math.PI / 2, 95], ['19_雙聯儲槽', 31, 9, 0, 85], ['18_物料艙', -32, -2, Math.PI / 2, 70], ['21_圓頂儲槽', -31, -20, 0, 85],
+  ['01_管制塔', 29.1, 2, Math.PI, 95], ['19_雙聯儲槽', 31, -17, 0, 85], ['18_物料艙', -32, -2, Math.PI / 2, 70], ['21_圓頂儲槽', -31, -20, 0, 85],
   ['16_雙管砲塔', 6, 26, 0.5, 65, 0.6], ['12_雙推進器艙', 15, 27, -0.4, 65, 0.6], ['20_小型機械爪', -6, 29, 0.3, 55, 0.6], ['08_軌道機械臂', -16, 25, 0.6, 55, 0.6], ['06_機械臂A', 21, 20, -1.2, 55, 0.6],
 ];
 function cbBuildProps() {
@@ -30765,12 +30780,13 @@ function cbMakeShip(hull, fac) {
     const top = y0 + (lo - bb.min.y) * L, h = top - 0.3, w = Math.min(7, hw * L * 0.7);
     const c = new THREE.Mesh(new THREE.BoxGeometry(w, h, 2.2), HG.mats.metal); c.position.set(0, 0.3 + h / 2, (zc - cz) * L); g.add(c);
     const pad = new THREE.Mesh(new THREE.BoxGeometry(w + 1.2, 0.5, 3), HG.mats.dark); pad.position.set(0, 0.55, (zc - cz) * L); g.add(pad);
-    // 新的剪式托架（41）：托面升到船底的高度；船窄、或船底很低時整座縮小。沒有那個檔就留著上面的方塊
+    // 新的托架（41，照設計圖）：騎在機庫軌道上的滑座，兩支支撐臂把托墊頂到船底的高度（參數 height）。滑座要對著軌道，所以不縮放；
+    // 只有船底比支撐臂伸得到的還高（或還低）時才整座放大（縮小）。沒有那個檔就留著上面的方塊
     const zr = (zc - cz) * L;
     caGlb('41_托架').then((G2) => {
-      const J = G2.lim.height, kk = Math.max(0.4, Math.min(1, (w + 1.2) / 5.8, (top - 0.3) / J.min)), I = caMake(G2);
+      const J = G2.lim.height, need = top - 0.3, kk = need > J.max ? need / J.max : need < J.min ? need / J.min : 1, I = caMake(G2);
       I.root.scale.setScalar(kk); I.root.position.set(0, 0.3, zr); g.add(I.root);
-      caPose({ G: G2, bones: I.bones, ang: { height: Math.max(J.min, Math.min(J.max, (top - 0.3) / kk)) } }); caStill(I.root); c.visible = pad.visible = false;
+      caPose({ G: G2, bones: I.bones, ang: { height: Math.max(J.min, Math.min(J.max, need / kk)) } }); caStill(I.root); c.visible = pad.visible = false;
     }).catch(() => {});
   }
   g.userData = { hl: (bb.max.z - bb.min.z) / 2 * L, hw: hw * L, bot: y0, top: y0 + (bb.max.y - bb.min.y) * L };   // 單艦視角用：半長、半寬、船底、船頂
@@ -30796,11 +30812,11 @@ function cbStep() {
   CB.mark.position.x = tx; CB.mark.children.forEach((b) => (b.material.opacity = 0.6 + 0.3 * Math.sin(now * 3)));
   const C = CB.cam, P = _cbP, Lk = _cbL; let fov = 36, ox = 0, oy = 0;
   if (CB.focus) {
-    // 單艦視角：站在機庫地上（人的高度）往上看船；鏡頭不出機庫（兩側牆、後牆、屋頂），前面可以退到停機坪
+    // 單艦視角：站在機庫地上（人的高度）往上看船；鏡頭不出機庫（兩側的桁架柱、右牆的走道、後牆、屋頂的斜面），前面可以退到停機坪
     const F = CB.fo, H = CB_HALL, sh = CB.ships[CB.sel], u = sh ? sh.userData : { hl: 15, hw: 6, bot: 2, top: 12 };
     const idle = now - F.user > 4, yaw = idle ? F.base + 0.5 * Math.sin((now - F.user - 4) * 0.05) : F.base;
     const sn = Math.sin(yaw), cs = Math.cos(yaw), r = Math.hypot(u.hw * sn, u.hl * cs) + F.d;
-    P.set(Math.max(tx - H.hw + 1.4, Math.min(tx + H.hw - 1.4, CB.tx + sn * r)), 0.6 + F.h, Math.max(H.z0 + 2, Math.min(H.z1 + 34, CB_SHIP_Z + cs * r)));
+    P.set(Math.max(tx - H.hw + 2.4, Math.min(tx + H.hw - 5.2, CB.tx + sn * r)), 0.6 + F.h, Math.max(H.z0 + 2, Math.min(H.z1 + 34, CB_SHIP_Z + cs * r)));
     const mid = (u.bot + u.top) / 2;
     Lk.set(tx + sn * u.hw * 0.25, mid + (u.top - mid) * 0.4 + F.h * 0.25, CB_SHIP_Z + cs * u.hl * 0.25);
     fov = 70;
@@ -30883,6 +30899,7 @@ function showCapBay() {
   document.querySelectorAll('[data-ch]').forEach((b) => (b.onclick = () => { p.slots[sel] = b.dataset.ch; if (!p.slots.some(Boolean)) p.slots[sel] = 'assault'; redo(); }));
   cbAttach(p, sel);
 }
+Object.assign(window.__cap || (window.__cap = {}), { showCapBay });   // 截圖腳本用（dev/tools/arm/bay-screen.mjs）
 
 // ═══════════════════════ 艦長生涯：整修庫（改裝預覽、維修動畫，2026-11-15） ═══════════════════════
 // 用戰艦庫（capbay.js）的場景，另外蓋第 6 座機庫（1～5 號是隨機任務的）。
@@ -31192,7 +31209,7 @@ function crEnsure() {
     if (CR_NEW[name]) caGlb(CR_NEW[name]).then((G) => { const I = caMake(G); I.root.position.set(cx + x, y, z); I.root.rotation.y = ry; CB.scene.add(I.root); }).catch(old);
     else old();
   }
-  for (const it of CB_PROP_SET) if (it[2] > H.z1 + 6 || Math.abs(it[1]) > H.hw + 6) caPlace(CB.scene, it[0], cx + it[1] * (H.hw / CB_HALL.hw), it[2] + (H.z1 - CB_HALL.z1), it[3], it[4], it[5] || 0);   // 機庫外面的（跟著機庫的大小往外挪）
+  for (const it of CB_PROP_SET) if (it[2] > H.z1 + 6 || Math.abs(it[1]) > H.hw + 6) caPlace(CB.scene, it[0], cx + (Math.abs(it[1]) > CB_HALL.hw + 6 ? it[1] + Math.sign(it[1]) * (H.hw - CB_HALL.hw) : it[1] * (H.hw / CB_HALL.hw)), it[2] + (H.z1 - CB_HALL.z1), it[3], it[4], it[5] || 0);   // 牆外的＝離牆的距離不變（管制塔的平台要接到牆上）   // 機庫外面的（跟著機庫的大小往外挪）
   crArmUnit('06_機械臂A', -1, CR_SHIP_Z + 4); crArmUnit('07_機械臂B', 1, CR_SHIP_Z - 8);
   crArmTower(-1, CR_SHIP_Z - 12); crArmTower(1, CR_SHIP_Z - 2);
   // 天車（02）：橫跨機庫、掛在屋頂下，沿 z 開到要裝的位置；吊鉤下面一條鋼索吊著砲塔（舊的、新的）或飛彈架

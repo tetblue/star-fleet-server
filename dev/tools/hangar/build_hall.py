@@ -66,6 +66,11 @@ if 'shell' in ONLY:
             bx(P['navy'], s, XH + 0.7, XH + 0.74, YT + 0.3, YT + 1.3, zb + 0.5, zb + L * 0.16 - 0.5)
             for i in range(4):
                 bx(P['steel'], s, XH + 1.2, XO - CO - 1.0, YT + 1.7, YT + 1.76, zb + 0.6 + i * 1.2, zb + 1.2 + i * 1.2)
+    DZ, DY = Z1 - 14.0, 8.6                                                             # 右牆的門：管制塔的上層平台接到這裡（塔的位置在 capbay.js 的 CB_PROP_SET）
+    box(P['navy'], XO, XO + 0.28, DY, DY + 3.2, DZ - 1.0, DZ + 1.0)
+    box(P['steel'], XO + 0.28, XO + 0.32, DY, DY + 2.9, DZ - 0.8, DZ + 0.8)
+    box(P['glow'], XO + 0.28, XO + 0.3, DY + 3.3, DY + 3.42, DZ - 0.9, DZ + 0.9)
+    box(P['steel'], XO, XO + 0.45, DY - 0.2, DY, DZ - 2.0, DZ + 2.0)                    # 門檻
     M.part('Side_Walls', 'Root', P)
     P = Pal()
     OUT = [(-XO, Y0), (XO, Y0), (XO, YT - CO), (XO - CO, YT), (-(XO - CO), YT), (-XO, YT - CO)]
@@ -88,12 +93,20 @@ if 'shell' in ONLY:
         plate(P['white'], mx([(HW, YW), (XP, YP - CP), (XP - CP, YP), (HW - CI, YR)], s), ZP, Z1 + 2)
         bx(P['navy'], s, HW + 1.7, HW + 3.6, Y0 + 1.0, YW - 0.6, Z1 + 2, Z1 + 2.06)     # 柱子正面的深藍直條
         bx(P['navy'], s, XP, XP + 0.2, BAND[0], BAND[1], ZP, Z1 + 2)
-        bx(P['steel'], s, HW - 0.02, HW + 0.5, Y0, YW, Z1 + 2, Z1 + 2.12)               # 門邊的框與藍燈
-        bx(P['glow'], s, HW + 0.14, HW + 0.36, Y0 + 1.4, Y0 + 5.4, Z1 + 2.12, Z1 + 2.15)
+        bx(P['glow'], s, HW + 0.2, HW + 0.42, Y0 + 1.4, Y0 + 5.4, Z1 + 2.38, Z1 + 2.41)   # 門邊的藍燈（在鋼框上）
         bx(P['hazard'], s, HW, XP, Y0, Y0 + 0.9, Z1 + 2.06, Z1 + 2.08)
     plate(P['white'], [(HW - CI, YR), (XP - CP, YP), (-(XP - CP), YP), (-(HW - CI), YR)], ZP, Z1 + 2)       # 門楣
-    box(P['navy'], -(HW - CI) + 1.0, (HW - CI) - 1.0, YR + 0.6, YR + 1.5, Z1 + 2, Z1 + 2.06)
-    box(P['glow'], -(HW - CI) * 0.5, (HW - CI) * 0.5, YR + 0.98, YR + 1.12, Z1 + 2.06, Z1 + 2.08)
+    box(P['navy'], -(HW - CI) + 1.0, (HW - CI) - 1.0, YR + 1.8, YR + 2.7, Z1 + 2, Z1 + 2.06)
+    box(P['glow'], -(HW - CI) * 0.5, (HW - CI) * 0.5, YR + 2.18, YR + 2.32, Z1 + 2.06, Z1 + 2.08)
+
+    def ring(col, d0, d1, zf):                                                          # 沿著開口邊緣的一圈框（d＝離開口邊緣多遠，zf＝凸出到哪）
+        def off(d):
+            return [(HW + d, Y0), (HW + d, YW + d * 0.41), (HW - CI + d * 0.41, YR + d), (-(HW - CI) - d * 0.41, YR + d), (-HW - d, YW + d * 0.41), (-HW - d, Y0)]
+        a, b = off(d0), off(d1)
+        for i in range(5):
+            plate(P[col], [a[i], b[i], b[i + 1], a[i + 1]], Z1 + 2, zf)
+    ring('steel', -0.02, 0.62, Z1 + 2.38)                                               # 設計圖：開口有兩層框，裡面一層鋼框凸出來，外面一層深色
+    ring('dark', 0.62, 1.2, Z1 + 2.18)
     # 左邊門柱的盾牌與 V 字徽
     sy = Y0 + HH * 0.42
     plate(P['navy'], [(-HW - 4.6, sy), (-HW - 0.9, sy), (-HW - 0.9, sy + 5.2), (-HW - 2.75, sy + 6.6), (-HW - 4.6, sy + 5.2)], Z1 + 2, Z1 + 2.1)
@@ -238,7 +251,7 @@ if 'floor' in ONLY:
 # 屋頂艙蓋（有骨架）：鉸鏈在後緣，參數 hatch＝掀開幾度；兩支液壓桿，固定點由程式挑
 # ==============================================================================================
 if 'hatch' in ONLY:
-    AMAX, AREST = 32.0, 24.0
+    AMAX, AREST = 42.0, 36.0                                                            # 設計圖裡艙蓋掀得很高
     XA = XH - 0.9
     ACT, ACTL = {}, {}
 
@@ -252,8 +265,8 @@ if 'hatch' in ONLY:
         return W
 
     best = search_actuator('艙蓋', fk, [dict(hatch=AMAX * i / 16) for i in range(17)], 'Root', 'Hatch',
-                           [(XA, YR - y, HZ + z) for y in (0.6, 1.4) for z in (2.0, 4.0, 6.0)],
-                           [(XA, -1.05, z) for z in (HLEN * 0.3, HLEN * 0.4, HLEN * 0.5)], clear=1.0, margin=0.9)
+                           [(XA, YR - y, HZ + z) for y in (0.6, 1.4, 2.4, 3.4) for z in (1.0, 2.0, 4.0, 6.0, 8.0)],
+                           [(XA, -1.05, z) for z in (HLEN * 0.25, HLEN * 0.3, HLEN * 0.4, HLEN * 0.5, HLEN * 0.6)], clear=1.0, margin=0.9)
     ACT.update(best)
     ACTL.update(dict(best, tp=(-best['tp'][0], best['tp'][1], best['tp'][2]), bp=(-best['bp'][0], best['bp'][1], best['bp'][2])))
     M = Machine('hall_hatch_' + ('refit' if REFIT else 'bay'), '整備庫_%d_%s_艙蓋' % (NUM + 3, TAG), [('hatch', '艙蓋掀開', 0.0, AMAX, AREST)],
