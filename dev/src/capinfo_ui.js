@@ -51,7 +51,9 @@ const CCD_LOGC = [['ok', '好事', '#3fdf8f'], ['bad', '損失', '#ff4d5e'], ['e
 const ccdCat = (x) => (x.c === 'ok' || x.c === 'bad' || x.c === 'ev' ? x.c : '');
 const ccdK = () => (typeof ccmK === 'function' ? ccmK() : 1);
 // kind：'mis'（arg＝{ tab: 'open'|'end' }）、'log'（arg＝{ mode: 'week'|'all', f: 篩選 }）
-function ccdOpen(kind, arg) { CC.drw = { kind, arg: arg || {} }; ccdDraw(); ccdRefit(); }
+function ccdOpen(kind, arg) {
+  if (document.querySelector('.sm-box.ccm-sheet') && typeof smuCloseModal === 'function') smuCloseModal();   // 右側同一個位置：小隊／船塢／研發等面板先收起
+  CC.drw = { kind, arg: arg || {} }; ccdDraw(); ccdRefit(); }
 function ccdClose() { CC.drw = null; const d = gEl('cc-drw'); if (d) d.remove(); ccdRefit(); }
 // 星圖的可用範圍跟著面板變（ccmArea），卡片重新定位
 function ccdRefit() { if (!gEl('cc-cv')) return; ccDraw(); const el = gEl('cc-card'); if (el && !el.hidden) CC_place(el); }

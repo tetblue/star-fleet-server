@@ -83,6 +83,7 @@ function ccmSheet(html, cls, sc) {
   const now = performance.now(), still = now - ccsLast < 4000 && !!document.querySelector('.sm-box.ccm-sheet'); ccsLast = now;
   const d = smuModal(html, `ccm-sheet ${cls || ''}${still ? ' still' : ''}`);
   const b = d.querySelector('.sm-box'); b.style.setProperty('--k', ccmK()); if (sc) b.style.setProperty('--sc', sc);
+  if (!b.classList.contains('cr-side') && typeof ccdRefit === 'function') { ccdRefit(); setTimeout(() => { if (d.isConnected) ccdRefit(); }, 450); }   // 星圖往左縮、星系卡片讓開（滑進來的動畫結束再排一次）
   return d;
 }
 // 小隊總覽（停泊大廳的「小隊」）：你的每個小隊、在哪裡、預定動向、每艘船；點船看資料

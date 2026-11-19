@@ -15,6 +15,7 @@ function cpMineSum(S, s) {   // 你在這裡的投資
 }
 const cpTkTx = (S, b) => `<span style="color:#ffb35a">接管中：${SM_FAC[b.tk.f].name}再 ${b.tk.left} 週接管${b.raze ? '・<b>這週結束時破壞</b>' : ''}</span>`;
 function cpView(s) {
+  ccvCss();
   const S = CC.S, V = ccSee(S, s), live = V.live, mine = s.owner === S.fac, nz = cpNzRule(S, s), neu = s.owner === SM_N || nz;
   const R = cpInc(S, s), K = cpRazeK(S), btn = (attr, tx, why) => `<button class="g-btn" ${attr} ${why ? `disabled title="${smuEsc(why)}"` : ''}>${tx}</button>`;
   // 狀況
@@ -36,7 +37,7 @@ function cpView(s) {
       const st = b.tk ? cpTkTx(S, b) : q ? `<span style="color:#c9a7ff">強化到 Lv${q.lv}：剩 ${q.left} 週</span>` : '';
       const act = b.tk ? (b.inv ? btn(`data-raze="${b.id}"`, b.raze ? '取消破壞' : `破壞（拿回 ${Math.round(b.inv * K)}）`, '') : '')
         : mine && b.lv < 3 && !q ? btn(`data-up="${b.id}"`, `強化到 Lv${b.lv + 1}（${cpUpCost(b)} 資金・${CP_RULE.upW[b.lv + 1]} 週）`, why) : '';
-      return `<div class="cc-ship cc-yq" style="grid-template-columns:1fr auto"><span><b>${B.name}</b> <span class="cc-lv${b.lv > 1 ? ' up' : ''}">Lv${b.lv}</span>${b.inv ? ' <span style="color:#3fdf8f">你出資</span>' : ''} ${st}<br><span class="g-dim">${B.desc}${b.lv < 3 && mine ? `・強化：勢力 ${B.fac}；你 ${B.perk}` : b.lv >= 2 && b.inv ? `・你得到：${B.perk}` : ''}</span></span>${act}</div>`;
+      return `<div class="cc-ship cc-yq" style="grid-template-columns:1fr auto"><span><b>${B.name}</b> ${ccvPips(3, b.lv, b.inv ? 'var(--own)' : ccFacCol(S, s.owner), q ? q.lv : 0)} <span class="cc-lv${b.lv > 1 ? ' up' : ''}">Lv${b.lv}</span>${b.inv ? ' <span style="color:#3fdf8f">你出資</span>' : ''} ${st}<br><span class="g-dim">${B.desc}${b.lv < 3 && mine ? `・強化：勢力 ${B.fac}；你 ${B.perk}` : b.lv >= 2 && b.inv ? `・你得到：${B.perk}` : ''}</span></span>${act}</div>`;
     }).join('') : '<div class="g-dim">沒有。</div>');
   }).join('') : '';
   const bq = live && s.bq.length ? `<h4 style="margin:10px 0 4px">建設佇列（${SM_FAC[s.owner].name}）</h4>${s.bq.map((o, i) => `<div class="g-dim">${i ? `${i + 1}.` : '施工中'} ${o.bid ? `強化${cpName(o.k)}到 Lv${o.lv}${o.pay ? '（你出資）' : ''}` : cpName(o.k)}・剩 ${o.left} 週${i === 0 && s.sg ? '（圍城中暫停）' : ''}</div>`).join('')}` : '';

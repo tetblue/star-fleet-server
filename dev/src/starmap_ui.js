@@ -86,9 +86,11 @@ function smuBindUi(root, onSeg) {
   root.querySelectorAll('.sm-seg, .sm-pick').forEach((g) => g.querySelectorAll('button').forEach((b) => (b.onclick = () => { if (b.disabled) return; g.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); g.dataset.val = b.dataset.v; if (onSeg) onSeg(g.id, b.dataset.v); })));
   root.querySelectorAll('.sm-tog').forEach((b) => (b.onclick = () => b.classList.toggle('on')));
 }
-function smuModal(html, cls) { const old = gEl('sm-modal'); if (old) old.remove(); const d = document.createElement('div'); d.className = 'sm-modal'; d.id = 'sm-modal'; d.innerHTML = `<div class="sm-box ${cls || ''}">${html}</div>`; gEl('g-screen').appendChild(d); smuBindUi(d); return d; }
+function smuModal(html, cls) { const old = gEl('sm-modal'); if (old) old.remove(); smuSheetGone(old); const d = document.createElement('div'); d.className = 'sm-modal'; d.id = 'sm-modal'; d.innerHTML = `<div class="sm-box ${cls || ''}">${html}</div>`; gEl('g-screen').appendChild(d); smuBindUi(d); return d; }
 // 關掉對話框；排隊的下一個（例如回合開始的任務簡報）接著出來
-function smuCloseModal() { const d = gEl('sm-modal'); if (d) d.remove(); if (SMU.q.length) SMU.q.shift()(); }
+function smuCloseModal() { const d = gEl('sm-modal'); if (d) d.remove(); if (SMU.q.length) SMU.q.shift()(); smuSheetGone(d); }
+// 艦長生涯：右側的斜放面板（ccmSheet）關掉後，星圖與星系卡片重新排（capinfo_ui.js 的 ccdRefit）
+function smuSheetGone(d) { if (d && d.querySelector('.ccm-sheet') && !document.querySelector('#sm-modal .ccm-sheet') && typeof ccdRefit === 'function') ccdRefit(); }
 function smuLater(fn) { if (gEl('sm-modal')) SMU.q.push(fn); else fn(); }
 // 確認框：smuAsk('標題', '內容', '確定的文字', 確定後做的事)
 function smuAsk(title, body, ok, fn, danger) {

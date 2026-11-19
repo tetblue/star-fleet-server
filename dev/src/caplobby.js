@@ -234,7 +234,7 @@ function cclRender() {
   CCL.el.innerHTML = `<div class="st"><div class="vig"></div><div class="ui">
     <div class="corner c1"></div><div class="corner c2"></div><div class="corner c3"></div><div class="corner c4"></div>
     <div class="status enter" style="--dy:-20px"><span class="live">停泊中</span><span>WEEK ${S.turn}</span><span class="sep">／</span><span class="zh">${smuEsc(s.name)}</span><span class="sep">／</span><span class="zh">${CAP_SPACE[s.scene || 'belt'].name}</span><span class="sep">／</span><span class="zh" style="color:${rel}">${SM_FAC[s.owner].name}</span></div>
-    <div class="rank enter" style="--dx:-40px;--d:.05s">
+    <div class="rank enter" data-ccl="rank" title="軍階：每一階解鎖什麼" style="--dx:-40px;--d:.05s;cursor:pointer">
       <div class="ring"><svg class="r" viewBox="0 0 104 104"><circle cx="52" cy="52" r="46" stroke="rgba(120,150,190,.25)" stroke-width="5" fill="none"/><circle cx="52" cy="52" r="46" stroke="#3cc8ff" stroke-width="5" fill="none" stroke-dasharray="289" stroke-dashoffset="${289 * (1 - frac)}" style="filter:drop-shadow(0 0 4px #3cc8ff)"/></svg>
         <div class="ins"><svg viewBox="0 0 46 40" width="46" height="40">${CCL_RANK_ICON[Math.min(3, S.pl.rank || 0)]}</svg><small>RANK</small></div></div>
       <div class="rk-id">CAPTAIN <span>／ ${CC_ROLES[S.role].name}・${CC_DIFF[S.diff].name}</span></div>
@@ -301,6 +301,7 @@ function cclAct(k) {
   if (k === 'sq') { CC.cur = P.id; cclToMap(); return ccSquadsView(); }
   if (k === 'yard') { if (!(s.owner === S.fac && s.yard)) return toast('這個星系沒有你的勢力的維修船塢', 'warn'); cclToMap(); return ccYardView(s); }
   if (k === 'tech') { cclToMap(); return ccTechView(); }
+  if (k === 'rank') { cclToMap(); return ccRankView(); }
   if (k === 'planet') { cclToMap(); return cpView(s); }
   if (k === 'shop') { if (!s.shop) return; cclToMap(); return ccShopView(s); }
   if (k === 'fly') return cclCruise();

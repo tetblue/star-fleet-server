@@ -356,7 +356,7 @@ function cceRepRestore() {
   const p = document.createElement('div'); p.id = 'cce-side'; p.className = 'rep' + (space ? ' sp' : ''); p.style.setProperty('--k', ccmK()); p.style.setProperty('--rc', rc);
   p.innerHTML = `<div class="tilt${anim ? '' : ' still'}"><div class="hd"><h3>戰報</h3><span class="en">${en}</span><button type="button" class="x" title="收起">✕</button></div><div class="bd">${body}</div></div>`;
   (onMap ? gEl('g-screen') : document.body).appendChild(p);
-  p.querySelector('.x').onclick = () => { if (onMap) { if (X) X.map = false; p.remove(); ccDraw(); } else { CC.rshow = false; cceRepRestore(); } };
+  p.querySelector('.x').onclick = () => { if (onMap) { if (X) X.map = false; p.remove(); ccdRefit(); } else { CC.rshow = false; cceRepRestore(); } };
   const gm = gEl('cce-gomap'); if (gm) gm.onclick = ccPostLeave;
 }
 // 星系裡（巡航、戰鬥剛結束）的側邊按鈕「戰報」：和交戰評估同一個位置

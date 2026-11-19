@@ -25,20 +25,21 @@ function ccRender() {
     <div class="sm-map" id="cc-map"><canvas id="cc-cv"></canvas><div class="ccm-vig"></div><i class="ccm-cn cn1"></i><i class="ccm-cn cn2"></i><i class="ccm-cn cn3"></i><i class="ccm-cn cn4"></i>
       <div class="ccm-z ccm-head"><button class="ccm-back" id="${back[0]}" title="${back[2]}"><svg viewBox="0 0 24 24">${back[1]}</svg></button>
         <div><span class="ent">STAR MAP ・ ORDERS</span><h1>星圖・下令</h1><span class="crumb"><b>第 ${S.turn} 週</b>・${CC_ROLES[S.role].name}・${ccRankOf(S).name}・指揮權 ${ccOwnCount(S)}／${ccSlots(S)} 隊${P0 ? `・你在 ${S.sys[P0.sys].name}` : ''}</span></div></div>
-      <div class="ccm-z ccm-res">${ri('資金', fmtN(Math.round(S.pl.money)), '#ffc24a', 'money')}${ri('戰功', fmtN(Math.round(S.pl.merit)), '#3fdf8f', 'merit')}${ri('研究點', fmtN(Math.round(S.pl.rp || 0)), '#3cc8ff', 'rp', 'cc-rp', '研究點數與研發樹')}</div>
+      <div class="ccm-z ccm-res">${ri('資金', fmtN(Math.round(S.pl.money)), '#ffc24a', 'money')}${ri('戰功', fmtN(Math.round(S.pl.merit)), '#3fdf8f', 'merit', 'cc-rank', '軍階：每一階解鎖什麼、離下一階還差多少')}${ri('研究點', fmtN(Math.round(S.pl.rp || 0)), '#3cc8ff', 'rp', 'cc-rp', '研究點數與研發樹')}</div>
       <div class="ccm-z ccm-rel"><span class="it" title="好感（${SM_FAC[S.fac].name}對你）${Math.round(fav)}／100：任務完成 +${CC_RULE.fav.ok}、失敗 −${CC_RULE.fav.fail}。新任務的獎勵 ×${ccFavK(S, S.fac).toFixed(2)}"><span class="pie" style="--c:#ffc24a;--v:${Math.round(fav)}"></span>好感 <b>${Math.round(fav)}</b></span><span class="sep"></span>${[SM_A, SM_E, SM_P, SM_N].map(facIt).join('')}</div>
       <div class="ccm-z ccm-tools"><button class="ccm-tb" id="cc-mis">${ico('mis')}任務${nMis ? `<span class="nb">${nMis}</span>` : ''}</button><button class="ccm-tb" id="cc-tech" title="研究點數與研發樹">${ico('rp')}研發 <span class="mono">${fmtN(Math.round(S.pl.rp || 0))}</span>${X.cur ? '<span class="busy">研究中</span>' : ''}</button><button class="ccm-tb" id="cc-logb">${ico('log')}紀錄</button>${S.fin ? '' : `<button class="ccm-tb" id="cc-fly" title="回到${smuEsc(P0 ? S.sys[P0.sys].name : '')}的太空">${ico('fly')}回到星系<kbd>${keyText('cap_map')}</kbd></button>`}<button class="ccm-tb q" id="cc-quit">${ico('quit')}離開</button></div>
       <div class="ccm-z ccm-leg" id="cc-leg">${CC.leg ? `<h5>圖例 ▾ ／ LEGEND</h5>${['own', 'ally', 'enemy', 'neutral'].map((k) => `<div><i style="background:${SMU_REL[k].col}"></i>${k === 'own' ? '你的小隊（★＋光圈＝親自指揮，白框＝選中）' : SMU_REL[k].name}</div>`).join('')}<div>箭頭＝一個小隊：越大船越多（1～5 艘）；停在星系下方，閃爍且在航道上＝這週要移動</div><div class="g-dim">星系的顏色＝擁有者跟你的關係：藍＝你的陣營、紅＝敵對、黃＝中立／停戰</div><div>! ＝ 你的小隊下週會被進攻</div><div>◆ 軌道防禦・⚓ 維修船塢・✚ 補給站・$ 商店（貿易站、黑市、商會貿易所）・白圈＝首都</div>${cpNzShow(S) ? '<div><span style="color:#ffd23f">◇</span> 星際商會的據點・<span style="color:#ffd23f">◆</span> 有商船隊（中立好感度 ' + CP_RULE.nzMap + ' 以上才標）</div>' : ''}<div>虛線圈：圍城中・⚔ 這週會交戰</div><div>箭頭：看得到的預定動向（你的小隊周圍、偵察過的星系）</div><div>藍色虛線大圈：偵察中・亂＝指揮中斷</div><div class="g-dim">點星系看詳情；點相鄰的星系下令移動</div>` : '<h5>圖例 ▸ ／ LEGEND（點開）</h5>'}</div>
       <button class="ccm-z ccm-end" id="cc-end" ${S.fin ? 'disabled' : ''}><div><b>結束這一週</b><small class="en">END WEEK ${S.turn} → ${S.turn + 1}</small></div>${nW ? `<span class="w" title="${nW} 個小隊留在原地，下週會被進攻">⚠ ${nW}</span>` : ''}<span class="arrow">→</span></button>
       <div class="sm-dock" id="cc-dock"></div><div class="sm-card" id="cc-card" hidden></div></div></div>`);
   { const b = gEl('cc-fly2') || gEl('cc-quit2'); b.onclick = () => gEl(b.id === 'cc-fly2' ? 'cc-fly' : 'cc-quit').click(); }
-  gEl('cc-rp').onclick = ccTechView;
+  gEl('cc-rp').onclick = () => ccTechView();
+  gEl('cc-rank').onclick = ccRankView;   // 軍階的階梯（caplevel_ui.js）
   gEl('cc-quit').onclick = () => { ccSave(S); ccIdleStop(); window.removeEventListener('resize', ccResize); GAME.spMode = 'captain'; showSingle(); };
   if (gEl('cc-fly')) gEl('cc-fly').onclick = () => ccFly();
   gEl('cc-end').onclick = () => ccEndWeek();
   gEl('cc-mis').onclick = () => (CC.drw && CC.drw.kind === 'mis' ? ccdClose() : ccdOpen('mis'));   // 任務、紀錄：右側的斜放面板（capinfo_ui.js）
   gEl('cc-leg').onclick = () => { CC.leg = !CC.leg; ccRender(); };
-  gEl('cc-tech').onclick = ccTechView;
+  gEl('cc-tech').onclick = () => ccTechView();
   gEl('cc-logb').onclick = () => (CC.drw && CC.drw.kind === 'log' && CC.drw.arg.mode === 'all' ? ccdClose() : ccdOpen('log', { mode: 'all' }));
   const cv = gEl('cc-cv');
   cv.onclick = (e) => { const r = cv.getBoundingClientRect(), id = ccHit(e.clientX - r.left, e.clientY - r.top); CC.sel = id; ccCard(); };
@@ -176,7 +177,7 @@ const ccSurvTx = (q, sv) => q.ships.map((c, k) => `${CAP_HULLS[c.key].name} ${Ma
 // 一艘船的等級、經驗、模組與實際數值（研發、改裝的第 1 步：先能看，改裝之後開放）
 function ccShipView(q, k) {
   const c = q && q.ships[k]; if (!c) return;
-  capShipFix(c); ccIcoCss();
+  capShipFix(c); ccIcoCss(); ccvCss();
   const H0 = CAP_HULLS[c.key], H = capProfMod(capHullMod(H0, c), c.mod, CC.S.pl.prof), L = CAP_XP.lv, lv = c.lv, cap = ccMkCap(CC.S, c);
   const lo = L[lv - 1], hi = L[lv], xpTx = hi == null ? `經驗 ${c.xp}（已經是最高等級）` : `經驗 ${c.xp}／${hi}（升到 Lv${lv + 1}${capMkCapLv(lv + 1) > capMkCapLv(lv) ? `，等級上限 ${CAP_MK_NAME[capMkCapLv(lv + 1)]}` : ''}）`;
   const pct = hi == null ? 1 : (c.xp - lo) / (hi - lo);
@@ -188,8 +189,7 @@ function ccShipView(q, k) {
     ['飛彈', H.msl ? `${H.msl.n} 枚・每枚 ${f1(H.msl.dmg)}・鎖定 ${f1(H.msl.lockT)} 秒${H.ftr ? `・護航機 ${H.ftr} 架` : ''}` : '沒有'],
     ['機動', `最高速度 ${f1(H.max)}・轉向 ${Math.round(H.turn)}°／秒`], ['技能', `${H0.skill.name}（船型固定）`]];
   ccmSheet(`<h3>${smuEsc(q.name)}・${H0.name} <span class="cc-lv${lv > 1 ? ' up' : ''}" style="font-size:13px">Lv${lv}</span><span class="en">SHIP DATA</span></h3>
-    <div class="g-dim">${xpTx}</div><div class="cc-xp"><i style="width:${Math.round(pct * 100)}%"></i></div>
-    <div>Mk 上限：<b>${CAP_MK_NAME[cap]}</b> <span class="g-dim">（船的等級 Lv1～2＝Mk I、Lv3～4＝Mk II、Lv5＝Mk III，再跟研發到的 ${CAP_MK_NAME[ccMkRes(CC.S)]} 取低的）</span></div>
+    <div class="g-dim">${xpTx}・Mk 上限 <b style="color:${ccMkCol(cap)}">${CAP_MK_NAME[cap]}</b>（船的等級與研發取低的）</div>${ccvShipLv(CC.S, c)}
     <table class="cc-mods">${rows}</table>
     <dl class="sm-kv">${st.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join('')}</dl>
     <p class="g-dim" style="font-size:12px">經驗：參戰 +${CAP_XP.fight}、活下來 +${CAP_XP.live}、擊沉 +10～30（看船型）。船沉了，等級也跟著沒了。改裝與 Mk 升級：在己方有船塢的星系，佔用船塢一週。</p>
@@ -298,22 +298,25 @@ function ccCard() {
   for (const M of S.missions) { on('cc-op-' + M.id, () => ccLaunch(S, 'op', { sys: s.id, mis: M.id })); on('cc-top-' + M.id, () => { ccSetTask(S, Q, { kind: 'op', sys: s.id, mis: M.id }); re(); }); }
 }
 // 研發（第 4 步）：研究點數、目前的研究、研發樹
-function ccTechView() {
-  const S = CC.S, X = ccT(S), cur = X.cur;
-  const curTx = cur ? `<div class="ccs-cur"><span>研究中<br><b style="font-size:17px">${CC_TECH[cur.id].name}</b></span>${ccBar(1 - cur.left / cur.tot, '#c9a7ff')}<span class="ccs-big">${cur.left}</span><span class="g-dim">週</span></div>` : '<div class="ccs-cur" style="border-left-color:var(--mute)"><span class="g-dim">目前沒有在研究：在下面挑一項開始。</span></div>';
-  const groups = [...new Set(CC_TECH_ORDER.map((id) => CC_TECH[id].g))];
-  const body = groups.map((g) => `<h4 style="margin:10px 0 4px">${g}</h4>` + CC_TECH_ORDER.filter((id) => CC_TECH[id].g === g && !(CC_TECH[id].cp && !ccForeignK(S, ccBpKey(CC_TECH[id])))).map((id) => {
-    const T = CC_TECH[id], why = ccTechWhy(S, id), done = X.done[id], on = cur && cur.id === id, c = ccTechCost(S, id);
-    const bk = ccBpKey(T), tag = done ? '<span style="color:#3fdf8f">✓ 已完成</span>' : on ? '<span style="color:#c9a7ff">研究中</span>' : ccForeignK(S, bk) ? (ccHasBp(S, bk) ? '<span style="color:#ffd34d">有藍圖</span>' : `<span class="g-dim">🔒 要${SM_FAC[CC_ORG[bk]].name}的藍圖</span>`) : '';
-    return `<div class="cc-ship cc-yq" style="grid-template-columns:1fr auto"><span><b>${T.name}</b> ${tag}${T.good === S.fac && !done ? ' <span class="g-dim">（你的陣營擅長，便宜 20%）</span>' : ''}<br><span class="g-dim">${T.desc}${T.need ? `・前置：${T.need.map((k) => CC_TECH[k].name).join('、')}` : ''}</span></span>${done || on ? '' : `<button class="g-btn" data-tech="${id}" ${why ? `disabled title="${smuEsc(why)}"` : ''}>研究（${c} 點・${T.w} 週）</button>`}</div>`;
-  }).join('')).join('');
-  ccmSheet(`<h3>研發 <span class="g-dim" style="font-size:14px">研究點數 ${S.pl.rp}</span><span class="en">R&amp;D</span></h3>
-    <div class="g-dim" style="font-size:12px">研究點數來源：任務完成（戰功的 1/10）、打贏後打撈殘骸（親自打的每擊沉一艘 ${CC_RP.kill} 點、計算的戰鬥每艘 ${CC_RP.calc} 點）、據點的研究所（每週 ${CC_RP.lab} 點）。一次研究一項，開始時付點數。別的陣營的招牌模組要先拿到藍圖（打贏後打撈、商店買）。船型要軍階＋研發都到；Mk 上限＝船的等級與研發取低的。</div>
-    <div style="margin:8px 0">${curTx}</div>${body}${ccProfHtml(S)}
+function ccTechView(sel) {
+  ccvCss();
+  const S = CC.S, X = ccT(S), cur = X.cur, L = ccvTechLayout(S).ids;
+  if (sel && CC_TECH[sel]) CC.tsel = sel;
+  if (CC.tsel && !L.includes(CC.tsel)) CC.tsel = null;   // 沒有預設選中：點了圖示才出現說明
+  const nDone = L.filter((id) => X.done[id]).length;
+  const strip = `<div class="ccs-stat" style="--sc:var(--violet)"><div><span>研究點數</span><b style="color:#c9a7ff">${S.pl.rp}</b></div><div><span>研究中</span><b style="font:900 16px/1.9 'Noto Sans TC',sans-serif">${cur ? `${CC_TECH[cur.id].name}<small>剩 ${cur.left} 週</small>` : '<span style="color:var(--dim);display:inline">閒著</span>'}</b></div><div><span>完成</span><b>${nDone}<small>／${L.length}</small></b></div><div><span>Mk 上限</span><b style="color:${ccMkCol(ccMkRes(S))}">${CAP_MK_NAME[ccMkRes(S)]}</b></div></div>`;
+  ccmSheet(`<h3>研發<span class="en">R&amp;D ・ TECH TREE</span></h3>${strip}
+    <div class="ccs-note">研究點數來源：任務完成（戰功的 1/10）、打贏後打撈殘骸（親自打的每擊沉一艘 ${CC_RP.kill} 點、計算的戰鬥每艘 ${CC_RP.calc} 點）、據點的研究所（每週 ${CC_RP.lab} 點）。一次研究一項，開始時付點數。別的陣營的招牌模組要先拿到藍圖（打贏後打撈、商店買）。</div>
+    ${CCV_LEGEND_T}<div class="ccv-tw">${ccvTechTree(S, CC.tsel)}</div>${ccProfHtml(S)}
     <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`, '', 'var(--violet)');
   gEl('cc-close').onclick = () => { smuCloseModal(); ccRender(); };
+  document.querySelectorAll('[data-tn]').forEach((b) => (b.onclick = () => { CC.tsel = CC.tsel === b.dataset.tn ? null : b.dataset.tn; ccTechKeep(); }));
+  const dx = document.querySelector('.ccv-det .x'); if (dx) dx.onclick = () => { CC.tsel = null; ccTechKeep(); };
+  ccvTechPlace();
   document.querySelectorAll('[data-tech]').forEach((b) => (b.onclick = () => { const err = ccTechStart(S, b.dataset.tech); if (err) { toast(err, 'warn'); return; } ccSave(S); ccRender(); ccTechView(); }));
 }
+// 重畫研發、捲動的位置不變（上下＝面板、左右＝研發樹）
+function ccTechKeep() { const q = (s) => document.querySelector(s), y = q('.ccm-sheet').scrollTop, x = q('.ccv-tw') ? q('.ccv-tw').scrollLeft : 0; ccTechView(); q('.ccm-sheet').scrollTop = y; if (q('.ccv-tw')) q('.ccv-tw').scrollLeft = x; ccvTechPlace(); }
 // 商店（第 5 步）：貿易站、黑市；貨每週換
 function ccShopView(s) {
   const S = CC.S, T = CC_SHOP[s.shop], why = ccShopWhy(S, s), L = ccShopStock(S, s), K = ccShopK(S, s);
@@ -333,8 +336,7 @@ function ccProfHtml(S) {
   const P = S.pl.prof || {}, mx = CAP_PROF.lv.length - 1;
   const keys = CAP_SLOTS.flatMap(([slot]) => [capProfKey(slot), ...Object.keys(CAP_MODS[slot]).map((id) => capProfKey(slot, id))]).filter((k) => P[k] || k.endsWith(':std'));
   return `<h4 style="margin:12px 0 4px">艦長熟練度</h4><div class="g-dim" style="font-size:12px">每一種裝備一條。經驗只從你親自開的船累積（照親自開的時間分配），效果套用到你所有小隊裝那種裝備的船：每級 +${Math.round(CAP_PROF.per * 100)}%，Lv${mx} 再解鎖特性。</div>`
-    + keys.map((k) => { const x = P[k] || 0, lv = capProfLv(x), lo = CAP_PROF.lv[lv], hi = CAP_PROF.lv[lv + 1], F = CAP_PROF_FX[k.split(':')[0]];
-      return `<div class="cc-ship cc-yq" style="grid-template-columns:150px 1fr"><b>${capProfName(k)} <span class="cc-lv${lv ? ' up' : ''}">Lv${lv}</span></b><span>${ccBar(hi == null ? 1 : (x - lo) / (hi - lo), '#c9a7ff')}<span class="g-dim">${F.name} +${Math.round(lv * CAP_PROF.per * 100)}%${lv >= mx ? `・${F.trait}` : `・經驗 ${x}／${hi}`}</span></span></div>`; }).join('');
+    + ccvProf(S, keys);   // 等級格子（caplevel_ui.js）
 }
 // 船塢的摘要：建造中、排隊、預備艦
 function ccYardSum(S, s) {
@@ -445,7 +447,8 @@ function CC_place(el) {
   const mp = gEl('cc-map'), s = CC.S && CC.S.sys[CC.sel]; if (!mp || !s || !CC.view) return;
   const [x, y] = ccXY(s), H = mp.clientHeight, kz = ccmK(), top = 168 * kz, bot = 24 * kz;   // 避開標題、工具列（capmap_ui.js）
   const dr = gEl('cc-drw') || document.querySelector('.sm-box.ccm-sheet:not(.cr-side)'), W = dr ? dr.getBoundingClientRect().left - mp.getBoundingClientRect().left - 20 : mp.clientWidth;   // 右側的任務／紀錄面板打開時，卡片不要蓋上去
-  const w = el.offsetWidth, L = x + 70 + w < W - 16 ? x + 70 : Math.max(16, x - 70 - w), m0 = mp.getBoundingClientRect();
+  const m0 = mp.getBoundingClientRect(), rp = mp.querySelector('#cce-side.rep') || document.querySelector('#g-screen > #cce-side.rep'), X0 = rp ? rp.getBoundingClientRect().right - m0.left + 12 : 16;   // 左側的戰報打開時，卡片不要蓋上去
+  const w = el.offsetWidth, L = x + 70 + w < W - 16 ? x + 70 : Math.max(X0, x - 70 - w);
   let B = H - bot;   // 底部：跟卡片左右重疊的面板（小隊面板、結束這一週、圖例）上緣
   for (const e of [document.querySelector('.ccm .cc-dock'), gEl('cc-end'), gEl('cc-leg')]) { if (!e) continue; const r = e.getBoundingClientRect(); if (r.right - m0.left > L && r.left - m0.left < L + w) B = Math.min(B, r.top - m0.top - 12); }
   if (B - top < 360) B = H - bot;   // 放不下就蓋過去
