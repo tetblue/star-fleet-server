@@ -154,6 +154,7 @@ def railing(bm, pts, h=1.1, r=0.035, mid=True):
 # 材質（程序材質，之後烘成貼圖）：白漆、海軍藍漆、鋼、鍍鉻、橡膠、橘漆、黃黑警示、發光
 # ----------------------------------------------------------------------------------------------
 MATS = {}
+EMIT = ['glow', 'lamp']                                  # 不烘、保留發光的材質（建築的工具 bdkit.py 會再加）
 BEV = dict(white=0.018, navy=0.014, steel=0.008, chrome=0.004, rubber=0.006, orange=0.006, hazard=0.012, yellow=0.012, glow=0.0, lamp=0.0, dark=0.012)
 
 
@@ -673,7 +674,7 @@ class Machine:
         me = MESH.data
         new, remap = [], []
         for m in list(me.materials):
-            m2 = m if m in (MATS['glow'], MATS['lamp']) else mt2      # 發光的材質不烘，留著
+            m2 = m if m in [MATS[k] for k in EMIT if k in MATS] else mt2      # 發光的材質不烘，留著
             if m2 not in new:
                 new.append(m2)
             remap.append(new.index(m2))
