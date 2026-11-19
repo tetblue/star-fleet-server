@@ -306,7 +306,7 @@ function crEnsure() {
     if (CR_NEW[name]) caGlb(CR_NEW[name]).then((G) => { const I = caMake(G); I.root.position.set(cx + x, y, z); I.root.rotation.y = ry; CB.scene.add(I.root); }).catch(old);
     else old();
   }
-  for (const it of CB_PROP_SET) if (it[2] > H.z1 + 6 || Math.abs(it[1]) > H.hw + 6) caPlace(CB.scene, it[0], cx + (Math.abs(it[1]) > CB_HALL.hw + 6 ? it[1] + Math.sign(it[1]) * (H.hw - CB_HALL.hw) : it[1] * (H.hw / CB_HALL.hw)), it[2] + (H.z1 - CB_HALL.z1), it[3], it[4], it[5] || 0);   // 牆外的＝離牆的距離不變（管制塔的平台要接到牆上）   // 機庫外面的（跟著機庫的大小往外挪）
+  for (const it of CB_PROP_SET) if (it[2] > H.z1 + 6 || it[1] > CB_HALL.hw + 6) caPlace(CB.scene, it[0], cx + (Math.abs(it[1]) > CB_HALL.hw + 6 ? it[1] + Math.sign(it[1]) * (H.hw - CB_HALL.hw) : it[1] * (H.hw / CB_HALL.hw)), it[2] + (H.z1 - CB_HALL.z1), it[3], it[4], it[5] || 0);   // 牆外的＝離牆的距離不變（管制塔的平台要接到牆上）   // 機庫外面的（跟著機庫的大小往外挪）
   crArmUnit('06_機械臂A', -1, CR_SHIP_Z + 4); crArmUnit('07_機械臂B', 1, CR_SHIP_Z - 8);
   crArmTower(-1, CR_SHIP_Z - 12); crArmTower(1, CR_SHIP_Z - 2);
   // 天車（02）：橫跨機庫、掛在屋頂下，沿 z 開到要裝的位置；吊鉤下面一條鋼索吊著砲塔（舊的、新的）或飛彈架
@@ -549,7 +549,7 @@ function crRepairEnd() {
 const _crP = new THREE.Vector3(), _crL = new THREE.Vector3();
 function crClamp(P, cx) {
   const H = CR_HALL;
-  P.x = Math.max(cx - H.hw + 1.6, Math.min(cx + H.hw - 1.6, P.x));
+  P.x = Math.max(cx - H.hw + 2.6, Math.min(cx + H.hw - 2.6, P.x));   // 兩側的桁架柱以內
   P.y = Math.min(H.h - 2, P.y);   // 屋頂（前緣的艙蓋也往外伸）下面
   P.y = Math.max(1.6, P.y); P.z = Math.max(H.z0 + 2, Math.min(H.z1 + 48, P.z));
 }
