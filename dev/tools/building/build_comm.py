@@ -117,4 +117,70 @@ box(P['steel'], -0.9, -0.2, 18.4, 18.44, -0.58, -0.52)                          
 box(P['steel'], -0.9, -0.2, 18.9, 18.94, -0.58, -0.52)
 M.part('Antennas', 'Root', P)
 
+# ===== 第三版：幾何細節 =====
+# BaseD 基座的小零件、欄杆；ShaftD 塔身的管線、爬梯；LatD 鋼架段的設備平台、板狀天線、線槽、拉索；MastD 桅杆上的板狀天線；YardD 基地的圍欄、地面站、雜物
+P = Pal()
+tier_detail(P, 8, 0, 0, A8, R1, 0.7, R1 - 0.2, 2.3, 21, 4, skip=(1, 3, 5, 7), scale=0.8)
+ring_rail(P, 8, 0, 0, A8, R1 - 0.75, 2.6, 0.42, 0.022)
+for k in range(8):
+    a = A8 + k * pi / 4 + 0.2
+    x, z = 3.65 * cos(a), -3.65 * sin(a)
+    if k % 3 == 0:
+        mast(P, x, z, 2.6, 4.2)
+    elif k % 3 == 1:
+        box(P['white'], x - 0.22, x + 0.22, 2.6, 3.0, z - 0.22, z + 0.22)
+        cylY(P['dark'], x, z, 3.0, 3.03, 0.16, None, 10)
+M.part('BaseD', 'Root', P)
+P = Pal()
+for k in range(4):
+    Mf, w0, w1, sl = face_frame(4, 0, 0, pi / 4, HS * 1.41421, 3.6, (HS - 0.25) * 1.41421, 7.0, k)
+    pipe_run(P, Mf, -1.25, 0.2, sl - 0.2, 0.06, 0.1)
+    pipe_run(P, Mf, -1.08, 0.5, sl - 0.5, 0.04, 0.08, 'navy')
+    if k % 2:
+        ladder(P, Mf, 1.2, 0.0, sl, 0.09)
+    else:
+        vent(P, Mf, 1.0, 0.4, 0.45, 0.5)
+        box(P['white'], 1.0, 1.45, 1.4, 2.1, -0.02, 0.14, Mf)
+        box(P['glow'], 1.1, 1.35, 1.7, 1.78, 0.14, 0.152, Mf)
+M.part('ShaftD', 'Root', P)
+P = Pal()
+for y, k in ((9.4, 1), (11.6, 3)):                     # 鋼架段兩層的設備平台（伸到外面）
+    Mf = FACES4[k]
+    box(P['steel'], -1.1, 1.1, y, y + 0.08, HP, HP + 1.0, Mf)
+    railing(P['steel'], [Mf @ V(-1.05, y + 0.08, HP + 0.1), Mf @ V(-1.05, y + 0.08, HP + 0.95), Mf @ V(0, y + 0.08, HP + 0.95), Mf @ V(1.05, y + 0.08, HP + 0.95), Mf @ V(1.05, y + 0.08, HP + 0.1)], 0.45, 0.02)
+    box(P['white'], -0.9, -0.3, y + 0.08, y + 0.75, HP + 0.1, HP + 0.5, Mf)
+    box(P['glow'], -0.8, -0.4, y + 0.5, y + 0.56, HP + 0.5, HP + 0.512, Mf)
+    beam(P['steel'], Mf @ V(-1.0, y, HP + 0.9), Mf @ V(-1.0, y - 0.9, HP), 0.07)
+    beam(P['steel'], Mf @ V(1.0, y, HP + 0.9), Mf @ V(1.0, y - 0.9, HP), 0.07)
+for k, Mf in enumerate(FACES4):                        # 角柱上的板狀天線（三層）
+    for i, y in enumerate((8.6, 10.6, 12.6)):
+        x = HP * (1 if (k + i) % 2 else -1)
+        box(P['white'], x - 0.09, x + 0.09, y, y + 0.9, HP + 0.2, HP + 0.3, Mf)
+        box(P['steel'], x - 0.03, x + 0.03, y + 0.4, y + 0.5, HP, HP + 0.2, Mf)
+ladder(P, FACES4[0] @ Tm(0, 0, HP + 0.08), 0.85, YL0, YL1, 0.1)                    # 鋼架外面的爬梯
+box(P['steel'], -HP - 0.1, -HP + 0.16, YL0, YL1, HP - 0.16, HP + 0.1)              # 沿著一根角柱的線槽
+for sx in (1, -1):
+    for sz in (1, -1):                                 # 環形平台底下的斜撐與四條拉索
+        beam(P['steel'], V(sx * HP, YL1 - 1.1, sz * HP), V(sx * 1.75, YL1, sz * 1.75), 0.09)
+        beam(P['steel'], V(sx * 1.8, YL1 + 0.05, sz * 1.8), V(sx * (HX - 0.25), 0.75, sz * (HZ - 0.25)), 0.035)
+        box(P['yellow'], sx * (HX - 0.25) - 0.14, sx * (HX - 0.25) + 0.14, 0.7, 0.9, sz * (HZ - 0.25) - 0.14, sz * (HZ - 0.25) + 0.14)
+M.part('LatD', 'Root', P)
+P = Pal()
+for Mf in FACES4:
+    box(P['white'], -0.5, -0.32, 16.5, 17.3, 0.78, 0.88, Mf)
+    box(P['white'], 0.32, 0.5, 14.5, 15.1, 0.84, 0.94, Mf)
+    box(P['steel'], -0.7, 0.7, 14.45, 14.5, 0.8, 0.9, Mf)
+M.part('MastD', 'Root', P)
+P = Pal()
+for sx in (1, -1):                                     # 基地兩邊的圍欄
+    railing(P['steel'], [V(sx * (HX - 0.2), 0.7, z) for z in (-3.6, -1.8, 0.0, 1.8, 3.6)], 0.6, 0.025)
+cylY(P['navy'], -3.9, 3.9, 0.7, 1.0, 0.45, None, 12)                               # 地面站的小碟
+cylY(P['steel'], -3.9, 3.9, 1.0, 1.7, 0.08, None, 8)
+dish(P['white'], Tm(-3.9, 1.95, 3.9) @ Ry(-0.8) @ Rx(-1.0), 0.75, None, 14)
+tank(P, -2.5, -4.9, 0.7, 0.36, 0.8)
+for i, (x, z) in enumerate(((2.6, 5.0), (3.2, 4.9), (-5.0, -1.0), (-5.0, -0.2), (5.0, 1.2))):
+    crate(P, x, z, 0.7, 0.5, 0.4, 0.6, ('navy', 'orange', 'white')[i % 3])
+box(P['hazard'], -0.9, 0.9, 0.7, 0.712, d1 + 0.15, HZ - 0.2)                       # 門前的警示地墊
+M.part('YardD', 'Root', P)
+
 done(M, '重製_通訊塔', dict(size=[HX * 2, H, HZ * 2]))

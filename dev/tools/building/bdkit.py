@@ -160,7 +160,7 @@ def dish(bm, M, r, depth=None, segs=20):
     """碟形天線：M 的 z 軸＝朝向。薄殼（拋物面）＋背面的座＋饋源。回傳 None。"""
     d = depth or r * 0.28
     prof = [(d * (t * t) - d, r * t) for t in (0.0, 0.25, 0.5, 0.75, 1.0)]
-    revolve(bm, prof + [(0.03 * r, r * 1.02), (-d * 0.2, r * 0.5), (-d * 1.3, r * 0.22)], M, segs)
+    revolve(bm, prof + [(0.03 * r, r * 1.02), (-d * 0.62, r * 0.6), (-d * 1.12, r * 0.14), (-d * 1.6, r * 0.12)], M, segs)
 
 
 def done(M, glb, extras=None):
@@ -195,3 +195,113 @@ FACES4 = [Ry(k * pi / 2) for k in range(4)]            # 四個面：把「朝 +
 def arch(bm, M, x, y0, y1, w, z0, z1):
     """尖拱形的板（哥德式的窗、門）：中心 x、底 y0、直邊到 y1、半寬 w，從 z0 凸到 z1（M 的局部座標，朝 +z）。"""
     plate(bm, [(x - w, y0), (x + w, y0), (x + w, y1), (x + w * 0.5, y1 + w * 0.9), (x, y1 + w * 1.5), (x - w * 0.5, y1 + w * 0.9), (x - w, y1)], z0, z1, M)
+
+
+# ----------------------------------------------------------------------------------------------
+# 小零件（第三版：幾何細節）。都畫在「面的座標」裡：x 沿著面、y 沿著面往上、z 朝外，原點在面的下緣中間。
+# ----------------------------------------------------------------------------------------------
+import random
+
+
+def face_frame(n, cx, cz, rot, r0, y0, r1, y1, k):
+    """prism(n, cx, cz, [(y0, r0), (y1, r1)], rot) 的第 k 個面 → (面的座標, 下緣寬, 上緣寬, 斜面的長度)。"""
+    c = cos(pi / n)
+    a0, a1 = r0 * c, r1 * c
+    phi = rot + (k + 0.5) * 2 * pi / n
+    tilt = atan2(a0 - a1, y1 - y0)
+    return Tm(cx, 0, cz) @ Ry(phi + pi / 2) @ Tm(0, y0, a0) @ Rx(-tilt), 2 * r0 * sin(pi / n), 2 * r1 * sin(pi / n), hypot(a0 - a1, y1 - y0)
+
+
+def vent(P, M, x, y, w, h, t=0.05, n=4):
+    """百葉通風口。"""
+    box(P['steel'], x, x + w, y, y + h, -0.02, t, M)
+    for i in range(n):
+        yy = y + h * (i + 0.5) / n
+        box(P['dark'], x + w * 0.1, x + w * 0.9, yy - h / n * 0.3, yy + h / n * 0.3, t, t + 0.012, M)
+
+
+def ladder(P, M, x, y0, y1, d=0.1, w=0.3):
+    """爬梯（貼在面上）。"""
+    for s in (-1, 1):
+        box(P['steel'], x + s * w / 2 - 0.02, x + s * w / 2 + 0.02, y0, y1, 0.0, d, M)
+    for i in range(int((y1 - y0) / 0.22)):
+        y = y0 + 0.12 + i * 0.22
+        box(P['steel'], x - w / 2, x + w / 2, y - 0.012, y + 0.012, d - 0.03, d, M)
+
+
+def pipe_run(P, M, x, y0, y1, r=0.06, d=0.1, col='steel'):
+    """沿著面往上的一根管子，兩頭彎進牆裡，中間幾個管夾。"""
+    cylY(P[col], x, d, y0, y1, r, None, 8, M)
+    for y in (y0, y1):
+        box(P[col], x - r, x + r, y - r, y + r, -0.02, d, M)
+    for i in range(1, max(2, int((y1 - y0) / 0.9))):
+        y = y0 + (y1 - y0) * i / max(2, int((y1 - y0) / 0.9))
+        box(P['steel'], x - r * 1.5, x + r * 1.5, y - 0.03, y + 0.03, -0.02, d + r * 0.6, M)
+
+
+def greeble(P, M, x0, x1, y0, y1, seed, n=6, cols=('white', 'navy', 'steel'), light='glow', scale=1.0):
+    """在面上的一塊範圍裡隨機擺 n 個小零件：凸出的蓋板、百葉、帶燈條的機盒、管子、線槽、爬梯。seed 固定，每次烘出來一樣。"""
+    R = random.Random(seed)
+    W, Hh = x1 - x0, y1 - y0
+    if W < 0.3 or Hh < 0.3:
+        return
+    for _ in range(n):
+        w, h = min(W, R.uniform(0.3, 0.9) * scale), min(Hh, R.uniform(0.25, 0.8) * scale)
+        x, y, t, k = R.uniform(x0, x1 - w), R.uniform(y0, y1 - h), R.choice((0.04, 0.07, 0.12)) * scale, R.random()
+        c = R.choice(cols)
+        if k < 0.3:                                    # 蓋板（兩層）
+            box(P[c], x, x + w, y, y + h, -0.03, t, M)
+            box(P[R.choice(cols)], x + w * 0.15, x + w * 0.85, y + h * 0.15, y + h * 0.85, t, t + 0.02, M)
+        elif k < 0.5:
+            vent(P, M, x, y, w, h, t)
+        elif k < 0.68:                                 # 機盒＋燈條
+            box(P[c], x, x + w, y, y + h, -0.03, t * 1.6, M)
+            box(P[light], x + w * 0.2, x + w * 0.8, y + h * 0.42, y + h * 0.58, t * 1.6, t * 1.6 + 0.012, M)
+        elif k < 0.84:
+            pipe_run(P, M, x + w / 2, y0 + R.uniform(0, Hh * 0.2), y1 - R.uniform(0, Hh * 0.2), 0.05 * scale, 0.09 * scale)
+        elif k < 0.93 and Hh > 1.2:
+            ladder(P, M, x + w / 2, y0, y1, 0.08)
+        else:                                          # 橫的線槽
+            box(P['steel'], x0, x1, y + h * 0.4, y + h * 0.4 + 0.07 * scale, -0.02, 0.06 * scale, M)
+
+
+def tier_detail(P, n, cx, cz, rot, r0, y0, r1, y1, seed, per=5, skip=(), **kw):
+    """整圈（n 個面）都擺小零件；skip＝不擺的面（門、徽記那幾面）。"""
+    for k in range(n):
+        if k in skip:
+            continue
+        M, w0, w1, sl = face_frame(n, cx, cz, rot, r0, y0, r1, y1, k)
+        w = min(w0, w1) * 0.42
+        greeble(P, M, -w, w, sl * 0.08, sl * 0.92, seed * 31 + k, per, **kw)
+
+
+def ring_rail(P, n, cx, cz, rot, r, y, h=0.5, t=0.025, col='steel'):
+    """多邊形平台邊上的一圈欄杆。"""
+    pts = [V(cx + r * cos(rot + 2 * pi * k / n), y, cz - r * sin(rot + 2 * pi * k / n)) for k in range(n + 1)]
+    q = []
+    for a, b in zip(pts, pts[1:]):
+        q += [a, a.lerp(b, 0.5)]
+    railing(P[col], q + [pts[-1]], h, t)
+
+
+def mast(P, x, z, y0, y1, col='steel', tip='beacon', bars=2):
+    """天線桿：細桿、幾根橫的振子、頂上一顆燈。"""
+    cylY(P[col], x, z, y0, y1, 0.03, 0.015, 6)
+    for i in range(bars):
+        y = y0 + (y1 - y0) * (0.55 + 0.3 * i / max(1, bars - 1))
+        w = 0.28 - 0.08 * i
+        box(P[col], x - w, x + w, y, y + 0.02, z - 0.012, z + 0.012)
+    if tip:
+        cylY(P[tip], x, z, y1, y1 + 0.07, 0.035, None, 6)
+
+
+def crate(P, x, z, y, w=0.5, h=0.4, d=0.7, col='navy'):
+    box(P[col], x - w / 2, x + w / 2, y, y + h, z - d / 2, z + d / 2)
+    box(P['steel'], x - w / 2 - 0.015, x + w / 2 + 0.015, y + h * 0.45, y + h * 0.55, z - d / 2 - 0.015, z + d / 2 + 0.015)
+
+
+def tank(P, x, z, y, r=0.4, h=1.0, col='white', band='navy'):
+    cylY(P[col], x, z, y, y + h, r, None, 12)
+    dome(P[col], x, z, y + h, r, 12, 0.45)
+    cylY(P[band], x, z, y + h * 0.35, y + h * 0.55, r * 1.02, None, 12)
+    cylY(P['steel'], x, z, y, y + 0.06, r * 1.12, None, 12)

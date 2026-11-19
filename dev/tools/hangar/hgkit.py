@@ -533,6 +533,8 @@ class Machine:
         MESH.data.uv_layers.new(name='UV_Atlas')
         bpy.ops.object.mode_set(mode='EDIT')
         bpy.ops.mesh.select_all(action='SELECT')
+        bpy.ops.mesh.dissolve_degenerate(threshold=1e-4)       # 倒角把很薄的零件壓成面積 0 的面：留著的話「平均島的比例」會把整張 UV 縮成幾個點
+        bpy.ops.mesh.select_all(action='SELECT')
         bpy.ops.uv.smart_project(angle_limit=radians(66), island_margin=0.0, area_weight=0.0, scale_to_bounds=False)
         bpy.ops.uv.select_all(action='SELECT')
         bpy.ops.uv.average_islands_scale()

@@ -85,6 +85,37 @@ if '--bridge' in ARGS:
         beam(P['navy'], V(x, H - 0.2, sz * 3.8), V(x, H - 0.2, sz * 1.4), 0.28, 0.4)
         beam(P['lamp'], V(x, H - 0.42, sz * 2.7), V(x, H - 0.42, sz * 1.6), 0.18, 0.04)
     M.part('Lamps', 'Root', P)
+    # ===== 第三版：幾何細節 =====
+    P = Pal()
+    for s in (1, -1):                                  # 橋墩：兩支腳之間的交叉撐、落水管、基座的地腳螺栓、墩上的燈
+        beam(P['steel'], V(s * 11.7, 1.5, -2.2), V(s * 11.7, 3.5, 2.2), 0.14)
+        beam(P['steel'], V(s * 11.7, 1.5, 2.2), V(s * 11.7, 3.5, -2.2), 0.14)
+        for sz in (1, -1):
+            cylY(P['steel'], s * 10.5, sz * 3.95, 1.0, 6.1, 0.08, None, 8)
+            box(P['lamp'], s * 10.15, s * 10.17, 4.7, 5.0, sz * 2.7, sz * 3.1)
+            for x in (9.9, 13.1):
+                for z in (1.9, 4.2):
+                    cylY(P['steel'], s * x, sz * z, 1.35, 1.45, 0.07, None, 6)
+        ladder(P, Tm(s * 13.06, 1.35, -s * 3.0) @ Ry(s * pi / 2), 0.0, 0.0, 4.7, 0.08)
+    for i in range(-4, 4):                             # 橋底縱樑之間的斜撐
+        x0, x1 = i * 3.0 - 0.0 + 1.5 - 1.5, i * 3.0 + 3.0
+        for z0, z1 in ((-2.6, 0.0), (0.0, 2.6)):
+            beam(P['steel'], V(x0, 5.75, z0 if i % 2 else z1), V(x1, 5.75, z1 if i % 2 else z0), 0.07)
+    for x in (-6.6, 6.6):                              # 伸縮縫
+        box(P['steel'], x - 0.08, x + 0.08, YD, YD + 0.015, -3.05, 3.05)
+    for sz in (1, -1):                                 # 橋面上的門形標誌架
+        cylY(P['steel'], 0.0, sz * 3.6, YD + 0.75, 9.7, 0.09, None, 8)
+        for i in range(-5, 6):                         # 護欄外側的加勁肋
+            box(P['white'], i * 2.4 - 0.08, i * 2.4 + 0.08, 6.1, YD + 0.7, sz * 3.9, sz * 4.05)
+    box(P['steel'], -0.1, 0.1, 9.5, 9.75, -3.7, 3.7)
+    box(P['navy'], -0.14, -0.1, 8.75, 9.5, -2.6, 2.6)
+    box(P['glow'], -0.16, -0.14, 9.05, 9.2, -2.0, 2.0)
+    for x, d in ((-9.0, 1), (9.0, -1)):                # 車道上的箭頭
+        for sz in (1, -1):
+            beam(P['white'], V(x, YD + 0.008, sz * 1.5 * d), V(x + d * 0.7, YD + 0.008, sz * 1.5 * d - 0.5), 0.14, 0.012)
+            beam(P['white'], V(x, YD + 0.008, sz * 1.5 * d), V(x + d * 0.7, YD + 0.008, sz * 1.5 * d + 0.5), 0.14, 0.012)
+    M.part('Detail', 'Root', P)
+
     done(M, '重製_天橋', dict(size=[28, H, 9.97], deck=YD))
 elif '--cross' in ARGS:
     # 零件表：Base 路基；Road 柏油與標線（四邊各一組斑馬線）；Corners 四個角的人行道、緣石、控制箱；Lamps 四個角各一支雙臂路燈
@@ -123,6 +154,27 @@ elif '--cross' in ARGS:
                 beam(P['lamp'], c - V(ax, 0, az) * 0.6, c + V(ax, 0, az) * 0.6, 0.2, 0.04)
             box(P['beacon'], x - 0.12, x + 0.12, YS + 2.6, YS + 2.85, z - 0.12, z + 0.12)       # 號誌燈
     M.part('Lamps', 'Root', P)
+    # ===== 第三版：幾何細節 =====
+    P = Pal()
+    cylY(P['steel'], 0.0, 0.0, YR, YR + 0.012, 0.5, None, 16)                      # 路口中間的人孔蓋
+    cylY(P['dark'], 0.0, 0.0, YR + 0.012, YR + 0.016, 0.38, None, 16)
+    for s in (1, -1):                                  # 停止線
+        box(P['white'], s * 4.45, s * 4.6, YR, YR + 0.012, -4.2, 4.2)
+        box(P['white'], -4.2, 4.2, YR, YR + 0.012, s * 4.45, s * 4.6)
+    for sx in (1, -1):
+        for sz in (1, -1):
+            x, z = sx * 5.5, sz * 5.5
+            for ax, az in ((-sx, 0), (0, -sz)):        # 號誌燈箱（掛在燈臂上，三顆燈）
+                c = V(x + ax * 2.3, TOP - 0.85, z + az * 2.3)
+                box(P['dark'], c.x - 0.14, c.x + 0.14, c.y - 0.4, c.y + 0.43, c.z - 0.14, c.z + 0.14)
+                for j, col in enumerate(('beacon', 'yellow', 'glow')):
+                    box(P[col], c.x - 0.08 - 0.07 * abs(az), c.x + 0.08 + 0.07 * abs(az), c.y + 0.2 - j * 0.24, c.y + 0.36 - j * 0.24, c.z - 0.08 - 0.07 * abs(ax), c.z + 0.08 + 0.07 * abs(ax))
+            for dx, dz in ((0.0, 0.9), (0.9, 0.0), (0.45, 0.45)):                   # 角上的護柱
+                cylY(P['yellow'], sx * (4.85 + dx), sz * (4.85 + dz), YS, YS + 0.45, 0.06, None, 8)
+            box(P['dark'], sx * 4.75, sx * 5.25, YR + 0.0, YR + 0.014, sz * 2.0, sz * 2.9)       # 排水格柵
+            box(P['steel'], sx * 6.0, sx * 6.6, YS, YS + 0.012, sz * 4.9, sz * 5.4)              # 人行道上的檢修蓋
+    M.part('Detail', 'Root', P)
+
     done(M, '重製_十字路口', dict(size=[14, TOP, 14], road=YR))
 elif '--corner' in ARGS:
     # 零件表：Base 路基；Road 彎道的柏油與標線；Walks 內側的扇形人行道、外側的人行道與外角的鋪面、護欄；Lamps 路燈、管線
@@ -162,6 +214,30 @@ elif '--corner' in ARGS:
     lamp(P, CX - 1.1, CZ + 1.1, -0.7071, 0.7071, 2.2)
     hose(P['steel'], [V(CX + 13.4 * cos(a), YS + 0.22, CZ + 13.4 * sin(a)) for a in [A0 + (A1 - A0) * i / 8 for i in range(9)]], 0.16, 8)
     M.part('Lamps', 'Root', P)
+    # ===== 第三版：幾何細節 =====
+    P = Pal()
+    for k in range(4):                                 # 彎道外側的導向標誌（黃底黑箭頭）
+        a = A0 + (A1 - A0) * (k + 0.5) / 4
+        c, s = cos(a), sin(a)
+        x, z = CX + 12.25 * c, CZ + 12.25 * s
+        cylY(P['steel'], x, z, YS, YS + 1.5, 0.04, None, 6)
+        Ms = Tm(x, YS + 1.5, z) @ Ry(pi / 2 - a + pi)
+        box(P['yellow'], -0.4, 0.4, -0.3, 0.3, 0.0, 0.04, Ms)
+        plate(P['dark'], [(-0.22, 0.2), (0.12, 0.0), (-0.22, -0.2), (-0.1, 0.0)], 0.04, 0.05, Ms)
+    for a in (A0 + 0.5, A1 - 0.5):                     # 排水格柵、人孔蓋
+        sector(P['dark'], CX, CZ, T + RW - 0.5, T + RW - 0.1, YR, YR + 0.014, a - 0.04, a + 0.04, 2)
+    cylY(P['steel'], CX - 7.6, CZ + 4.6, YR, YR + 0.012, 0.5, None, 16)
+    cylY(P['dark'], CX - 7.6, CZ + 4.6, YR + 0.012, YR + 0.016, 0.38, None, 16)
+    for a, b in ((-6.3, 1.2), (-1.2, 6.3)):            # 外角的長椅
+        box(P['navy'], a - 0.7, a + 0.7, YS + 0.3, YS + 0.38, b - 0.25, b + 0.25)
+        for d in (-0.5, 0.5):
+            box(P['steel'], a + d - 0.04, a + d + 0.04, YS, YS + 0.3, b - 0.2, b + 0.2)
+    for i in range(5):                                 # 內側扇形邊上的護柱
+        a = A0 + (A1 - A0) * (i + 0.5) / 5
+        cylY(P['yellow'], CX + 2.0 * cos(a), CZ + 2.0 * sin(a), YS, YS + 0.45, 0.06, None, 8)
+    box(P['steel'], -4.9, -3.9, YS, YS + 0.012, 4.0, 5.0)
+    M.part('Detail', 'Root', P)
+
     done(M, '重製_轉角道路', dict(size=[14, TOP, 14], road=YR))
 else:
     # 零件表：Base 路基；Road 柏油與標線；Walks 兩邊的人行道、緣石、矮護欄與燈條、設備箱；Lamps 每邊兩支路燈、人行道外緣的管線
@@ -198,4 +274,28 @@ else:
         for z in (-5.25, -1.75, 1.75, 5.25):
             box(P['steel'], s * 6.75 - 0.22, s * 6.75 + 0.22, YS, YS + 0.44, z - 0.06, z + 0.06)
     M.part('Lamps', 'Root', P)
+    # ===== 第三版：幾何細節 =====
+    P = Pal()
+    cylY(P['steel'], 2.2, -2.4, YR, YR + 0.012, 0.5, None, 16)                     # 人孔蓋
+    cylY(P['dark'], 2.2, -2.4, YR + 0.012, YR + 0.016, 0.38, None, 16)
+    for s in (1, -1):
+        for z in (-4.6, 4.6):                          # 排水格柵
+            box(P['dark'], s * (RW - 0.5), s * (RW - 0.1), YR, YR + 0.014, z - 0.35, z + 0.35)
+        z0 = s * 4.2                                   # 車道上的箭頭（兩個方向）
+        beam(P['white'], V(s * 2.15, YR + 0.008, z0), V(s * 2.15 - 0.5, YR + 0.008, z0 - s * 0.7), 0.14, 0.012)
+        beam(P['white'], V(s * 2.15, YR + 0.008, z0), V(s * 2.15 + 0.5, YR + 0.008, z0 - s * 0.7), 0.14, 0.012)
+        for z in (-6.3, -0.4, 0.4, 6.3):               # 護欄缺口兩邊的護柱
+            cylY(P['yellow'], s * (RW + 0.34), z, YS, YS + 0.5, 0.06, None, 8)
+        for z in (-5.25, -1.75, 1.75, 5.25):           # 人行道上的檢修蓋
+            box(P['steel'], s * 5.9 - 0.3, s * 5.9 + 0.3, YS, YS + 0.012, z + 0.4, z + 1.0)
+    box(P['navy'], -6.45, -5.95, YS + 0.3, YS + 0.38, -1.0, 1.0)                    # 長椅（另一邊是設備箱）
+    for z in (-0.8, 0.8):
+        box(P['steel'], -6.4, -6.0, YS, YS + 0.3, z - 0.04, z + 0.04)
+    cylY(P['steel'], -5.3, 5.6, YS, YS + 2.3, 0.04, None, 6)                       # 路牌
+    box(P['navy'], -5.34, -5.3, YS + 1.6, YS + 2.3, 4.8, 6.4)
+    box(P['glow'], -5.35, -5.34, YS + 1.9, YS + 2.0, 5.0, 6.2)
+    cylY(P['orange'], 5.2, 5.9, YS, YS + 0.45, 0.1, None, 10)                      # 消防栓
+    cylY(P['orange'], 5.2, 5.9, YS + 0.45, YS + 0.52, 0.07, None, 10)
+    M.part('Detail', 'Root', P)
+
     done(M, '重製_直線道路', dict(size=[14, TOP, 14], road=YR))

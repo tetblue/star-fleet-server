@@ -137,4 +137,65 @@ for x, z in ((-7.2, -1.5), (-7.2, 0.2), (7.0, -4.5)):  # 貨櫃
     box(P['orange' if z > -1 else 'navy'], x - 0.5, x + 0.5, YD, YD + 0.8, z - 0.7, z + 0.7)
 M.part('Yard', 'Root', P)
 
+# ===== 第三版：幾何細節 =====
+# BaseD 平台側面的小零件、邊上的欄杆、乾塢壁的肋與爬梯；GantryD 門形架的吊車小車與吊鉤、探照燈、立柱的爬梯、上走道的樓梯；TowerD 兩座高塔的小零件；YardD2 燈柱、纜線盤、搬運車、護柱
+P = Pal()
+for i, Ms in enumerate((Tm(HX - 0.3, 0.45, 0) @ Ry(pi / 2), Tm(-HX + 0.3, 0.45, 0) @ Ry(-pi / 2))):
+    greeble(P, Ms, -HZ + 2.2, HZ - 2.2, 0.05, 1.0, 41 + i, 12, scale=0.75)
+greeble(P, Tm(0, 0.45, -HZ + 0.3) @ Ry(pi), -HX + 2.2, HX - 2.2, 0.05, 1.0, 43, 10, scale=0.75)
+for s in (1, -1):
+    railing(P['steel'], [V(s * (HX - 0.5), YD, z) for z in (-8.0, -6.0, -4.0, -2.0, 0.0, 2.0)], 0.5, 0.025)
+    for z in (-7.0, -5.4, -3.8, -2.2, -0.6, 1.0, 2.6, 4.2):                        # 乾塢壁的肋
+        box(P['steel'], s * (PX - 0.14), s * PX, 0.6, YD, z - 0.07, z + 0.07)
+    ladder(P, Tm(s * PX, 0.6, 5.0) @ Ry(-s * pi / 2), 0.0, 0.0, 0.9, 0.08)
+    for z in (-5.0, 0.0):                              # 塢邊的工作燈
+        cylY(P['steel'], s * (PX + 0.55), z, YD, YD + 0.9, 0.035, None, 6)
+        box(P['lamp'], s * (PX + 0.3), s * (PX + 0.6), YD + 0.86, YD + 0.9, z - 0.12, z + 0.12)
+railing(P['steel'], [V(x, YD, -HZ + 0.5) for x in (-6.0, -3.0, 0.0, 3.0, 6.0)], 0.5, 0.025)
+hose(P['rubber'], [V(-2.6, 0.66, -7.0), V(-1.0, 0.66, -5.2), V(-2.4, 0.66, -3.0), V(-2.9, 0.66, 0.5)], 0.06, 8)
+hose(P['orange'], [V(2.8, 0.66, 4.8), V(1.6, 0.66, 2.4), V(2.7, 0.66, -0.4)], 0.05, 8)
+M.part('BaseD', 'Root', P)
+P = Pal()
+for i, z in enumerate((-6.8, -2.6, 1.6)):
+    x = (-2.2, 1.6, -0.6)[i]                           # 每道門形架底下一台吊車小車與吊鉤
+    box(P['navy'], x - 0.5, x + 0.5, YG - 0.28, YG, z - 0.42, z + 0.42)
+    cylY(P['steel'], x, z, YG - 2.2 - i * 0.5, YG - 0.28, 0.022, None, 6)
+    box(P['yellow'], x - 0.16, x + 0.16, YG - 2.55 - i * 0.5, YG - 2.2 - i * 0.5, z - 0.12, z + 0.12)
+    for s in (1, -1):
+        box(P['navy'], s * (GX - 0.4) - 0.2, s * (GX - 0.4) + 0.2, 6.9, 7.2, z + 0.42, z + 0.6)      # 立柱上的探照燈
+        box(P['lamp'], s * (GX - 0.4) - 0.15, s * (GX - 0.4) + 0.15, 6.86, 6.9, z + 0.44, z + 0.58)
+        ladder(P, Tm(s * (GX + 0.46), YD + 0.5, z) @ Ry(s * pi / 2), 0.0, 0.0, YG - YD - 0.5, 0.08)
+        box(P['white'], s * GX - 0.5, s * GX + 0.5, YG + 0.9, YG + 1.0, z - 0.5, z + 0.5)           # 柱頂的蓋板
+for i in range(14):                                    # 上走道的樓梯（左邊，往前下到平台）
+    box(P['steel'], -GX + 0.3, -GX + 0.9, 4.5 - (i + 1) * 0.214, 4.55 - (i + 1) * 0.214, 1.6 + i * 0.22, 1.6 + (i + 1) * 0.22)
+for x in (-GX + 0.3, -GX + 0.9):
+    beam(P['white'], V(x, 4.45, 1.6), V(x, YD + 0.05, 4.68), 0.06, 0.2)
+    railing(P['steel'], [V(x, 4.55 - t * 3.0, 1.6 + t * 3.08) for t in (0.0, 0.33, 0.66, 1.0)], 0.5, 0.02, False)
+M.part('GantryD', 'Root', P)
+P = Pal()
+for i, (x, z, top, hw) in enumerate(((-6.6, 5.2, 9.9, 0.95), (6.7, 5.4, 8.6, 0.85))):
+    tier_detail(P, 4, x, z, pi / 4, hw * 1.41421, YD + 0.8, (hw - 0.12) * 1.41421, top - 0.6, 45 + i, 5, skip=(2,), scale=0.6)
+    sq(P['navy'], x, z, [(top - 0.62, hw - 0.08), (top - 0.5, hw - 0.1)])
+    mast(P, x + 0.4, z - 0.4, top - 0.3, top + 0.35, tip=None)
+M.part('TowerD', 'Root', P)
+P = Pal()
+for x, z in ((-8.0, -8.9), (8.0, -8.9), (-3.6, 8.9)):  # 照明燈柱
+    cylY(P['steel'], x, z, YD, YD + 3.6, 0.06, None, 8)
+    box(P['navy'], x - 0.45, x + 0.45, YD + 3.6, YD + 3.75, z - 0.12, z + 0.12)
+    box(P['lamp'], x - 0.4, x + 0.4, YD + 3.56, YD + 3.6, z - 0.1, z + 0.1)
+for x, z in ((4.6, -7.6), (5.5, -7.6)):                # 纜線盤
+    cylX(P['orange'], x - 0.22, x + 0.22, YD + 0.42, z, 0.42, None, 14)
+    cylX(P['steel'], x - 0.27, x + 0.27, YD + 0.42, z, 0.12, None, 8)
+box(P['yellow'], 6.4, 7.6, YD + 0.18, YD + 0.6, 0.2, 0.9)                          # 搬運車
+box(P['navy'], 6.4, 6.9, YD + 0.6, YD + 1.0, 0.25, 0.85)
+for x in (6.6, 7.4):
+    for z in (0.2, 0.9):
+        cylZ(P['rubber'], x, YD + 0.16, z - 0.07, z + 0.07, 0.16, 10)
+for s in (1, -1):
+    for z in (6.6, 7.6, 8.6):
+        cylY(P['yellow'], s * 2.5, z, YD, YD + 0.4, 0.07, None, 8)
+for i, (x, z) in enumerate(((-7.4, 2.2), (-6.7, 2.4), (-7.3, 3.2), (4.9, -3.0), (7.4, -1.6), (7.4, -2.6))):
+    crate(P, x, z, YD, 0.55, 0.42, 0.75, ('white', 'navy', 'orange')[i % 3])
+M.part('YardD2', 'Root', P)
+
 done(M, '重製_星艦船塢', dict(size=[HX * 2, H, HZ * 2]))
