@@ -134,7 +134,8 @@ const CB_PROP_SET = [
 ];
 function cbBuildProps() {
   const S = CB.scene;
-  for (let k = 0; k < 5; k++) for (const [name, x, z, ry, s, y = 0] of CB_PROP_SET) hgPlaceProps(S, [[name, cbX(k) + x, z, ry, 1, y]], s);
+  // caPlace（caprefit.js）：有用 Blender 腳本重建過的就用新模型，沒有的用舊的
+  for (let k = 0; k < 5; k++) CB_PROP_SET.forEach(([name, x, z, ry, s, y = 0], n) => caPlace(S, name, cbX(k) + x, z, ry, s, y, n + k));
 }
 
 // ── 船：跟編成畫面同一套船體＋武器掛點；船頭朝鏡頭（+z）──

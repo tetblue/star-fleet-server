@@ -30712,7 +30712,8 @@ const CB_PROP_SET = [
 ];
 function cbBuildProps() {
   const S = CB.scene;
-  for (let k = 0; k < 5; k++) for (const [name, x, z, ry, s, y = 0] of CB_PROP_SET) hgPlaceProps(S, [[name, cbX(k) + x, z, ry, 1, y]], s);
+  // caPlace（caprefit.js）：有用 Blender 腳本重建過的就用新模型，沒有的用舊的
+  for (let k = 0; k < 5; k++) CB_PROP_SET.forEach(([name, x, z, ry, s, y = 0], n) => caPlace(S, name, cbX(k) + x, z, ry, s, y, n + k));
 }
 
 // ── 船：跟編成畫面同一套船體＋武器掛點；船頭朝鏡頭（+z）──
@@ -30886,7 +30887,31 @@ const CR_PROP_SET = [
   ['20_小型機械爪', -24, 8, Math.PI / 2, 60, 0.6], ['22_登艦梯', 8, -43, Math.PI, 60, 0.6], ['22_登艦梯', -8, -43, Math.PI, 60, 0.6],
   ['02_天車', 0, -44, 0, 1, 0, 0],   // 停在後面的另一台天車（x、y 縮放在 crEnsure 照機庫算）
 ];
-const CR_NEW = { '04_飛彈架': '28_飛彈架', '16_雙管砲塔': '29_雙管砲塔', '12_雙推進器艙': '30_雙推進器艙', '22_登艦梯': '31_登艦梯', '13_照明塔A': '32_照明塔A', '14_照明塔B': '33_照明塔B', '11_加工站': '34_加工站', '15_氣瓶組': '35_氣瓶組' };   // 舊模型 → dev/tools/hangar 重建的
+const CR_NEW = { '04_飛彈架': '28_飛彈架', '16_雙管砲塔': '29_雙管砲塔', '12_雙推進器艙': '30_雙推進器艙', '22_登艦梯': '31_登艦梯', '13_照明塔A': '32_照明塔A', '14_照明塔B': '33_照明塔B', '11_加工站': '34_加工站', '15_氣瓶組': '35_氣瓶組',
+  '01_管制塔': '36_管制塔', '18_物料艙': '37_物料艙', '19_雙聯儲槽': '38_雙聯儲槽', '21_圓頂儲槽': '39_圓頂儲槽' };   // 舊模型 → dev/tools/hangar 重建的
+// 新模型是照整修庫裡的大小（公尺）建的：CA_BASE＝對應的舊模型在整修庫用的縮放。別的地方（戰艦庫）用別的縮放時，照比例縮
+const CA_BASE = { '04_飛彈架': 85, '16_雙管砲塔': 55, '12_雙推進器艙': 60, '22_登艦梯': 60, '13_照明塔A': 75, '14_照明塔B': 75, '11_加工站': 70, '15_氣瓶組': 75,
+  '01_管制塔': 95, '18_物料艙': 70, '19_雙聯儲槽': 85, '21_圓頂儲槽': 85 };   // 這四樣只在戰艦庫旁邊，照那裡的縮放建的
+// 當擺設的機械臂的幾個姿勢（手臂的平面跟舊模型一樣，不朝船伸）
+const CA_STOW = [{ sh: 70, el: -100, wr: -60 }, { yaw: 12, sh: 86, el: -116, wr: -58, grip: 8 }, { yaw: -10, sh: 60, el: -92, wr: -58, roll: 40 }, { yaw: 6, sh: 78, el: -108, wr: -40, grip: 20 }];
+// 不會再動的蒙皮模型：算一次包圍球，看不到的時候就不畫（戰艦庫有五座，每座好幾座機械臂）
+function caStill(root) { root.updateMatrixWorld(true); root.traverse((o) => { if (o.isSkinnedMesh) { o.computeBoundingSphere(); o.frustumCulled = true; } }); }
+// 擺一件擺設：有重建過的就用新的，沒有、或新的載入失敗，就用舊的。s＝舊模型在這裡用的縮放；n＝第幾件（機械臂輪流擺不同的姿勢）
+//   06／07／08 機械臂 → 一座擺好姿勢的重型機械臂；20 小型機械爪 → 兩座小的重型機械臂；CR_NEW 裡有的 → 對應的新模型
+function caPlace(S, name, x, z, ry, s, y = 0, n = 0) {
+  const old = () => hgPlaceProps(S, [[name, x, z, ry, 1, y]], s);
+  const arm = (G, k, px, pz, rot, pose) => {
+    const I = caMake(G), ang = {}; for (const key in G.lim) ang[key] = G.lim[key].rest;
+    I.root.scale.setScalar(k); I.root.position.set(px, y, pz); I.root.rotation.y = rot; S.add(I.root); caPose({ G, bones: I.bones, ang: Object.assign(ang, pose) }); caStill(I.root);
+  };
+  if (/^0[678]_/.test(name)) caSrc().then((G) => arm(G, s / 95, x, z, ry, CA_STOW[n % CA_STOW.length])).catch(old);
+  else if (name === '20_小型機械爪') {
+    const rot = ry - Math.PI / 2, k = 0.38 * s / 60;
+    caSrc().then((G) => [[-1.8, { yaw: 28, sh: 62, el: -112, wr: -30, grip: 22 }], [1.8, { yaw: -22, sh: 96, el: -82, wr: -68, grip: 0 }]]
+      .forEach(([d, pose]) => arm(G, k, x + d * Math.sin(rot) * s / 60, z + d * Math.cos(rot) * s / 60, rot, pose))).catch(old);
+  } else if (CR_NEW[name] && CA_BASE[name]) caGlb(CR_NEW[name]).then((G) => { const I = caMake(G); I.root.scale.setScalar(s / CA_BASE[name]); I.root.position.set(x, y, z); I.root.rotation.y = ry; S.add(I.root); }).catch(old);
+  else old();
+}
 // 模型上的一點（原始單位）：pick(頂點陣列) 回傳一個點；模型載入後才算得出來
 function crPropPt(name, pick) {
   return hgProp(name).then((src) => {
@@ -30957,7 +30982,7 @@ function caGlb(file) {
     const g = await MODEL_LOAD.loader.parseAsync(await r.arrayBuffer(), '');
     const clips = {}, lim = {}, X = {};
     for (const c of g.animations) clips[c.name.replace('_param', '')] = c.tracks.filter((t) => !t.name.endsWith('.scale')).map((t) => ({ bone: t.name.split('.')[0], pos: t.name.endsWith('.position'), v: t.values, n: t.times.length }));
-    g.scene.traverse((o) => { if (o.isMesh) o.frustumCulled = false; for (const k in o.userData) { const v = o.userData[k]; if (typeof v === 'string') try { X[k] = JSON.parse(v); } catch (e) { /* 不是數字資料 */ } } });
+    g.scene.traverse((o) => { if (o.isSkinnedMesh) o.frustumCulled = false; for (const k in o.userData) { const v = o.userData[k]; if (typeof v === 'string') try { X[k] = JSON.parse(v); } catch (e) { /* 不是數字資料 */ } } });
     for (const j of X.joints || []) lim[j.key] = j;
     return { scene: g.scene, clips, lim, X };
   })());
@@ -31131,7 +31156,7 @@ function crEnsure() {
     if (CR_NEW[name]) caGlb(CR_NEW[name]).then((G) => { const I = caMake(G); I.root.position.set(cx + x, y, z); I.root.rotation.y = ry; CB.scene.add(I.root); }).catch(old);
     else old();
   }
-  for (const it of CB_PROP_SET) if (it[2] > H.z1 + 6 || Math.abs(it[1]) > H.hw + 6) hgPlaceProps(CB.scene, [[it[0], cx + it[1] * (H.hw / CB_HALL.hw), it[2] + (H.z1 - CB_HALL.z1), it[3], 1, it[5] || 0]], it[4]);   // 機庫外面的（跟著機庫的大小往外挪）
+  for (const it of CB_PROP_SET) if (it[2] > H.z1 + 6 || Math.abs(it[1]) > H.hw + 6) caPlace(CB.scene, it[0], cx + it[1] * (H.hw / CB_HALL.hw), it[2] + (H.z1 - CB_HALL.z1), it[3], it[4], it[5] || 0);   // 機庫外面的（跟著機庫的大小往外挪）
   crArmUnit('06_機械臂A', -1, CR_SHIP_Z + 4); crArmUnit('07_機械臂B', 1, CR_SHIP_Z - 8);
   crArmTower(-1, CR_SHIP_Z - 12); crArmTower(1, CR_SHIP_Z - 2);
   // 天車（02）：橫跨機庫、掛在屋頂下，沿 z 開到要裝的位置；吊鉤下面一條鋼索吊著砲塔（舊的、新的）或飛彈架
@@ -31414,7 +31439,7 @@ function crFrame() {
   CB.r.render(CB.scene, C);
 }
 if (typeof requestAnimationFrame === 'function') CR.raf = requestAnimationFrame(crFrame);
-Object.assign(window.__cap || (window.__cap = {}), { CR, crShow, crHide, crRepair, crEnsure, crMakeShip, crRigArm, crRigAim, crRigStep, crRigTip, THREE, hgProp, getModel });   // THREE、hgProp、getModel：測試腳本用
+Object.assign(window.__cap || (window.__cap = {}), { CR, CB, crShow, crHide, crRepair, crEnsure, crMakeShip, crRigArm, crRigAim, crRigStep, crRigTip, THREE, hgProp, getModel });   // THREE、hgProp、getModel：測試腳本用
 
 // ═════ 武器配置：表現預覽 ═════
 // 在武器配置的 3D 畫面直接看：武器開火／轉向（用戰鬥的砲塔動畫：轉塔、仰角、砲管後座、飛彈艙蓋）、戰艦推進、躍傳、受損／破壞／修復。
