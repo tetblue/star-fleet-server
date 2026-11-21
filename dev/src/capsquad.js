@@ -163,6 +163,7 @@ function capCaptureInit(M) {
 function capCaptureTick(M, t) {
   if (M.type !== 'capture') return false;
   if (M.inb && !M.inb.done) {
+    if (!M.inb.fx && t >= M.inb.t - CAP_WARP.in) { M.inb.fx = true; for (const s of CAP.foes) if (s.inb) { const L = Math.hypot(s.x, s.z) || 1; capWarpFx(s, 'in', { keep: true, F: [-s.x / L, 0, -s.z / L] }); } }   // 光束先到，倒數結束時船出現
     if (t < M.inb.t) return true;   // 倒數中：還不算交戰
     M.inb.done = true;
     for (const s of CAP.foes) {
@@ -187,14 +188,15 @@ function capSquadLost(s) { if (!CAP.foes.some((o) => !o.dead && o.sq === s.sq)) 
 // 切換小隊：接手另一隊的第一艘還在的船；原本的小隊交給 AI
 function capSquadKey() {
   const c = capCur(); if (!c) return;
-  const o = CAP.own.filter((s) => !s.dead && s.sq !== c.sq);
-  if (!o.length) { capFeed(CAP.own.some((s) => s.sq !== c.sq) ? '另一個小隊已經全滅' : '這場戰鬥只有一個小隊', 'hint'); return; }
+  const D = CAP.cfg && CAP.cfg.duel, mine = (s) => !D || !D.mine || D.mine[s.sq];   // 艦長生涯：同陣營 AI 的小隊不能切過去
+  const o = CAP.own.filter((s) => !s.dead && s.sq !== c.sq && mine(s));
+  if (!o.length) { capFeed(CAP.own.some((s) => s.sq !== c.sq && mine(s)) ? '另一個小隊已經全滅' : CAP.own.some((s) => s.sq !== c.sq) ? '另一個小隊不是你的（同陣營 AI 的小隊），不能切換' : '這場戰鬥只有一個小隊', 'hint'); return; }
   CAP.tgt = null; for (const s of CAP.own) s.lockT = 0;
   capTake(o[0], `${capSqName(c.sq)}交給 AI・改指揮${capSqName(o[0].sq)}：`);
 }
 const _sqv = new THREE.Vector3(), _sqw = new THREE.Vector3();
 // 小隊的目標（集火）：離小隊中心近、血少的敵艦優先；軌道防禦等武裝設施排在船後面
-function capSquadTarget(s) {
+function capSquadTarget(s, prov) {
   const es = 1 - s.side, t = U.uTime.value, team = capTeam(s).filter((o) => !o.dead && o.sq === s.sq);
   let cx = 0, cy = 0, cz = 0; for (const o of team) { cx += o.x; cy += o.y; cz += o.z; } const n = team.length || 1; cx /= n; cy /= n; cz /= n;
   let best = null, bs = 1e9;
@@ -202,7 +204,7 @@ function capSquadTarget(s) {
     const q = squadrons[ships.sq[i]];
     if (!ships.alive[i] || ships.side[i] !== es || q.hidden || q.bg || !capVis(s, i, t)) continue;
     shipWorldCPU(i, _sqv); const d = Math.hypot(_sqv.x - cx, _sqv.y - cy, _sqv.z - cz); if (d > 1600) continue;
-    if (s.guard && Math.hypot(_sqv.x - s.guard.x, _sqv.z - s.guard.z) > s.guard.R + 150) continue;   // 守軍：防區外的不追
+    if (s.guard && Math.hypot(_sqv.x - s.guard.x, _sqv.z - s.guard.z) > s.guard.R + (prov ? 600 : 150)) continue;   // 守軍：防區外的不追；被打的時候可以追出去一段距離，之後回來
     const sc = d * (0.55 + 0.45 * ships.hp[i] / maxHp(i));
     if (sc < bs) { bs = sc; best = { k: 's', i }; }
   }
@@ -219,10 +221,11 @@ function capSquadAI(s, t, dt) {
   const I = s.inp, H = s.H, M = H.main;
   if (s.inb) { I.thr = 0; I.boost = false; I.turn = null; s.aiFire = false; s.aiMsl = false; s.vx = s.vy = s.vz = 0; return; }   // 還在躍遷途中
   I.boost = false; I.turn = null; I.pitch = 0; s.aiFire = false; s.aiMsl = false; s.aimP = null; s.aiEng = false;
-  const hpNow = ships.hp[s.i] + ships.sh[s.i]; if (s.lastHp != null && hpNow < s.lastHp - 0.5) s.hitT = t; s.lastHp = hpNow;   // 敵方的船不經過 capHurt
-  const key = s.side * 4 + s.sq, Q = CAP.sqAI[key] || (CAP.sqAI[key] = { t: -9, tgt: null });
-  if (t > Q.t) { Q.t = t + 1 + capRnd() * 0.3; Q.tgt = capSquadTarget(s); }
-  let T = Q.tgt; if (T && !capTgtPos(T, _sqw)) { T = Q.tgt = capSquadTarget(s); Q.t = t + 1; }
+  const key = s.side * 4 + s.sq, Q = CAP.sqAI[key] || (CAP.sqAI[key] = { t: -9, tgt: null, prov: -9 });
+  const hpNow = ships.hp[s.i] + ships.sh[s.i]; if (s.lastHp != null && hpNow < s.lastHp - 0.5) { s.hitT = t; if (t >= Q.prov) Q.t = t; Q.prov = t + 10; } s.lastHp = hpNow;   // 敵方的船不經過 capHurt；被打中＝整隊 10 秒內反擊（開火的船已經暴露：capProvoke）
+  const pv = t < Q.prov;
+  if (t > Q.t) { Q.t = t + 1 + capRnd() * 0.3; Q.tgt = capSquadTarget(s, pv); }
+  let T = Q.tgt; if (T && !capTgtPos(T, _sqw)) { T = Q.tgt = capSquadTarget(s, pv); Q.t = t + 1; }
   const MO = capMisOrder(s, t);   // AI 對 AI 的派出任務：照任務目標行動（capmisai.js）
   if (MO) T = MO.tgt && capTgtPos(MO.tgt, _sqw) ? MO.tgt : MO.go ? null : T;
   s.aiTgt = T;

@@ -129,14 +129,16 @@ const CCV_TICO = {
   lab: '<path d="M9 3h6M10 3v6l-5 9a2 2 0 002 3h10a2 2 0 002-3l-5-9V3"/><path d="M7.5 15h9"/>',
   yard1: '<circle cx="9" cy="10" r="3"/><path d="M9 4v2M9 14v2M3 10h2M13 10h2M4.8 5.8l1.4 1.4M11.8 12.8l1.4 1.4M4.8 14.2l1.4-1.4M11.8 7.2l1.4-1.4"/><path d="M14 20l3-3 4 4"/>',
   yard2: '<path d="M3 8h18M3 16h18"/><path d="M6 5v6M10 5v6M6 13v6M10 13v6"/><path d="M14 6.5l4 1.5-4 1.5zM14 14.5l4 1.5-4 1.5z"/>',
+  bomb: '<path d="M12 3v7M9 7l3 3 3-3"/><circle cx="12" cy="16" r="4.5"/><path d="M5 21h14"/>',
+  rjam: '<path d="M4 12h3l2-5 3 10 3-8 2 3h3"/><path d="M3 4l18 16"/>',
   scorch: '<path d="M12 21c-4 0-6.5-2.8-6.5-6.3 0-3.7 3-5.3 3.6-9.2 2.3 1.6 3.4 3.7 3.4 6 1-.8 1.6-2 1.7-3.4 2.4 2 4.3 4.3 4.3 6.7 0 3.4-2.6 6.2-6.5 6.2z"/>',
 };
 function ccvTSvg(id) {
   const T = CC_TECH[id], mk = T.mod && T.mod.join(':');
   if (mk && typeof CC_MODICO !== 'undefined' && CC_MODICO[mk]) return `<svg viewBox="0 0 20 20">${CC_MODICO[mk]}</svg>`;
-  const sc = /^scorch(\d)/.exec(id), n = sc ? +sc[1] : 0;
+  const sc = /^(scorch|bomb)(\d)/.exec(id), n = sc ? +sc[2] : 0;
   const dots = Array.from({ length: n }, (_, i) => `<circle cx="${12 + (i - (n - 1) / 2) * 3.6}" cy="16.5" r="1.1" fill="var(--c)" stroke="none"/>`).join('');
-  return `<svg viewBox="0 0 24 24">${sc ? CCV_TICO.scorch + dots : CCV_TICO[id] || '<circle cx="12" cy="12" r="7"/>'}</svg>`;
+  return `<svg viewBox="0 0 24 24">${sc ? CCV_TICO[sc[1]] + (sc[1] === 'bomb' ? dots.replace(/cy="16.5"/g, 'cy="16"').replace(/fill="var\(--c\)"/g, 'fill="#04122a"') : dots) : CCV_TICO[id] || '<circle cx="12" cy="12" r="7"/>'}</svg>`;
 }
 const CCV_LOCK = '<svg viewBox="0 0 12 12" width="9" height="9" style="stroke:none"><rect x="2" y="5" width="8" height="6" fill="#04122a"/><path d="M4 5V3.5a2 2 0 014 0V5" stroke="#04122a" stroke-width="1.6" fill="none"/></svg>';
 function ccvTechTree(S, sel) {

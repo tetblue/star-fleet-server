@@ -212,7 +212,7 @@ function capLayout(p) {
   }
   const at = sp ? 's' : 'g';
   if (!mt) { const L = Object.keys(CAP_MIS).filter((k) => CAP_MIS[k].at.includes(at)); mt = L[Math.floor(R0() * L.length)]; }
-  if (sp) return capSpaceScale(capLayoutSpace(p, sp, mt), CAP_SPACE_K);   // 太空戰場整體縮小（capspace.js）
+  if (sp) return capApproach(capSpaceScale(capLayoutSpace(p, sp, mt), CAP_SPACE_K));   // 太空戰場整體縮小、起點拉近到目標的射程＋20 秒（capspace.js）
   return capLayoutGround({ ...p, env: p.env > nG ? 0 : p.env }, mt);
 }
 function capLayoutGround(p, misType) {
@@ -313,6 +313,19 @@ function capLayoutGround(p, misType) {
   m.name = `${CAP_MIS[misType].name}・${GROUND_SCENES[scene].name}・${CAP_DIFF[li].name}`;
   return m;
 }
+// 地面突襲（艦長生涯）：起點拉近到目標「射程＋secs 秒」（使用者 2026-11-21：沒有掩護 20 秒、電子干擾 10 秒、軌道轟炸 5 秒）
+// 射程用飛彈陣地的 260＋20；速度＝最慢的船的巡航速度。出發點＝撤離點一起移，高度照地形重算
+function capApproachGround(m, secs) {
+  const C = m.captain, own = m.fleets.filter((f) => f.side === 0 && f.capRole === 'player'); if (!C || !own.length || m.ground == null) return null;
+  const tg = C.units.filter((u) => u.mis), T = tg.length ? { x: tg.reduce((a, u) => a + u.x, 0) / tg.length, z: tg.reduce((a, u) => a + u.z, 0) / tg.length } : C.B;
+  const dx = C.S.x - T.x, dz = C.S.z - T.z, d = Math.hypot(dx, dz) || 1, want = capApproachD(C.hulls, [], secs) - 300 + 280;
+  if (d <= want) return { S: C.S, T, d };
+  const D = groundData({ scene: m.ground.scene, seed: m.ground.seed }), hAt = (x, z) => D.H[gIdx(x, z)];
+  const nx = T.x + dx / d * want, nz = T.z + dz / d * want, sx = nx - C.S.x, sz = nz - C.S.z;
+  for (const f of own) { f.x += sx; f.z += sz; f.y = Math.max(hAt(f.x, f.z), GROUND_Y) + 4; }
+  C.S = { x: nx, z: nz }; C.approach = { d: Math.round(want), from: Math.round(d) };
+  return { S: C.S, T, d: want };
+}
 // resume＝true：接續撤退中的戰鬥（用當時的編成、種子重建戰場，再套上存下的戰況）；其他＝新任務（放棄撤退中的戰鬥）
 function capGo(resume) {
   const p = capLoad(), R = resume === true ? p.resume : null;
@@ -372,7 +385,7 @@ function capBlock(ax, ay, az, bx, by, bz) { return SOLID ? rockBlock(ax, ay, az,
 // 地面高度；太空＝基準面下 16（敵艦的高度＝這個 +16）
 function capGY(x, z) { return GRD ? terrainHAt(x, z) : -16; }
 function capBegin(C) {
-  CAP.on = true; CAP.side = 0; CAP.cfg = C; capFxClear(); capSpaceBegin(C); CAP.li = C.li; CAP.Df = CAP_DIFF[C.li];
+  CAP.on = true; CAP.side = 0; CAP.cfg = C; capFxClear(); capWarpClear(); capSpaceBegin(C); CAP.li = C.li; CAP.Df = CAP_DIFF[C.li];
   CAP.rng = (battleSeed ^ 0x2545f491) >>> 0 || 1;
   CAP.sc = capScaleSet(); capRangeScale(CAP.sc.rng);
   CAP.saveRange = opts.rangeMul; opts.rangeMul = CAP_RULE.rangeMul * CAP.sc.rng; MIS_SPD = CAP_RULE.misSpd;
@@ -1225,7 +1238,7 @@ function capSensors() {
   return out;
 }
 function capDetect(dt, t) {
-  const sens = capSensors(), mul = CAP.Df.sens * (CAP.alarm ? 1.25 : 1);
+  const sens = t < CAP.jamUntil ? [] : capSensors(), mul = CAP.Df.sens * (CAP.alarm ? 1.25 : 1);
   for (const s of CAP.own) {
     if (s.dead) continue;
     capCloakTick(s, t); if (capCloakOn(s, t)) { s.seeing = false; s.seen = 0; continue; }   // 匿蹤中：看不到
@@ -1385,6 +1398,7 @@ function capSwitch(dir, forced) {
     for (let k = 1; k <= n; k++) {
       const s = L[(CAP.cur + dir * k + n * 4) % n];
       if (s.dead || (s.sq === sq) !== same) continue;
+      if (!same && CAP.cfg && CAP.cfg.duel && CAP.cfg.duel.mine && !CAP.cfg.duel.mine[s.sq]) continue;   // 艦長生涯：不接手同陣營 AI 的小隊
       capTake(s, forced ? (same ? '旗艦沉沒，' : `${capSqName(sq)}全滅，改指揮${capSqName(s.sq)}：`) : '');
       return true;
     }
@@ -1411,7 +1425,14 @@ function capHurt(ti, e, shD, hullD) {
   }
 }
 // ───── 戰果 ─────
+// 敵方被打中：最近幾秒開過火、離它最近的我方船位置暴露 8 秒（敵人知道是誰在打它，會過來反擊，不用等開進它的射程）
+function capProvoke(ti) {
+  const t = U.uTime.value; shipWorldCPU(ti, _cp); let by = null, bd = 1700;
+  for (const s of CAP.own) { if (s.dead || t >= s.sigT || capCloakOn(s, t)) continue; const d = Math.hypot(s.x - _cp.x, s.y - _cp.y, s.z - _cp.z); if (d < bd) { bd = d; by = s; } }
+  if (by) { by.knownT = Math.max(by.knownT, t + 8); CAP.last = { x: by.x, y: by.y, z: by.z, t }; }
+}
 function capCreditShip(ti, dmg, kill) {
+  if (!kill) capProvoke(ti);
   const S = CAP.stats; if (!S) return;
   S.dmg += dmg;
   if (!kill) return;
@@ -1446,6 +1467,8 @@ function capCreditF() { const S = CAP.stats; if (!S) return; S.kf++; S.merit += 
 function capMisInit(C) {
   CAP.mai = null;
   const M = CAP.mis = { ...C, prog: 0, done: false, doneT: 0, gts: [], ship: -1 };
+  CAP.jamUntil = CAP.cfg && CAP.cfg.jamT ? U.uTime.value + CAP.cfg.jamT : -1;   // 突襲前的電子干擾：開頭幾秒敵人偵測不到你（艦長生涯）
+  if (CAP.cfg && CAP.cfg.coverMsg) capFeed(CAP.cfg.coverMsg, 'hint');
   if (M.type === 'sabotage' || M.type === 'strike') { M.gts = CAP.G.gts.filter((g) => g.mis).map((g) => g.id); M.goal = M.gts.length || 1; }
   if (M.type === 'decap') { const P = CAP.pat.find((p) => p.role === 'flag'); const q = P && P.f.sqs[0]; let best = -1; if (q) for (const i of q.list) if (best < 0 || ships.type[i] < ships.type[best]) best = i; M.ship = best; M.goal = 1; }
   if (M.type === 'wipe') { M.goal = capWipeLeft(); M.total = M.goal; }
@@ -1453,6 +1476,7 @@ function capMisInit(C) {
   if (M.type === 'run') { M.goal = 1; M.prog = 0; }
   capMis2Init(M);
   capCaptureInit(M);
+  if (CAP.cfg && CAP.cfg.duel && CAP.cfg.duel.arrive || CAP.cfg && CAP.cfg.arrive) capWarpArrive();   // 剛躍遷進這個星系：我方的船從光束出現（capwarp.js）
 }
 function capWipeLeft() {
   const es = 1 - CAP.side;
@@ -1467,9 +1491,10 @@ function capMisText() {
 function capMisTick(t) {
   const M = CAP.mis; if (!M || GAME.result) return;
   if (CAP.warp) {
-    const w = capCalmWhy(t);
+    const w = CAP.warp.go ? '' : capCalmWhy(t);
     if (w) { CAP.warp = null; capFeed(`躍遷充能中斷：${w}`, 'bad'); }
-    else if (t - CAP.warp.t0 >= CAP_RULE.warpT) { if (M.done) capFinish(true, '躍遷撤離'); else capRetreat(); return; }
+    else if (!CAP.warp.go && t - CAP.warp.t0 >= CAP_RULE.warpT) { CAP.warp.go = t; CAP.warp.dur = capWarpOutAll(0); }   // 充能滿了：光束、閃光、船消失（capwarp.js）
+    else if (CAP.warp.go && t - CAP.warp.go >= CAP.warp.dur) { if (M.done) capFinish(true, '躍遷撤離'); else capRetreat(); return; }
   }
   if (M.type === 'sabotage' || M.type === 'strike') M.prog = M.gts.filter((i) => gtDead(CAP.G.gts[i])).length;
   if (M.type === 'decap') M.prog = M.ship >= 0 && !ships.alive[M.ship] ? 1 : 0;
@@ -1643,7 +1668,7 @@ function capCamTop(s) {
   renderPass.camera = camera;
   view.target.set(s.x, 0, s.z); view.height = 160;
 }
-function capCamera() { capFxFrame(); capCamera0(); capFxCam(); }   // 改裝的外觀、展示鏡頭（capfx.js）
+function capCamera() { capFxFrame(); capWarpFrame(); capCamera0(); capFxCam(); }   // 躍遷的動畫（capwarp.js）   // 改裝的外觀、展示鏡頭（capfx.js）
 function capCamera0() {
   const s = capCur(); if (!s) return;
   if (capTop()) return capCamTop(s);
@@ -1891,6 +1916,7 @@ function capMarkers(g, sw, s, red, grn, amb, col, now) {
       g.fillStyle = '#ff8a7a'; g.fillText(`${capTgtName(T)} ${Math.round(d)}`, p[0] + 22, p[1] - 22);
     } else { _ch.copy(tp); pilotEdgeArrow(g, _ch, '#ff5a4a', `LOCK ${Math.round(d)}`); } } }
   capMis2Marks(g, sw, s, dia);   // 我方艦艇、偵察點（capmissions.js）
+  capObjMarks(g, sw, s, dia, now);   // 任務目標：沒偵測到也標出推估位置；剛開始的幾秒畫指引線
   // 撤離點
   const eh = GRD ? terrainHAt(CAP.ext.x, CAP.ext.z) + 3 : 0, ep = sw(CAP.ext.x, eh, CAP.ext.z), ed = Math.hypot(CAP.ext.x - s.x, CAP.ext.z - s.z);
   if (M && (M.done || M.type === 'run' || M.type === 'escort')) { if (ep) { dia(ep, 14, grn); g.fillStyle = grn; g.fillText(`撤離點 ${Math.round(ed)}`, ep[0] + 18, ep[1]); } else { _ch.set(CAP.ext.x, eh, CAP.ext.z); pilotEdgeArrow(g, _ch, grn, `撤離 ${Math.round(ed)}`); } }
@@ -1901,6 +1927,43 @@ function capMarkers(g, sw, s, red, grn, amb, col, now) {
     g.fillStyle = o.sq === s.sq ? col : '#9fd8ff'; g.textAlign = 'center'; g.fillText(`${o.sq === s.sq ? '' : capSqName(o.sq) + '・'}${o.name.replace(/^.隊・/, '').slice(0, 3)}${o.repOn !== false && o.repOn != null ? '・維修中' : ''}`, p[0], p[1] - 8); g.textAlign = 'left';
     const r = ships.hp[o.i] / maxHp(o.i); g.fillStyle = 'rgba(0,0,0,.5)'; g.fillRect(p[0] - 14, p[1] - 1, 28, 3); g.fillStyle = r < 0.35 ? red : grn; g.fillRect(p[0] - 14, p[1] - 1, 28 * r, 3);
   }
+}
+// 任務目標一律標出來（使用者 2026-11-21：剛躍遷進星系時完全不知道目標在哪）
+// 沒偵測到＝虛線的「推估位置」（移動的目標每 8 秒更新一次，不洩漏即時位置）；畫面外＝邊緣箭頭＋距離；任務開始的前 4 秒從畫面中央畫指引線
+const _ob = new THREE.Vector3();
+function capObjPts(M, t) {
+  const L = [], C = (M.objC = M.objC || {}), es = 1 - CAP.side;
+  const est = (key, x, y, z, seen) => { const o = C[key]; if (seen || !o || t > o.t) C[key] = { x, y, z, t: t + 8 }; const P = seen ? { x, y, z } : C[key]; return P; };
+  for (const id of M.gts || []) { const G = CAP.G.gts[id]; if (!G || gtDead(G)) continue; const seen = !!CAP.seeG[id]; L.push({ x: G.x, y: G.y + (G.hh || 0), z: G.z, seen, nm: G.name, drawn: seen }); }
+  if (M.ship >= 0 && ships.alive[M.ship]) { shipWorldCPU(M.ship, _ob); const seen = !!CAP.seeS[M.ship], P = est('ship', _ob.x, _ob.y, _ob.z, seen); L.push({ ...P, seen, nm: '指揮艦', drawn: seen }); }
+  if (M.type === 'capture' && !M.idle) {
+    for (const id of M.defs || []) { const G = CAP.G.gts[id]; if (!G || gtDead(G)) continue; const seen = !!CAP.seeG[id]; L.push({ x: G.x, y: G.y + (G.hh || 0), z: G.z, seen, nm: G.name, drawn: false }); }
+    const by = new Map(); for (const f of CAP.foes) { if (f.dead || f.inb) continue; if (!by.has(f.sq)) by.set(f.sq, []); by.get(f.sq).push(f); }
+    for (const [sq, F] of by) { let x = 0, y = 0, z = 0; for (const f of F) { x += f.x; y += f.y; z += f.z; } x /= F.length; y /= F.length; z /= F.length;
+      const seen = F.some((f) => CAP.seeS[f.i]), P = est('sq' + sq, x, y, z, seen); L.push({ ...P, seen, nm: capSqName(sq, true), drawn: false, sq: true }); }
+  }
+  return L;
+}
+function capObjMarks(g, sw, s, dia, now) {
+  const M = CAP.mis, t = U.uTime.value; if (!M || M.idle || M.done) return;
+  if (M.objT0 == null) M.objT0 = t;
+  const L = capObjPts(M, t), guide = t - M.objT0 < 4, ga = guide ? Math.min(1, (4 - (t - M.objT0)) / 1.2) : 0, W = VW, H = VH;
+  for (const o of L) {
+    const d = Math.hypot(o.x - s.x, o.y - s.y, o.z - s.z), p = sw(o.x, o.y, o.z), c = '#ff9f40', lab = `${o.seen ? '' : '推估・'}${o.nm} ${Math.round(d)}`;
+    let gx, gy;
+    if (p) {
+      gx = p[0]; gy = p[1];
+      if (!o.drawn) {   // 已經偵測到的地面目標、指揮艦，上面的迴圈畫過了
+        if (o.seen) { if (o.sq) { g.strokeStyle = c; g.lineWidth = 1.5; g.beginPath(); g.arc(p[0], p[1], 26, 0, 7); g.stroke(); g.fillStyle = c; g.fillText(`TGT ${lab}`, p[0] + 30, p[1] + 14); } }
+        else { g.setLineDash([4, 4]); dia(p, 15, c); g.beginPath(); g.arc(p[0], p[1], 24 + 3 * Math.sin(now / 200), 0, 7); g.stroke(); g.setLineDash([]); g.fillStyle = c; g.fillText(lab, p[0] + 28, p[1] - 4); }
+      }
+    } else {
+      _ob.set(o.x, o.y, o.z); pilotEdgeArrow(g, _ob, c, `${o.seen ? 'TGT' : 'TGT?'} ${Math.round(d)}`);
+      _pp.set(o.x, o.y, o.z).applyMatrix4(camera.matrixWorldInverse); const a = Math.atan2(-_pp.y, _pp.x), r = Math.min(W, H) * 0.38; gx = W / 2 + Math.cos(a) * r; gy = H / 2 + Math.sin(a) * r;
+    }
+    if (guide) { g.globalAlpha = ga; g.strokeStyle = c; g.lineWidth = 2; g.setLineDash([10, 8]); g.lineDashOffset = -now / 30; g.beginPath(); g.moveTo(W / 2, H / 2); g.lineTo(gx, gy); g.stroke(); g.setLineDash([]); g.globalAlpha = 1; }
+  }
+  if (guide && L.length) { g.globalAlpha = ga; plFont(g, 13, true, true); g.textAlign = 'center'; g.fillStyle = '#ff9f40'; g.fillText(`任務目標 ${L.length} 處・沿虛線前進`, W / 2, H * 0.3); g.textAlign = 'left'; plFont(g, 11, false, true); g.globalAlpha = 1; }
 }
 // 俯視：選取的船、移動目標、自動航行、游標下的我方船、操作提示
 function capTopMarks(g, sw, s, grn, amb, col, now, W, H) {
@@ -2139,4 +2202,4 @@ function capReport() {
   gEl('cr-again').onclick = () => capGo();
   if (pr) gEl('cr-resume').onclick = () => capGo(true);
 }
-window.__cap = { bounds: () => Object.fromEntries(Object.entries(R3.models).filter(([k]) => /^[ea][0-5]$/.test(k)).map(([k, M]) => { const g = M.lods[0]; g.computeBoundingBox(); const b = g.boundingBox; return [k, [b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z].map((v) => +v.toFixed(2))]; })), frame: () => frame(), capHud, grd: () => GRD, gv: () => GV, dbg: () => ({ gunStats, dmgDealt, wStats, ftrStats }), pending: () => pending, capPickTarget, capMain, CAP, capLoad, capSave, capLayout, capGo, capDetect, capSwitch, capOrder, capFinish, CAP_RULE, CAP_UNIT, CAP_HULLS };
+window.__cap = { bounds: () => Object.fromEntries(Object.entries(R3.models).filter(([k]) => /^[ea][0-5]$/.test(k)).map(([k, M]) => { const g = M.lods[0]; g.computeBoundingBox(); const b = g.boundingBox; return [k, [b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z].map((v) => +v.toFixed(2))]; })), frame: () => frame(), capHud, grd: () => GRD, gv: () => GV, dbg: () => ({ gunStats, dmgDealt, wStats, ftrStats }), pending: () => pending, capPickTarget, capMain, CAP, capLoad, capSave, capLayout, capGo, capDetect, capSwitch, capOrder, capFinish, CAP_RULE, CAP_UNIT, CAP_HULLS, capProvoke, now: () => U.uTime.value, hurt: (i, v) => { ships.hp[i] -= v; }, simM: () => SIM.m };

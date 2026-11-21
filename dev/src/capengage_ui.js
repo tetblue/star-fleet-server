@@ -372,9 +372,11 @@ function cceRepTab() {
 function cceRepOff() { const b = gEl('cce-rtab'); if (b) b.remove(); const p = gEl('cce-side'); if (p && p.classList.contains('rep')) p.remove(); }
 // 戰鬥剛結束：離開戰場、打開星圖（M、Esc、星圖按鈕、面板上的按鈕）
 function ccPostLeave() {
-  const Q = CC.post; if (!Q) return;
-  CC.post = null; CC.rshow = false; cceRepOff();
+  const Q = CC.post; if (!Q || CC.leaving) return;
+  CC.rshow = false; cceRepOff();
   if (paused) { paused = false; updateTimeUI(); }
+  if (Q.warp && CAP.on) { CC.leaving = true; const T = capWarpOutAll(CAP_WARP.charge); capFeed('躍遷離開', 'ok'); capWarpWait(T + 0.2, () => { CC.leaving = false; Q.warp = false; ccPostLeave(); }); return; }   // 突襲、特戰：播完躍遷離開才回星圖（capwarp.js）
+  CC.post = null;
   setPhase('menu');
   const S = CC.S; CC.sel = -1; ccRender();
   if (Q.week && !S.fin) ccTurnStart(S, true);

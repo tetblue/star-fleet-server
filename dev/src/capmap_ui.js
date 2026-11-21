@@ -37,6 +37,14 @@ const CCM_CSS = `
 .ccm-rel .dot{width:10px;height:10px;border-radius:50%;background:var(--c)}
 .ccm-rel b{font:700 16px var(--en);color:var(--text)}
 .ccm-rel .sep{width:1px;height:16px;background:var(--line2)}
+/* 撤退的目的地 */
+.ccm-flee{left:50%;top:150px;transform:translateX(-50%);padding:10px 16px 12px;background:linear-gradient(100deg,rgba(10,40,70,.94),rgba(10,16,36,.9));border:1px solid rgba(60,200,255,.6);border-top:3px solid var(--cyan);clip-path:polygon(0 0,100% 0,100% 100%,14px 100%,0 calc(100% - 14px));min-width:420px}
+.ccm-flee .h{display:flex;align-items:baseline;gap:12px;white-space:nowrap}.ccm-flee .h > b{font:900 17px var(--jp);color:#fff;letter-spacing:.1em}.ccm-flee .h span{font:500 13px var(--jp);color:var(--dim)}.ccm-flee .h span b{color:var(--cyan)}
+.ccm-flee .L{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.ccm-flee button{display:flex;align-items:center;gap:6px;height:32px;padding:0 12px;cursor:pointer;color:var(--text);font:700 14px var(--jp);background:rgba(10,16,36,.9);border:1px solid rgba(120,170,230,.3)}
+.ccm-flee button i{width:10px;height:10px;border-radius:50%;background:var(--c)}.ccm-flee button small{font:500 11px var(--jp);color:var(--dim)}
+.ccm-flee button:hover{border-color:var(--cyan)}.ccm-flee button.on{border-color:var(--cyan);background:rgba(30,90,140,.9)}
+.ccm-flee button.ok{margin-left:auto;background:linear-gradient(100deg,#2f86ff,#3cc8ff);color:#04122a;border:0}
 /* 工具列 */
 .ccm-tools{right:40px;top:120px;display:flex;gap:8px}
 .ccm-tb{position:relative;display:flex;align-items:center;gap:8px;height:38px;padding:0 16px;cursor:pointer;color:var(--text);background:rgba(10,16,36,.86);border:1px solid rgba(120,170,230,.25);font:700 15px var(--jp);letter-spacing:.08em;white-space:nowrap;clip-path:polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%)}

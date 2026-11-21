@@ -185,6 +185,9 @@ function ccXp(S, q, c, n) {
 function ccLog(S, t, c) { S.log.push({ turn: S.turn, t, c: c || '' }); if (S.log.length > 300) S.log.splice(0, S.log.length - 300); }
 const ccPl = (S) => S.sq.find((q) => q.id === S.pl.sq);
 const ccAt = (S, sid, fac) => S.sq.filter((q) => q.sys === sid && q.ships.length && (fac == null || q.fac === fac));
+// 每個星系的小隊上限（maxSq）分開算：玩家的小隊一組、每個勢力的 AI 小隊一組（使用者 2026-11-21：同陣營 AI 的小隊不會把玩家擋在必經之路上）
+const ccSameGrp = (a, b) => (a.pl ? !!b.pl : !b.pl && b.fac === a.fac);
+const ccAtGrp = (S, sid, q) => S.sq.filter((o) => o !== q && o.sys === sid && o.ships.length && ccSameGrp(q, o));
 const ccHostile = (S, a, b) => a !== b && (a === SM_N || b === SM_N ? true : S.rel[a][b] < 0);   // 中立星系：誰都可以佔
 const ccDefsAlive = (s) => s.defs.filter((d) => d.hp > 0);
 // ───── 星圖的戰爭迷霧（2026-11-11）─────
@@ -297,7 +300,7 @@ function ccWeekB(S) {
 function ccMove(S) {
   for (const q of S.sq) {
     if (q.to == null || !q.ships.length) { q.prev = q.sys; continue; }
-    q.prev = q.sys; q.sys = q.to; q.to = null;
+    q.prev = q.sys; q.sys = q.to; q.to = null; if (q.pl) q.arr = (q.arr || 0) + 1;   // arr：換過星系（下次開場景播躍遷進入）
   }
 }
 // 這個星系有沒有交戰：擁有者（小隊＋軌道防禦）對 敵對的入侵者；沒有擁有者的戰力時，兩個在場的敵對勢力互打
@@ -336,10 +339,19 @@ function ccFightCalc(S, s, B) {
   ccLog(S, `${s.name}：${SM_FAC[fa].name}進攻${fd >= 0 ? SM_FAC[fd].name : ''}${B.defs.length ? `（軌道防禦 ${B.defs.length} 座）` : ''}，${aWin ? SM_FAC[fa].name : SM_FAC[fd].name}獲勝（預測勝率 ${Math.round(O.win * 100)}%）・損失 ${lA}／${lD} 艘`, mine ? (aWin === (fa === S.fac) ? 'ok' : 'bad') : '');
   for (const [q, n] of own0) { const won = B.A.includes(q) === aWin; ccLog(S, `${q.name}（計算）：${won ? '打贏了' : '打輸了'}${n > q.ships.length ? `，損失 ${n - q.ships.length} 艘` : ''}${q.ships.length ? (won ? '' : `，撤到 ${S.sys[q.sys].name}`) : '（全滅）'}`, won && q.ships.length ? 'ok' : 'bad'); }
 }
+// 你在戰鬥中躍遷撤退：可以去的星系（使用者 2026-11-21：讓玩家選）＝戰場相鄰、己方或中立、沒有敵方小隊、你的小隊沒滿；上週的星系一定可以
+function ccFleeOpts(S, q, from) {
+  return S.adj[from].map((j) => S.sys[j]).filter((t) => t.id === q.prev || ((t.owner === S.fac || t.owner === SM_N) && !ccAt(S, t.id).some((o) => o.fac !== SM_N && ccHostile(S, o.fac, S.fac)) && ccAtGrp(S, t.id, q).length < CC_RULE.maxSq)).map((t) => t.id);
+}
+// 撤退的目的地改成 sid（S.pl.flee 還在：星圖上還沒選，或這週還沒結束）
+function ccFleePick(S, sid) {
+  const F = S.pl.flee, q = F && ccSqById(F.q); if (!q || !q.ships.length || !F.opts.includes(sid)) { S.pl.flee = null; return false; }
+  q.sys = sid; q.to = null; S.pl.flee = null; ccLog(S, `${q.name}撤退到 ${S.sys[sid].name}`, ''); return true;
+}
 // 輸的小隊撤退到相鄰的己方星系（沒有就投降＝全滅）
 function ccFlee(S, q) {
   if (!q.ships.length) return;
-  const to = S.adj[q.sys].map((j) => S.sys[j]).filter((t) => t.owner === q.fac && ccAt(S, t.id, q.fac).length < CC_RULE.maxSq);
+  const to = S.adj[q.sys].map((j) => S.sys[j]).filter((t) => t.owner === q.fac && ccAtGrp(S, t.id, q).length < CC_RULE.maxSq);
   if (to.length) { q.prev = q.sys; q.sys = (to.find((t) => t.id === q.prev) || to[0]).id; }
   else { ccLog(S, `${q.name}無路可退，全員投降`, q.fac === S.fac ? 'bad' : ''); q.ships = []; }
 }
@@ -385,7 +397,7 @@ function ccCapture(S, s, f, why) {
 // 每隊：受重傷就回有維修船塢的己方星系；否則找相鄰、打得贏（和同星系的另一隊一起）的敵方星系進攻；沒事做就補到沒有小隊的前線
 function ccAi(S, f) {
   const aggr = f === S.fac ? 1 : CC_DIFF[S.diff].aggr, mine = S.sq.filter((q) => q.fac === f && !q.pl && q.ships.length);
-  const goingTo = (sid) => S.sq.filter((q) => q.fac === f && (q.to != null ? q.to : q.sys) === sid && q.ships.length).length;
+  const goingTo = (sid) => S.sq.filter((q) => q.fac === f && !q.pl && (q.to != null ? q.to : q.sys) === sid && q.ships.length).length;   // 只算 AI 的小隊（玩家的另外算）
   for (const q of mine) {
     q.to = null;
     const s = S.sys[q.sys], hp = q.ships.reduce((a, c) => a + c.hp, 0) / q.ships.length;
@@ -455,7 +467,7 @@ function ccAiYard(S, f, own) {
     const c = ccAiShip(S, f, o.key);
     const q = S.sq.filter((x) => x.fac === f && !x.pl && x.ships.length && x.sys === o.sys && x.ships.length < CC_RULE.maxShips).sort((a, b) => a.ships.length - b.ships.length)[0];
     if (q) { q.ships.push(c); return false; }
-    if (ccAt(S, o.sys, f).length < CC_RULE.maxSq) { ccNewSquad(S, f, o.sys, []).ships.push(c); return false; }
+    if (ccAt(S, o.sys, f).filter((x) => !x.pl).length < CC_RULE.maxSq) { ccNewSquad(S, f, o.sys, []).ships.push(c); return false; }
     return true;   // 沒地方放：等下週
   });
   const nSq = S.sq.filter((q) => q.fac === f && q.ships.length).length;
@@ -481,8 +493,8 @@ function ccEconomy(S) {
 function ccCanMove(S, to, P = ccPl(S)) {
   if (!P || S.fin) return '生涯已結束';
   if (!S.adj[P.sys].includes(to)) return '只能移動到相鄰的星系（一週一個航道）';
-  const n = S.sq.filter((q) => q.fac === S.fac && q !== P && (q.to != null ? q.to : q.sys) === to && q.ships.length).length;
-  if (n >= CC_RULE.maxSq) return `那裡已經有 ${CC_RULE.maxSq} 個我方小隊`;
+  const n = S.sq.filter((q) => q.pl && q !== P && (q.to != null ? q.to : q.sys) === to && q.ships.length).length;   // 只算你自己的小隊（同陣營 AI 的另外算）
+  if (n >= CC_RULE.maxSq) return `那裡已經有 ${CC_RULE.maxSq} 個你的小隊`;
   return '';
 }
 const ccBaseK = (S, P) => (P.sys === S.pl.base ? 0.5 : 1);   // 據點：半價
@@ -519,7 +531,15 @@ CC_TECH.scorch1 = { g: '設施', name: '焦土協定 I', rp: 60, w: 2, desc: '�
 CC_TECH.scorch2 = { g: '設施', name: '焦土協定 II', rp: 150, w: 3, need: ['scorch1'], desc: '返還 50% → 80%' };
 CC_TECH.scorch3 = { g: '設施', name: '焦土協定 III', rp: 300, w: 4, need: ['scorch2'], desc: '返還 80% → 100%' };
 CC_TECH.lab.desc = '據點每週 +8 研究點數（要有據點：特戰隊長）；可以蓋私人研究室';
-const CC_TECH_ORDER = ['mk2', 'mk3', 'beam', 'react', 'ew', 'stealth', 'lab', 'yard1', 'yard2', 'scorch1', 'scorch2', 'scorch3'];
+// 地面突襲的掩護（使用者 2026-11-21）：沒有掩護＝起點離目標 20 秒；軌道轟炸 5 秒（不一定準，等級越高越準）；電子干擾 10 秒（沒有代價）
+CC_TECH.bomb1 = { g: '突襲', name: '軌道轟炸 I', rp: 70, w: 2, desc: '地面突襲前可以先軌道轟炸：起點離目標約 5 秒，炸掉降落路線上的防空與飛彈；精準度 60%（沒炸準＝防禦還在，或誤炸民用設施）' };
+CC_TECH.bomb2 = { g: '突襲', name: '軌道轟炸 II', rp: 130, w: 3, need: ['bomb1'], desc: '軌道轟炸的精準度 60% → 78%' };
+CC_TECH.bomb3 = { g: '突襲', name: '軌道轟炸 III', rp: 220, w: 4, need: ['bomb2'], desc: '軌道轟炸的精準度 78% → 92%' };
+CC_TECH.rjam = { g: '突襲', name: '突襲電子干擾', rp: 80, w: 2, desc: '地面突襲前可以干擾敵方的感測：起點離目標約 10 秒，敵人前 20 秒偵測不到你' };
+const CC_TECH_ORDER = ['mk2', 'mk3', 'beam', 'react', 'ew', 'stealth', 'lab', 'yard1', 'yard2', 'scorch1', 'scorch2', 'scorch3', 'bomb1', 'bomb2', 'bomb3', 'rjam'];
+// 地面突襲的掩護：secs＝起點離目標幾秒（射程外）；acc＝軌道轟炸的精準度（照研發等級）
+const CC_COVER = { none: { name: '不掩護', secs: 20 }, bomb: { name: '軌道轟炸', secs: 5, tech: 'bomb1', acc: [0.6, 0.78, 0.92] }, jam: { name: '電子干擾', secs: 10, tech: 'rjam', jamT: 20 } };
+const ccBombLv = (S) => (ccHas(S, 'bomb3') ? 3 : ccHas(S, 'bomb2') ? 2 : ccHas(S, 'bomb1') ? 1 : 0);
 const CC_RP = { misK: 0.1, kill: 4, calc: 3, lab: 8 };
 // 研發的狀態（舊存檔、新局都在第一次用到時補上：軍階已經能造的船型算研究好了）
 function ccT(S) {
@@ -961,7 +981,7 @@ const CC_OPFX = {
   rescue: { name: '救援撤離', goal: (S, M) => `救出在 ${S.sys[M.sys].name} 受困的友艦`,
     fx: (S) => `救出的友艦在最近的己方星系組成一支${SM_FAC[S.fac].name}小隊（2 艘，AI 指揮）`,
     apply(S, M) {
-      const L = S.sys.filter((t) => t.owner === S.fac && ccAt(S, t.id, S.fac).length < CC_RULE.maxSq).sort((a, b) => smHop(S, M.sys, a.id) - smHop(S, M.sys, b.id));
+      const L = S.sys.filter((t) => t.owner === S.fac && ccAt(S, t.id, S.fac).filter((x) => !x.pl).length < CC_RULE.maxSq).sort((a, b) => smHop(S, M.sys, a.id) - smHop(S, M.sys, b.id));
       if (!L.length) return '附近的己方星系都滿了：友艦歸建後分散到各隊';
       const q = ccNewSquad(S, S.fac, L[0].id, ccRandHulls(S, 2)); for (const c of q.ships) c.hp = 0.6;
       return `救出的友艦在 ${L[0].name} 組成${q.name}（2 艘，帶傷）`;

@@ -30,13 +30,14 @@ function ccRender() {
       <div class="ccm-z ccm-tools"><button class="ccm-tb" id="cc-mis">${ico('mis')}任務${nMis ? `<span class="nb">${nMis}</span>` : ''}</button><button class="ccm-tb" id="cc-tech" title="研究點數與研發樹">${ico('rp')}研發 <span class="mono">${fmtN(Math.round(S.pl.rp || 0))}</span>${X.cur ? '<span class="busy">研究中</span>' : ''}</button><button class="ccm-tb" id="cc-logb">${ico('log')}紀錄</button>${S.fin ? '' : `<button class="ccm-tb" id="cc-fly" title="回到${smuEsc(P0 ? S.sys[P0.sys].name : '')}的太空">${ico('fly')}回到星系<kbd>${keyText('cap_map')}</kbd></button>`}<button class="ccm-tb q" id="cc-quit" title="存檔、回到選擇作戰（可以玩其他模式）">${ico('quit')}存檔離開</button></div>
       <div class="ccm-z ccm-leg" id="cc-leg">${CC.leg ? `<h5>圖例 ▾ ／ LEGEND</h5>${['own', 'ally', 'enemy', 'neutral'].map((k) => `<div><i style="background:${SMU_REL[k].col}"></i>${k === 'own' ? '你的小隊（★＋光圈＝親自指揮，白框＝選中）' : SMU_REL[k].name}</div>`).join('')}<div>箭頭＝一個小隊：越大船越多（1～5 艘）；停在星系下方，閃爍且在航道上＝這週要移動</div><div class="g-dim">星系的顏色＝擁有者跟你的關係：藍＝你的陣營、紅＝敵對、黃＝中立／停戰</div><div>! ＝ 你的小隊下週會被進攻</div><div>◆ 軌道防禦・⚓ 維修船塢・✚ 補給站・$ 商店（貿易站、黑市、商會貿易所）・白圈＝首都</div>${cpNzShow(S) ? '<div><span style="color:#ffd23f">◇</span> 星際商會的據點・<span style="color:#ffd23f">◆</span> 有商船隊（中立好感度 ' + CP_RULE.nzMap + ' 以上才標）</div>' : ''}<div>虛線圈：圍城中・⚔ 這週會交戰</div><div>箭頭：看得到的預定動向（你的小隊周圍、偵察過的星系）</div><div>藍色虛線大圈：偵察中・亂＝指揮中斷</div><div class="g-dim">點星系看詳情；點相鄰的星系下令移動</div>` : '<h5>圖例 ▸ ／ LEGEND（點開）</h5>'}</div>
       <button class="ccm-z ccm-end" id="cc-end" ${S.fin ? 'disabled' : ''}><div><b>結束這一週</b><small class="en">END WEEK ${S.turn} → ${S.turn + 1}</small></div>${nW ? `<span class="w" title="${nW} 個小隊留在原地，下週會被進攻">⚠ ${nW}</span>` : ''}<span class="arrow">→</span></button>
-      <div class="sm-dock" id="cc-dock"></div><div class="sm-card" id="cc-card" hidden></div></div></div>`);
+      ${ccFleeHtml(S)}<div class="sm-dock" id="cc-dock"></div><div class="sm-card" id="cc-card" hidden></div></div></div>`);
   { const b = gEl('cc-fly2') || gEl('cc-quit2'); b.onclick = () => gEl(b.id === 'cc-fly2' ? 'cc-fly' : 'cc-quit').click(); }
   gEl('cc-rp').onclick = () => ccTechView();
   gEl('cc-rank').onclick = ccRankView;   // 軍階的階梯（caplevel_ui.js）
   gEl('cc-quit').onclick = () => { ccSave(S); ccIdleStop(); window.removeEventListener('resize', ccResize); GAME.spMode = 'captain'; showSingle(); };
   if (gEl('cc-fly')) gEl('cc-fly').onclick = () => ccFly();
   gEl('cc-end').onclick = () => ccEndWeek();
+  document.querySelectorAll('[data-flee]').forEach((b) => (b.onclick = () => { if (+b.dataset.flee >= 0) ccFleePick(S, +b.dataset.flee); else S.pl.flee = null; ccSave(S); CC.sel = -1; ccRender(); }));
   gEl('cc-mis').onclick = () => (CC.drw && CC.drw.kind === 'mis' ? ccdClose() : ccdOpen('mis'));   // 任務、紀錄：右側的斜放面板（capinfo_ui.js）
   gEl('cc-leg').onclick = () => { CC.leg = !CC.leg; ccRender(); };
   gEl('cc-tech').onclick = () => ccTechView();
@@ -67,6 +68,12 @@ const ccXY = (s) => { const V = CC.view; return [V.ox + s.x * V.k, V.oy + s.y * 
 function ccHit(x, y) { let best = -1, bd = 26; for (const s of CC.S.sys) { const [px, py] = ccXY(s), d = Math.hypot(px - x, py - y); if (d < bd) { bd = d; best = s.id; } } return best; }
 // 星圖上選中的我方小隊（命令的對象）；預設＝親自指揮的
 const ccCur = (S) => S.sq.find((q) => q.id === CC.cur && q.pl && q.ships.length) || ccPl(S);
+// 戰鬥中躍遷撤退之後：選撤退的目的地（星圖上方的橫幅；星圖上可以去的星系有青色的虛線圈，星系卡片也可以選）
+function ccFleeHtml(S) {
+  const F = S.pl.flee, q = F && ccSqById(F.q); if (!q || S.fin) return '';
+  return `<div class="ccm-z ccm-flee"><div class="h"><b>選擇撤退的目的地</b><span>${smuEsc(q.name)}從 ${smuEsc(S.sys[F.from].name)} 躍遷撤退・現在在 <b>${smuEsc(S.sys[q.sys].name)}</b></span></div>
+    <div class="L">${F.opts.map((id) => { const t = S.sys[id]; return `<button type="button" data-flee="${id}" class="${id === q.sys ? 'on' : ''}" style="--c:${ccFacCol(S, t.owner)}"><i></i>${smuEsc(t.name)}<small>${t.owner === S.fac ? '己方' : '中立'}${t.yard ? '・船塢' : ''}${id === q.prev ? '' : ''}</small></button>`; }).join('')}<button type="button" data-flee="-1" class="ok">就這樣</button></div></div>`;
+}
 function ccDraw(ts) {
   const cv = gEl('cc-cv'); if (!cv || !CC.S) return;
   const S = CC.S, Q = ccCur(S), own = ccOwn(S), dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight, t = (ts || performance.now()) / 1000;
@@ -97,6 +104,7 @@ function ccDraw(ts) {
     if (ccCut(S, s)) { g.fillStyle = '#ffb35a'; g.font = 'bold 10px sans-serif'; g.textAlign = 'right'; g.fillText('補給切斷', x - r - 4, y + 4); g.textAlign = 'center'; }
     if (Q && Q.sys === s.id) { const p = 0.5 + 0.5 * Math.sin(t * 3); g.strokeStyle = `rgba(63,223,143,${0.4 + 0.45 * p})`; g.lineWidth = 3; g.beginPath(); g.arc(x, y, r + 8 + p * 3, 0, 7); g.stroke(); }
     else if (mineHere.length) { g.strokeStyle = 'rgba(63,223,143,.6)'; g.lineWidth = 1.5; g.beginPath(); g.arc(x, y, r + 8, 0, 7); g.stroke(); }
+    if (S.pl.flee && S.pl.flee.opts.includes(s.id)) { const p = 0.5 + 0.5 * Math.sin(t * 4); g.strokeStyle = `rgba(60,200,255,${0.5 + 0.45 * p})`; g.lineWidth = 2.5; g.setLineDash([5, 4]); g.lineDashOffset = -t * 16; g.beginPath(); g.arc(x, y, r + 12 + p * 2, 0, 7); g.stroke(); g.setLineDash([]); }   // 可以撤退過去的星系
     if (Q && S.adj[Q.sys].includes(s.id) && !S.fin) { g.strokeStyle = 'rgba(63,223,143,.25)'; g.lineWidth = 1; g.beginPath(); g.arc(x, y, r + 5, 0, 7); g.stroke(); }
     if (s.id === CC.sel) { const rr = r + 14 + Math.sin(t * 3.3) * 2; g.strokeStyle = 'rgba(60,200,255,.95)'; g.lineWidth = 2; g.beginPath(); g.arc(x, y, rr, 0, 7); g.stroke(); g.setLineDash([3, 6]); g.beginPath(); g.arc(x, y, rr + 8, t * 1.1, t * 1.1 + 5); g.stroke(); g.setLineDash([]); }
     if (V.sg) { g.strokeStyle = ccFacCol(S, V.sg.f); g.lineWidth = 2; g.setLineDash([3, 3]); g.beginPath(); g.arc(x, y, r + 3, 0, 7); g.stroke(); g.setLineDash([]); }
@@ -291,7 +299,7 @@ function ccCard() {
   on('cc-yard', () => ccYardView(s));
   on('cc-planet', () => cpView(s));
   on('cc-shop', () => ccShopView(s));
-  on('cc-raid', () => ccLaunch(S, 'raid', { sys: s.id }));
+  on('cc-raid', () => ccRaidCover(S, s));   // 先選掩護方式
   on('cc-base', () => { ccMoveBase(S, s); ccSave(S); ccRender(); });
   on('cc-traid', () => { ccSetTask(S, Q, { kind: 'raid', sys: s.id }); re(); });
   on('cc-tcancel', () => { Q.task = null; re(); });
@@ -458,15 +466,22 @@ function CC_place(el) {
 }
 
 // ───── 結束這一週 ─────
-function ccEndWeek(go) {
-  const S = CC.S; if (S.fin) return;
+function ccEndWeek(go, warped) {
+  const S = CC.S; if (S.fin || CC.leaving) return;
+  S.pl.flee = null;   // 撤退的目的地：結束這一週就照目前的
   // 提醒：駐守（沒有移動、沒有派出）的小隊下週會被進攻
   const W = go ? [] : S.sq.filter((q) => q.pl && q.ships.length && q.to == null && !q.task && ccThreatA(S, q, q.sys).length);
   if (W.length) {
     smuModal(ccmWarnHtml(S, W), 'ccm-warn');
-    gEl('cc-endgo').onclick = () => { smuCloseModal(); ccEndWeek(true); };
+    gEl('cc-endgo').onclick = () => { smuCloseModal(); ccEndWeek(true, warped); };
     gEl('cc-endback').onclick = () => { smuCloseModal(); const q = W[0]; CC.cur = q.id; CC.sel = q.sys; ccRender(); };
     return;
+  }
+  const P0 = ccPl(S);
+  if (!warped && P0 && P0.to != null && !P0.task && ccIdleOn() && CAP.on) {   // 你指揮的小隊要換星系：先在巡航的場景播躍遷離開（capwarp.js），播完再結算這一週
+    CC.leaving = true; if (gEl('sm-modal')) smuCloseModal(); overlay(null); CC.over = false; paused = false; updateTimeUI();
+    const T = capWarpOutAll(CAP_WARP.charge); capFeed(`躍遷前往 ${S.sys[P0.to].name}`, 'ok');
+    capWarpWait(T + 0.2, () => { CC.leaving = false; ccEndWeek(true, true); }); return;
   }
   CC.cont = ccIdleOn() ? { sys: SIM.m.captain.cc.sys, seed: SIM.m.captain.cc.seed, env: SIM.m.captain.cc.env, turn: S.turn, key: CC.idle && CC.idle.key, snap: capContSnap() } : null;   // 巡航中結束這一週：迎擊戰接著打
   ccIdleStop();
@@ -500,7 +515,7 @@ function ccSkipPlayerBattle(S, why) {
 function ccShipSt(c) { return { hp: c.hp, sh: c.sh, msl: c.msl, mod: c.mod, mk: c.mk }; }
 const ccShipStP = (c) => ({ ...ccShipSt(c), prof: CC.S && CC.S.pl.prof });   // 你的船：再帶艦長熟練度   // mod、mk：模組與 Mk（capHullMod）
 function ccLaunch(S, kind, o) {
-  CC.brep = null; CC.rshow = false; cceRepOff();
+  CC.brep = null; CC.rshow = false; cceRepOff(); S.pl.flee = null;
   const s = S.sys[o.sys], P = ccPl(S), R = CC_ROLES[S.role], li = CC_DIFF[S.diff].li, fac = SM_FAC[S.fac].game === 0 ? 0 : 1;
   const seed = ccSeedOf(S, s);
   let m, info = { kind, sys: s.id, own: [], foe: [], defIdx: [], mis: o.mis };
@@ -509,7 +524,7 @@ function ccLaunch(S, kind, o) {
     const own = [P, ...mine.filter((q) => q !== P)], defs = B.att ? ccDefsAlive(s) : [], ownDefs = !B.att && s.owner === S.fac ? ccDefsAlive(s) : [];
     info.ownDefIdx = ownDefs.map((d) => s.defs.indexOf(d));
     info.own = own.map((q) => q.id); info.foe = foe.map((q) => q.id); info.att = B.att; info.defIdx = defs.map((d) => s.defs.indexOf(d));
-    const duel = { a: own.map((q) => q.ships.map((c) => c.key)), b: foe.map((q) => q.ships.map((c) => c.key)), st: [own.map((q) => q.ships.map(ccShipStP)), foe.map((q) => q.ships.map(ccShipSt))], li, real: true,
+    const duel = { a: own.map((q) => q.ships.map((c) => c.key)), b: foe.map((q) => q.ships.map((c) => c.key)), st: [own.map((q) => q.ships.map(ccShipStP)), foe.map((q) => q.ships.map(ccShipSt))], li, real: true, mine: own.map((q) => !!q.pl),   // mine：哪幾隊是玩家的（B 鍵只能切換到玩家的小隊）
       defs: defs.map((d) => ({ type: d.type, hp: d.hp })), ownDefs: ownDefs.map((d) => ({ type: d.type, hp: d.hp, k: d.k })), yard: B.att && s.yard, depot: B.att && s.depot, hm: R.tech.hull, shm: R.tech.shield,
       ownYard: !B.att && s.owner === S.fac && s.yard, ownDepot: !B.att && s.owner === S.fac && s.depot, ...cpScene(S, s, !B.att) };
     const K = CC.cont; CC.cont = null;
@@ -526,11 +541,13 @@ function ccLaunch(S, kind, o) {
     // 地點：太空任務在星系的太空場景；地面、太空都可以的任務（斬首、全滅）一半一半；地面任務隨機地形
     const at = CAP_MIS[mis].at, env = at === 'g' ? 0 : at === 's' || seed % 2 ? ccSceneEnv(s) : 0;
     m = capLayout({ ...capLoad(), fac, diff: Math.min(4, li + (s.def >= 4 ? 1 : 0)), env, mis, seed, tgt: M && M.tgt, slots: P.ships.map((c) => c.key), space: env !== 0 });
+    if (kind === 'raid') ccRaidPrep(S, s, m, o.cover || 'none', seed);   // 掩護：起點離目標的秒數、軌道轟炸、電子干擾
     let k = 0; for (const fd of m.fleets) if (fd.capRole === 'player') { fd.capSt = ccShipStP(P.ships[k]); fd.capHm = R.tech.hull; fd.capShm = R.tech.shield; k++; }
     info.own = [P.id];
     m.name = `${s.name}・${kind === 'raid' ? '地面突襲' : CC_OPFX[mis].name}`;
   }
   m.captain.cc = info;
+  if (kind !== 'capture' || info.att) m.captain.arrive = true;   // 進攻、突襲、特戰：躍遷進場（迎擊戰本來就在這裡）
   // 戰場要雙方都有艦隊才開得起來：開不起來就改用計算的（佔領戰），或回到星圖（任務）
   if ([0, 1].some((sd) => !m.fleets.some((f) => f.side === sd && !f.reserve && simComp(f) > 0) && !(sd === 1 && kind === 'capture' && info.defIdx.length))) {
     if (kind === 'capture') return ccCalcPlayerBattle(S);
@@ -541,6 +558,38 @@ function ccLaunch(S, kind, o) {
   SIM.m = m; SIM.sel = null; camAnim = null;
   simStart();
   if (kind === 'capture') cceTab(S);   // 戰場左側的「交戰評估」按鈕（capengage_ui.js）
+}
+// 地面突襲前：選掩護方式（要先研發）。沒有掩護＝起點離目標 20 秒；軌道轟炸 5 秒；電子干擾 10 秒（capcareer.js 的 CC_COVER）
+function ccRaidCover(S, s) {
+  const lv = ccBombLv(S), acc = lv ? CC_COVER.bomb.acc[lv - 1] : 0;
+  const L = [
+    { id: 'cc-cv-none', name: '直接降落', desc: `起點離目標約 ${CC_COVER.none.secs} 秒（開到能開火）` },
+    { id: 'cc-cv-bomb', name: `軌道轟炸${lv ? ' ' + 'I'.repeat(lv) : ''}`, desc: lv ? `起點約 ${CC_COVER.bomb.secs} 秒；先炸降落路線上的防空與飛彈，精準度 ${Math.round(acc * 100)}%（沒炸準＝防禦還在，或誤炸民用設施：繁榮 −3）` : '要先研發「軌道轟炸 I」', off: !lv, cls: lv ? 'go' : '' },
+    { id: 'cc-cv-jam', name: '電子干擾', desc: ccHas(S, 'rjam') ? `起點約 ${CC_COVER.jam.secs} 秒；敵人前 ${CC_COVER.jam.jamT} 秒偵測不到你，防禦完好` : '要先研發「突襲電子干擾」', off: !ccHas(S, 'rjam'), cls: ccHas(S, 'rjam') ? 'go' : '' },
+  ];
+  smuModal(`<h3>地面突襲・${smuEsc(s.name)}<span class="g-dim" style="font-size:13px;font-weight:400;margin-left:8px">選擇掩護方式</span></h3>
+    <p class="g-dim" style="font-size:13px">起點的距離是「開到能開火要幾秒」。掩護方式在「研發」的突襲分類解鎖。</p>${smuActs(L, 220)}
+    <div class="sm-btns"><button class="g-btn" id="cc-cv-x">取消</button></div>`, 'sm-sm');
+  gEl('cc-cv-x').onclick = smuCloseModal;
+  for (const k of Object.keys(CC_COVER)) { const b = gEl('cc-cv-' + k); if (b) b.onclick = () => { if (b.classList.contains('off') || b.disabled) return; smuCloseModal(); ccLaunch(S, 'raid', { sys: s.id, cover: k }); }; }
+}
+// 突襲的戰場：照掩護方式拉近起點；軌道轟炸先擲每一座降落路線上的防禦（照精準度：炸掉／沒炸到／誤炸民用設施）；電子干擾設定開頭的偵測空窗
+function ccRaidPrep(S, s, m, cover, seed) {
+  const CV = CC_COVER[cover] || CC_COVER.none, C = m.captain, A = capApproachGround(m, CV.secs); if (!A) return;
+  C.cover = cover;
+  if (cover === 'jam') { C.jamT = CV.jamT; C.coverMsg = `電子干擾中：敵人前 ${CV.jamT} 秒偵測不到你`; return; }
+  if (cover !== 'bomb') return;
+  const acc = CV.acc[Math.max(0, ccBombLv(S) - 1)], R = mulberry32(campHash(seed, 211)), DEF = ['flak', 'site', 'tel', 'radar'];
+  const seg = (u) => { const vx = A.T.x - A.S.x, vz = A.T.z - A.S.z, L2 = vx * vx + vz * vz || 1, k = Math.max(0, Math.min(1, ((u.x - A.S.x) * vx + (u.z - A.S.z) * vz) / L2)); return Math.hypot(u.x - (A.S.x + vx * k), u.z - (A.S.z + vz * k)); };
+  let hit = 0, miss = 0, civ = 0;
+  C.units = C.units.filter((u) => {
+    if (!DEF.includes(u.type) || seg(u) > 260) return true;
+    if (R() < acc) { hit++; return false; }
+    if (R() < 0.5) miss++; else civ++;
+    return true;
+  });
+  if (civ && s.bd) { s.prosp = Math.max(0, s.prosp - 3 * civ); ccLog(S, `${s.name}：軌道轟炸誤炸民用設施 ${civ} 處（繁榮 −${3 * civ}）`, 'bad'); }
+  C.coverMsg = `軌道轟炸：炸掉防禦 ${hit} 座${miss ? `・${miss} 座沒炸到` : ''}${civ ? `・誤炸民用設施 ${civ} 處` : ''}`;
 }
 // 戰鬥結束（capReport 呼叫，CAP 還沒清掉）：各艦的狀態、戰果寫回生涯
 function ccBattleDone() {
@@ -571,7 +620,10 @@ function ccBattleDone() {
   if (!P || !P.ships.length) { S.fin = { why: `你的小隊在 ${s.name} 全滅`, turn: S.turn }; ccLog(S, S.fin.why, 'bad'); }
   else if (I.kind === 'capture') {
     if (ok) ccLog(S, `${s.name}：你的小隊打贏了（擊沉 ${st.ks} 艘${I.att ? '，取得軌道' : ''}）`, 'ok');
-    else { ccLog(S, `${s.name}：你的小隊${R.retreat ? '躍遷撤退' : '撤出戰場'}`, 'bad'); for (const id of I.own) { const q = ccSqById(id); if (!q || !q.ships.length) continue; if (I.att) { q.sys = q.prev; q.to = null; } else ccFlee(S, q); } }
+    else { ccLog(S, `${s.name}：你的小隊${R.retreat ? '躍遷撤退' : '撤出戰場'}`, 'bad'); for (const id of I.own) { const q = ccSqById(id); if (!q || !q.ships.length) continue;
+      const O = q === P ? ccFleeOpts(S, q, s.id) : [];   // 你指揮的小隊：撤退的目的地在星圖上選（預設上週的星系）
+      if (O.length) { q.sys = O.includes(q.prev) ? q.prev : O[0]; q.prev = s.id; q.to = null; if (O.length > 1) S.pl.flee = { q: q.id, from: s.id, opts: O }; }
+      else if (I.att) { q.sys = q.prev; q.to = null; } else ccFlee(S, q); } }
     for (const id of I.foe) { const q = ccSqById(id); if (q && q.ships.length && ok) ccFlee(S, q); }
   } else if (I.kind === 'raid') {
     if (ok && s.sg) { s.sg.raid = true; ccLog(S, `${s.name}：地面突襲成功，地面守軍將在這週結束時投降`, 'ok'); } else ccLog(S, `${s.name}：地面突襲${ret ? '中止' : '失敗'}`, 'bad');
@@ -584,7 +636,7 @@ function ccBattleDone() {
   if (wk) { S.pendB = null; if (!S.fin) ccWeekB(S); }   // 這週先結算完（中途離開也不會壞檔）
   ccSave(S);
   // 畫面留在戰場（暫停），戰報出現在左邊交戰評估的位置；M／Esc／星圖按鈕才打開星圖（ccPostLeave，capengage_ui.js）
-  CC.post = { week: wk }; CC.rshow = true;
+  CC.post = { week: wk, warp: (I.kind === 'raid' || I.kind === 'op') && !R.retreat && !!(P && P.ships.length) && !S.fin }; CC.rshow = true;   // warp：突襲、特戰打完離開時播躍遷離開
   cceRepTab(); cceRepRestore();
 }
 function ccLogView(L, title) {
@@ -662,6 +714,7 @@ function ccIdle(S) {
   const s = S.sys[P.sys], R = CC_ROLES[S.role], li = CC_DIFF[S.diff].li, fac = SM_FAC[S.fac].game === 0 ? 0 : 1, mine = s.owner === S.fac;
   const duel = { a: [P.ships.map((c) => c.key)], b: [], st: [[P.ships.map(ccShipStP)], []], li, real: true, idle: true, defs: [], ownDefs: mine ? ccDefsAlive(s).map((d) => ({ type: d.type, hp: d.hp, k: d.k })) : [],
     ownYard: mine && s.yard, ownDepot: mine && s.depot, hm: R.tech.hull, shm: R.tech.shield, ...cpScene(S, s, true) };
+  if (P.arr && P.arrSeen !== P.arr) { duel.arrive = true; P.arrSeen = P.arr; }   // 這週剛到這個星系：播躍遷進入（capwarp.js）
   const m = capLayout({ ...capLoad(), fac, diff: li, env: ccSceneEnv(s), mis: 'capture', seed: ccSeedOf(S, s), ally: '', duel, noDef: false });
   m.captain.cc = { kind: 'idle', sys: s.id, own: [P.id], foe: [], defIdx: [], seed: ccSeedOf(S, s), env: ccSceneEnv(s) }; m.name = `${s.name}・巡航`;
   CC.idle = { key: ccIdleKey(S, P) }; CC.over = false;

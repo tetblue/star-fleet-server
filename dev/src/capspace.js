@@ -177,9 +177,34 @@ function capSpaceScale(m, k) {
   for (const u of C.units || []) xz(u);
   for (const t of m.terrain || []) { xz(t); if (t.r != null) t.r *= k; }
   [C.S, C.B, C.ext, C.inbPt].forEach(xz);
+  for (const g of new Set(m.fleets.map((f) => f.capGuard).filter(Boolean))) { g.x *= k; g.z *= k; g.R *= k; }   // 守軍的防區（之前沒縮：防區中心跑到防禦站後面，玩家要很近守軍才動）
   if (C.mis && C.mis.pts) for (const q of C.mis.pts) { xz(q); if (q.r != null) q.r *= k; }
   const S = C.space; S.R *= k; S.Ry *= k; S.k = k;
   if (S.hole) { const H = S.hole; xz(H); for (const key of ['r', 'pull', 'hurt']) if (H[key] != null) H[key] *= k; }
+  return m;
+}
+// 起點離目標＝敵人的主砲射程＋N 秒航程（使用者 2026-11-21：開 20 秒就進入交火）；速度用我方最慢的船的巡航速度（含巨艦手感的減速）
+// 只動打目標的任務（佔領戰、摧毀設施、斬首、全滅）；迎擊戰、接續巡航、巡航、AI 對 AI 的測試不動。目標：佔領戰＝敵方小隊的中心，其他＝敵方據點 B
+const CAP_APPROACH = { secs: 20, types: ['capture', 'strike', 'decap', 'wipe'] };
+function capApproachD(hulls, foeHulls, secs) {
+  const L = (hulls || []).filter((h) => CAP_HULLS[h]), v = (L.length ? Math.min(...L.map((h) => CAP_HULLS[h].cruise)) : 6) * (SETTINGS.capHeavy !== false ? CAP_FEEL.spd : 1);
+  const F = (foeHulls || []).filter((h) => CAP_HULLS[h]), rg = F.length ? Math.max(...F.map((h) => CAP_HULLS[h].main.range)) : 300;
+  return rg + secs * v;
+}
+function capApproach(m, secs = CAP_APPROACH.secs) {
+  const C = m && m.captain, D = C && C.duel; if (!C || !C.mis || !CAP_APPROACH.types.includes(C.mis.type)) return m;
+  if (D && (D.inb || D.cont || D.idle || !D.real)) return m;
+  const own = m.fleets.filter((f) => f.side === 0 && f.capRole === 'player'), foe = m.fleets.filter((f) => f.side === 1 && !f.reserve);
+  if (!own.length) return m;
+  const cen = (L) => { let x = 0, z = 0; for (const f of L) { x += f.x; z += f.z; } return { x: x / L.length, z: z / L.length }; };
+  const T = C.mis.type === 'capture' && foe.length ? cen(foe) : C.B; if (!T) return m;
+  const P0 = cen(own), dx = P0.x - T.x, dz = P0.z - T.z, d = Math.hypot(dx, dz) || 1;
+  const want = capApproachD(C.hulls || own.map((f) => f.capHull), foe.map((f) => f.capHull), secs); if (d <= want) return m;
+  const sx = T.x + dx / d * want - P0.x, sz = T.z + dz / d * want - P0.z;
+  for (const f of own) { f.x += sx; f.z += sz; }
+  const near = (o) => o && Math.hypot(o.x - P0.x, o.z - P0.z) < 220;
+  for (const o of [C.S, C.ext]) if (near(o)) { o.x += sx; o.z += sz; }
+  C.approach = { d: Math.round(want), from: Math.round(d) };
   return m;
 }
 const capEdgeE = (x, y, z) => Math.sqrt((x * x + z * z) / (capER() * capER()) + (y * y) / (capERy() * capERy()));
