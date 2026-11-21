@@ -242,6 +242,28 @@ function ccThreat(S, Q) {
     <div>駐守的勝率 <b style="color:${ccOddCol(w)}">${Math.round(w * 100)}%</b>・存活率 ${ccSurvTx(Q, (O.surv[1] && O.surv[1][0]) || [])}</div>
     <div class="g-dim" style="font-size:11px">${D.length > 1 ? `一起駐守：${D.slice(1).map((q) => smuEsc(q.name)).join('、')}・` : ''}${s.owner === S.fac && ccDefsAlive(s).length ? `軌道防禦 ${ccDefsAlive(s).length} 座` : ''}</div></div>`;
 }
+// 星系卡片的指令：簡易圖示＋兩個字（使用者 2026-11-21：移動用箭頭、建設用槌子）；滑過／按住看完整說明，角落的數字＝價錢或成功率
+const CC_ACT_ICO = {
+  go: ['移動', '<path d="M4 12h14M13 6l6 6-6 6"/>'], cancel: ['取消', '<path d="M6 6l12 12M18 6L6 18"/>'],
+  repair: ['修理', '<path d="M14.5 4.5a4 4 0 00-5 5L4 15l5 5 5.5-5.5a4 4 0 005-5l-2.5 2.5-3-.5-.5-3z"/>'], msl: ['補彈', '<path d="M6 18l2.5-2.5M8.5 15.5L17 7l3-4-4 3-8.5 8.5zM7 12l5 5"/>'],
+  raid: ['突襲', '<circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/>'],
+  traid: ['派出', '<path d="M3 12l16-7-5 16-3-6z"/>'], tcancel: ['召回', '<path d="M20 12H6M11 6l-6 6 6 6"/>'],
+  op: ['任務', '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/>'], top: ['派出', '<path d="M3 12l16-7-5 16-3-6z"/>'],
+  shop: ['商店', '<path d="M4 8h16l-1.5 12h-13z"/><path d="M8.5 8V6a3.5 3.5 0 017 0v2"/>'], yard: ['船塢', '<path d="M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6"/>'],
+  planet: ['建設', '<path d="M13.5 3.5l7 7-3 3-7-7z"/><path d="M12 8l-8.5 8.5 3 3L15 11"/>'], base: ['據點', '<path d="M5 21V3M5 4h12l-2 4 2 4H5"/>'],
+};
+const ccActKey = (id) => (/^cc-top-/.test(id) ? 'top' : /^cc-op-/.test(id) ? 'op' : id.replace(/^cc-/, '').replace('msl', 'msl'));
+function ccActGrid(acts) {
+  const badge = (d) => { const m = /(d[d,]*) 資金/.exec(d || '') || null, p = /成功率 (d+)%/.exec(d || ''); return p ? p[1] + '%' : m ? m[1] : ''; };
+  return `<div class="cc-acts">${acts.map((o) => { const k = ccActKey(o.id), I = CC_ACT_ICO[k] || ['', '<circle cx="12" cy="12" r="6"/>'], b = badge(o.desc);
+    return `<button type="button" class="cc-act ${o.cls || ''}" id="${o.id}" ${o.off ? 'disabled' : ''} data-h="${smuEsc(o.name)}" data-d="${smuEsc(String(o.desc || '').replace(/<[^>]+>/g, ''))}" title="${smuEsc(o.name)}"><svg viewBox="0 0 24 24">${I[1]}</svg><span>${I[0]}</span>${b ? `<i>${b}</i>` : ''}</button>`; }).join('')}</div><div class="cc-acth"><b>點圖示＝執行</b><span>滑過看說明</span></div>`;
+}
+function ccActHover(el) {
+  const h = el.querySelector('.cc-acth'); if (!h) return;
+  const show = (b) => { h.innerHTML = `<b>${b.dataset.h}</b><span>${b.dataset.d}</span>`; h.classList.toggle('off', b.disabled); };
+  el.querySelectorAll('.cc-act').forEach((b) => { b.addEventListener('mouseenter', () => show(b)); b.addEventListener('focus', () => show(b)); b.addEventListener('touchstart', () => show(b), { passive: true }); });
+  const first = el.querySelector('.cc-act.go:not([disabled])') || el.querySelector('.cc-act:not([disabled])'); if (first) show(first);
+}
 function ccCard() {
   const S = CC.S, el = gEl('cc-card'); if (!el) return;
   ccDraw();
@@ -252,8 +274,8 @@ function ccCard() {
   if (Q && !qAt && !S.fin) acts.push(Q.to === s.id ? { id: 'cc-cancel', name: `取消移動（${who}）`, desc: '小隊留在原地' } : { id: 'cc-go', name: `${who}移動到這裡`, desc: why || (Q.task ? '會取消派出的任務・' : '') + (own0 < 0 ? '沒有情報：不知道裡面有什麼' : ccHostile(S, S.fac, own0) && own0 !== S.fac ? '這週結束時開進去：會和軌道防禦、守軍交戰' : '這週結束時抵達'), off: !!why });
   if (qAt && !S.fin) {
     const rc = ccRepairCost(S, Q), mc = ccMissileCost(S, Q), w1 = ccCanService(S, 'repair', Q), w2 = ccCanService(S, 'missile', Q);
-    acts.push({ id: 'cc-repair', name: `修理${who}`, desc: w1 || (rc ? `${rc} 資金` : '不用修'), off: !!w1 || !rc || S.pl.money < rc });
-    acts.push({ id: 'cc-msl', name: '補飛彈', desc: w2 || (mc ? `${mc} 資金` : '已經滿了'), off: !!w2 || !mc || S.pl.money < mc });
+    acts.push({ id: 'cc-repair', name: `修理${who}`, desc: rc ? `${rc} 資金${w1 ? `・現地維修 ×${CC_FIELD_K}（${w1}）` : ''}` : '不用修', off: !rc || S.pl.money < rc });   // 不在船塢＝現地維修，貴 1.5 倍
+    acts.push({ id: 'cc-msl', name: '補飛彈', desc: mc ? `${mc} 資金${w2 ? `・現地補給 ×${CC_FIELD_K}` : ''}` : '已經滿了', off: !mc || S.pl.money < mc });
   }
   // 地面突襲、特戰任務：親自指揮的小隊＝親自打；其他小隊＝派出（公式計算，顯示成功率與存活率）
   const taskAct = (id, name, t, fx) => { const O = ccTaskOdds(S, Q, t), on = Q.task && Q.task.kind === t.kind && Q.task.sys === t.sys && Q.task.mis === t.mis;
@@ -286,8 +308,8 @@ function ccCard() {
     ${odds}
     ${Q ? `<div class="cc-for">下面的命令給：<b>${me ? '★' : ''}${who}</b>（點下面的小隊、或在小隊面板換）</div>` : ''}
     <h4>小隊${V.live ? '' : unk ? '（不明）' : `（${V.age} 週前）`}</h4>${here.length ? here.map((q) => `<div class="cc-sq ${q.pl ? 'pl' : ''} ${q === Q ? 'cur' : ''}" style="--c:${SMU_REL[ccRel(S, q)].col}" ${q.pl ? `data-sq="${q.id}" title="選這個小隊下命令"` : ''}><b style="color:${SMU_REL[ccRel(S, q)].col}">${q.id === S.pl.sq ? '★' : ''}${smuEsc(q.name)}</b>${ccSqNote(S, q)}${ccShipRows(q)}</div>`).join('') : (unk ? '<div class="g-dim">不明</div>' : '<div class="g-dim">沒有</div>')}
-    ${acts.length ? smuActs(acts, 150) : ''}</div>`;
-  CC_place(el);
+    ${acts.length ? ccActGrid(acts) : ''}</div>`;
+  CC_place(el); ccActHover(el);
   const on = (id, fn) => { const b = gEl(id); if (b) b.onclick = fn; };
   const re = () => { ccSave(S); ccDock(); ccCard(); };
   el.querySelectorAll('[data-sq]').forEach((b) => (b.onclick = () => { CC.cur = +b.dataset.sq; ccDock(); ccCard(); }));
@@ -325,19 +347,46 @@ function ccTechView(sel) {
 }
 // 重畫研發、捲動的位置不變（上下＝面板、左右＝研發樹）
 function ccTechKeep() { const q = (s) => document.querySelector(s), y = q('.ccm-sheet').scrollTop, x = q('.ccv-tw') ? q('.ccv-tw').scrollLeft : 0; ccTechView(); q('.ccm-sheet').scrollTop = y; if (q('.ccv-tw')) q('.ccv-tw').scrollLeft = x; ccvTechPlace(); }
+// 商店貨品的簡易圖示（使用者 2026-11-21）：藍圖＝紙捲（角落疊那個模組的圖示）、研究資料＝晶片、教官訓練＝階級章
+const CC_SHOP_ICO = {
+  bp: '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/><path d="M9 10h5M9 13h7M9 16h4" stroke-dasharray="1.5 1.5"/>',
+  rp: '<rect x="6" y="6" width="12" height="12" rx="1"/><rect x="9.5" y="9.5" width="5" height="5"/><path d="M9 3v3M12 3v3M15 3v3M9 18v3M12 18v3M15 18v3M3 9h3M3 12h3M3 15h3M18 9h3M18 12h3M18 15h3"/>',
+  xp: '<path d="M5 9l7-5 7 5M5 14l7-5 7 5M5 19l7-5 7 5"/>',
+};
+function ccShopIco(it) {
+  const c = it.kind === 'bp' ? 'var(--gold)' : it.kind === 'rp' ? 'var(--violet)' : 'var(--own)';
+  const mod = it.kind === 'bp' && typeof CC_MODICO !== 'undefined' && CC_MODICO[it.k] ? `<svg class="m" viewBox="0 0 20 20">${CC_MODICO[it.k]}</svg>` : '';
+  return `<span class="ccs-ico" style="--c:${c}"><svg viewBox="0 0 24 24">${CC_SHOP_ICO[it.kind] || CC_SHOP_ICO.rp}</svg>${mod}</span>`;
+}
 // 商店（第 5 步）：貿易站、黑市；貨每週換
 function ccShopView(s) {
-  const S = CC.S, T = CC_SHOP[s.shop], why = ccShopWhy(S, s), L = ccShopStock(S, s), K = ccShopK(S, s);
-  const rows = L.map((it, i) => { const got = ccShopBought(S, s, i) || (it.kind === 'bp' && ccHasBp(S, it.k));
-    return `<div class="cc-ship cc-yq ccs-item${got ? ' got' : ''}" style="grid-template-columns:1fr auto"><span><b>${ccShopItemName(it)}</b>${it.kind === 'bp' ? ' <span class="ccs-tag">藍圖</span>' : ''}${it.kind === 'bp' ? `<br><span class="g-dim">${CAP_MODS[it.k.split(':')[0]][it.k.split(':')[1]].desc}・買到後在「研發」研究</span>` : ''}</span><button class="g-btn" data-buy="${i}" ${why || got || S.pl.money < it.p ? `disabled title="${smuEsc(why || (got ? '已經買了' : '資金不夠'))}"` : ''}>${got ? '已經買了' : `買（${it.p} 資金）`}</button></div>`; }).join('');
-  const blk = s.shop === 'black';
+  cpvCss();   // 格子、浮出的說明跟星球畫面同一套（capplanet_ui.js）
+  const S = CC.S, T = CC_SHOP[s.shop], why = ccShopWhy(S, s), L = ccShopStock(S, s), K = ccShopK(S, s), blk = s.shop === 'black', sc = blk ? 'var(--red)' : 'var(--gold)';
+  if (CC.ssel && (CC.ssel.sys !== s.id || CC.ssel.turn !== S.turn)) CC.ssel = null;
+  const sel = CC.ssel ? CC.ssel.i : -1;
+  const got = (it, i) => ccShopBought(S, s, i) || (it.kind === 'bp' && ccHasBp(S, it.k));
+  const short = (it) => (it.kind === 'bp' ? ccBpName(it.k) : it.kind === 'rp' ? `研究 +${it.n}` : `經驗 +${it.n}`);
+  const col = (it) => (it.kind === 'bp' ? 'var(--gold)' : it.kind === 'rp' ? 'var(--violet)' : 'var(--own)');
+  // 一格貨品：圖示＋短名，右上角＝價錢；買過的變暗
+  const tile = (it, i) => `<button type="button" class="cpv-t shop-t${i === sel ? ' sel' : ''}${got(it, i) ? ' got' : ''}" data-si="${i}" style="--c:${col(it)}"><div>${ccShopIco(it)}<span>${smuEsc(short(it))}</span></div><b class="tag pr">${got(it, i) ? '已買' : fmtN(it.p)}</b></button>`;
+  const det = (it, i) => {
+    if (i !== sel) return '';
+    const g = got(it, i), no = why || (g ? '已經買了' : S.pl.money < it.p ? `資金不夠（要 ${it.p}）` : '');
+    const M = it.kind === 'bp' ? CAP_MODS[it.k.split(':')[0]][it.k.split(':')[1]] : null;
+    const d = it.kind === 'bp' ? `${M.desc}。買到後在「研發」研究（${SM_FAC[CC_ORG[it.k]].name}的技術）。` : it.kind === 'rp' ? `研究點數 +${it.n}，馬上可以用在「研發」。` : `在場你的小隊每艘 +${it.n} 經驗（船的等級決定 Mk 上限）。`;
+    return `<div class="cpv-det" style="--c:${col(it)}"><button type="button" class="x" data-si="${i}">✕</button><div class="hd">${ccShopIco(it)}<div><h5>${smuEsc(ccShopItemName(it))}</h5><div class="lab">${fmtN(it.p)} 資金${it.kind === 'bp' ? '・藍圖' : ''}</div></div></div>
+      <div class="d">${d}</div><div class="acts"><button class="g-btn${no ? '' : ' primary'}" data-buy="${i}" ${no ? 'disabled' : ''}>${no ? smuEsc(no) : `買（${fmtN(it.p)} 資金）`}</button></div></div>`;
+  };
   ccmSheet(`<h3>${s.name} 的${T.name}<span class="en">${blk ? 'BLACK MARKET' : 'TRADE POST'}</span></h3>
-    <div class="ccs-stat"><div><span>資金</span><b>${S.pl.money}</b></div><div><span>價格</span><b style="color:${K > 1.05 ? 'var(--red)' : K < 0.95 ? 'var(--own)' : '#fff'}">×${K.toFixed(2)}</b></div><div><span>本週貨品</span><b>${L.length}</b></div></div>
-    <div class="ccs-note">貨每週換。價格 ×${K.toFixed(2)}（${s.shop === 'black' ? '黑市貴 30%、看海盜' : '看中立勢力'}對你的好感度與你的陣營的聲望）。${s.shop === 'trade' ? '擁有者跟你交戰中就不賣。' : '黑市誰都賣。'}</div>
-    ${why ? `<div class="ccs-warn">${why}</div>` : ''}<h4>貨品</h4>${rows || '<div class="g-dim">這週沒有貨。</div>'}
-    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`, '', blk ? 'var(--red)' : 'var(--gold)');
-  gEl('cc-close').onclick = () => { smuCloseModal(); ccRender(); };
+    <div class="ccs-stat"><div><span>資金</span><b>${fmtN(S.pl.money)}</b></div><div title="${blk ? '黑市貴 30%、看海盜' : '看中立勢力'}對你的好感度與你的陣營的聲望"><span>價格</span><b style="color:${K > 1.05 ? 'var(--red)' : K < 0.95 ? 'var(--own)' : '#fff'}">×${K.toFixed(2)}</b></div><div><span>本週貨品</span><b>${L.length}</b></div></div>
+    ${why ? `<div class="ccs-warn">${why}</div>` : ''}
+    <div class="cpv-area">${L.length ? `<div class="cpv-grid">${L.map(tile).join('')}</div>${L.map(det).join('')}` : '<div class="g-dim">這週沒有貨。</div>'}</div>
+    <div class="g-dim" style="font-size:12px;margin-top:6px">貨每週換${s.shop === 'trade' ? '・擁有者跟你交戰中就不賣' : '・黑市誰都賣'}・點貨品看說明</div>
+    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`, 'narrow', sc);
+  gEl('cc-close').onclick = () => { CC.ssel = null; smuCloseModal(); ccRender(); };
+  document.querySelectorAll('.ccm-sheet [data-si]').forEach((b) => (b.onclick = () => { const i = +b.dataset.si; CC.ssel = sel === i ? null : { sys: s.id, turn: S.turn, i }; ccShopView(s); }));
   document.querySelectorAll('[data-buy]').forEach((b) => (b.onclick = () => { const err = ccShopBuy(S, s, +b.dataset.buy); if (err) { toast(err, 'warn'); return; } ccSave(S); ccRender(); ccShopView(s); }));
+  cpvPlace();
 }
 // 艦長熟練度的列表（研發視窗的下面）
 function ccProfHtml(S) {

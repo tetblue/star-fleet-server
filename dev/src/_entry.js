@@ -26812,8 +26812,11 @@ function ccCanMove(S, to, P = ccPl(S)) {
   return '';
 }
 const ccBaseK = (S, P) => (P.sys === S.pl.base ? 0.5 : 1);   // 據點：半價
-function ccRepairCost(S, P) { return Math.round(P.ships.reduce((a, c) => a + (1 - c.hp) * CAP_HULLS[c.key].hp, 0) * CC_RULE.repair * ccBaseK(S, P) * (S.sys[P.sys].owner === S.fac ? cpRepK(S, S.sys[P.sys]) : CP_RULE.dockK)); }
-function ccMissileCost(S, P) { return Math.round(P.ships.reduce((a, c) => a + (CAP_HULLS[c.key].msl ? (1 - c.msl) * CAP_HULLS[c.key].msl.n : 0), 0) * CC_RULE.missile * ccBaseK(S, P) * (cpStore(S, S.sys[P.sys]) ? 1 : S.sys[P.sys].owner === S.fac ? cpMslK(S, S.sys[P.sys]) : CP_RULE.dockK)); }
+// 維修、補飛彈：在船塢（己方的維修船塢、補給站、商會維修站、你的倉庫）照原價；不在船塢＝現地維修，貴 CC_FIELD_K 倍（使用者 2026-11-21：1.5 倍）
+const CC_FIELD_K = 1.5;
+const ccField = (S, kind, P = ccPl(S)) => !!ccCanService(S, kind, P);
+function ccRepairCost(S, P) { const raw = P.ships.reduce((a, c) => a + (1 - c.hp) * CAP_HULLS[c.key].hp, 0) * CC_RULE.repair; return Math.round(ccField(S, 'repair', P) ? raw * CC_FIELD_K : raw * ccBaseK(S, P) * (S.sys[P.sys].owner === S.fac ? cpRepK(S, S.sys[P.sys]) : CP_RULE.dockK)); }
+function ccMissileCost(S, P) { const raw = P.ships.reduce((a, c) => a + (CAP_HULLS[c.key].msl ? (1 - c.msl) * CAP_HULLS[c.key].msl.n : 0), 0) * CC_RULE.missile; return Math.round(ccField(S, 'missile', P) ? raw * CC_FIELD_K : raw * ccBaseK(S, P) * (cpStore(S, S.sys[P.sys]) ? 1 : S.sys[P.sys].owner === S.fac ? cpMslK(S, S.sys[P.sys]) : CP_RULE.dockK)); }
 function ccCanService(S, kind, P = ccPl(S)) {
   const s = S.sys[P.sys];
   if (kind === 'missile' && cpStore(S, s)) return '';   // 你的倉庫
@@ -26824,8 +26827,8 @@ function ccCanService(S, kind, P = ccPl(S)) {
   if (kind === 'build' && !s.yard) return '這裡沒有維修船塢';
   return '';
 }
-function ccRepair(S, P = ccPl(S)) { const c = ccRepairCost(S, P); if (ccCanService(S, 'repair', P) || S.pl.money < c) return false; S.pl.money -= c; for (const x of P.ships) x.hp = 1; ccLog(S, `在 ${S.sys[P.sys].name} 修好${P.name}（${c} 資金）`, 'ok'); return true; }
-function ccResupply(S, P = ccPl(S)) { const c = ccMissileCost(S, P); if (ccCanService(S, 'missile', P) || S.pl.money < c) return false; S.pl.money -= c; for (const x of P.ships) x.msl = 1; ccLog(S, `${P.name}補滿飛彈（${c} 資金）`, 'ok'); return true; }
+function ccRepair(S, P = ccPl(S)) { const c = ccRepairCost(S, P), f = ccField(S, 'repair', P); if (!c || S.pl.money < c) return false; S.pl.money -= c; for (const x of P.ships) x.hp = 1; ccLog(S, `在 ${S.sys[P.sys].name} ${f ? '現地' : ''}修好${P.name}（${c} 資金）`, 'ok'); return true; }
+function ccResupply(S, P = ccPl(S)) { const c = ccMissileCost(S, P), f = ccField(S, 'missile', P); if (!c || S.pl.money < c) return false; S.pl.money -= c; for (const x of P.ships) x.msl = 1; ccLog(S, `${P.name}${f ? '現地' : ''}補滿飛彈（${c} 資金）`, 'ok'); return true; }
 // ───── 研發（研發、生產、改裝的第 4 步，2026-11-15）─────
 // 研究點數（S.pl.rp）：任務完成（戰功的 1/10）、打贏後打撈殘骸（實戰每擊沉一艘 4 點、計算的戰鬥每艘 3 點）、據點的研究所（每週 8 點）。
 // 一次研究一項：開始時付點數，要幾週完成（S.pl.tech.cur）。每個陣營一棵樹：同一套項目，自己陣營擅長的便宜 20%。
@@ -28115,6 +28118,28 @@ function ccThreat(S, Q) {
     <div>駐守的勝率 <b style="color:${ccOddCol(w)}">${Math.round(w * 100)}%</b>・存活率 ${ccSurvTx(Q, (O.surv[1] && O.surv[1][0]) || [])}</div>
     <div class="g-dim" style="font-size:11px">${D.length > 1 ? `一起駐守：${D.slice(1).map((q) => smuEsc(q.name)).join('、')}・` : ''}${s.owner === S.fac && ccDefsAlive(s).length ? `軌道防禦 ${ccDefsAlive(s).length} 座` : ''}</div></div>`;
 }
+// 星系卡片的指令：簡易圖示＋兩個字（使用者 2026-11-21：移動用箭頭、建設用槌子）；滑過／按住看完整說明，角落的數字＝價錢或成功率
+const CC_ACT_ICO = {
+  go: ['移動', '<path d="M4 12h14M13 6l6 6-6 6"/>'], cancel: ['取消', '<path d="M6 6l12 12M18 6L6 18"/>'],
+  repair: ['修理', '<path d="M14.5 4.5a4 4 0 00-5 5L4 15l5 5 5.5-5.5a4 4 0 005-5l-2.5 2.5-3-.5-.5-3z"/>'], msl: ['補彈', '<path d="M6 18l2.5-2.5M8.5 15.5L17 7l3-4-4 3-8.5 8.5zM7 12l5 5"/>'],
+  raid: ['突襲', '<circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/>'],
+  traid: ['派出', '<path d="M3 12l16-7-5 16-3-6z"/>'], tcancel: ['召回', '<path d="M20 12H6M11 6l-6 6 6 6"/>'],
+  op: ['任務', '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/>'], top: ['派出', '<path d="M3 12l16-7-5 16-3-6z"/>'],
+  shop: ['商店', '<path d="M4 8h16l-1.5 12h-13z"/><path d="M8.5 8V6a3.5 3.5 0 017 0v2"/>'], yard: ['船塢', '<path d="M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6"/>'],
+  planet: ['建設', '<path d="M13.5 3.5l7 7-3 3-7-7z"/><path d="M12 8l-8.5 8.5 3 3L15 11"/>'], base: ['據點', '<path d="M5 21V3M5 4h12l-2 4 2 4H5"/>'],
+};
+const ccActKey = (id) => (/^cc-top-/.test(id) ? 'top' : /^cc-op-/.test(id) ? 'op' : id.replace(/^cc-/, '').replace('msl', 'msl'));
+function ccActGrid(acts) {
+  const badge = (d) => { const m = /(d[d,]*) 資金/.exec(d || '') || null, p = /成功率 (d+)%/.exec(d || ''); return p ? p[1] + '%' : m ? m[1] : ''; };
+  return `<div class="cc-acts">${acts.map((o) => { const k = ccActKey(o.id), I = CC_ACT_ICO[k] || ['', '<circle cx="12" cy="12" r="6"/>'], b = badge(o.desc);
+    return `<button type="button" class="cc-act ${o.cls || ''}" id="${o.id}" ${o.off ? 'disabled' : ''} data-h="${smuEsc(o.name)}" data-d="${smuEsc(String(o.desc || '').replace(/<[^>]+>/g, ''))}" title="${smuEsc(o.name)}"><svg viewBox="0 0 24 24">${I[1]}</svg><span>${I[0]}</span>${b ? `<i>${b}</i>` : ''}</button>`; }).join('')}</div><div class="cc-acth"><b>點圖示＝執行</b><span>滑過看說明</span></div>`;
+}
+function ccActHover(el) {
+  const h = el.querySelector('.cc-acth'); if (!h) return;
+  const show = (b) => { h.innerHTML = `<b>${b.dataset.h}</b><span>${b.dataset.d}</span>`; h.classList.toggle('off', b.disabled); };
+  el.querySelectorAll('.cc-act').forEach((b) => { b.addEventListener('mouseenter', () => show(b)); b.addEventListener('focus', () => show(b)); b.addEventListener('touchstart', () => show(b), { passive: true }); });
+  const first = el.querySelector('.cc-act.go:not([disabled])') || el.querySelector('.cc-act:not([disabled])'); if (first) show(first);
+}
 function ccCard() {
   const S = CC.S, el = gEl('cc-card'); if (!el) return;
   ccDraw();
@@ -28125,8 +28150,8 @@ function ccCard() {
   if (Q && !qAt && !S.fin) acts.push(Q.to === s.id ? { id: 'cc-cancel', name: `取消移動（${who}）`, desc: '小隊留在原地' } : { id: 'cc-go', name: `${who}移動到這裡`, desc: why || (Q.task ? '會取消派出的任務・' : '') + (own0 < 0 ? '沒有情報：不知道裡面有什麼' : ccHostile(S, S.fac, own0) && own0 !== S.fac ? '這週結束時開進去：會和軌道防禦、守軍交戰' : '這週結束時抵達'), off: !!why });
   if (qAt && !S.fin) {
     const rc = ccRepairCost(S, Q), mc = ccMissileCost(S, Q), w1 = ccCanService(S, 'repair', Q), w2 = ccCanService(S, 'missile', Q);
-    acts.push({ id: 'cc-repair', name: `修理${who}`, desc: w1 || (rc ? `${rc} 資金` : '不用修'), off: !!w1 || !rc || S.pl.money < rc });
-    acts.push({ id: 'cc-msl', name: '補飛彈', desc: w2 || (mc ? `${mc} 資金` : '已經滿了'), off: !!w2 || !mc || S.pl.money < mc });
+    acts.push({ id: 'cc-repair', name: `修理${who}`, desc: rc ? `${rc} 資金${w1 ? `・現地維修 ×${CC_FIELD_K}（${w1}）` : ''}` : '不用修', off: !rc || S.pl.money < rc });   // 不在船塢＝現地維修，貴 1.5 倍
+    acts.push({ id: 'cc-msl', name: '補飛彈', desc: mc ? `${mc} 資金${w2 ? `・現地補給 ×${CC_FIELD_K}` : ''}` : '已經滿了', off: !mc || S.pl.money < mc });
   }
   // 地面突襲、特戰任務：親自指揮的小隊＝親自打；其他小隊＝派出（公式計算，顯示成功率與存活率）
   const taskAct = (id, name, t, fx) => { const O = ccTaskOdds(S, Q, t), on = Q.task && Q.task.kind === t.kind && Q.task.sys === t.sys && Q.task.mis === t.mis;
@@ -28159,8 +28184,8 @@ function ccCard() {
     ${odds}
     ${Q ? `<div class="cc-for">下面的命令給：<b>${me ? '★' : ''}${who}</b>（點下面的小隊、或在小隊面板換）</div>` : ''}
     <h4>小隊${V.live ? '' : unk ? '（不明）' : `（${V.age} 週前）`}</h4>${here.length ? here.map((q) => `<div class="cc-sq ${q.pl ? 'pl' : ''} ${q === Q ? 'cur' : ''}" style="--c:${SMU_REL[ccRel(S, q)].col}" ${q.pl ? `data-sq="${q.id}" title="選這個小隊下命令"` : ''}><b style="color:${SMU_REL[ccRel(S, q)].col}">${q.id === S.pl.sq ? '★' : ''}${smuEsc(q.name)}</b>${ccSqNote(S, q)}${ccShipRows(q)}</div>`).join('') : (unk ? '<div class="g-dim">不明</div>' : '<div class="g-dim">沒有</div>')}
-    ${acts.length ? smuActs(acts, 150) : ''}</div>`;
-  CC_place(el);
+    ${acts.length ? ccActGrid(acts) : ''}</div>`;
+  CC_place(el); ccActHover(el);
   const on = (id, fn) => { const b = gEl(id); if (b) b.onclick = fn; };
   const re = () => { ccSave(S); ccDock(); ccCard(); };
   el.querySelectorAll('[data-sq]').forEach((b) => (b.onclick = () => { CC.cur = +b.dataset.sq; ccDock(); ccCard(); }));
@@ -28198,19 +28223,46 @@ function ccTechView(sel) {
 }
 // 重畫研發、捲動的位置不變（上下＝面板、左右＝研發樹）
 function ccTechKeep() { const q = (s) => document.querySelector(s), y = q('.ccm-sheet').scrollTop, x = q('.ccv-tw') ? q('.ccv-tw').scrollLeft : 0; ccTechView(); q('.ccm-sheet').scrollTop = y; if (q('.ccv-tw')) q('.ccv-tw').scrollLeft = x; ccvTechPlace(); }
+// 商店貨品的簡易圖示（使用者 2026-11-21）：藍圖＝紙捲（角落疊那個模組的圖示）、研究資料＝晶片、教官訓練＝階級章
+const CC_SHOP_ICO = {
+  bp: '<path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/><path d="M9 10h5M9 13h7M9 16h4" stroke-dasharray="1.5 1.5"/>',
+  rp: '<rect x="6" y="6" width="12" height="12" rx="1"/><rect x="9.5" y="9.5" width="5" height="5"/><path d="M9 3v3M12 3v3M15 3v3M9 18v3M12 18v3M15 18v3M3 9h3M3 12h3M3 15h3M18 9h3M18 12h3M18 15h3"/>',
+  xp: '<path d="M5 9l7-5 7 5M5 14l7-5 7 5M5 19l7-5 7 5"/>',
+};
+function ccShopIco(it) {
+  const c = it.kind === 'bp' ? 'var(--gold)' : it.kind === 'rp' ? 'var(--violet)' : 'var(--own)';
+  const mod = it.kind === 'bp' && typeof CC_MODICO !== 'undefined' && CC_MODICO[it.k] ? `<svg class="m" viewBox="0 0 20 20">${CC_MODICO[it.k]}</svg>` : '';
+  return `<span class="ccs-ico" style="--c:${c}"><svg viewBox="0 0 24 24">${CC_SHOP_ICO[it.kind] || CC_SHOP_ICO.rp}</svg>${mod}</span>`;
+}
 // 商店（第 5 步）：貿易站、黑市；貨每週換
 function ccShopView(s) {
-  const S = CC.S, T = CC_SHOP[s.shop], why = ccShopWhy(S, s), L = ccShopStock(S, s), K = ccShopK(S, s);
-  const rows = L.map((it, i) => { const got = ccShopBought(S, s, i) || (it.kind === 'bp' && ccHasBp(S, it.k));
-    return `<div class="cc-ship cc-yq ccs-item${got ? ' got' : ''}" style="grid-template-columns:1fr auto"><span><b>${ccShopItemName(it)}</b>${it.kind === 'bp' ? ' <span class="ccs-tag">藍圖</span>' : ''}${it.kind === 'bp' ? `<br><span class="g-dim">${CAP_MODS[it.k.split(':')[0]][it.k.split(':')[1]].desc}・買到後在「研發」研究</span>` : ''}</span><button class="g-btn" data-buy="${i}" ${why || got || S.pl.money < it.p ? `disabled title="${smuEsc(why || (got ? '已經買了' : '資金不夠'))}"` : ''}>${got ? '已經買了' : `買（${it.p} 資金）`}</button></div>`; }).join('');
-  const blk = s.shop === 'black';
+  cpvCss();   // 格子、浮出的說明跟星球畫面同一套（capplanet_ui.js）
+  const S = CC.S, T = CC_SHOP[s.shop], why = ccShopWhy(S, s), L = ccShopStock(S, s), K = ccShopK(S, s), blk = s.shop === 'black', sc = blk ? 'var(--red)' : 'var(--gold)';
+  if (CC.ssel && (CC.ssel.sys !== s.id || CC.ssel.turn !== S.turn)) CC.ssel = null;
+  const sel = CC.ssel ? CC.ssel.i : -1;
+  const got = (it, i) => ccShopBought(S, s, i) || (it.kind === 'bp' && ccHasBp(S, it.k));
+  const short = (it) => (it.kind === 'bp' ? ccBpName(it.k) : it.kind === 'rp' ? `研究 +${it.n}` : `經驗 +${it.n}`);
+  const col = (it) => (it.kind === 'bp' ? 'var(--gold)' : it.kind === 'rp' ? 'var(--violet)' : 'var(--own)');
+  // 一格貨品：圖示＋短名，右上角＝價錢；買過的變暗
+  const tile = (it, i) => `<button type="button" class="cpv-t shop-t${i === sel ? ' sel' : ''}${got(it, i) ? ' got' : ''}" data-si="${i}" style="--c:${col(it)}"><div>${ccShopIco(it)}<span>${smuEsc(short(it))}</span></div><b class="tag pr">${got(it, i) ? '已買' : fmtN(it.p)}</b></button>`;
+  const det = (it, i) => {
+    if (i !== sel) return '';
+    const g = got(it, i), no = why || (g ? '已經買了' : S.pl.money < it.p ? `資金不夠（要 ${it.p}）` : '');
+    const M = it.kind === 'bp' ? CAP_MODS[it.k.split(':')[0]][it.k.split(':')[1]] : null;
+    const d = it.kind === 'bp' ? `${M.desc}。買到後在「研發」研究（${SM_FAC[CC_ORG[it.k]].name}的技術）。` : it.kind === 'rp' ? `研究點數 +${it.n}，馬上可以用在「研發」。` : `在場你的小隊每艘 +${it.n} 經驗（船的等級決定 Mk 上限）。`;
+    return `<div class="cpv-det" style="--c:${col(it)}"><button type="button" class="x" data-si="${i}">✕</button><div class="hd">${ccShopIco(it)}<div><h5>${smuEsc(ccShopItemName(it))}</h5><div class="lab">${fmtN(it.p)} 資金${it.kind === 'bp' ? '・藍圖' : ''}</div></div></div>
+      <div class="d">${d}</div><div class="acts"><button class="g-btn${no ? '' : ' primary'}" data-buy="${i}" ${no ? 'disabled' : ''}>${no ? smuEsc(no) : `買（${fmtN(it.p)} 資金）`}</button></div></div>`;
+  };
   ccmSheet(`<h3>${s.name} 的${T.name}<span class="en">${blk ? 'BLACK MARKET' : 'TRADE POST'}</span></h3>
-    <div class="ccs-stat"><div><span>資金</span><b>${S.pl.money}</b></div><div><span>價格</span><b style="color:${K > 1.05 ? 'var(--red)' : K < 0.95 ? 'var(--own)' : '#fff'}">×${K.toFixed(2)}</b></div><div><span>本週貨品</span><b>${L.length}</b></div></div>
-    <div class="ccs-note">貨每週換。價格 ×${K.toFixed(2)}（${s.shop === 'black' ? '黑市貴 30%、看海盜' : '看中立勢力'}對你的好感度與你的陣營的聲望）。${s.shop === 'trade' ? '擁有者跟你交戰中就不賣。' : '黑市誰都賣。'}</div>
-    ${why ? `<div class="ccs-warn">${why}</div>` : ''}<h4>貨品</h4>${rows || '<div class="g-dim">這週沒有貨。</div>'}
-    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`, '', blk ? 'var(--red)' : 'var(--gold)');
-  gEl('cc-close').onclick = () => { smuCloseModal(); ccRender(); };
+    <div class="ccs-stat"><div><span>資金</span><b>${fmtN(S.pl.money)}</b></div><div title="${blk ? '黑市貴 30%、看海盜' : '看中立勢力'}對你的好感度與你的陣營的聲望"><span>價格</span><b style="color:${K > 1.05 ? 'var(--red)' : K < 0.95 ? 'var(--own)' : '#fff'}">×${K.toFixed(2)}</b></div><div><span>本週貨品</span><b>${L.length}</b></div></div>
+    ${why ? `<div class="ccs-warn">${why}</div>` : ''}
+    <div class="cpv-area">${L.length ? `<div class="cpv-grid">${L.map(tile).join('')}</div>${L.map(det).join('')}` : '<div class="g-dim">這週沒有貨。</div>'}</div>
+    <div class="g-dim" style="font-size:12px;margin-top:6px">貨每週換${s.shop === 'trade' ? '・擁有者跟你交戰中就不賣' : '・黑市誰都賣'}・點貨品看說明</div>
+    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`, 'narrow', sc);
+  gEl('cc-close').onclick = () => { CC.ssel = null; smuCloseModal(); ccRender(); };
+  document.querySelectorAll('.ccm-sheet [data-si]').forEach((b) => (b.onclick = () => { const i = +b.dataset.si; CC.ssel = sel === i ? null : { sys: s.id, turn: S.turn, i }; ccShopView(s); }));
   document.querySelectorAll('[data-buy]').forEach((b) => (b.onclick = () => { const err = ccShopBuy(S, s, +b.dataset.buy); if (err) { toast(err, 'warn'); return; } ccSave(S); ccRender(); ccShopView(s); }));
+  cpvPlace();
 }
 // 艦長熟練度的列表（研發視窗的下面）
 function ccProfHtml(S) {
@@ -28650,56 +28702,155 @@ function cpMineSum(S, s) {   // 你在這裡的投資
   return a.join('・');
 }
 const cpTkTx = (S, b) => `<span style="color:#ffb35a">接管中：${SM_FAC[b.tk.f].name}再 ${b.tk.left} 週接管${b.raze ? '・<b>這週結束時破壞</b>' : ''}</span>`;
+// ───── 星球的圖像化（使用者 2026-11-21：像研發一樣的表現方式，數據用圖表讓玩家快速理解）─────
+// 狀況＝四張小圖（人口條、繁榮量表、收入的分段長條、地面防禦格子）；建築＝每格一個圖示（空格虛線），點了浮出說明與按鈕
+const CP_ICO = {
+  home: '<path d="M4 11l8-7 8 7v9H4z"/><path d="M10 20v-5h4v5"/>', ind: '<path d="M3 20V10l5 3V10l5 3V6h3l1 14z"/><path d="M17 6V3"/>',
+  port: '<path d="M3 17h18l-2 4H5z"/><path d="M7 17V9h6v8M10 9V5h4"/>', gar: '<path d="M12 3l8 3v6c0 5-4 8-8 9-4-1-8-4-8-9V6z"/>',
+  aa: '<path d="M5 20h14M8 20l2-6h4l2 6M12 14l5-9M14 9l3 1"/>', lab: '<path d="M9 3h6M10 3v6l-5 9a2 2 0 002 3h10a2 2 0 002-3l-5-9V3"/>',
+  intel: '<path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>', yard: '<path d="M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6"/>',
+  depot: '<rect x="4" y="8" width="16" height="12"/><path d="M4 8l3-4h10l3 4M12 12v5M9.5 14.5h5"/>', orb: '<circle cx="12" cy="12" r="5"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/>',
+  plat: '<path d="M4 15h16l-3 4H7zM12 15V8M8 8h8"/>', hangar: '<path d="M3 19h18M5 19V11a7 7 0 0114 0v8"/><path d="M9 15l3-2 3 2"/>',
+  plab: '<path d="M9 3h6M10 3v6l-5 9a2 2 0 002 3h10a2 2 0 002-3l-5-9V3"/><circle cx="12" cy="16" r="1.5"/>', shop: '<path d="M4 8h16l-1.5 12h-13z"/><path d="M8.5 8V6a3.5 3.5 0 017 0v2"/>',
+  crew: '<circle cx="9" cy="8" r="3"/><circle cx="16" cy="9" r="2.5"/><path d="M3 20c0-4 3-6 6-6s6 2 6 6M14 14c3 0 6 2 6 5"/>', safe: '<rect x="4" y="5" width="16" height="15"/><circle cx="12" cy="12" r="3"/><path d="M12 9v1M15 12h-1"/>',
+  pdock: '<path d="M3 8h18M3 16h18M6 5v6M10 5v6M6 13v6M10 13v6M14 6.5l4 1.5-4 1.5z"/>', store: '<rect x="4" y="9" width="16" height="11"/><path d="M4 9l8-5 8 5M9 20v-6h6v6"/>',
+  listen: '<path d="M12 20v-8M8 20h8"/><path d="M8 8a5.5 5.5 0 018 0M5 5a10 10 0 0114 0"/><circle cx="12" cy="11" r="1.5"/>',
+};
+const cpIco = (k) => `<svg viewBox="0 0 24 24">${CP_ICO[k] || '<circle cx="12" cy="12" r="6"/>'}</svg>`;
+const CPV_CSS = `
+.ccm-sheet .cpv-ch{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:4px 0 8px}
+.ccm-sheet .cpv-ch > div{padding:9px 12px 10px;background:rgba(12,20,42,.75);border-top:2px solid var(--c,var(--cyan))}
+.ccm-sheet .cpv-ch .h{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;color:var(--dim)}
+.ccm-sheet .cpv-ch .h b{font:700 22px var(--en);color:#fff}.ccm-sheet .cpv-ch .h b small{font-size:13px;color:var(--dim);margin-left:2px}
+.cpv-bar{position:relative;height:12px;margin-top:7px;background:rgba(255,255,255,.08);display:flex;overflow:visible}
+.cpv-bar > i{display:block;height:100%}
+.cpv-bar > u{position:absolute;top:-4px;bottom:-4px;width:2px;background:#fff;opacity:.75}
+.cpv-bar > u::after{content:attr(data-l);position:absolute;top:16px;left:-30px;width:60px;text-align:center;font:500 10px var(--jp);color:var(--dim);white-space:nowrap}
+.cpv-leg{display:flex;flex-wrap:wrap;gap:2px 10px;margin-top:16px;font-size:11.5px;color:var(--dim)}.cpv-leg i{display:inline-block;width:8px;height:8px;margin-right:4px;background:var(--c)}
+.cpv-pips{display:flex;gap:4px;margin-top:8px}.cpv-pips i{flex:1;height:12px;background:rgba(255,255,255,.1);transform:skewX(-14deg)}.cpv-pips i.on{background:var(--c)}.cpv-pips i.lost{background:none;border:1px dashed #ff6a5a}
+.cpv-area{position:relative;margin:4px 0 6px}
+.cpv-grid{display:flex;flex-wrap:wrap;gap:8px}
+.cpv-t{position:relative;width:70px;height:78px;padding:0;cursor:pointer;color:#fff;background:var(--c,#5d6f92);clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);transition:transform .12s;border:0}
+.cpv-t > div{position:absolute;inset:2px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;background:rgb(10,16,34);clip-path:inherit}
+.cpv-t svg{width:28px;height:28px;fill:none;stroke:var(--c);stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.cpv-t span{font:700 11.5px var(--jp);white-space:nowrap;max-width:64px;overflow:hidden;text-overflow:ellipsis}
+.cpv-t .ccv-pips i{width:10px;height:6px}
+.cpv-t:hover{transform:scale(1.06)}.cpv-t.sel{background:#fff;transform:scale(1.08)}
+.cpv-t.empty{background:none;border:1px dashed rgba(150,190,240,.3);cursor:default;clip-path:none}.cpv-t.empty > div{background:none}.cpv-t.empty span{color:var(--mute);font-weight:500}
+.cpv-t.tk{animation:cpvTk 1s ease-in-out infinite}@keyframes cpvTk{50%{background:#ffb35a}}
+.cpv-t.q > div{background:rgba(52,30,96,.95)}.cpv-t.mine > div{background:rgba(20,60,44,.95)}
+.cpv-t.new{opacity:.85}.cpv-t.new:disabled{opacity:.35;cursor:pointer}
+.cpv-t b.tag{position:absolute;right:4px;top:3px;font:700 9.5px var(--jp);color:var(--c);z-index:1}
+.cpv-det{position:absolute;z-index:3;width:300px;box-sizing:border-box;padding:12px 14px;background:rgba(8,14,32,.97);border:1px solid var(--line2);border-top:3px solid var(--c);box-shadow:0 10px 30px rgba(0,0,0,.6);display:flex;flex-direction:column;gap:7px;animation:ccvIn .16s ease-out}
+.cpv-det .hd{display:flex;gap:10px;align-items:center}.cpv-det .hd svg{width:32px;height:32px;fill:none;stroke:var(--c);stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.cpv-det h5{margin:0;font:900 17px 'Noto Sans TC','Microsoft JhengHei',sans-serif;color:#fff}.cpv-det .lab{font:700 12.5px var(--jp);color:var(--c)}
+.cpv-det .d{font-size:13px;color:#cfd8e3;line-height:1.55}
+.cpv-det .lv{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:12.5px;color:var(--dim)}.cpv-det .lv b{color:#fff;font-weight:700}
+.cpv-det .x{position:absolute;right:8px;top:6px;border:0;background:none;color:var(--dim);font-size:16px;cursor:pointer}
+.cpv-det .acts{display:flex;flex-wrap:wrap;gap:6px}
+`;
+function cpvCss() { ccvCss(); if (!gEl('cpv-css')) { const st = document.createElement('style'); st.id = 'cpv-css'; st.textContent = CPV_CSS; document.head.appendChild(st); } }
+// 狀況的四張圖
+function cpvCharts(S, s, R) {
+  const cap = cpPopCap(s), up = Math.round(SM_TIER_CAP[s.tier] * 0.7), [r0, r1] = CP_RULE.riot, pc = s.prosp < r0 ? 'var(--red)' : s.prosp < 40 ? '#ffb35a' : 'var(--own)';
+  const pct = (v, m) => Math.max(0, Math.min(100, (v / (m || 1)) * 100));
+  const pop = `<div style="--c:var(--cyan)" title="人口上限：等級 ${SM_TIER_CAP[s.tier]}＋住宅區"><div class="h"><span>人口</span><b>${s.pop}<small>／${cap}</small></b></div>
+    <div class="cpv-bar"><i style="width:${pct(s.pop, cap)}%;background:var(--cyan)"></i>${s.tier < 4 ? `<u style="left:${pct(up, cap)}%" data-l="升級 ${up}"></u>` : ''}</div></div>`;
+  const pros = `<div style="--c:${pc}" title="繁榮低於 ${r0} 暴動，回到 ${r1} 才平息"><div class="h"><span>繁榮（民心）${s.riot ? '・<b style="font-size:13px;color:var(--red)">暴動中</b>' : ''}</span><b style="color:${pc}">${s.prosp}</b></div>
+    <div class="cpv-bar" style="background:linear-gradient(90deg,rgba(255,77,94,.35) ${r0}%,rgba(255,179,90,.25) ${r0}% 40%,rgba(63,223,143,.2) 40%)"><i style="width:${s.prosp}%;background:${pc}"></i><u style="left:${r0}%" data-l="暴動 ${r0}"></u></div></div>`;
+  const tot = Math.max(1, R.g), segs = [['基本', R.base, '#3cc8ff'], ...R.b.map(([b, v]) => [CP_B[b.k].name, v, b.k === 'ind' ? '#ffc24a' : '#a97bff'])];
+  const inc = `<div style="--c:var(--gold)"><div class="h"><span>勢力的收入／週</span><b>${Math.round(R.g - R.up)}</b></div>
+    <div class="cpv-bar">${segs.map(([n, v, c]) => `<i title="${n} +${Math.round(v)}" style="width:${pct(v, tot + R.up)}%;background:${c}"></i>`).join('')}<i title="維護 −${R.up}" style="width:${pct(R.up, tot + R.up)}%;background:repeating-linear-gradient(135deg,#ff4d5e 0 4px,transparent 4px 7px)"></i></div>
+    <div class="cpv-leg">${segs.map(([n, v, c]) => `<span style="--c:${c}"><i></i>${n} +${Math.round(v)}</span>`).join('')}<span style="--c:#ff4d5e"><i></i>維護 −${R.up}</span>${s.sg ? '<span style="color:var(--red)">圍城中＝0</span>' : ''}</div></div>`;
+  const dn = Math.max(s.def0, s.def), def = `<div style="--c:#5aa8ff" title="基礎 ${s.gd0}${s.bd.filter((b) => cpAct(b) && CP_B[b.k].gd).map((b) => `＋${CP_B[b.k].name} ${b.lv}`).join('')}${s.mob ? '＋戰時動員 1' : ''}${s.riot ? '−暴動 1' : ''}"><div class="h"><span>地面防禦</span><b>${s.def}<small>／${s.def0}</small></b></div>
+    <div class="cpv-pips">${Array.from({ length: dn }, (_, i) => `<i class="${i < s.def ? 'on' : i < s.def0 ? 'lost' : ''}"></i>`).join('')}</div></div>`;
+  return `<div class="cpv-ch">${pop}${pros}${inc}${def}</div>`;
+}
+// 一格建築
+function cpvTile(key, k, nm, cls, c, lv, tag) {
+  return `<button type="button" class="cpv-t ${cls}" data-pt="${key}" style="--c:${c}"><div>${cpIco(k)}<span>${nm}</span>${lv != null ? ccvPips(3, lv, c) : ''}</div>${tag ? `<b class="tag">${tag}</b>` : ''}</button>`;
+}
+// 點了格子：浮出說明（照研發樹的作法放在格子旁邊）
+function cpvPlace() {
+  const d = document.querySelector('.cpv-det'); if (!d) return;
+  const area = d.parentElement, t = area.querySelector('.cpv-t.sel'); if (!t) return;
+  const x = t.offsetLeft, y = t.offsetTop, W = area.clientWidth, dw = d.offsetWidth;
+  d.style.left = (x + t.offsetWidth + 12 + dw <= W ? x + t.offsetWidth + 12 : Math.max(0, x - 12 - dw)) + 'px'; d.style.top = Math.max(-10, y - 10) + 'px';
+  d.scrollIntoView({ block: 'nearest' });
+}
 function cpView(s) {
-  ccvCss();
+  cpvCss();
   const S = CC.S, V = ccSee(S, s), live = V.live, mine = s.owner === S.fac, nz = cpNzRule(S, s), neu = s.owner === SM_N || nz;
-  const R = cpInc(S, s), K = cpRazeK(S), btn = (attr, tx, why) => `<button class="g-btn" ${attr} ${why ? `disabled title="${smuEsc(why)}"` : ''}>${tx}</button>`;
-  // 狀況
-  const pc = s.prosp < CP_RULE.riot[0] ? 'var(--red)' : s.prosp < 40 ? '#ffb35a' : 'var(--own)';
-  const strip = live ? `<div class="ccs-stat"><div><span>人口</span><b>${s.pop}<small>／${cpPopCap(s)}</small></b></div><div><span>繁榮</span><b style="color:${pc}">${s.prosp}</b></div><div><span>地面防禦</span><b>${s.def}<small>／${s.def0}</small></b></div><div><span>勢力收入／週</span><b>${Math.round(R.g - R.up)}</b></div><div><span>你的資金</span><b style="color:var(--gold)">${S.pl.money}</b></div></div>` : '';
-  const head = live ? `<dl class="sm-kv"><dt>擁有者</dt><dd>${SM_FAC[s.owner].name}・${SM_TIER[s.tier]}${s.tier < 4 ? `（人口到 ${Math.round(SM_TIER_CAP[s.tier] * 0.7)} 可以升級）` : ''}</dd>
-      <dt>人口</dt><dd>${s.pop}／${cpPopCap(s)}</dd>
-      <dt>繁榮（民心）</dt><dd>${ccBar(s.prosp / 100, s.prosp < CP_RULE.riot[0] ? '#ff6a5a' : s.prosp < 40 ? '#ffb35a' : '#5fd39a')}${s.prosp}${s.riot ? `・<b style="color:#ff7a6b">暴動中</b>（收入歸零、地面防禦 −1，回到 ${CP_RULE.riot[1]} 才平息）` : `・低於 ${CP_RULE.riot[0]} 會暴動`}</dd>
-      <dt>地面防禦</dt><dd>${s.def}／${s.def0}（基礎 ${s.gd0}${s.bd.filter((b) => cpAct(b) && CP_B[b.k].gd).map((b) => `＋${CP_B[b.k].name} ${b.lv}`).join('')}${s.mob ? '＋戰時動員 1' : ''}${s.riot ? '−暴動 1' : ''}）</dd>
+  const R = cpInc(S, s), K = cpRazeK(S), btn = (attr, tx, why, pri) => `<button class="g-btn${pri && !why ? ' primary' : ''}" ${attr} ${why ? `disabled title="${smuEsc(why)}"` : ''}>${why && pri ? smuEsc(why) : tx}</button>`;
+  if (CC.psel && CC.psel.sys !== s.id) CC.psel = null;
+  const sel = CC.psel ? CC.psel.k : null, fc = live ? ccFacCol(S, s.owner) : 'var(--mute)';
+  // 狀況：四張圖＋幾行文字
+  const head = live ? `${cpvCharts(S, s, R)}<dl class="sm-kv"><dt>擁有者</dt><dd>${SM_FAC[s.owner].name}・${SM_TIER[s.tier]}${s.tier < 4 ? `（人口到 ${Math.round(SM_TIER_CAP[s.tier] * 0.7)} 可以升級）` : ''}</dd>
       ${s.mob ? `<dt>政策</dt><dd>戰時動員（前線）：地面防禦 +1、收入 ×${CP_RULE.mob.inc}、繁榮目標 −${CP_RULE.mob.prosp}</dd>` : ''}
-      <dt>勢力的收入</dt><dd>每週 <b>${Math.round(R.g - R.up)}</b><br><span class="g-dim">人口×（0.4＋繁榮/100）×${CP_RULE.incK}＝${Math.round(R.base)}${R.b.map(([b, v]) => `・${CP_B[b.k].name} +${Math.round(v)}`).join('')}・維護 −${R.up}${s.sg ? '・圍城中＝0' : ''}${ccCut(S, s) ? '・補給切斷 ×0.5' : ''}</span></dd>
       ${cpNzRow(S, s, V)}${neu ? `<dt>中立好感度</dt><dd>${Math.round(ccFavOf(S, SM_N))}（${cpNeuTier(S)[3]}）：${nz ? '這裡有商會辦事處，照中立規則；' : ''}中立星系（含辦事處）你總共能蓋 ${cpPvCap(S, true)} 座、每個星系 ${cpNeuTier(S)[2]} 座</dd>` : ''}</dl>`
     : `<p class="g-dim">${V.age == null ? '沒有情報。' : `${V.age} 週前的情報；建築要看得到這個星系才知道。`}</p>`;
-  // 勢力的建築
+  // 說明（點了格子才有）
+  const det = (key) => {
+    if (sel !== key) return '';
+    const [kd, id] = key.split(':');
+    if (kd === 'b') {
+      const b = s.bd.find((x) => x.id === +id); if (!b) return '';
+      const B = CP_B[b.k], why = cpUpWhy(S, s, b), q = s.bq.find((o) => o.bid === b.id), st = b.tk ? '接管中' : q ? `強化到 Lv${q.lv}・剩 ${q.left} 週` : b.inv ? '你出資強化' : `${SM_FAC[s.owner].name}的建築`;
+      const acts = b.tk ? (b.inv ? btn(`data-raze="${b.id}"`, b.raze ? '取消破壞' : `破壞（拿回 ${Math.round(b.inv * K)}）`, '') : '') : mine && b.lv < 3 && !q ? btn(`data-up="${b.id}"`, `強化到 Lv${b.lv + 1}（${cpUpCost(b)} 資金・${CP_RULE.upW[b.lv + 1]} 週）`, why, true) : '';
+      return `<div class="cpv-det" style="--c:${b.inv ? 'var(--own)' : fc}"><button type="button" class="x" data-pt="${key}">✕</button><div class="hd">${cpIco(b.k)}<div><h5>${B.name} Lv${b.lv}</h5><div class="lab">${st}</div></div></div>
+        <div class="d">${B.desc}</div>${b.tk ? `<div class="d">${cpTkTx(S, b)}</div>` : ''}
+        <div class="lv"><span>Lv</span>${ccvPips(3, b.lv, b.inv ? 'var(--own)' : fc, q ? q.lv : 0)}<span>強化：勢力</span><b>${B.fac}</b><span>強化：你</span><b>${B.perk}</b></div>
+        ${acts ? `<div class="acts">${acts}</div>` : ''}</div>`;
+    }
+    if (kd === 'p') {
+      const p = (s.pv || []).find((x) => x.id === +id); if (!p) return '';
+      const P = CP_PV[p.k], st = p.tk ? '接管中' : p.off ? '停止運作（中立好感度不夠）' : '運作中';
+      const act = p.tk ? btn(`data-praze="${p.id}"`, p.raze ? '取消破壞' : `破壞（拿回 ${Math.round(p.cost * K)}）`, '') : btn(`data-pdel="${p.id}"`, `拆除（退 ${Math.round(p.cost * 0.25)}）`, '');
+      return `<div class="cpv-det" style="--c:var(--own)"><button type="button" class="x" data-pt="${key}">✕</button><div class="hd">${cpIco(p.k)}<div><h5>${P.name}</h5><div class="lab">你的建築・${st}</div></div></div>
+        <div class="d">${P.desc}</div>${p.tk ? `<div class="d">${cpTkTx(S, p)}</div>` : ''}<div class="lv"><span>${P.at === 'g' ? '地表' : '軌道'}</span><b>每週維護 ${P.up}</b></div><div class="acts">${act}</div></div>`;
+    }
+    if (kd === 'n') {
+      const P = CP_PV[id], why = cpPvWhy(S, s, id);
+      return `<div class="cpv-det" style="--c:${why ? 'var(--mute)' : 'var(--cyan)'}"><button type="button" class="x" data-pt="${key}">✕</button><div class="hd">${cpIco(id)}<div><h5>蓋${P.name}</h5><div class="lab">${why ? '還不能蓋' : '可以蓋'}</div></div></div>
+        <div class="d">${P.desc}</div><div class="lv"><span>${P.at === 'g' ? '地表' : '軌道'}</span><b>${P.cost} 資金・${P.w} 週・每週維護 ${P.up}</b></div>
+        <div class="acts">${btn(`data-pb="${id}"`, `蓋${P.name}（${P.cost} 資金）`, why, true)}</div></div>`;
+    }
+    return '';
+  };
+  const area = (title, keys, tiles) => `<h4 style="margin:12px 0 6px">${title}</h4><div class="cpv-area"><div class="cpv-grid">${tiles}</div>${keys.map(det).join('')}</div>`;
+  // 勢力的建築：每格一個圖示，空格虛線
   const fac = live ? ['g', 'o'].map((at) => {
     const L = s.bd.filter((b) => CP_B[b.k].at === at), n = at === 'g' ? CP_SLOTS_G[s.tier] : cpSlotsO(s);
-    return `<h4 style="margin:10px 0 4px">${at === 'g' ? '地表' : '軌道'}（${L.length}／${n} 格）</h4>` + (L.length ? L.map((b) => {
-      const B = CP_B[b.k], why = cpUpWhy(S, s, b), q = s.bq.find((o) => o.bid === b.id);
-      const st = b.tk ? cpTkTx(S, b) : q ? `<span style="color:#c9a7ff">強化到 Lv${q.lv}：剩 ${q.left} 週</span>` : '';
-      const act = b.tk ? (b.inv ? btn(`data-raze="${b.id}"`, b.raze ? '取消破壞' : `破壞（拿回 ${Math.round(b.inv * K)}）`, '') : '')
-        : mine && b.lv < 3 && !q ? btn(`data-up="${b.id}"`, `強化到 Lv${b.lv + 1}（${cpUpCost(b)} 資金・${CP_RULE.upW[b.lv + 1]} 週）`, why) : '';
-      return `<div class="cc-ship cc-yq" style="grid-template-columns:1fr auto"><span><b>${B.name}</b> ${ccvPips(3, b.lv, b.inv ? 'var(--own)' : ccFacCol(S, s.owner), q ? q.lv : 0)} <span class="cc-lv${b.lv > 1 ? ' up' : ''}">Lv${b.lv}</span>${b.inv ? ' <span style="color:#3fdf8f">你出資</span>' : ''} ${st}<br><span class="g-dim">${B.desc}${b.lv < 3 && mine ? `・強化：勢力 ${B.fac}；你 ${B.perk}` : b.lv >= 2 && b.inv ? `・你得到：${B.perk}` : ''}</span></span>${act}</div>`;
-    }).join('') : '<div class="g-dim">沒有。</div>');
+    const tiles = L.map((b) => { const q = s.bq.find((o) => o.bid === b.id), c = b.inv ? 'var(--own)' : fc;
+      return cpvTile(`b:${b.id}`, b.k, CP_B[b.k].name, `${sel === `b:${b.id}` ? 'sel ' : ''}${b.tk ? 'tk ' : ''}${q ? 'q ' : ''}${b.inv ? 'mine' : ''}`, c, b.lv, q ? `→Lv${q.lv}` : b.tk ? '接管' : b.inv ? '出資' : ''); }).join('')
+      + Array.from({ length: Math.max(0, n - L.length) }, () => `<div class="cpv-t empty"><div><span>空地</span></div></div>`).join('');
+    return area(`${at === 'g' ? '地表' : '軌道'}（${L.length}／${n} 格）`, L.map((b) => `b:${b.id}`), tiles);
   }).join('') : '';
-  const bq = live && s.bq.length ? `<h4 style="margin:10px 0 4px">建設佇列（${SM_FAC[s.owner].name}）</h4>${s.bq.map((o, i) => `<div class="g-dim">${i ? `${i + 1}.` : '施工中'} ${o.bid ? `強化${cpName(o.k)}到 Lv${o.lv}${o.pay ? '（你出資）' : ''}` : cpName(o.k)}・剩 ${o.left} 週${i === 0 && s.sg ? '（圍城中暫停）' : ''}</div>`).join('')}` : '';
-  // 你的建築
+  const bq = live && s.bq.length ? `<div class="g-dim" style="font-size:12px;margin-top:4px">建設佇列（${SM_FAC[s.owner].name}）：${s.bq.map((o, i) => `${i ? `${i + 1}.` : '施工中'} ${o.bid ? `強化${cpName(o.k)}到 Lv${o.lv}${o.pay ? '（你出資）' : ''}` : cpName(o.k)}・剩 ${o.left} 週${i === 0 && s.sg ? '（圍城中暫停）' : ''}`).join('　')}</div>` : '';
+  // 你的建築＋可以蓋的
   const canPv = mine || neu;
-  const pvRows = (s.pv || []).map((p) => {
-    const P = CP_PV[p.k], st = p.tk ? cpTkTx(S, p) : p.off ? '<span style="color:#ffb35a">停止運作（中立好感度不夠）</span>' : '';
-    const act = p.tk ? btn(`data-praze="${p.id}"`, p.raze ? '取消破壞' : `破壞（拿回 ${Math.round(p.cost * K)}）`, '') : btn(`data-pdel="${p.id}"`, `拆除（退 ${Math.round(p.cost * 0.25)}）`, '');
-    return `<div class="cc-ship cc-yq" style="grid-template-columns:1fr auto"><span><b>${P.name}</b> <span class="g-dim">${P.at === 'g' ? '地表' : '軌道'}</span> ${st}<br><span class="g-dim">${P.desc}・每週維護 ${P.up}</span></span>${act}</div>`;
-  }).join('') + (s.pq || []).map((o) => `<div class="g-dim">建設中：${CP_PV[o.k].name}・剩 ${o.left} 週</div>`).join('');
-  const build = canPv ? smuActs(CP_PV_ORDER.filter((k) => !(CP_PV[k].neu && !neu)).map((k) => { const P = CP_PV[k], why = cpPvWhy(S, s, k); return { id: 'cp-b-' + k, name: `蓋${P.name}（${P.at === 'g' ? '地表' : '軌道'}）`, desc: why || `${P.cost} 資金・${P.w} 週・每週維護 ${P.up}・${P.desc}`, off: !!why }; }), 150) : '';
+  const pvTiles = (s.pv || []).map((p) => cpvTile(`p:${p.id}`, p.k, CP_PV[p.k].name, `mine ${sel === `p:${p.id}` ? 'sel ' : ''}${p.tk ? 'tk' : ''}`, 'var(--own)', null, p.tk ? '接管' : p.off ? '停用' : '')).join('')
+    + (s.pq || []).map((o) => `<div class="cpv-t q" style="--c:var(--violet)"><div>${cpIco(o.k)}<span>${CP_PV[o.k].name}</span></div><b class="tag">剩${o.left}週</b></div>`).join('');
+  const nb = canPv ? CP_PV_ORDER.filter((k) => !(CP_PV[k].neu && !neu)) : [];
+  const newTiles = nb.map((k) => { const why = cpPvWhy(S, s, k); return cpvTile(`n:${k}`, k, CP_PV[k].name, `new ${sel === `n:${k}` ? 'sel ' : ''}`, why ? 'var(--mute)' : 'var(--cyan)', null, why ? '' : `${CP_PV[k].cost}`); }).join('');
   const cap = `己方星系 ${cpPvCount(S, false)}／${cpPvCap(S, false)} 座（${ccRankOf(S).name}，據點的不算）・中立星系 ${cpPvCount(S, true)}／${cpPvCap(S, true)} 座（中立好感度 ${Math.round(ccFavOf(S, SM_N))}：${cpNeuTier(S)[3]}）`;
   const inc = S.pl.inc ? `<div class="g-dim" style="font-size:12px">上週你的收入：薪餉 ${S.pl.inc.sal}・分紅 ${S.pl.inc.div}・你的建築 ${S.pl.inc.pv}（已繳稅 ${S.pl.inc.tax}）・維護 −${S.pl.inc.up}${S.pl.inc.rp ? `・研究點數 +${S.pl.inc.rp}` : ''}</div>` : '';
+  const pvSec = canPv || (s.pv || []).length ? `${area('你的建築', (s.pv || []).map((p) => `p:${p.id}`), pvTiles || '<div class="g-dim">還沒有。</div>')}<div class="g-dim" style="font-size:12px">${cap}</div>${nb.length ? area('可以蓋的（點了看條件）', nb.map((k) => `n:${k}`), newTiles) : ''}` : '';
   ccmSheet(`<h3>${s.name} 的星球<span class="en">PLANET ・ ${live ? SM_FAC[s.owner].name : 'NO INTEL'}</span></h3>
-    ${strip}${s.riot && live ? '<div class="ccs-warn">暴動中：收入歸零、地面防禦 −1</div>' : ''}
+    ${s.riot && live ? '<div class="ccs-warn">暴動中：收入歸零、地面防禦 −1</div>' : ''}
+    ${head}${inc}${fac}${bq}${pvSec}
     <div class="ccs-note">基礎建設是${neu ? '中立勢力' : '勢力的上級'}的事；你可以出錢強化你的陣營的建築（好處一半給勢力、一半給你），或在你的區塊蓋自己的建築。星系失守時建築先「接管中」，接管完成前你可以破壞，拿回出的錢的 ${Math.round(K * 100)}%（研發「焦土協定」提高）；接管完成前奪回＝原樣還你。</div>
-    ${inc}${head}${fac}${bq}
-    ${canPv || (s.pv || []).length ? `<h4 style="margin:12px 0 4px">你的建築</h4><div class="g-dim" style="font-size:12px">${cap}</div>${pvRows || '<div class="g-dim">還沒有。</div>'}${build}` : ''}
-    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`, '', live ? ccFacCol(S, s.owner) : 'var(--mute)');
-  const re = (err) => { if (err) { toast(err, 'warn'); return; } ccSave(S); ccRender(); cpView(s); };
-  gEl('cc-close').onclick = () => { smuCloseModal(); ccRender(); };
+    <div class="sm-btns"><button class="g-btn primary" id="cc-close">關閉</button></div>`, '', fc);
+  const keep = () => { const b = document.querySelector('.ccm-sheet'), y = b ? b.scrollTop : 0; cpView(s); const b2 = document.querySelector('.ccm-sheet'); if (b2) b2.scrollTop = y; cpvPlace(); };
+  const re = (err) => { if (err) { toast(err, 'warn'); return; } ccSave(S); ccRender(); keep(); };
+  gEl('cc-close').onclick = () => { CC.psel = null; smuCloseModal(); ccRender(); };
+  document.querySelectorAll('.ccm-sheet [data-pt]').forEach((b) => (b.onclick = () => { const k = b.dataset.pt; CC.psel = CC.psel && CC.psel.k === k ? null : { sys: s.id, k }; keep(); }));
   document.querySelectorAll('[data-up]').forEach((b) => (b.onclick = () => re(cpUp(S, s, s.bd.find((x) => x.id === +b.dataset.up)))));
   document.querySelectorAll('[data-raze]').forEach((b) => (b.onclick = () => { const x = s.bd.find((y) => y.id === +b.dataset.raze); re(cpRaze(S, s, x.id, false, x.raze)); }));
   document.querySelectorAll('[data-praze]').forEach((b) => (b.onclick = () => { const x = s.pv.find((y) => y.id === +b.dataset.praze); re(cpRaze(S, s, x.id, true, x.raze)); }));
-  document.querySelectorAll('[data-pdel]').forEach((b) => (b.onclick = () => re(cpPvDemolish(S, s, +b.dataset.pdel))));
-  for (const k of CP_PV_ORDER) { const b = gEl('cp-b-' + k); if (b) b.onclick = () => re(cpPvBuild(S, s, k)); }
+  document.querySelectorAll('[data-pdel]').forEach((b) => (b.onclick = () => { CC.psel = null; re(cpPvDemolish(S, s, +b.dataset.pdel)); }));
+  document.querySelectorAll('[data-pb]').forEach((b) => (b.onclick = () => { CC.psel = null; re(cpPvBuild(S, s, b.dataset.pb)); }));
+  cpvPlace();
 }
 Object.assign(window.__cap || (window.__cap = {}), { cpView, cpUp, cpPvBuild, cpRaze, cpWeek, CP_B, CP_PV, CP_RULE });
 // 太空場景（巡航、迎擊戰）要放的：你在這裡的軌道建築（私人船台＝船塢、倉庫＝補給站、監聽站＝浮標），強化過的船塢、補給站標綠燈
@@ -28831,6 +28982,17 @@ const CCM_CSS = `
 .ccm .sm-card .ccm-ch h3 i{display:inline-block;width:13px;height:13px;border-radius:50%;margin-right:10px;vertical-align:2px;background:var(--pc)}
 .ccm .sm-card .ccm-ch .en{font:700 11px var(--en);letter-spacing:.26em;color:var(--dim)}
 .ccm .sm-card .ccm-cb{padding:10px 22px 18px}
+/* 星系卡片的指令（圖示） */
+.ccm .cc-acts{display:grid;grid-template-columns:repeat(auto-fill,minmax(74px,1fr));gap:6px;margin-top:12px}
+.ccm .cc-act{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;height:66px;padding:0;cursor:pointer;color:var(--text);background:rgba(14,22,46,.9);border:1px solid var(--line2);clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px)}
+.ccm .cc-act svg{width:26px;height:26px;fill:none;stroke:var(--cyan);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ccm .cc-act span{font:700 13px var(--jp);letter-spacing:.1em}
+.ccm .cc-act i{position:absolute;right:4px;top:3px;font:700 10px var(--en);font-style:normal;color:var(--gold)}
+.ccm .cc-act:hover:not(:disabled){border-color:var(--cyan);background:rgba(30,60,110,.95)}
+.ccm .cc-act.go{border-color:rgba(63,223,143,.6);background:linear-gradient(180deg,rgba(20,70,48,.9),rgba(14,22,46,.9))}.ccm .cc-act.go svg{stroke:var(--own)}
+.ccm .cc-act:disabled{opacity:.38;cursor:default}.ccm .cc-act:disabled svg{stroke:var(--mute)}
+.ccm .cc-acth{margin-top:8px;padding:7px 10px;min-height:38px;background:rgba(12,20,42,.7);border-left:3px solid var(--cyan);font:500 12.5px/1.5 var(--jp);color:var(--dim)}
+.ccm .cc-acth b{display:block;color:#fff;font-size:13.5px}.ccm .cc-acth.off{border-left-color:var(--mute)}.ccm .cc-acth.off b{color:var(--dim)}
 .ccm .sm-x{right:14px;top:12px;width:30px;height:30px;font:700 20px var(--en);color:var(--dim);z-index:2}.ccm .sm-x:hover{color:var(--red)}
 .ccm .sm-kv{gap:5px 16px;font:500 14px/1.5 var(--jp)}.ccm .sm-kv dt{color:var(--dim);white-space:nowrap}
 .ccm .sm-card h4{margin:14px 0 4px;font:700 12px var(--jp);letter-spacing:.14em;color:var(--dim)}
@@ -28904,7 +29066,7 @@ function ccmFit() { const w = document.querySelector('.ccm'); if (w) w.style.set
 function ccmArea(W, H) {
   const k = ccmK(), top = 168 * k, d = gEl('cc-dock'), dh = d ? d.getBoundingClientRect().height : 0;
   const bot = Math.min(H * 0.4, Math.max(110 * k, dh) + 40 * k);
-  const dr = CC.drw && gEl('cc-drw') ? 640 * k : document.querySelector('.sm-box.ccm-sheet:not(.cr-side)') ? 820 * k : 0;   // 右側的任務／紀錄面板、小隊／船塢／研發面板打開時，星圖往左縮
+  const dr = CC.drw && gEl('cc-drw') ? 640 * k : document.querySelector('.sm-box.ccm-sheet:not(.cr-side)') ? (document.querySelector('.sm-box.ccm-sheet.narrow') ? 580 : 820) * k : 0;   // 右側的任務／紀錄面板、小隊／船塢／研發面板打開時，星圖往左縮
   const lf = CC.brep && gEl('cce-side') ? 500 * k : 0;   // 左側的戰報打開時，星圖往右縮
   return { x: 40 + lf, y: top, w: W - 80 - dr - lf, h: H - top - bot };
 }
@@ -29500,6 +29662,14 @@ const CCS_CSS = `
 .ccm-sheet .ccs-warn{padding:8px 12px;margin:6px 0;background:rgba(120,20,30,.45);border-left:3px solid var(--red);color:#ffb0a8;font-weight:700}
 .ccm-sheet .ccs-item{border-left-color:var(--sc,var(--gold))}
 .ccm-sheet .ccs-item.got{opacity:.55}
+#g-screen:has(.ccm) .sm-box.ccm-sheet.narrow{width:520px}   /* 商店：緊湊 */
+.ccm-sheet .shop-t{width:96px;height:96px}.ccm-sheet .shop-t .ccs-ico{width:42px;height:42px;border:0;background:none}.ccm-sheet .shop-t span{max-width:88px;font-size:12px}
+.ccm-sheet .shop-t.got{opacity:.45}.ccm-sheet .cpv-t b.tag.pr{right:6px;top:4px;font:700 13px var(--en);color:var(--gold)}
+.ccm-sheet .cpv-det .hd .ccs-ico{width:40px;height:40px}
+.ccm-sheet .ccs-ico{position:relative;display:grid;place-items:center;width:46px;height:46px;background:rgba(10,16,34,.9);border:1px solid var(--c);clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px)}
+.ccm-sheet .ccs-ico svg{width:28px;height:28px;fill:none;stroke:var(--c);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.ccm-sheet .ccs-ico svg.m{position:absolute;right:2px;bottom:2px;width:18px;height:18px;stroke:#fff;stroke-width:1.6;background:rgba(10,16,34,.95);border-radius:2px}
+.ccm-sheet .ccs-item{align-items:center}
 .ccm-sheet .ccs-tag{display:inline-block;padding:0 6px;font-size:11px;font-weight:700;color:#1a1200;background:var(--gold);transform:skewX(-12deg)}
 .ccm-sheet .cc-yq .cc-lv{font-size:12px}
 /* 小隊總覽 */
@@ -30167,6 +30337,11 @@ body.ccl-on #battlehud, body.ccl-on #labels, body.ccl-on #caphud{visibility:hidd
 #ccl .ship .t i{font:700 12px Rajdhani,sans-serif;font-style:normal;color:#3cc8ff;margin-right:8px}
 #ccl .ship .bars{display:flex;gap:3px;margin-top:4px}
 #ccl .ship .bars span{height:4px;background:rgba(255,255,255,.15);flex:1}#ccl .ship .bars span i{display:block;height:100%}
+#ccl .svc{display:flex;align-items:center;gap:10px;height:46px;padding:0 22px 0 18px;background:linear-gradient(100deg,rgba(14,60,40,.92),rgba(10,16,36,.88));border-left:3px solid #3fdf8f;clip-path:polygon(5% 0,100% 0,95% 100%,0 100%);white-space:nowrap;color:#e8f2ff;text-align:left}
+#ccl .svc:hover{background:linear-gradient(100deg,rgba(30,110,70,.95),rgba(20,40,70,.9))}
+#ccl .svc svg{width:24px;height:24px;stroke:#3fdf8f;fill:none;stroke-width:1.8;flex:none}
+#ccl .svc b{display:block;font:700 15px 'Noto Sans TC','Microsoft JhengHei',sans-serif}#ccl .svc small{display:block;font:500 11px 'Noto Sans TC','Microsoft JhengHei',sans-serif;color:#9fb6d8}#ccl .svc small em{font-style:normal;color:#ffc24a}
+#ccl .svc.ok{border-left-color:#5d6f92;background:rgba(10,16,36,.8)}#ccl .svc.ok svg{stroke:#5d6f92}
 #ccl .ship.on{background:#3fdf8f;color:#062014}#ccl .ship.on .t i{color:#062014}#ccl .ship.on .bars span{background:rgba(0,0,0,.25)}
 #ccl .camread{position:absolute;left:50%;translate:-50% 0;top:982px;display:flex;gap:28px;font:600 13px Rajdhani,sans-serif;letter-spacing:.18em;color:#c9d6f0;white-space:nowrap}
 #ccl.ready .camread.enter{translate:-50% 0}
@@ -30194,6 +30369,7 @@ const CCL_ICON = {
   merit: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>',
   mail: '<rect x="3" y="6" width="18" height="13"/><path d="M3 7l9 6 9-6"/>',
   gear: '<circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>',
+  wrench: '<path d="M14.5 4.5a4 4 0 00-5 5L4 15l5 5 5.5-5.5a4 4 0 005-5l-2.5 2.5-3-.5-.5-3z"/>',
   quit: '<path d="M14 4h6v16h-6M4 12h11M9 7l-5 5 5 5"/>',
   sq: '<path d="M3 15l9-9 9 9M6 19l6-6 6 6"/>',
   yard: '<path d="M3 20h18M5 20V9l7-5 7 5v11M9 20v-6h6v6"/>',
@@ -30299,7 +30475,7 @@ function cclRender() {
     <div class="plate enter" style="--dx:-40px;--d:.45s"><div class="sq">★ ${smuEsc(P.name)} <span>／ ${P.ships.length} SHIPS</span></div>
       <h3>${CCL.sel + 1} 號艦<small>${Hn(F)}${ccMkTag(F).replace(/<[^>]+>/g, '')}</small></h3>
       <div class="xp">SHIP <em>Lv.${F.lv || 1}</em>${cclSeg(22, Math.round(22 * cclXpFrac(F)), '#3fdf8f')}</div></div>
-    <div class="ships enter" style="--dx:-40px;--d:.55s">${P.ships.map((c, i) => `<button class="ship ${i === CCL.sel ? 'on' : ''}" data-ship="${i}"><span class="t"><i>${i + 1}</i>${Hn(c)}</span><span class="bars"><span><i style="width:${c.hp * 100}%;background:${i === CCL.sel ? '#062014' : cclHpCol(c.hp)}"></i></span><span><i style="width:${c.sh * 100}%;background:${i === CCL.sel ? '#0b3a24' : '#5aa8ff'}"></i></span></span></button>`).join('')}</div>
+    <div class="ships enter" style="--dx:-40px;--d:.55s">${cclSvcBtn(S, P)}${P.ships.map((c, i) => `<button class="ship ${i === CCL.sel ? 'on' : ''}" data-ship="${i}"><span class="t"><i>${i + 1}</i>${Hn(c)}</span><span class="bars"><span><i style="width:${c.hp * 100}%;background:${i === CCL.sel ? '#062014' : cclHpCol(c.hp)}"></i></span><span><i style="width:${c.sh * 100}%;background:${i === CCL.sel ? '#0b3a24' : '#5aa8ff'}"></i></span></span></button>`).join('')}</div>
     <div class="camread enter" style="--dy:10px;--d:.7s"><span>CAM <b id="ccl-cam">WIDE</b></span><span>${keyText('cap_dock')} <b>巡航</b></span><span>1–${P.ships.length} <b>看船</b></span></div>
     <div class="tools enter" style="--dx:30px;--d:.6s"><button class="ib" data-ccl="fly" title="親自開船"><svg viewBox="0 0 24 24">${CCL_ICON.fly}</svg>巡航<kbd>${keyText('cap_dock')}</kbd></button><button class="ib" data-ccl="hide" title="隱藏介面"><svg viewBox="0 0 24 24">${CCL_ICON.eye}</svg></button></div>
     <div class="news enter" style="--dy:20px;--d:.75s"><span class="label">情報</span><div class="ticker"><div class="track">${logs}${logs}</div></div><span class="wkc"><small>第</small>${S.turn}<small>週</small></span></div>
@@ -30327,6 +30503,7 @@ function cclAct(k) {
   if (k === 'log') { cclToMap(); return ccdOpen('log', { mode: 'all' }); }
   if (k === 'report') { cclToMap(); return ccdOpen('log', { mode: 'week' }); }
   if (k === 'gear') return openSettings();
+  if (k === 'svc') return cclSvc(S, P);
   if (k === 'quit') { cclToMap(); const q = gEl('cc-quit'); if (q) q.click(); return; }   // 存檔離開：走星圖的「離開」（存檔、停掉巡航、回到選擇作戰）
   if (k === 'sq') { CC.cur = P.id; cclToMap(); return ccSquadsView(); }
   if (k === 'yard') { if (!(s.owner === S.fac && s.yard)) return toast('這個星系沒有你的勢力的維修船塢', 'warn'); cclToMap(); return ccYardView(s); }
@@ -30336,6 +30513,19 @@ function cclAct(k) {
   if (k === 'shop') { if (!s.shop) return; cclToMap(); return ccShopView(s); }
   if (k === 'fly') return cclCruise();
   if (k === 'hide') { CCL.el.classList.add('noui'); CCL.hideUi = true; }
+}
+// 維修／補給（使用者 2026-11-21）：在船塢照原價，不在船塢＝現地維修貴 1.5 倍（capcareer.js 的 CC_FIELD_K）
+function cclSvcBtn(S, P) {
+  const rc = ccRepairCost(S, P), mc = ccMissileCost(S, P), c = rc + mc, fd = ccField(S, 'repair', P) || (mc && ccField(S, 'missile', P));
+  return `<button class="svc ${c ? '' : 'ok'}" data-ccl="svc" title="${c ? `修好船體、補滿飛彈${fd ? `（這裡沒有船塢：現地維修 ×${CC_FIELD_K}）` : ''}` : '船體、飛彈都是滿的'}"><svg viewBox="0 0 24 24">${CCL_ICON.wrench}</svg><span><b>維修／補給</b><small>${c ? `<em>${fmtN(c)}</em> 資金${fd ? `・現地 ×${CC_FIELD_K}` : '・船塢'}` : '不用修'}</small></span></button>`;
+}
+function cclSvc(S, P) {
+  const rc = ccRepairCost(S, P), mc = ccMissileCost(S, P);
+  if (!rc && !mc) return toast('船體、飛彈都是滿的', 'info');
+  if (S.pl.money < rc + mc && !(rc && S.pl.money >= rc)) return toast(`資金不夠（要 ${rc + mc}）`, 'warn');
+  const a = rc ? ccRepair(S, P) : false, b = mc ? ccResupply(S, P) : false;
+  if (!a && !b) return toast('資金不夠', 'warn');
+  ccSave(S); toast(`${a ? '船體修好了' : ''}${a && b ? '、' : ''}${b ? '飛彈補滿了' : ''}`, 'ok'); cclRender();
 }
 function cclPick(i) {
   const P = ccPl(CC.S); if (!P || !P.ships[i]) return;

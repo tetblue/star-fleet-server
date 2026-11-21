@@ -63,6 +63,14 @@ const CCS_CSS = `
 .ccm-sheet .ccs-warn{padding:8px 12px;margin:6px 0;background:rgba(120,20,30,.45);border-left:3px solid var(--red);color:#ffb0a8;font-weight:700}
 .ccm-sheet .ccs-item{border-left-color:var(--sc,var(--gold))}
 .ccm-sheet .ccs-item.got{opacity:.55}
+#g-screen:has(.ccm) .sm-box.ccm-sheet.narrow{width:520px}   /* 商店：緊湊 */
+.ccm-sheet .shop-t{width:96px;height:96px}.ccm-sheet .shop-t .ccs-ico{width:42px;height:42px;border:0;background:none}.ccm-sheet .shop-t span{max-width:88px;font-size:12px}
+.ccm-sheet .shop-t.got{opacity:.45}.ccm-sheet .cpv-t b.tag.pr{right:6px;top:4px;font:700 13px var(--en);color:var(--gold)}
+.ccm-sheet .cpv-det .hd .ccs-ico{width:40px;height:40px}
+.ccm-sheet .ccs-ico{position:relative;display:grid;place-items:center;width:46px;height:46px;background:rgba(10,16,34,.9);border:1px solid var(--c);clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px)}
+.ccm-sheet .ccs-ico svg{width:28px;height:28px;fill:none;stroke:var(--c);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.ccm-sheet .ccs-ico svg.m{position:absolute;right:2px;bottom:2px;width:18px;height:18px;stroke:#fff;stroke-width:1.6;background:rgba(10,16,34,.95);border-radius:2px}
+.ccm-sheet .ccs-item{align-items:center}
 .ccm-sheet .ccs-tag{display:inline-block;padding:0 6px;font-size:11px;font-weight:700;color:#1a1200;background:var(--gold);transform:skewX(-12deg)}
 .ccm-sheet .cc-yq .cc-lv{font-size:12px}
 /* 小隊總覽 */

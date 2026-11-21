@@ -103,6 +103,17 @@ const CCM_CSS = `
 .ccm .sm-card .ccm-ch h3 i{display:inline-block;width:13px;height:13px;border-radius:50%;margin-right:10px;vertical-align:2px;background:var(--pc)}
 .ccm .sm-card .ccm-ch .en{font:700 11px var(--en);letter-spacing:.26em;color:var(--dim)}
 .ccm .sm-card .ccm-cb{padding:10px 22px 18px}
+/* 星系卡片的指令（圖示） */
+.ccm .cc-acts{display:grid;grid-template-columns:repeat(auto-fill,minmax(74px,1fr));gap:6px;margin-top:12px}
+.ccm .cc-act{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;height:66px;padding:0;cursor:pointer;color:var(--text);background:rgba(14,22,46,.9);border:1px solid var(--line2);clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px)}
+.ccm .cc-act svg{width:26px;height:26px;fill:none;stroke:var(--cyan);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ccm .cc-act span{font:700 13px var(--jp);letter-spacing:.1em}
+.ccm .cc-act i{position:absolute;right:4px;top:3px;font:700 10px var(--en);font-style:normal;color:var(--gold)}
+.ccm .cc-act:hover:not(:disabled){border-color:var(--cyan);background:rgba(30,60,110,.95)}
+.ccm .cc-act.go{border-color:rgba(63,223,143,.6);background:linear-gradient(180deg,rgba(20,70,48,.9),rgba(14,22,46,.9))}.ccm .cc-act.go svg{stroke:var(--own)}
+.ccm .cc-act:disabled{opacity:.38;cursor:default}.ccm .cc-act:disabled svg{stroke:var(--mute)}
+.ccm .cc-acth{margin-top:8px;padding:7px 10px;min-height:38px;background:rgba(12,20,42,.7);border-left:3px solid var(--cyan);font:500 12.5px/1.5 var(--jp);color:var(--dim)}
+.ccm .cc-acth b{display:block;color:#fff;font-size:13.5px}.ccm .cc-acth.off{border-left-color:var(--mute)}.ccm .cc-acth.off b{color:var(--dim)}
 .ccm .sm-x{right:14px;top:12px;width:30px;height:30px;font:700 20px var(--en);color:var(--dim);z-index:2}.ccm .sm-x:hover{color:var(--red)}
 .ccm .sm-kv{gap:5px 16px;font:500 14px/1.5 var(--jp)}.ccm .sm-kv dt{color:var(--dim);white-space:nowrap}
 .ccm .sm-card h4{margin:14px 0 4px;font:700 12px var(--jp);letter-spacing:.14em;color:var(--dim)}
@@ -176,7 +187,7 @@ function ccmFit() { const w = document.querySelector('.ccm'); if (w) w.style.set
 function ccmArea(W, H) {
   const k = ccmK(), top = 168 * k, d = gEl('cc-dock'), dh = d ? d.getBoundingClientRect().height : 0;
   const bot = Math.min(H * 0.4, Math.max(110 * k, dh) + 40 * k);
-  const dr = CC.drw && gEl('cc-drw') ? 640 * k : document.querySelector('.sm-box.ccm-sheet:not(.cr-side)') ? 820 * k : 0;   // 右側的任務／紀錄面板、小隊／船塢／研發面板打開時，星圖往左縮
+  const dr = CC.drw && gEl('cc-drw') ? 640 * k : document.querySelector('.sm-box.ccm-sheet:not(.cr-side)') ? (document.querySelector('.sm-box.ccm-sheet.narrow') ? 580 : 820) * k : 0;   // 右側的任務／紀錄面板、小隊／船塢／研發面板打開時，星圖往左縮
   const lf = CC.brep && gEl('cce-side') ? 500 * k : 0;   // 左側的戰報打開時，星圖往右縮
   return { x: 40 + lf, y: top, w: W - 80 - dr - lf, h: H - top - bot };
 }

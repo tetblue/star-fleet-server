@@ -141,6 +141,11 @@ body.ccl-on #battlehud, body.ccl-on #labels, body.ccl-on #caphud{visibility:hidd
 #ccl .ship .t i{font:700 12px Rajdhani,sans-serif;font-style:normal;color:#3cc8ff;margin-right:8px}
 #ccl .ship .bars{display:flex;gap:3px;margin-top:4px}
 #ccl .ship .bars span{height:4px;background:rgba(255,255,255,.15);flex:1}#ccl .ship .bars span i{display:block;height:100%}
+#ccl .svc{display:flex;align-items:center;gap:10px;height:46px;padding:0 22px 0 18px;background:linear-gradient(100deg,rgba(14,60,40,.92),rgba(10,16,36,.88));border-left:3px solid #3fdf8f;clip-path:polygon(5% 0,100% 0,95% 100%,0 100%);white-space:nowrap;color:#e8f2ff;text-align:left}
+#ccl .svc:hover{background:linear-gradient(100deg,rgba(30,110,70,.95),rgba(20,40,70,.9))}
+#ccl .svc svg{width:24px;height:24px;stroke:#3fdf8f;fill:none;stroke-width:1.8;flex:none}
+#ccl .svc b{display:block;font:700 15px 'Noto Sans TC','Microsoft JhengHei',sans-serif}#ccl .svc small{display:block;font:500 11px 'Noto Sans TC','Microsoft JhengHei',sans-serif;color:#9fb6d8}#ccl .svc small em{font-style:normal;color:#ffc24a}
+#ccl .svc.ok{border-left-color:#5d6f92;background:rgba(10,16,36,.8)}#ccl .svc.ok svg{stroke:#5d6f92}
 #ccl .ship.on{background:#3fdf8f;color:#062014}#ccl .ship.on .t i{color:#062014}#ccl .ship.on .bars span{background:rgba(0,0,0,.25)}
 #ccl .camread{position:absolute;left:50%;translate:-50% 0;top:982px;display:flex;gap:28px;font:600 13px Rajdhani,sans-serif;letter-spacing:.18em;color:#c9d6f0;white-space:nowrap}
 #ccl.ready .camread.enter{translate:-50% 0}
@@ -168,6 +173,7 @@ const CCL_ICON = {
   merit: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>',
   mail: '<rect x="3" y="6" width="18" height="13"/><path d="M3 7l9 6 9-6"/>',
   gear: '<circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>',
+  wrench: '<path d="M14.5 4.5a4 4 0 00-5 5L4 15l5 5 5.5-5.5a4 4 0 005-5l-2.5 2.5-3-.5-.5-3z"/>',
   quit: '<path d="M14 4h6v16h-6M4 12h11M9 7l-5 5 5 5"/>',
   sq: '<path d="M3 15l9-9 9 9M6 19l6-6 6 6"/>',
   yard: '<path d="M3 20h18M5 20V9l7-5 7 5v11M9 20v-6h6v6"/>',
@@ -273,7 +279,7 @@ function cclRender() {
     <div class="plate enter" style="--dx:-40px;--d:.45s"><div class="sq">★ ${smuEsc(P.name)} <span>／ ${P.ships.length} SHIPS</span></div>
       <h3>${CCL.sel + 1} 號艦<small>${Hn(F)}${ccMkTag(F).replace(/<[^>]+>/g, '')}</small></h3>
       <div class="xp">SHIP <em>Lv.${F.lv || 1}</em>${cclSeg(22, Math.round(22 * cclXpFrac(F)), '#3fdf8f')}</div></div>
-    <div class="ships enter" style="--dx:-40px;--d:.55s">${P.ships.map((c, i) => `<button class="ship ${i === CCL.sel ? 'on' : ''}" data-ship="${i}"><span class="t"><i>${i + 1}</i>${Hn(c)}</span><span class="bars"><span><i style="width:${c.hp * 100}%;background:${i === CCL.sel ? '#062014' : cclHpCol(c.hp)}"></i></span><span><i style="width:${c.sh * 100}%;background:${i === CCL.sel ? '#0b3a24' : '#5aa8ff'}"></i></span></span></button>`).join('')}</div>
+    <div class="ships enter" style="--dx:-40px;--d:.55s">${cclSvcBtn(S, P)}${P.ships.map((c, i) => `<button class="ship ${i === CCL.sel ? 'on' : ''}" data-ship="${i}"><span class="t"><i>${i + 1}</i>${Hn(c)}</span><span class="bars"><span><i style="width:${c.hp * 100}%;background:${i === CCL.sel ? '#062014' : cclHpCol(c.hp)}"></i></span><span><i style="width:${c.sh * 100}%;background:${i === CCL.sel ? '#0b3a24' : '#5aa8ff'}"></i></span></span></button>`).join('')}</div>
     <div class="camread enter" style="--dy:10px;--d:.7s"><span>CAM <b id="ccl-cam">WIDE</b></span><span>${keyText('cap_dock')} <b>巡航</b></span><span>1–${P.ships.length} <b>看船</b></span></div>
     <div class="tools enter" style="--dx:30px;--d:.6s"><button class="ib" data-ccl="fly" title="親自開船"><svg viewBox="0 0 24 24">${CCL_ICON.fly}</svg>巡航<kbd>${keyText('cap_dock')}</kbd></button><button class="ib" data-ccl="hide" title="隱藏介面"><svg viewBox="0 0 24 24">${CCL_ICON.eye}</svg></button></div>
     <div class="news enter" style="--dy:20px;--d:.75s"><span class="label">情報</span><div class="ticker"><div class="track">${logs}${logs}</div></div><span class="wkc"><small>第</small>${S.turn}<small>週</small></span></div>
@@ -301,6 +307,7 @@ function cclAct(k) {
   if (k === 'log') { cclToMap(); return ccdOpen('log', { mode: 'all' }); }
   if (k === 'report') { cclToMap(); return ccdOpen('log', { mode: 'week' }); }
   if (k === 'gear') return openSettings();
+  if (k === 'svc') return cclSvc(S, P);
   if (k === 'quit') { cclToMap(); const q = gEl('cc-quit'); if (q) q.click(); return; }   // 存檔離開：走星圖的「離開」（存檔、停掉巡航、回到選擇作戰）
   if (k === 'sq') { CC.cur = P.id; cclToMap(); return ccSquadsView(); }
   if (k === 'yard') { if (!(s.owner === S.fac && s.yard)) return toast('這個星系沒有你的勢力的維修船塢', 'warn'); cclToMap(); return ccYardView(s); }
@@ -310,6 +317,19 @@ function cclAct(k) {
   if (k === 'shop') { if (!s.shop) return; cclToMap(); return ccShopView(s); }
   if (k === 'fly') return cclCruise();
   if (k === 'hide') { CCL.el.classList.add('noui'); CCL.hideUi = true; }
+}
+// 維修／補給（使用者 2026-11-21）：在船塢照原價，不在船塢＝現地維修貴 1.5 倍（capcareer.js 的 CC_FIELD_K）
+function cclSvcBtn(S, P) {
+  const rc = ccRepairCost(S, P), mc = ccMissileCost(S, P), c = rc + mc, fd = ccField(S, 'repair', P) || (mc && ccField(S, 'missile', P));
+  return `<button class="svc ${c ? '' : 'ok'}" data-ccl="svc" title="${c ? `修好船體、補滿飛彈${fd ? `（這裡沒有船塢：現地維修 ×${CC_FIELD_K}）` : ''}` : '船體、飛彈都是滿的'}"><svg viewBox="0 0 24 24">${CCL_ICON.wrench}</svg><span><b>維修／補給</b><small>${c ? `<em>${fmtN(c)}</em> 資金${fd ? `・現地 ×${CC_FIELD_K}` : '・船塢'}` : '不用修'}</small></span></button>`;
+}
+function cclSvc(S, P) {
+  const rc = ccRepairCost(S, P), mc = ccMissileCost(S, P);
+  if (!rc && !mc) return toast('船體、飛彈都是滿的', 'info');
+  if (S.pl.money < rc + mc && !(rc && S.pl.money >= rc)) return toast(`資金不夠（要 ${rc + mc}）`, 'warn');
+  const a = rc ? ccRepair(S, P) : false, b = mc ? ccResupply(S, P) : false;
+  if (!a && !b) return toast('資金不夠', 'warn');
+  ccSave(S); toast(`${a ? '船體修好了' : ''}${a && b ? '、' : ''}${b ? '飛彈補滿了' : ''}`, 'ok'); cclRender();
 }
 function cclPick(i) {
   const P = ccPl(CC.S); if (!P || !P.ships[i]) return;

@@ -498,8 +498,11 @@ function ccCanMove(S, to, P = ccPl(S)) {
   return '';
 }
 const ccBaseK = (S, P) => (P.sys === S.pl.base ? 0.5 : 1);   // 據點：半價
-function ccRepairCost(S, P) { return Math.round(P.ships.reduce((a, c) => a + (1 - c.hp) * CAP_HULLS[c.key].hp, 0) * CC_RULE.repair * ccBaseK(S, P) * (S.sys[P.sys].owner === S.fac ? cpRepK(S, S.sys[P.sys]) : CP_RULE.dockK)); }
-function ccMissileCost(S, P) { return Math.round(P.ships.reduce((a, c) => a + (CAP_HULLS[c.key].msl ? (1 - c.msl) * CAP_HULLS[c.key].msl.n : 0), 0) * CC_RULE.missile * ccBaseK(S, P) * (cpStore(S, S.sys[P.sys]) ? 1 : S.sys[P.sys].owner === S.fac ? cpMslK(S, S.sys[P.sys]) : CP_RULE.dockK)); }
+// 維修、補飛彈：在船塢（己方的維修船塢、補給站、商會維修站、你的倉庫）照原價；不在船塢＝現地維修，貴 CC_FIELD_K 倍（使用者 2026-11-21：1.5 倍）
+const CC_FIELD_K = 1.5;
+const ccField = (S, kind, P = ccPl(S)) => !!ccCanService(S, kind, P);
+function ccRepairCost(S, P) { const raw = P.ships.reduce((a, c) => a + (1 - c.hp) * CAP_HULLS[c.key].hp, 0) * CC_RULE.repair; return Math.round(ccField(S, 'repair', P) ? raw * CC_FIELD_K : raw * ccBaseK(S, P) * (S.sys[P.sys].owner === S.fac ? cpRepK(S, S.sys[P.sys]) : CP_RULE.dockK)); }
+function ccMissileCost(S, P) { const raw = P.ships.reduce((a, c) => a + (CAP_HULLS[c.key].msl ? (1 - c.msl) * CAP_HULLS[c.key].msl.n : 0), 0) * CC_RULE.missile; return Math.round(ccField(S, 'missile', P) ? raw * CC_FIELD_K : raw * ccBaseK(S, P) * (cpStore(S, S.sys[P.sys]) ? 1 : S.sys[P.sys].owner === S.fac ? cpMslK(S, S.sys[P.sys]) : CP_RULE.dockK)); }
 function ccCanService(S, kind, P = ccPl(S)) {
   const s = S.sys[P.sys];
   if (kind === 'missile' && cpStore(S, s)) return '';   // 你的倉庫
@@ -510,8 +513,8 @@ function ccCanService(S, kind, P = ccPl(S)) {
   if (kind === 'build' && !s.yard) return '這裡沒有維修船塢';
   return '';
 }
-function ccRepair(S, P = ccPl(S)) { const c = ccRepairCost(S, P); if (ccCanService(S, 'repair', P) || S.pl.money < c) return false; S.pl.money -= c; for (const x of P.ships) x.hp = 1; ccLog(S, `在 ${S.sys[P.sys].name} 修好${P.name}（${c} 資金）`, 'ok'); return true; }
-function ccResupply(S, P = ccPl(S)) { const c = ccMissileCost(S, P); if (ccCanService(S, 'missile', P) || S.pl.money < c) return false; S.pl.money -= c; for (const x of P.ships) x.msl = 1; ccLog(S, `${P.name}補滿飛彈（${c} 資金）`, 'ok'); return true; }
+function ccRepair(S, P = ccPl(S)) { const c = ccRepairCost(S, P), f = ccField(S, 'repair', P); if (!c || S.pl.money < c) return false; S.pl.money -= c; for (const x of P.ships) x.hp = 1; ccLog(S, `在 ${S.sys[P.sys].name} ${f ? '現地' : ''}修好${P.name}（${c} 資金）`, 'ok'); return true; }
+function ccResupply(S, P = ccPl(S)) { const c = ccMissileCost(S, P), f = ccField(S, 'missile', P); if (!c || S.pl.money < c) return false; S.pl.money -= c; for (const x of P.ships) x.msl = 1; ccLog(S, `${P.name}${f ? '現地' : ''}補滿飛彈（${c} 資金）`, 'ok'); return true; }
 // ───── 研發（研發、生產、改裝的第 4 步，2026-11-15）─────
 // 研究點數（S.pl.rp）：任務完成（戰功的 1/10）、打贏後打撈殘骸（實戰每擊沉一艘 4 點、計算的戰鬥每艘 3 點）、據點的研究所（每週 8 點）。
 // 一次研究一項：開始時付點數，要幾週完成（S.pl.tech.cur）。每個陣營一棵樹：同一套項目，自己陣營擅長的便宜 20%。
