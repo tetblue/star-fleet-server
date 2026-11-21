@@ -211,7 +211,7 @@ function cclPrio(S) {
   const open = S.missions.filter((M) => M.state === 'open').sort((a, b) => (b.exam ? 1 : 0) - (a.exam ? 1 : 0) || a.due - b.due);
   for (const M of open.slice(0, 2)) {
     const t = S.sys[M.sys];
-    L.push({ k: M.exam ? 'promo' : 'mis', tag: M.exam ? '升遷考核' : '任務', title: `${ccMisName(M)} ${t.name}`, sub: M.exam ? `完成就升任${M.exam}` : `報酬：資金 ${M.reward.money}・戰功 ${M.reward.merit}`, left: `剩 ${M.due - S.turn} 週`, go: () => { cclToMap(); ccBrief(M, true); } });
+    L.push({ k: M.exam ? 'promo' : 'mis', tag: M.exam ? '升遷考核' : '任務', title: `${ccMisName(M)} ${t.name}`, sub: M.exam ? `完成就升任${M.exam}` : `報酬：資金 ${M.reward.money}・戰功 ${M.reward.merit}`, left: `剩 ${M.due - S.turn} 週`, go: () => cclHost(() => ccBrief(M, true)) });   // 任務簡報疊在大廳上；簡報裡按「在星圖上看目標」才進星圖
   }
   if (!L.length) L.push({ k: 'calm', tag: '狀況', title: '這週沒有急事', sub: '可以整備、研發，或打開星圖找下一個目標', left: '', go: () => cclToMap() });
   return L;
@@ -255,7 +255,7 @@ function cclRender() {
     </nav>
     <div class="right"><div class="tilt">
       <div class="res enter" style="--dy:-20px;--d:.1s">
-        <button class="ri" data-ccl="map" style="--c:#f3e94b"><svg viewBox="0 0 24 24">${CCL_ICON.money}</svg><span class="k">資金</span><b>${fmtN(Math.round(S.pl.money))}</b></button>
+        <button class="ri" data-ccl="money" style="--c:#f3e94b" title="每週的收入、支出"><svg viewBox="0 0 24 24">${CCL_ICON.money}</svg><span class="k">資金</span><b>${fmtN(Math.round(S.pl.money))}</b></button>
         <button class="ri" data-ccl="tech" style="--c:#3cc8ff"><svg viewBox="0 0 24 24">${CCL_ICON.rp}</svg><span class="k">研究點</span><b>${fmtN(Math.round(S.pl.rp || 0))}</b></button>
         <div class="ri" style="--c:#3fdf8f"><svg viewBox="0 0 24 24">${CCL_ICON.merit}</svg><span class="k">戰功</span><b>${fmtN(Math.round(mer))}</b></div></div>
       <button class="ib enter" data-ccl="report" style="left:586px;--dy:-20px;--d:.15s" title="上週的戰報"><svg viewBox="0 0 24 24">${CCL_ICON.mail}</svg></button>
@@ -296,25 +296,59 @@ function cclFit() {
   CCL.k = Math.min(innerWidth / 1920, innerHeight / 1080); st.style.transform = `scale(${CCL.k}) translate(-50%,-50%)`;
 }
 // 打開星圖（暫停巡航的場景、收起大廳），之後的視窗都疊在星圖上
-function cclToMap() { if (!CC.over) ccMapOpen(); }
+function cclToMap() { if (CC.lobHost) cclHostEnd(false); else if (!CC.over) ccMapOpen(); }
+// 大廳打開的面板（使用者 2026-11-21）：不跳到星圖，面板直接疊在大廳上；關掉就回到大廳。
+// 面板的樣式掛在星圖底下（#g-screen:has(.ccm)），所以星圖照樣畫出來，只是藏起來（body.ccl-host），大廳留在下面。
+function cclHost(fn) {
+  if (CC.over && !CC.lobHost) return fn();   // 已經在星圖上：照舊
+  if (!CC.over) {
+    if (!ccIdleOn()) return;
+    paused = true; updateTimeUI(); if (document.pointerLockElement) document.exitPointerLock();
+    CC.over = true; CC.lobHost = true; CC.sel = -1; document.body.classList.add('ccl-host');
+    if (!gEl('ccl-host-css')) { const st = document.createElement('style'); st.id = 'ccl-host-css'; st.textContent = CCL_HOST_CSS; document.head.appendChild(st); }
+    CC.S = CC.S || ccLoad(); ccRender();
+  }
+  fn();
+}
+const CCL_HOST_CSS = `body.ccl-host #game{background:none!important;backdrop-filter:none!important;pointer-events:none}
+body.ccl-host #g-screen .ccm>*:not(#cc-drw){visibility:hidden}
+body.ccl-host #g-screen .ccm{background:none}
+body.ccl-host #g-screen .sm-modal:not(:has(.ccm-sheet)){pointer-events:auto}
+body.ccl-host #g-screen .sm-box,body.ccl-host #cc-drw{pointer-events:auto}`;
+// 結束疊在大廳上的面板。back：回到大廳；不然＝真的打開星圖（例如面板裡點了「在星圖上看」）
+function cclHostOff() { CC.lobHost = false; document.body.classList.remove('ccl-host'); }   // 大廳收起來（開打、離開）時一併清掉
+function cclHostEnd(back) {
+  if (!CC.lobHost) return;
+  cclHostOff();
+  if (!back) { cclHide(true); ccRender(); return; }
+  if (gEl('sm-modal')) smuCloseModal();
+  if (CC.drw) ccdClose();
+  window.removeEventListener('resize', ccResize);
+  overlay(null); CC.over = false; cceRepTab(); cceRepRestore();
+  paused = false; updateTimeUI(); cclShow();
+}
+// 面板關掉後（smuCloseModal、ccdClose 呼叫）：沒有別的面板接著開就回到大廳（下一幀再看：換面板是先關再開）
+function cclHostCheck() { if (CC.lobHost) setTimeout(() => { if (CC.lobHost && !gEl('sm-modal') && !CC.drw) cclHostEnd(true); }, 0); }
 function cclAct(k) {
   const S = CC.S, P = ccPl(S), s = S.sys[P.sys];
   if (k === 'map') return cclToMap();
   if (k === 'end') { cclToMap(); return ccEndWeek(); }
   if (k === 'prio') { const L = cclPrio(S); return (L[CCL.prio] || L[0]).go(); }
-  if (k === 'mis') { cclToMap(); return ccdOpen('mis'); }
-  if (k === 'fac' || k === 'help') { CC.leg = k === 'help' ? true : CC.leg; return cclToMap(); }
-  if (k === 'log') { cclToMap(); return ccdOpen('log', { mode: 'all' }); }
-  if (k === 'report') { cclToMap(); return ccdOpen('log', { mode: 'week' }); }
+  if (k === 'mis') return cclHost(() => ccdOpen('mis'));
+  if (k === 'fac') return cclHost(ccFacView);   // 勢力、說明、資金：自己的面板（capfac_ui.js）
+  if (k === 'help') return cclHost(ccHelpView);
+  if (k === 'money') return cclHost(ccMoneyView);
+  if (k === 'log') return cclHost(() => ccdOpen('log', { mode: 'all' }));
+  if (k === 'report') return cclHost(() => ccdOpen('log', { mode: 'week' }));
   if (k === 'gear') return openSettings();
   if (k === 'svc') return cclSvc(S, P);
   if (k === 'quit') { cclToMap(); const q = gEl('cc-quit'); if (q) q.click(); return; }   // 存檔離開：走星圖的「離開」（存檔、停掉巡航、回到選擇作戰）
-  if (k === 'sq') { CC.cur = P.id; cclToMap(); return ccSquadsView(); }
-  if (k === 'yard') { if (!(s.owner === S.fac && s.yard)) return toast('這個星系沒有你的勢力的維修船塢', 'warn'); cclToMap(); return ccYardView(s); }
-  if (k === 'tech') { cclToMap(); return ccTechView(); }
-  if (k === 'rank') { cclToMap(); return ccRankView(); }
-  if (k === 'planet') { cclToMap(); return cpView(s); }
-  if (k === 'shop') { if (!s.shop) return; cclToMap(); return ccShopView(s); }
+  if (k === 'sq') { CC.cur = P.id; return cclHost(ccSquadsView); }   // 小隊、船塢、研發、軍階、星球、商店：面板疊在大廳上（cclHost）
+  if (k === 'yard') { if (!(s.owner === S.fac && s.yard)) return toast('這個星系沒有你的勢力的維修船塢', 'warn'); return cclHost(() => ccYardView(s)); }
+  if (k === 'tech') return cclHost(() => ccTechView());
+  if (k === 'rank') return cclHost(ccRankView);
+  if (k === 'planet') return cclHost(() => cpView(s));
+  if (k === 'shop') { if (!s.shop) return; return cclHost(() => ccShopView(s)); }
   if (k === 'fly') return cclCruise();
   if (k === 'hide') { CCL.el.classList.add('noui'); CCL.hideUi = true; }
 }
@@ -359,11 +393,13 @@ function cclShow() {
 // 收起大廳（keepDock：等一下會回來，例如打開星圖）
 function cclHide(keepDock) {
   if (!keepDock) CCL.dock = false;
+  cclHostOff();
   CCL.on = false; CAP_FX.cam = null; document.body.classList.remove('ccl-on');
   if (CCL.el) CCL.el.hidden = true;
   if (CAP.el && ccIdleOn() && !keepDock) CAP.el.hidden = false;
 }
 function cclRemove() {
+  cclHostOff();
   CCL.on = false; CAP_FX.cam = null; document.body.classList.remove('ccl-on');
   if (CCL.el) { CCL.el.remove(); CCL.el = null; removeEventListener('resize', cclFit); }
   if (CCL.raf) { cancelAnimationFrame(CCL.raf); CCL.raf = 0; }

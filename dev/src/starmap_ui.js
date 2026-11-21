@@ -88,7 +88,7 @@ function smuBindUi(root, onSeg) {
 }
 function smuModal(html, cls) { const old = gEl('sm-modal'); if (old) old.remove(); smuSheetGone(old); const d = document.createElement('div'); d.className = 'sm-modal'; d.id = 'sm-modal'; d.innerHTML = `<div class="sm-box ${cls || ''}">${html}</div>`; gEl('g-screen').appendChild(d); smuBindUi(d); return d; }
 // 關掉對話框；排隊的下一個（例如回合開始的任務簡報）接著出來
-function smuCloseModal() { const d = gEl('sm-modal'); if (d) d.remove(); if (SMU.q.length) SMU.q.shift()(); smuSheetGone(d); }
+function smuCloseModal() { const d = gEl('sm-modal'); if (d) d.remove(); if (SMU.q.length) SMU.q.shift()(); smuSheetGone(d); if (typeof cclHostCheck === 'function') cclHostCheck(); }   // 從大廳打開的面板：關掉回大廳（caplobby.js）
 // 艦長生涯：右側的斜放面板（ccmSheet）關掉後，星圖與星系卡片重新排（capinfo_ui.js 的 ccdRefit）
 function smuSheetGone(d) { if (d && d.querySelector('.ccm-sheet') && !document.querySelector('#sm-modal .ccm-sheet') && typeof ccdRefit === 'function') ccdRefit(); }
 function smuLater(fn) { if (gEl('sm-modal')) SMU.q.push(fn); else fn(); }

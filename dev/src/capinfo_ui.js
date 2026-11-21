@@ -54,7 +54,7 @@ const ccdK = () => (typeof ccmK === 'function' ? ccmK() : 1);
 function ccdOpen(kind, arg) {
   if (document.querySelector('.sm-box.ccm-sheet') && typeof smuCloseModal === 'function') smuCloseModal();   // 右側同一個位置：小隊／船塢／研發等面板先收起
   CC.drw = { kind, arg: arg || {} }; ccdDraw(); ccdRefit(); }
-function ccdClose() { CC.drw = null; const d = gEl('cc-drw'); if (d) d.remove(); ccdRefit(); }
+function ccdClose() { CC.drw = null; const d = gEl('cc-drw'); if (d) d.remove(); ccdRefit(); cclHostCheck(); }
 // 星圖的可用範圍跟著面板變（ccmArea），卡片重新定位
 function ccdRefit() { if (!gEl('cc-cv')) return; ccDraw(); const el = gEl('cc-card'); if (el && !el.hidden) CC_place(el); }
 function ccdRestore() { if (CC.drw) ccdDraw(true); }
