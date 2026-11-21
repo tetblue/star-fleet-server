@@ -1,0 +1,591 @@
+// 戰艦組裝編輯器：用「戰艦建模」做出來的船身部件、零件（砲塔、砲座、推進器…）、細節元件拼裝新戰艦。
+// 素材：models/戰艦組裝/library.json（dev/tools/shipyard/import.mjs 產生）。每艘船每個塗裝一個整艦 GLB，這裡依節點名稱拆成部件：
+//   「部件.細節名」「部件_材質」都屬於那個部件（kit.py 的 PARTS，取最長的符合者）；名稱以 .R 結尾的是鏡像到另一舷的那一半，
+//   只有部件本體也有 .R 的（新月戰艦的臂）才拆成兩個部件。零件與細節來自各船的 零件庫.glb（不含貼圖），材質依名稱換成所選塗裝的。
+// 設計：{ name, pieces: [{ id, ship, v(塗裝), k: 'part'|'lib', n(名稱), p[3], r[3](度), s[3] }] }，存在伺服器 models/戰艦組裝/designs.json。
+// 座標和素材一樣：+x 船首、+y 上、+z 右舷，單位公尺。
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const D2R = Math.PI / 180;
+const r1 = (x) => Math.round(x * 1000) / 1000;
+
+const PART_NAMES = {
+  hull: '船身', bow: '船首', stern: '船尾', engines: '引擎', citadel: '艦橋堡', pontoons: '浮筒', shields: '護盾', weapons: '武裝',
+  superstructure: '上層建築', hangar: '機庫', mid: '中段', ring: '環段', arm_fore: '前臂', arm_mid: '中臂', arm_aft: '後臂',
+  core_tower: '核心塔', core_mid: '核心中段', core_aft: '核心後段', engine_block: '引擎座', thrusters: '推進器組', bow_prong: '叉首',
+  bow_centre: '船首中央', hull_fore: '前船身', hull_mid: '中船身', hull_aft: '後船身', bridge: '艦橋', crest: '紋章', crest_top: '頂部紋章', crest_side: '側面紋章',
+};
+const LIB_NAMES = {
+  ball_mount: '球型砲座', casemate: '舷砲廓', dome: '圓頂', escape_pod: '逃生艙', gun_port: '砲門', gun_port_triple: '三聯砲門',
+  hangar_door: '機庫門', launch_bay: '發射艙', low_turret: '低砲塔', main_turret: '主砲塔', shield_gun: '護盾砲', shield_gun_triple: '三聯護盾砲',
+  stack: '煙囪', thruster: '推進器', triple_turret: '三聯砲塔', wing_turret: '側翼砲塔', twin_turret: '雙聯砲塔', missile_cell: '飛彈艙',
+  antenna_whip: '鞭狀天線', bolt_strip: '螺栓條', dish_small: '小碟形天線', door: '艙門', hatch_round: '圓艙蓋', hatch_square: '方艙蓋',
+  heatsink: '散熱片', panel_recess: '凹板', plate_dark: '深色裝甲板', plate_light: '淺色裝甲板', plate_mid: '中色裝甲板', seam: '接縫',
+  vent_slat: '百葉通風口', vent_round: '圓通風口', window: '舷窗', window_lit: '亮舷窗', handrail: '扶手', junction_box: '接線盒',
+  sensor_dome: '感測罩', nav_light: '航行燈', crate: '貨箱', pipe: '管線', pipe_clamp: '管夾', pipe_joint: '管接頭',
+};
+const partLabel = (key) => {
+  const R = key.endsWith('.R'), b = key.replace(/\.R$/, '').replace(/^x:/, '');
+  return (PART_NAMES[b] || b) + (R ? '（另一舷）' : '');
+};
+const libLabel = (n) => { const b = n.replace(/^(component|detail)_/, ''); return LIB_NAMES[b] || b; };
+const varLabel = (v) => v.replace(/_/g, '・');
+
+function authHeaders() {   // 和遊戲共用 localStorage 的 fleet.session
+  try { const s = JSON.parse(localStorage.getItem('fleet.session') || 'null'); if (s && s.token) return { Authorization: 'Bearer ' + s.token }; } catch (e) { /* 沒登入 */ }
+  return {};
+}
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* 無痕或停用 */ } };
+
+let toastT = 0;
+function toast(msg, bad) { const t = $('toast'); t.textContent = msg; t.className = 'on' + (bad ? ' bad' : ''); clearTimeout(toastT); toastT = setTimeout(() => (t.className = ''), bad ? 5000 : 2500); }
+let busyN = 0;
+function busy(on) { busyN += on ? 1 : -1; $('busy').classList.toggle('on', busyN > 0); }
+
+// ───── 畫面 ─────
+const view = $('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+view.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a1020);
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+scene.add(new THREE.HemisphereLight(0xdde8ff, 0x202430, 0.8));
+const sun = new THREE.DirectionalLight(0xffffff, 2.2); sun.position.set(0.6, 1, 0.4); scene.add(sun);
+const camera = new THREE.PerspectiveCamera(40, 1, 0.5, 40000);
+camera.position.set(900, 520, 1000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.mouseButtons = { LEFT: -1, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };   // 左鍵留給選取與拖曳
+const grid = new THREE.GridHelper(3000, 60, 0x2b4466, 0x16243a); scene.add(grid);
+const axes = new THREE.Group(); scene.add(axes);
+axes.add(new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 0), 800, 0x5cc8ff, 60, 30));   // 船首
+axes.add(new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0), 250, 0xffd27a, 30, 15));
+const world = new THREE.Group(); scene.add(world);
+const selBoxes = new THREE.Group(); scene.add(selBoxes);
+const tc = new TransformControls(camera, renderer.domElement);
+tc.setSpace('world');
+scene.add(tc);
+const pivot = new THREE.Object3D(); scene.add(pivot);   // 選取多個時，拖曳的是這個
+
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h); camera.aspect = w / Math.max(1, h); camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize();
+function loop() {   // 在檔尾（狀態都建好後）開始
+  requestAnimationFrame(loop); controls.update();
+  for (const b of selBoxes.children) { const o = OBJ.get(b.userData.pid); if (o) { o.updateMatrixWorld(); b.box.copy(o.userData.box).applyMatrix4(o.matrixWorld); } }
+  renderer.render(scene, camera);
+  $('stat').textContent = `${S.pieces.length} 個部件・${fmtK(triCount())} 面・繪製 ${renderer.info.render.calls} 次`;
+}
+const fmtK = (n) => (n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(0) + 'k' : String(n));
+
+// ───── 素材 ─────
+const loader = new GLTFLoader();
+const glbCache = new Map();
+const urlOf = (file) => '../models/戰艦組裝/' + file.split('/').map(encodeURIComponent).join('/');
+function loadGLB(file) {
+  if (!glbCache.has(file)) glbCache.set(file, new Promise((res, rej) => { busy(true); loader.load(urlOf(file), (g) => { busy(false); res(g); }, undefined, (e) => { busy(false); glbCache.delete(file); rej(new Error('讀不到 ' + file)); }); }));
+  return glbCache.get(file);
+}
+const LIB = { ships: [], byId: {} };
+const shipCache = new Map(), libCache = new Map();
+const flipCache = new WeakMap();
+function flipGeo(geo) {   // 鏡像的實例：三角形繞向反過來，InstancedMesh 不會像一般物件那樣自己處理
+  let g = flipCache.get(geo); if (g) return g;
+  g = geo.clone();
+  const idx = g.index ? g.index.array.slice() : Uint32Array.from({ length: g.attributes.position.count }, (_, i) => i);
+  for (let i = 0; i < idx.length; i += 3) { const t = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = t; }
+  g.setIndex(new THREE.BufferAttribute(idx, 1));
+  flipCache.set(geo, g); return g;
+}
+// glTF 節點 → three 物件。不能用 parser.associations 或 o.name：共用網格的複本共用同一個關聯（節點索引被最後一個蓋掉），
+// 名稱又被 sanitize 拿掉了「.」。getDependency('node', i) 回傳的就是放進場景的那個物件；多個 primitive 時是 Group，網格在 children。
+async function nodeMeshes(gl) {
+  const json = gl.parser.json, out = [], objs = new Map();
+  for (let i = 0; i < json.nodes.length; i++) if (json.nodes[i].mesh !== undefined) objs.set(i, await gl.parser.getDependency('node', i));
+  const isNode = new Set(objs.values());
+  for (const [i, o] of objs) {
+    const meshes = o.isMesh ? [o] : o.children.filter((c) => c.isMesh && !isNode.has(c));
+    out.push({ node: json.nodes[i].name || '', mesh: (json.meshes[json.nodes[i].mesh] || {}).name || '', meshes });
+  }
+  return out;
+}
+// 一組網格（世界矩陣）→ 依幾何＋材質＋是否鏡像分組；recenter 時移到外框中心
+function makeAsset(entries, recenter) {
+  const box = new THREE.Box3(), tmp = new THREE.Box3();
+  for (const e of entries) { if (!e.geo.boundingBox) e.geo.computeBoundingBox(); box.union(tmp.copy(e.geo.boundingBox).applyMatrix4(e.m)); }
+  const center = recenter ? box.getCenter(new THREE.Vector3()) : new THREE.Vector3();
+  const sh = new THREE.Matrix4().makeTranslation(-center.x, -center.y, -center.z);
+  const groups = new Map(); let tris = 0;
+  for (const e of entries) {
+    const flip = e.m.determinant() < 0, k = e.geo.uuid + '|' + e.mat.uuid + '|' + flip;
+    let g = groups.get(k); if (!g) groups.set(k, (g = { geo: e.geo, mat: e.mat, flip, ms: [] }));
+    g.ms.push(sh.clone().multiply(e.m));
+    tris += (e.geo.index ? e.geo.index.count : e.geo.attributes.position.count) / 3;
+  }
+  return { center: center.toArray().map(r1), box: box.translate(center.clone().negate()), items: [...groups.values()], tris };
+}
+async function shipAssets(shipId, v) {
+  const key = shipId + '|' + v;
+  if (!shipCache.has(key)) shipCache.set(key, (async () => {
+    const ship = LIB.byId[shipId], vv = ship.variants.find((x) => x.name === v) || ship.variants[0];
+    const gl = await loadGLB(vv.file), nodes = await nodeMeshes(gl);
+    gl.scene.updateMatrixWorld(true);
+    const ents = [], mats = new Map(), scl = new Map();
+    for (const { node, mesh, meshes } of nodes) {
+      const base = node.split('.')[0];
+      let part = null; for (const p of ship.parts) if ((base === p || base.startsWith(p + '_')) && (!part || p.length > part.length)) part = p;
+      for (const o of meshes) {
+        ents.push({ o, node, base, part, R: /\.R$/.test(node) });
+        for (const m of [].concat(o.material)) if (m.name && !mats.has(m.name)) mats.set(m.name, m);
+      }
+      if (/^(component|detail)_/.test(mesh) && meshes[0]) {   // 零件在這艘船上的常用大小
+        const s = r1(Math.cbrt(Math.abs(meshes[0].matrixWorld.determinant())));
+        const c = scl.get(mesh) || new Map(); c.set(s, (c.get(s) || 0) + 1); scl.set(mesh, c);
+      }
+    }
+    const split = new Set(ents.filter((e) => e.part && !e.node.replace(/\.R$/, '').includes('.') && e.R).map((e) => e.part));
+    const byPart = new Map();
+    for (const e of ents) {
+      const k = e.part ? (split.has(e.part) && e.R ? e.part + '.R' : e.part) : 'x:' + e.base.replace(/_(left|right|top|bottom)$/, '');
+      if (!byPart.has(k)) byPart.set(k, []);
+      byPart.get(k).push({ geo: e.o.geometry, mat: e.o.material, m: e.o.matrixWorld.clone() });
+    }
+    const parts = new Map();
+    const order = (k) => { const b = k.replace(/\.R$/, ''); const i = ship.parts.indexOf(b); return (i < 0 ? 99 : i) * 2 + (k.endsWith('.R') ? 1 : 0); };
+    for (const k of [...byPart.keys()].sort((a, b) => order(a) - order(b))) parts.set(k, makeAsset(byPart.get(k), true));
+    const compScale = new Map();
+    for (const [n, c] of scl) compScale.set(n, [...c].sort((a, b) => b[1] - a[1])[0][0]);
+    return { parts, mats, compScale };
+  })());
+  return shipCache.get(key);
+}
+const libStyle = (ship, v) => (v.startsWith('機戰風') && ship.libs['機戰風'] ? '機戰風' : '標準');
+async function libAssets(shipId, style) {
+  const key = shipId + '|' + style;
+  if (!libCache.has(key)) libCache.set(key, (async () => {
+    const ship = LIB.byId[shipId], file = ship.libs[style] || ship.libs['標準'];
+    if (!file) return new Map();
+    const gl = await loadGLB(file), nodes = await nodeMeshes(gl);
+    gl.scene.updateMatrixWorld(true);
+    const by = new Map();
+    for (const { node, meshes } of nodes) {
+      const n = node.split('.')[0];
+      if (!by.has(n)) by.set(n, []);
+      for (const o of meshes) by.get(n).push({ geo: o.geometry, mat: o.material, m: o.matrixWorld.clone() });
+    }
+    const out = new Map();
+    for (const n of [...by.keys()].sort()) out.set(n, makeAsset(by.get(n), false));
+    return out;
+  })());
+  return libCache.get(key);
+}
+async function assetOf(pc) {
+  const ship = LIB.byId[pc.ship]; if (!ship) throw new Error('素材庫沒有 ' + pc.ship);
+  if (pc.k === 'part') { const a = (await shipAssets(pc.ship, pc.v)).parts.get(pc.n); if (!a) throw new Error(`${ship.name} 沒有部件 ${pc.n}`); return { a }; }
+  const [lib, sa] = await Promise.all([libAssets(pc.ship, libStyle(ship, pc.v)), shipAssets(pc.ship, pc.v)]);
+  const a = lib.get(pc.n); if (!a) throw new Error(`${ship.name} 的零件庫沒有 ${pc.n}`);
+  return { a, mats: sa.mats };   // 零件庫沒有貼圖：材質依名稱換成這個塗裝的
+}
+function buildObject(a, mats) {
+  const g = new THREE.Group();
+  for (const it of a.items) {
+    const mat = (mats && it.mat.name && mats.get(it.mat.name)) || it.mat;
+    let o;
+    if (it.ms.length === 1) { o = new THREE.Mesh(it.geo, mat); o.matrixAutoUpdate = false; o.matrix.copy(it.ms[0]); }
+    else {
+      o = new THREE.InstancedMesh(it.flip ? flipGeo(it.geo) : it.geo, mat, it.ms.length);
+      it.ms.forEach((m, i) => o.setMatrixAt(i, m));
+      o.computeBoundingSphere();
+    }
+    o.userData.item = it; g.add(o);
+  }
+  g.userData.box = a.box; g.userData.tris = a.tris;
+  return g;
+}
+
+// ───── 狀態 ─────
+const S = { designs: {}, canEdit: false, curId: null, pieces: [], sel: [], undo: [], redo: [], dirty: false, nextId: 1, libShip: null, libVar: null };
+const OBJ = new Map();   // 部件 id → THREE.Group
+const keyOf = (pc) => `${pc.ship}|${pc.v}|${pc.k}|${pc.n}`;
+const pieceOf = (id) => S.pieces.find((p) => p.id === id);
+const triCount = () => { let n = 0; for (const o of OBJ.values()) n += o.userData.tris || 0; return n; };
+
+function applyT(o, pc) {
+  o.position.fromArray(pc.p); o.rotation.set(pc.r[0] * D2R, pc.r[1] * D2R, pc.r[2] * D2R); o.scale.fromArray(pc.s);
+  o.updateMatrix(); o.updateMatrixWorld(true);
+}
+const FLIP_Q = { 1: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI), 2: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI) };
+function readT(o, pc) {   // 從物件的矩陣讀回。鏡像時 decompose 把負號放在 x；原本負的是 y 或 z 就搬回那一軸（旋轉補 180°），數字才好讀
+  o.updateMatrix();
+  const p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3();
+  o.matrix.decompose(p, q, s);
+  const k = pc.s && pc.s[0] >= 0 ? (pc.s[2] < 0 ? 2 : pc.s[1] < 0 ? 1 : 0) : 0;
+  if (s.x < 0 && k) { q.multiply(FLIP_Q[k]); s.x = -s.x; s.setComponent(k, -s.getComponent(k)); }
+  const e = new THREE.Euler().setFromQuaternion(q, 'XYZ');
+  pc.p = p.toArray().map(r1); pc.r = [e.x, e.y, e.z].map((x) => r1(x / D2R)); pc.s = s.toArray().map(r1);
+}
+let syncTok = 0;
+async function sync() {   // 讓畫面上的物件和 S.pieces 一致（不同素材才重建）
+  const tok = ++syncTok, alive = new Set(S.pieces.map((p) => p.id));
+  for (const [id, o] of OBJ) if (!alive.has(id)) { world.remove(o); OBJ.delete(id); }
+  const jobs = [];
+  for (const pc of S.pieces) {
+    const o = OBJ.get(pc.id);
+    if (o && o.userData.key === keyOf(pc)) { applyT(o, pc); continue; }
+    jobs.push(assetOf(pc).then(({ a, mats }) => {
+      if (tok !== syncTok && !pieceOf(pc.id)) return;
+      const cur = pieceOf(pc.id); if (!cur || keyOf(cur) !== keyOf(pc)) return;
+      const n = buildObject(a, mats); n.userData.pid = pc.id; n.userData.key = keyOf(pc);
+      const old = OBJ.get(pc.id); if (old) world.remove(old);
+      world.add(n); OBJ.set(pc.id, n); applyT(n, cur);
+    }).catch((e) => toast(e.message, true)));
+  }
+  await Promise.all(jobs);
+  if (tok === syncTok) refreshSel();
+}
+
+// ───── 復原 ─────
+function snap() { return JSON.stringify(S.pieces); }
+function pushUndo(prev) { S.undo.push(prev || snap()); if (S.undo.length > 150) S.undo.shift(); S.redo = []; markDirty(); }
+function markDirty() { S.dirty = true; updHeader(); autosave(); }
+function undo(redo) {
+  const from = redo ? S.redo : S.undo, to = redo ? S.undo : S.redo;
+  if (!from.length) return;
+  to.push(snap()); S.pieces = JSON.parse(from.pop());
+  S.sel = S.sel.filter((id) => pieceOf(id)); S.dirty = true; updHeader(); autosave(); sync(); renderPieces();
+}
+function updHeader() {
+  $('dirty').textContent = S.dirty ? '未儲存' : '';
+  $('btnUndo').disabled = !S.undo.length; $('btnRedo').disabled = !S.redo.length;
+}
+let autoT = 0;
+function autosave() { clearTimeout(autoT); autoT = setTimeout(() => lsSet('shipyard.work', JSON.stringify({ id: S.curId, name: $('dname').value, pieces: S.pieces, dirty: S.dirty })), 400); }
+
+// ───── 選取與拖曳 ─────
+function refreshSel() {
+  S.sel = S.sel.filter((id) => OBJ.has(id) || pieceOf(id));
+  selBoxes.clear();
+  for (const id of S.sel) {
+    const o = OBJ.get(id); if (!o) continue;
+    const b = new THREE.Box3Helper(new THREE.Box3(), 0x5cc8ff); b.userData.pid = id; selBoxes.add(b);
+  }
+  tc.detach();
+  const objs = S.sel.map((id) => OBJ.get(id)).filter(Boolean);
+  if (objs.length === 1) tc.attach(objs[0]);
+  else if (objs.length > 1) {
+    const box = new THREE.Box3(); for (const o of objs) box.union(o.userData.box.clone().applyMatrix4(o.matrixWorld));
+    pivot.position.copy(box.getCenter(new THREE.Vector3())); pivot.rotation.set(0, 0, 0); pivot.scale.set(1, 1, 1); pivot.updateMatrixWorld();
+    tc.attach(pivot);
+  }
+  renderSel(); renderPieces();
+}
+function select(ids, add) {
+  if (add) { for (const id of ids) { const i = S.sel.indexOf(id); if (i >= 0) S.sel.splice(i, 1); else S.sel.push(id); } }
+  else S.sel = ids.slice();
+  refreshSel();
+}
+let drag = null;
+tc.addEventListener('dragging-changed', (e) => {
+  controls.enabled = !e.value;
+  if (e.value) {
+    drag = { prev: snap(), pivotInv: pivot.matrix.clone().invert(), starts: S.sel.map((id) => [id, OBJ.get(id) && OBJ.get(id).matrix.clone()]) };
+  } else if (drag) {
+    if (snap() !== drag.prev) pushUndo(drag.prev);
+    drag = null; if (S.sel.length > 1) refreshSel(); else renderSel();
+  }
+});
+tc.addEventListener('objectChange', () => {
+  if (tc.object === pivot && drag) {
+    pivot.updateMatrix();
+    const d = pivot.matrix.clone().multiply(drag.pivotInv);
+    for (const [id, m0] of drag.starts) {
+      const o = OBJ.get(id), pc = pieceOf(id); if (!o || !pc || !m0) continue;
+      d.clone().multiply(m0).decompose(o.position, o.quaternion, o.scale); readT(o, pc);
+    }
+  } else if (tc.object) { const pc = pieceOf(tc.object.userData.pid); if (pc) readT(tc.object, pc); }
+  renderSel(true);
+});
+function setMode(m) { tc.setMode(m); document.querySelectorAll('[data-mode]').forEach((b) => b.classList.toggle('sel', b.dataset.mode === m)); }
+function toggleSpace() { tc.setSpace(tc.space === 'world' ? 'local' : 'world'); $('btnSpace').textContent = tc.space === 'world' ? '世界座標' : '本地座標'; }
+function applySnap() {
+  const on = $('snapOn').checked;
+  tc.setTranslationSnap(on && +$('snapT').value > 0 ? +$('snapT').value : null);
+  tc.setRotationSnap(on && +$('snapR').value > 0 ? +$('snapR').value * D2R : null);
+  tc.setScaleSnap(on ? 0.05 : null);
+}
+
+// 左鍵點選（拖曳控制軸時不算）
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+let down = null;
+renderer.domElement.addEventListener('pointerdown', (e) => { if (e.button === 0) down = { x: e.clientX, y: e.clientY, axis: tc.axis }; });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (e.button !== 0 || !down) return;
+  const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4, onAxis = down.axis; down = null;
+  if (moved || onAxis) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObjects(world.children, true)[0];
+  let pid = null; for (let x = hit && hit.object; x; x = x.parent) if (x.userData.pid) { pid = x.userData.pid; break; }
+  if (pid) select([pid], e.shiftKey); else if (!e.shiftKey) select([]);
+});
+
+// ───── 編輯指令 ─────
+const newId = () => 'p' + (S.nextId++);
+function addPieces(list, sel = true) {
+  if (!list.length) return;
+  pushUndo(); S.pieces.push(...list); renderPieces();
+  return sync().then(() => { if (sel) select(list.map((p) => p.id)); });
+}
+async function addPart(shipId, v, key) {
+  const a = (await shipAssets(shipId, v)).parts.get(key);
+  addPieces([{ id: newId(), ship: shipId, v, k: 'part', n: key, p: a.center.slice(), r: [0, 0, 0], s: [1, 1, 1] }]);
+}
+async function addLib(shipId, v, n) {
+  const sc = (await shipAssets(shipId, v)).compScale.get(n) || 1, t = controls.target;
+  const st = +$('snapT').value || 1, q = (x) => Math.round(x / st) * st;
+  addPieces([{ id: newId(), ship: shipId, v, k: 'lib', n, p: [q(t.x), q(t.y), q(t.z)], r: [0, 0, 0], s: [sc, sc, sc] }]);
+}
+async function addWhole(shipId, v) {
+  const sa = await shipAssets(shipId, v);
+  await addPieces([...sa.parts].map(([k, a]) => ({ id: newId(), ship: shipId, v, k: 'part', n: k, p: a.center.slice(), r: [0, 0, 0], s: [1, 1, 1] })));
+  frame();
+}
+function cloneSel(fn) {
+  const out = [];
+  for (const id of S.sel) { const pc = pieceOf(id); if (!pc) continue; const c = { ...JSON.parse(JSON.stringify(pc)), id: newId() }; if (fn) fn(c); out.push(c); }
+  return out;
+}
+const cmd = {
+  dup() { addPieces(cloneSel()); },
+  // 對 Z=0（船的中線）鏡像：Z·Rx(a)Ry(b)Rz(c)·S＝Rx(−a)Ry(−b)Rz(c)·Z·S，所以 z、rx、ry 反號，z 縮放反號
+  mirror() { addPieces(cloneSel((c) => { c.p[2] = -c.p[2]; c.r[0] = -c.r[0]; c.r[1] = -c.r[1]; c.s[2] = -c.s[2]; })); },
+  flip() {
+    if (!S.sel.length) return; pushUndo();
+    for (const id of S.sel) { const pc = pieceOf(id); if (pc) pc.s[2] = -pc.s[2]; }
+    sync(); renderSel();
+  },
+  async reset() {
+    if (!S.sel.length) return; pushUndo();
+    for (const id of S.sel) {
+      const pc = pieceOf(id); if (!pc) continue;
+      if (pc.k === 'part') { const a = (await shipAssets(pc.ship, pc.v)).parts.get(pc.n); pc.p = a.center.slice(); pc.s = [1, 1, 1]; }
+      else { const sc = (await shipAssets(pc.ship, pc.v)).compScale.get(pc.n) || 1; pc.s = [sc, sc, sc]; }
+      pc.r = [0, 0, 0];
+    }
+    sync(); renderSel();
+  },
+  del() {
+    if (!S.sel.length) return; pushUndo();
+    const del = new Set(S.sel); S.pieces = S.pieces.filter((p) => !del.has(p.id)); S.sel = [];
+    tc.detach(); sync(); renderPieces();
+  },
+};
+function frame() {
+  const box = new THREE.Box3();
+  const objs = S.sel.length ? S.sel.map((id) => OBJ.get(id)).filter(Boolean) : [...OBJ.values()];
+  for (const o of objs) box.union(o.userData.box.clone().applyMatrix4(o.matrixWorld));
+  if (box.isEmpty()) box.setFromCenterAndSize(new THREE.Vector3(), new THREE.Vector3(1000, 300, 500));
+  const c = box.getCenter(new THREE.Vector3()), r = Math.max(20, box.getSize(new THREE.Vector3()).length() / 2);
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  controls.target.copy(c); camera.position.copy(c).addScaledVector(dir, r / Math.sin(camera.fov * D2R / 2) * 0.9);
+}
+
+// ───── 面板 ─────
+function renderLib() {
+  const ship = LIB.byId[S.libShip];
+  $('libShip').innerHTML = LIB.ships.map((s) => `<option value="${esc(s.id)}"${s.id === S.libShip ? ' selected' : ''}>${esc(s.name)}</option>`).join('');
+  $('libVar').innerHTML = ship ? ship.variants.map((v) => `<option value="${esc(v.name)}"${v.name === S.libVar ? ' selected' : ''}>${esc(varLabel(v.name))}</option>`).join('') : '';
+  if (!ship) return;
+  $('libParts').innerHTML = '載入中…';
+  const sid = S.libShip, v = S.libVar;
+  Promise.all([shipAssets(sid, v), libAssets(sid, libStyle(ship, v))]).then(([sa, lib]) => {
+    if (sid !== S.libShip || v !== S.libVar) return;
+    $('libParts').classList.remove('dim');
+    $('libParts').innerHTML = [...sa.parts].map(([k, a]) => `<div class="it add" data-part="${esc(k)}"><span>${esc(partLabel(k))} <small>${esc(k.replace(/^x:/, ''))}・${fmtK(a.tris)} 面</small></span></div>`).join('');
+    const li = (n) => `<div class="it add" data-lib="${esc(n)}"><span>${esc(libLabel(n))} <small>${esc(n.replace(/^(component|detail)_/, ''))}</small></span></div>`;
+    const names = [...lib.keys()];
+    $('libComps').innerHTML = names.filter((n) => n.startsWith('component_')).map(li).join('') || '<div class="dim small">沒有</div>';
+    $('libDetails').innerHTML = names.filter((n) => n.startsWith('detail_')).map(li).join('') || '<div class="dim small">沒有</div>';
+    document.querySelectorAll('[data-part]').forEach((el) => (el.onclick = () => addPart(sid, v, el.dataset.part)));
+    document.querySelectorAll('[data-lib]').forEach((el) => (el.onclick = () => addLib(sid, v, el.dataset.lib)));
+  }).catch((e) => { $('libParts').textContent = e.message; });
+}
+function pieceLabel(pc) { const s = LIB.byId[pc.ship]; return `${pc.k === 'part' ? partLabel(pc.n) : libLabel(pc.n)}`; }
+function renderPieces() {
+  $('pcount').textContent = S.pieces.length ? S.pieces.length + ' 個' : '';
+  $('pieces').innerHTML = S.pieces.map((pc) => `<div class="it${S.sel.includes(pc.id) ? ' on' : ''}" data-pid="${pc.id}"><span>${esc(pieceLabel(pc))}</span><small>${esc((LIB.byId[pc.ship] || {}).name || pc.ship)}・${esc(varLabel(pc.v))}</small></div>`).join('') || '<div class="dim">還沒有部件。從左邊素材庫加入，或按「整艦放入」。</div>';
+  document.querySelectorAll('#pieces [data-pid]').forEach((el) => (el.onclick = (e) => select([el.dataset.pid], e.shiftKey)));
+}
+function renderSel(liveOnly) {
+  const pcs = S.sel.map(pieceOf).filter(Boolean);
+  $('selNone').hidden = !!pcs.length; $('selBox').hidden = !pcs.length;
+  if (!pcs.length) return;
+  const one = pcs.length === 1 ? pcs[0] : null;
+  document.querySelectorAll('#selBox [data-f]').forEach((el) => {
+    const [f, i] = [el.dataset.f[0], +el.dataset.f[1]];
+    el.disabled = !one; if (document.activeElement !== el) el.value = one ? one[f][i] : '';
+  });
+  if (liveOnly) return;
+  $('selName').innerHTML = one ? `<b>${esc(pieceLabel(one))}</b> <span class="dim">${esc(LIB.byId[one.ship] ? LIB.byId[one.ship].name : one.ship)}・${esc(one.n)}</span>` : `<b>選取了 ${pcs.length} 個</b> <span class="dim">（拖曳控制軸一起移動）</span>`;
+  const ships = new Set(pcs.map((p) => p.ship)), vs = [...ships].map((s) => (LIB.byId[s] ? LIB.byId[s].variants.map((v) => v.name) : []));
+  const common = vs.reduce((a, b) => a.filter((x) => b.includes(x)), vs[0] || []);
+  const curV = new Set(pcs.map((p) => p.v));
+  $('selVar').innerHTML = (curV.size > 1 ? '<option value="">（不同）</option>' : '') + common.map((v) => `<option value="${esc(v)}"${curV.size === 1 && curV.has(v) ? ' selected' : ''}>${esc(varLabel(v))}</option>`).join('');
+}
+function renderAllVar() {
+  const all = new Set(); for (const s of LIB.ships) for (const v of s.variants) all.add(v.name);
+  $('allVar').innerHTML = '<option value="">選一個…</option>' + [...all].map((v) => `<option value="${esc(v)}">${esc(varLabel(v))}</option>`).join('');
+}
+function renderDesigns() {
+  $('canEdit').textContent = S.canEdit ? '' : '（只能存在這台瀏覽器）';
+  const ids = Object.keys(S.designs).sort((a, b) => (S.designs[b].updated || 0) - (S.designs[a].updated || 0));
+  $('designs').innerHTML = ids.map((id) => { const d = S.designs[id]; return `<div class="it${id === S.curId ? ' on' : ''}" data-did="${esc(id)}"><span>${esc(d.name || '未命名')}</span><small>${(d.pieces || []).length} 個</small><button class="danger small" data-ddel="${esc(id)}" title="刪除這個設計">×</button></div>`; }).join('') || '<div class="dim">還沒有存過設計。</div>';
+  document.querySelectorAll('[data-did]').forEach((el) => (el.onclick = (e) => { if (!e.target.dataset.ddel) openDesign(el.dataset.did); }));
+  document.querySelectorAll('[data-ddel]').forEach((el) => (el.onclick = () => delDesign(el.dataset.ddel)));
+}
+
+// ───── 設計存取 ─────
+function loadPieces(list) {
+  S.pieces = (list || []).map((p) => ({ ...p })); S.sel = []; S.undo = []; S.redo = [];
+  S.nextId = 1 + S.pieces.reduce((m, p) => Math.max(m, +String(p.id).replace(/\D/g, '') || 0), 0);
+  for (const [id, o] of OBJ) { world.remove(o); OBJ.delete(id); }
+  tc.detach(); sync().then(() => frame()); renderPieces(); renderSel();
+}
+function openDesign(id) {
+  if (S.dirty && id !== S.curId && !confirm('目前的設計還沒儲存，要放棄修改嗎？')) return;
+  const d = S.designs[id]; if (!d) return;
+  S.curId = id; $('dname').value = d.name || ''; loadPieces(d.pieces); S.dirty = false; updHeader(); autosave(); renderDesigns();
+}
+function newDesign() {
+  if (S.dirty && !confirm('目前的設計還沒儲存，要放棄修改嗎？')) return;
+  S.curId = null; $('dname').value = ''; loadPieces([]); S.dirty = false; updHeader(); autosave(); renderDesigns();
+}
+async function putDesigns() {
+  if (!S.canEdit) { lsSet('shipyard.designs', JSON.stringify(S.designs)); return; }
+  const r = await fetch('../api/shipyard', { method: 'PUT', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ designs: S.designs }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+}
+async function saveDesign() {
+  const name = $('dname').value.trim() || '未命名戰艦'; $('dname').value = name;
+  const id = S.curId || 'd' + Date.now().toString(36);
+  const prev = S.designs[id];
+  S.designs[id] = { name, pieces: S.pieces, updated: Date.now() };
+  try { await putDesigns(); } catch (e) { if (prev) S.designs[id] = prev; else delete S.designs[id]; return toast('存檔失敗：' + e.message, true); }
+  S.curId = id; S.dirty = false; updHeader(); autosave(); renderDesigns();
+  toast(S.canEdit ? `已存到伺服器：${name}` : `已存在這台瀏覽器：${name}（伺服器只允許在伺服器那台電腦上存）`);
+}
+async function delDesign(id) {
+  const d = S.designs[id]; if (!d || !confirm(`刪除設計「${d.name || '未命名'}」？伺服器會留一份上一版（designs.json.bak）。`)) return;
+  delete S.designs[id];
+  try { await putDesigns(); } catch (e) { S.designs[id] = d; return toast('刪除失敗：' + e.message, true); }
+  if (S.curId === id) { S.curId = null; S.dirty = true; updHeader(); }
+  renderDesigns();
+}
+
+// ───── 匯出 GLB：實例展開成共用網格的節點（glTF 允許多個節點用同一個網格；鏡像的直接用負的矩陣）─────
+async function exportGlb() {
+  if (!S.pieces.length) return toast('設計是空的', true);
+  busy(true);
+  try {
+    const root = new THREE.Group(); root.name = $('dname').value.trim() || 'ship';
+    for (const pc of S.pieces) {
+      const o = OBJ.get(pc.id); if (!o) continue;
+      const g = new THREE.Group(); g.name = pc.n; g.matrixAutoUpdate = false; g.matrix.copy(o.matrix); root.add(g);
+      for (const c of o.children) {
+        const it = c.userData.item;
+        for (const m of it.ms) { const mesh = new THREE.Mesh(it.geo, c.material); mesh.matrixAutoUpdate = false; mesh.matrix.copy(m); g.add(mesh); }
+      }
+    }
+    const buf = await new GLTFExporter().parseAsync(root, { binary: true, maxTextureSize: 2048 });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([buf], { type: 'model/gltf-binary' }));
+    a.download = root.name + '.glb'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    toast(`已匯出 ${root.name}.glb（${(buf.byteLength / 1048576).toFixed(1)} MB）`);
+  } catch (e) { console.error(e); toast('匯出失敗：' + e.message, true); } finally { busy(false); }
+}
+
+// ───── 事件 ─────
+$('libShip').onchange = () => { S.libShip = $('libShip').value; const s = LIB.byId[S.libShip]; if (!s.variants.some((v) => v.name === S.libVar)) S.libVar = s.variants[0].name; lsSet('shipyard.lib', JSON.stringify([S.libShip, S.libVar])); renderLib(); };
+$('libVar').onchange = () => { S.libVar = $('libVar').value; lsSet('shipyard.lib', JSON.stringify([S.libShip, S.libVar])); renderLib(); };
+$('btnWhole').onclick = () => addWhole(S.libShip, S.libVar);
+$('btnUndo').onclick = () => undo(false); $('btnRedo').onclick = () => undo(true);
+$('btnNew').onclick = newDesign; $('btnSave').onclick = saveDesign; $('btnGlb').onclick = exportGlb;
+$('dname').oninput = () => markDirty();
+$('btnDup').onclick = cmd.dup; $('btnMirror').onclick = cmd.mirror; $('btnFlip').onclick = cmd.flip; $('btnReset').onclick = cmd.reset; $('btnDel').onclick = cmd.del;
+document.querySelectorAll('[data-mode]').forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
+$('btnSpace').onclick = toggleSpace;
+['snapOn', 'snapT', 'snapR'].forEach((id) => ($(id).onchange = applySnap)); applySnap();
+$('showGrid').onchange = () => (grid.visible = $('showGrid').checked);
+$('showAxes').onchange = () => (axes.visible = $('showAxes').checked);
+$('selVar').onchange = () => {
+  const v = $('selVar').value; if (!v) return;
+  pushUndo(); for (const id of S.sel) { const pc = pieceOf(id); if (pc) pc.v = v; }
+  sync(); renderPieces();
+};
+$('allVar').onchange = () => {
+  const v = $('allVar').value; if (!v || !S.pieces.length) return;
+  pushUndo(); let skip = 0;
+  for (const pc of S.pieces) { const s = LIB.byId[pc.ship]; if (s && s.variants.some((x) => x.name === v)) pc.v = v; else skip++; }
+  $('allVar').value = ''; sync(); renderPieces(); renderSel();
+  if (skip) toast(`${skip} 個部件的艦型沒有「${varLabel(v)}」塗裝，維持原樣`);
+};
+document.querySelectorAll('#selBox [data-f]').forEach((el) => (el.onchange = () => {
+  const pc = S.sel.length === 1 && pieceOf(S.sel[0]); if (!pc || el.value === '' || !isFinite(+el.value)) return;
+  pushUndo(); pc[el.dataset.f[0]][+el.dataset.f[1]] = +el.value; sync();
+}));
+addEventListener('keydown', (e) => {
+  if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
+  const k = e.key.toLowerCase(), c = e.ctrlKey || e.metaKey;
+  if (c && k === 'z') { e.preventDefault(); undo(e.shiftKey); }
+  else if (c && k === 'y') { e.preventDefault(); undo(true); }
+  else if (c && k === 's') { e.preventDefault(); saveDesign(); }
+  else if (c && k === 'd') { e.preventDefault(); cmd.dup(); }
+  else if (c && k === 'a') { e.preventDefault(); select(S.pieces.map((p) => p.id)); }
+  else if (c) return;
+  else if (k === 'w') setMode('translate'); else if (k === 'e') setMode('rotate'); else if (k === 'r') setMode('scale');
+  else if (k === 'q') toggleSpace(); else if (k === 'f') frame(); else if (k === 'm') cmd.mirror();
+  else if (k === 'delete' || k === 'backspace') cmd.del();
+  else if (k === 'escape') select([]);
+});
+addEventListener('beforeunload', (e) => { if (S.dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+// ───── 開始 ─────
+loop();
+(async () => {
+  try {
+    const [lib, ds] = await Promise.all([
+      fetch(urlOf('library.json'), { cache: 'no-cache' }).then((r) => { if (!r.ok) throw new Error('找不到素材庫 models/戰艦組裝/library.json（在 dev 執行 node tools/shipyard/import.mjs）'); return r.json(); }),
+      fetch('../api/shipyard', { headers: authHeaders() }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]);
+    LIB.ships = lib.ships || []; for (const s of LIB.ships) LIB.byId[s.id] = s;
+    if (ds) { S.designs = ds.designs || {}; S.canEdit = !!ds.canEdit; }
+    if (!S.canEdit) { try { Object.assign(S.designs, JSON.parse(lsGet('shipyard.designs') || '{}')); } catch (e) { /* 壞掉就算了 */ } }
+    let pick = null; try { pick = JSON.parse(lsGet('shipyard.lib') || 'null'); } catch (e) { /* 沒有 */ }
+    S.libShip = pick && LIB.byId[pick[0]] ? pick[0] : (LIB.ships[0] || {}).id;
+    const ship = LIB.byId[S.libShip];
+    S.libVar = ship && pick && ship.variants.some((v) => v.name === pick[1]) ? pick[1] : ship && ship.variants[0].name;
+    renderLib(); renderAllVar(); renderDesigns();
+    let work = null; try { work = JSON.parse(lsGet('shipyard.work') || 'null'); } catch (e) { /* 沒有 */ }
+    if (work && work.pieces && work.pieces.length) {   // 上次沒關掉的工作（重新整理後接著做）
+      S.curId = work.id && S.designs[work.id] ? work.id : null; $('dname').value = work.name || '';
+      loadPieces(work.pieces); S.dirty = !!work.dirty; updHeader(); renderDesigns();
+    } else { renderPieces(); renderSel(); }
+    if (!ds) toast('沒有登入伺服器：設計只會存在這台瀏覽器', true);
+  } catch (e) { console.error(e); toast(e.message, true); $('libParts').textContent = e.message; }
+})();
+window.__shipyard = { S, OBJ, LIB, shipAssets, libAssets, addWhole, frame };

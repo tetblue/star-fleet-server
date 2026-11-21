@@ -32,4 +32,8 @@ for (const d of ['index.html', 'css', 'js', 'lib', 'LICENSE']) fs.cpSync(path.jo
 fs.rmSync(path.join(web, 'modeltool'), { recursive: true, force: true });
 await esbuild.build({ entryPoints: [path.join(root, 'modeltool', 'main.js')], bundle: true, minify: true, format: 'iife', outfile: path.join(web, 'modeltool', 'tool.js'), logLevel: 'warning' });
 fs.copyFileSync(path.join(root, 'modeltool', 'index.html'), path.join(web, 'modeltool', 'index.html'));
+// 戰艦組裝編輯器（素材在 models/戰艦組裝，由 tools/shipyard/import.mjs 產生）：同樣打包成 web/shipyard/tool.js
+fs.rmSync(path.join(web, 'shipyard'), { recursive: true, force: true });
+await esbuild.build({ entryPoints: [path.join(root, 'shipyard', 'main.js')], bundle: true, minify: true, format: 'iife', outfile: path.join(web, 'shipyard', 'tool.js'), logLevel: 'warning' });
+fs.copyFileSync(path.join(root, 'shipyard', 'index.html'), path.join(web, 'shipyard', 'index.html'));
 console.log('web', build, '→', web);

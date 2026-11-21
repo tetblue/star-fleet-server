@@ -11186,6 +11186,7 @@ const MENU_ICONS = {
   watch: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   tal: '<path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6l-5.4 2.9 1.2-6-4.5-4.2 6.1-.7z"/>',
   tav: '<path d="M5 9h10v10a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z"/><path d="M15 11h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-2M5 9c0-2 1.3-3.2 3-3.2C8.6 4.6 9.7 4 11 4s2.6.8 3 2c1 .2 1 1.5 1 3"/>',
+  yard: '<path d="M2 13h4l3-3h7l6 3-6 3H9l-3-3"/><path d="M9 10V7h4v3M12 16v3M7 19h10"/>',
   bld: '<path d="M3 21h18M5 21V9l4-3v15M9 21V4l6-2v19M15 21V10l4 2v9"/><path d="M11.5 7h1M11.5 10.5h1M11.5 14h1"/>',
   hang: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3 17.8V21h3.2l6.3-6.3a4 4 0 0 0 5.2-5.4l-2.6 2.6-2.5-.6-.6-2.5z"/>',
 };
@@ -11218,6 +11219,7 @@ function showMenu() {
         ${T('m-save', 'save', '存檔管理', '3 個雲端存檔欄位：儲存、讀取進度，也可以匯出成檔案或從檔案匯入')}
         ${T('m-test', 'test', '遊戲測試', '大軍畫面、效能與戰鬥數值（射程、側背受擊倍率等）的測試場')}
         ${T('m-bld', 'bld', '建築編輯器', '匯入建築 GLB、調整大小與碰撞，在近地戰場擺放建築、存成自訂地圖')}
+        ${T('m-yard', 'yard', '戰艦組裝', '用戰艦建模的船身部件、砲塔與細節零件拼裝新戰艦，可換塗裝、存成設計或匯出 GLB')}
       </div>
     </div>
     <div class="mm-note" id="mm-note"></div>
@@ -11233,6 +11235,7 @@ function showMenu() {
   gEl('m-set').onclick = () => openSettings();
   gEl('m-save').onclick = () => (window.API ? showSaves() : (gEl('mm-note').textContent = '存檔管理要連上伺服器才能用。'));
   gEl('m-bld').onclick = () => showBldEditor();
+  gEl('m-yard').onclick = () => { const w = window.open('shipyard/index.html', 'star-shipyard'); if (w) w.focus(); };   // 戰艦組裝編輯器：獨立網頁（dev/shipyard）
   gEl('m-test').onclick = () => { overlay(null); setPhase('sandbox'); newBattle(12345); setCmdSide(0); };   // 原本的測試場（數值、畫面）
 }
 // 單人戰鬥：先選模式（指揮官、王牌飛行員…），再進該模式的大廳。GAME.spMode＝目前所在的模式（戰鬥、子畫面返回時回到同一個大廳）

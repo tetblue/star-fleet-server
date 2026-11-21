@@ -1,0 +1,258 @@
+{
+ "說明": "戰艦組裝編輯器的素材庫（由 dev/tools/shipyard/import.mjs 從「戰艦建模」資料夾產生，重跑會覆蓋）。座標：+x 船首、+y 上，單位公尺。",
+ "version": 1,
+ "ships": [
+  {
+   "id": "三體戰艦1000m",
+   "name": "三體戰艦 1000m",
+   "length": 1000,
+   "parts": [
+    "hull",
+    "pontoons",
+    "citadel",
+    "engines"
+   ],
+   "variants": [
+    {
+     "name": "標準",
+     "file": "三體戰艦1000m/標準.glb"
+    },
+    {
+     "name": "帝國",
+     "file": "三體戰艦1000m/帝國.glb"
+    },
+    {
+     "name": "機戰風",
+     "file": "三體戰艦1000m/機戰風.glb"
+    },
+    {
+     "name": "機戰風_帝國",
+     "file": "三體戰艦1000m/機戰風_帝國.glb"
+    },
+    {
+     "name": "機戰風_聯盟",
+     "file": "三體戰艦1000m/機戰風_聯盟.glb"
+    }
+   ],
+   "libs": {
+    "標準": "三體戰艦1000m/零件庫.glb",
+    "機戰風": "三體戰艦1000m/零件庫_機戰風.glb"
+   }
+  },
+  {
+   "id": "新月戰艦1000m",
+   "name": "新月戰艦 1000m",
+   "length": 1000,
+   "parts": [
+    "arm_fore",
+    "arm_mid",
+    "arm_aft",
+    "core_tower",
+    "core_mid",
+    "core_aft",
+    "engine_block",
+    "thrusters"
+   ],
+   "variants": [
+    {
+     "name": "標準",
+     "file": "新月戰艦1000m/標準.glb"
+    },
+    {
+     "name": "帝國",
+     "file": "新月戰艦1000m/帝國.glb"
+    },
+    {
+     "name": "機戰風",
+     "file": "新月戰艦1000m/機戰風.glb"
+    },
+    {
+     "name": "機戰風_帝國",
+     "file": "新月戰艦1000m/機戰風_帝國.glb"
+    },
+    {
+     "name": "機戰風_聯盟",
+     "file": "新月戰艦1000m/機戰風_聯盟.glb"
+    }
+   ],
+   "libs": {
+    "標準": "新月戰艦1000m/零件庫.glb",
+    "機戰風": "新月戰艦1000m/零件庫_機戰風.glb"
+   }
+  },
+  {
+   "id": "發射艦1200m",
+   "name": "發射艦 1200m",
+   "length": 1200,
+   "parts": [
+    "bow",
+    "hangar",
+    "mid",
+    "ring",
+    "stern",
+    "engines"
+   ],
+   "variants": [
+    {
+     "name": "標準",
+     "file": "發射艦1200m/標準.glb"
+    },
+    {
+     "name": "帝國",
+     "file": "發射艦1200m/帝國.glb"
+    },
+    {
+     "name": "聯盟",
+     "file": "發射艦1200m/聯盟.glb"
+    },
+    {
+     "name": "機戰風",
+     "file": "發射艦1200m/機戰風.glb"
+    },
+    {
+     "name": "機戰風_帝國",
+     "file": "發射艦1200m/機戰風_帝國.glb"
+    },
+    {
+     "name": "機戰風_聯盟",
+     "file": "發射艦1200m/機戰風_聯盟.glb"
+    },
+    {
+     "name": "賽璐璐",
+     "file": "發射艦1200m/賽璐璐.glb"
+    },
+    {
+     "name": "賽璐璐_帝國",
+     "file": "發射艦1200m/賽璐璐_帝國.glb"
+    },
+    {
+     "name": "賽璐璐_聯盟",
+     "file": "發射艦1200m/賽璐璐_聯盟.glb"
+    }
+   ],
+   "libs": {
+    "標準": "發射艦1200m/零件庫.glb",
+    "機戰風": "發射艦1200m/零件庫_機戰風.glb"
+   }
+  },
+  {
+   "id": "運輸艦1000m",
+   "name": "運輸艦 1000m",
+   "length": 1000,
+   "parts": [
+    "hull",
+    "bow",
+    "shields",
+    "engines",
+    "weapons",
+    "superstructure"
+   ],
+   "variants": [
+    {
+     "name": "標準",
+     "file": "運輸艦1000m/標準.glb"
+    },
+    {
+     "name": "帝國",
+     "file": "運輸艦1000m/帝國.glb"
+    },
+    {
+     "name": "機戰風",
+     "file": "運輸艦1000m/機戰風.glb"
+    },
+    {
+     "name": "機戰風_帝國",
+     "file": "運輸艦1000m/機戰風_帝國.glb"
+    },
+    {
+     "name": "機戰風_聯盟",
+     "file": "運輸艦1000m/機戰風_聯盟.glb"
+    }
+   ],
+   "libs": {
+    "標準": "運輸艦1000m/零件庫.glb",
+    "機戰風": "運輸艦1000m/零件庫_機戰風.glb"
+   }
+  },
+  {
+   "id": "運輸艦320m",
+   "name": "運輸艦 320m",
+   "length": 320,
+   "parts": [
+    "hull",
+    "bow",
+    "shields",
+    "engines",
+    "weapons",
+    "superstructure"
+   ],
+   "variants": [
+    {
+     "name": "標準",
+     "file": "運輸艦320m/標準.glb"
+    },
+    {
+     "name": "帝國",
+     "file": "運輸艦320m/帝國.glb"
+    },
+    {
+     "name": "機戰風",
+     "file": "運輸艦320m/機戰風.glb"
+    },
+    {
+     "name": "機戰風_帝國",
+     "file": "運輸艦320m/機戰風_帝國.glb"
+    },
+    {
+     "name": "機戰風_聯盟",
+     "file": "運輸艦320m/機戰風_聯盟.glb"
+    }
+   ],
+   "libs": {
+    "標準": "運輸艦320m/零件庫.glb",
+    "機戰風": "運輸艦320m/零件庫_機戰風.glb"
+   }
+  },
+  {
+   "id": "雙叉戰艦1200m",
+   "name": "雙叉戰艦 1200m",
+   "length": 1200,
+   "parts": [
+    "bow_prong",
+    "bow_centre",
+    "hull_fore",
+    "hull_mid",
+    "hull_aft",
+    "stern",
+    "bridge",
+    "engines"
+   ],
+   "variants": [
+    {
+     "name": "標準",
+     "file": "雙叉戰艦1200m/標準.glb"
+    },
+    {
+     "name": "帝國",
+     "file": "雙叉戰艦1200m/帝國.glb"
+    },
+    {
+     "name": "機戰風",
+     "file": "雙叉戰艦1200m/機戰風.glb"
+    },
+    {
+     "name": "機戰風_帝國",
+     "file": "雙叉戰艦1200m/機戰風_帝國.glb"
+    },
+    {
+     "name": "機戰風_聯盟",
+     "file": "雙叉戰艦1200m/機戰風_聯盟.glb"
+    }
+   ],
+   "libs": {
+    "標準": "雙叉戰艦1200m/零件庫.glb",
+    "機戰風": "雙叉戰艦1200m/零件庫_機戰風.glb"
+   }
+  }
+ ]
+}

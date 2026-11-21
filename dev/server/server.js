@@ -292,6 +292,22 @@ async function api(req, res, url) {
     }
     return json(res, 405, { error: '方法不對' });
   }
+  // 戰艦組裝編輯器：素材庫是 models/戰艦組裝/library.json（靜態，/models/ 直接給）；組好的設計存在同資料夾的 designs.json
+  if (p === '/api/shipyard' && m === 'GET') {
+    const d = readJSON(path.join(MODELS_DIR, '戰艦組裝', 'designs.json'), null) || { version: 1, designs: {} };
+    return json(res, 200, { ...d, canEdit: canEditModels(req) });
+  }
+  if (p === '/api/shipyard' && m === 'PUT') {
+    if (!canEditModels(req)) return json(res, 403, { error: CFG.modelEdit === 'off' ? '伺服器設定不允許修改（config.json 的 modelEdit）' : '只有在伺服器那台電腦上才能存' });
+    const b = await readBody(req, 16 * 1048576);
+    if (!b.designs || typeof b.designs !== 'object' || Array.isArray(b.designs)) return json(res, 400, { error: '設計資料格式錯誤' });
+    const dir = path.join(MODELS_DIR, '戰艦組裝'), f = path.join(dir, 'designs.json');
+    fs.mkdirSync(dir, { recursive: true });
+    if (fs.existsSync(f)) fs.copyFileSync(f, f + '.bak');
+    writeAtomic(f, JSON.stringify({ version: 1, designs: b.designs }, null, 1));
+    log(`戰艦組裝：${me.name} 存了 ${Object.keys(b.designs).length} 個設計`);
+    return json(res, 200, { ok: true });
+  }
   // 建築編輯器：建築種類（GLB 對位、碰撞、耐久）與自訂近地地圖都存在 models/建築/buildings.json；GLB 也放在 models/建築/
   if (p === '/api/buildings' && m === 'GET') {
     const d = readJSON(bldFile(), null) || { version: 1, types: {}, maps: {} };

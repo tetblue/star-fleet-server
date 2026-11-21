@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>戰艦組裝 · 星海艦隊戰</title>
+<style>
+  :root { --bg: #070b14; --panel: #0d1424; --line: #24324d; --text: #d8e4f5; --dim: #7f91ad; --acc: #5cc8ff; --ok: #6fdc8c; --warn: #ffc857; --bad: #ff6b6b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.5 "Microsoft JhengHei", "PingFang TC", system-ui, sans-serif; }
+  body { display: grid; grid-template-columns: 260px 1fr 320px; grid-template-rows: 44px 1fr; height: 100vh; overflow: hidden; }
+  header { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { margin: 0; font-size: 15px; letter-spacing: .08em; white-space: nowrap; }
+  header .sp { flex: 1; }
+  button, select, input { font: inherit; color: var(--text); background: #15203a; border: 1px solid var(--line); border-radius: 4px; }
+  button { padding: 3px 10px; cursor: pointer; white-space: nowrap; }
+  button:hover:not(:disabled) { border-color: var(--acc); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: #17456b; border-color: #2f7fb8; }
+  button.sel { background: #1b3557; border-color: var(--acc); }
+  button.danger:hover:not(:disabled) { border-color: var(--bad); }
+  input[type=number] { width: 72px; padding: 1px 4px; }
+  input[type=text] { padding: 2px 6px; }
+  select { padding: 2px 4px; }
+  #dname { width: 200px; }
+  #dirty { color: var(--warn); font-size: 12px; }
+  nav, aside { overflow: auto; background: var(--panel); }
+  nav { border-right: 1px solid var(--line); padding: 8px 10px 30px; }
+  aside { border-left: 1px solid var(--line); padding: 4px 12px 30px; }
+  h3 { margin: 14px 0 6px; font-size: 13px; color: var(--acc); letter-spacing: .06em; display: flex; align-items: center; gap: 6px; }
+  h3 .sp { flex: 1; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0; }
+  .dim { color: var(--dim); }
+  .small { font-size: 12px; }
+  .lib .it { padding: 3px 8px; cursor: pointer; display: flex; justify-content: space-between; gap: 6px; border-radius: 3px; }
+  .lib .it:hover { background: #15203a; }
+  .lib .it small { color: var(--dim); }
+  .lib .it.add::after { content: '＋'; color: var(--acc); }
+  details summary { cursor: pointer; color: var(--acc); margin: 10px 0 4px; font-size: 13px; letter-spacing: .06em; }
+  #view { position: relative; overflow: hidden; }
+  #view canvas { display: block; }
+  #hint { position: absolute; left: 10px; bottom: 8px; color: var(--dim); font-size: 12px; pointer-events: none; text-shadow: 0 0 3px #000; }
+  #stat { position: absolute; right: 10px; top: 8px; color: var(--dim); font-size: 12px; pointer-events: none; text-align: right; }
+  .grid3 { display: grid; grid-template-columns: 34px repeat(3, 1fr); gap: 4px; align-items: center; }
+  .grid3 input { width: 100%; }
+  #designs .it, #pieces .it { padding: 2px 6px; cursor: pointer; display: flex; gap: 6px; align-items: center; border-radius: 3px; }
+  #designs .it:hover, #pieces .it:hover { background: #15203a; }
+  #designs .it.on, #pieces .it.on { background: #1b3557; }
+  #designs .it span, #pieces .it span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #designs .it small, #pieces .it small { color: var(--dim); }
+  #pieces { max-height: 300px; overflow: auto; }
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); padding: 8px 16px; border-radius: 6px; background: #17324f; border: 1px solid #2f7fb8; display: none; z-index: 10; max-width: 70vw; }
+  #toast.bad { background: #4a1c1c; border-color: var(--bad); }
+  #toast.on { display: block; }
+  #busy { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 9; font-size: 16px; }
+  #busy.on { display: flex; }
+</style>
+</head>
+<body>
+<header>
+  <h1>戰艦組裝</h1>
+  <input type="text" id="dname" placeholder="設計名稱">
+  <span id="dirty"></span>
+  <span class="sp"></span>
+  <button id="btnUndo" title="Ctrl+Z" disabled>復原</button><button id="btnRedo" title="Ctrl+Y" disabled>重做</button>
+  <button id="btnNew">新設計</button>
+  <button id="btnSave" class="primary" title="Ctrl+S">存檔</button>
+  <button id="btnGlb">匯出 GLB</button>
+  <a href="../" style="color:var(--dim)">← 回遊戲</a>
+</header>
+<nav>
+  <h3>素材庫</h3>
+  <div class="row small">艦型 <select id="libShip"></select></div>
+  <div class="row small">塗裝 <select id="libVar"></select></div>
+  <div class="dim small">點一下加到設計裡。部件加在原本的位置；零件與細節加在畫面中央。</div>
+  <div class="lib">
+    <h3>船身部件<span class="sp"></span><button id="btnWhole" class="small" title="把這艘船的全部部件照原樣放進來">整艦放入</button></h3>
+    <div id="libParts" class="dim small">載入中…</div>
+    <details open><summary>零件（砲塔、砲座、推進器…）</summary><div id="libComps"></div></details>
+    <details><summary>細節元件</summary><div id="libDetails"></div></details>
+  </div>
+</nav>
+<main id="view">
+  <div id="stat"></div>
+  <div id="hint">左鍵選取（Shift 加選）・拖曳箭頭移動｜W 移動 E 旋轉 R 縮放 Q 本地／世界座標｜Ctrl+D 複製 M 鏡像到另一舷 Delete 刪除｜右鍵旋轉視角、中鍵平移、滾輪縮放、F 取景</div>
+</main>
+<aside>
+  <h3>設計<span class="sp"></span><span id="canEdit" class="dim small"></span></h3>
+  <div id="designs" class="small"></div>
+
+  <h3>選取</h3>
+  <div id="selNone" class="dim small">在畫面上點一個部件，或從下方清單選。</div>
+  <div id="selBox" hidden>
+    <div id="selName" class="small"></div>
+    <div class="row small" id="selVarRow">塗裝 <select id="selVar"></select></div>
+    <div class="grid3 small">
+      <span>位置</span><input type="number" step="1" data-f="p0"><input type="number" step="1" data-f="p1"><input type="number" step="1" data-f="p2">
+      <span>旋轉</span><input type="number" step="15" data-f="r0"><input type="number" step="15" data-f="r1"><input type="number" step="15" data-f="r2">
+      <span>縮放</span><input type="number" step="0.1" data-f="s0"><input type="number" step="0.1" data-f="s1"><input type="number" step="0.1" data-f="s2">
+    </div>
+    <div class="dim small">X 船首方向、Y 上、Z 右舷；單位公尺、角度。縮放為負就是鏡像。</div>
+    <div class="row">
+      <button id="btnDup" title="Ctrl+D">複製</button>
+      <button id="btnMirror" title="M：在另一舷（Z 反向）放一個鏡像的複本">鏡像到另一舷</button>
+      <button id="btnFlip" title="把選取的部件自己左右翻轉">翻轉</button>
+      <button id="btnReset" title="回到素材原本的位置與大小">還原</button>
+      <button id="btnDel" class="danger" title="Delete">刪除</button>
+    </div>
+  </div>
+
+  <h3>工具</h3>
+  <div class="row small">
+    <button data-mode="translate" class="sel">移動 W</button><button data-mode="rotate">旋轉 E</button><button data-mode="scale">縮放 R</button>
+    <button id="btnSpace" title="Q">世界座標</button>
+  </div>
+  <div class="row small"><label><input type="checkbox" id="snapOn" checked> 吸附</label> 移動 <input type="number" id="snapT" value="5" min="0" step="1"> m 旋轉 <input type="number" id="snapR" value="15" min="0" step="5" style="width:52px">°</div>
+  <div class="row small">全部換塗裝 <select id="allVar"></select></div>
+  <div class="row small"><label><input type="checkbox" id="showGrid" checked> 格線</label><label><input type="checkbox" id="showAxes" checked> 船首箭頭</label></div>
+
+  <h3>部件清單<span class="sp"></span><span id="pcount" class="dim small"></span></h3>
+  <div id="pieces" class="small"></div>
+</aside>
+<div id="toast"></div>
+<div id="busy">載入中…</div>
+<script src="tool.js"></script>
+</body>
+</html>
