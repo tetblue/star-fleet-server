@@ -231,7 +231,7 @@ const CAP_HULL_PUB = {};
 function capHullsApply(J) {
   for (const [k, H] of Object.entries((J && J.hulls) || {})) {
     if (!Array.isArray(H.slots) || H.slots.length !== 5) continue;
-    if (!CAP_HULLS[k] && !H.old && H.stats && (H.pub || []).some(Boolean) && /^\w+$/.test(k)) capHullNew(k, H);
+    if ((!CAP_HULLS[k] || CAP_HULLS[k].sy) && !H.old && H.stats && /^[a-z]\w*$/i.test(k)) capHullNew(k, H);   // 戰艦組裝的艦種（新的或改過數值）：照 hulls.json 建／更新
     if (!CAP_HULLS[k]) continue;
     const T = H.slots.map((r) => CAP_KIND_ORDER.map((_, i) => Math.max(0, Math.min(12, (r && r[i]) | 0))));
     if (T.every((r, l) => !l || r.every((v, i) => v >= T[l - 1][i]))) CAP_HULL_SLOTS[k] = T;   // 槽位數不能比上一級少
@@ -240,8 +240,9 @@ function capHullsApply(J) {
 }
 // 戰艦組裝的新艦種（發佈過至少一級）：照 hulls.json 的數值建一個 CAP_HULLS。還不放進 CAP_HULL_ORDER（第 6 步上線時才給玩家選），測試、開發先用得到
 function capHullNew(k, J) {
-  const st = J.stats, S0 = J.slots[0] || [], sk = Object.values(CAP_HULLS).find((h) => h.skill && h.skill.key === J.skill);
-  const H = { name: J.name || k, en: k.toUpperCase(), look: Math.max(0, Math.min(4, +J.look || 0)), desc: J.desc || '', pub: true };
+  const st = J.stats, S0 = J.slots[0] || [];
+  const sk = Object.values(CAP_HULLS).find((h) => h.skill && h.skill.key === J.skill), skill = sk ? { ...sk.skill } : { key: 'burst', name: '推進過載', cd: 25, dur: 5 };
+  const H = { name: J.name || k, en: k.toUpperCase(), look: Math.max(0, Math.min(4, +J.look || 0)), desc: `${J.desc || J.name || k}。技能：${skill.name}`, sy: true };
   for (const f of ['hp', 'sh', 'cruise', 'max', 'acc', 'strafe', 'climb', 'turn', 'boostT']) H[f] = +st[f] || 1;
   H.main = { name: '主砲', dmg: 20, cd: 1.5, range: 230, spd: 260, arc: 60, trav: 60, ...(st.main || {}) };
   H.tur = { dmg: 6, cd: 1.4, range: 160, acc: 0.85, ...(st.tur || {}), n: Math.max(0, (S0[1] | 0) - 1) };   // 原廠：副砲槽留一個給飛彈艙
@@ -249,9 +250,40 @@ function capHullNew(k, J) {
   H.msl = { n: 16, dmg: 35, range: 260, lockT: 1.1, cd: 0.5, ...(st.msl || {}) };
   if (st.repair) H.repair = { ...st.repair };
   if (S0[3]) H.ftr = 3 * S0[3];
-  H.skill = sk ? { ...sk.skill } : { key: 'burst', name: '推進過載', cd: 25, dur: 5 };
+  H.skill = skill;
   CAP_HULLS[k] = H;
+  if (!CAP_HULL_ORDER.includes(k)) CAP_HULL_ORDER.push(k);   // 隨機任務的艦長選單也選得到（槽位制度第 6 步：上線）
+  if (!CAP_HULL_SLOTS[k] && Array.isArray(J.slots)) CAP_HULL_SLOTS[k] = J.slots.map((r) => CAP_KIND_ORDER.map((_, i) => Math.max(0, Math.min(12, (r && r[i]) | 0))));
+  if (CAP_XP.kill[k] == null) CAP_XP.kill[k] = H.hp >= 600 ? 30 : H.hp >= 450 ? 20 : 15;   // 擊沉的經驗：照船的大小
 }
+// ───── 槽位制度第 6 步：戰艦組裝的 6 個新艦種上線（預設值＝models/戰艦組裝/hulls.json 一開始的內容；遊戲開機讀到 hulls.json 會照它更新）─────
+// 還沒發佈模型的等級：照 look 借用勢力船體的外觀（capfx.js capHullModel 找不到發佈的模型＝原本的樣子）
+// 艦長生涯：照軍階解鎖（capcareer.js CC_RANKS），三個陣營都能造，AI 也會造
+const CAP_HULL_NEW = {
+  twin: { name: '雙叉戰艦', desc: '重砲：雙叉之間的大口徑主砲', look: 1, skill: 'shield',
+    stats: { hp: 680, sh: 340, cruise: 5.2, max: 8, acc: 1.7, strafe: 2.4, climb: 2.4, turn: 15, boostT: 4, main: { name: '雙叉重砲', dmg: 85, cd: 6, range: 320, spd: 200, arc: 30, trav: 25 }, tur: { dmg: 8, cd: 1.6, range: 190, acc: 0.85 }, pd: { dmg: 2, cd: 0.45, far: 70, acc: 0.75 }, msl: { n: 28, dmg: 55, range: 300, lockT: 1.4, cd: 0.45 } },
+    slots: [[1, 2, 2, 0, 1], [2, 3, 3, 0, 1], [2, 3, 3, 1, 2], [3, 4, 4, 1, 2], [3, 4, 4, 1, 2]] },
+  tri: { name: '三體戰艦', desc: '飛彈戰艦：浮筒上的發射艙', look: 1, skill: 'shield',
+    stats: { hp: 560, sh: 300, cruise: 5.8, max: 9, acc: 2, strafe: 2.8, climb: 2.6, turn: 18, boostT: 4, main: { name: '磁軌主砲', dmg: 30, cd: 2.2, range: 240, spd: 260, arc: 45, trav: 60 }, tur: { dmg: 6, cd: 1.4, range: 170, acc: 0.85 }, pd: { dmg: 2, cd: 0.4, far: 75, acc: 0.78 }, msl: { n: 28, dmg: 50, range: 300, lockT: 1.1, cd: 0.4 } },
+    slots: [[1, 2, 2, 0, 1], [2, 3, 3, 0, 1], [2, 4, 3, 0, 2], [2, 5, 4, 0, 2], [2, 6, 4, 0, 2]] },
+  launcher: { name: '發射艦', desc: '航母：艦首發射口、兩舷機庫', look: 0, skill: 'repair',
+    stats: { hp: 600, sh: 360, cruise: 5.5, max: 8.5, acc: 1.9, strafe: 2.6, climb: 2.5, turn: 16, boostT: 4, main: { name: '速射砲', dmg: 12, cd: 0.9, range: 200, spd: 280, arc: 150, trav: 90 }, tur: { dmg: 6, cd: 1.4, range: 170, acc: 0.85 }, pd: { dmg: 2, cd: 0.4, far: 80, acc: 0.8 }, msl: { n: 16, dmg: 35, range: 260, lockT: 1.2, cd: 0.5 }, repair: { range: 150, hps: 14, dur: 6, recharge: 10 } },
+    slots: [[0, 1, 2, 1, 1], [0, 2, 3, 2, 1], [1, 2, 3, 2, 2], [1, 3, 4, 3, 2], [1, 3, 4, 3, 2]] },
+  crescent: { name: '新月戰艦', desc: '護盾／前衛：C 形環臂', look: 2, skill: 'shield',
+    stats: { hp: 520, sh: 420, cruise: 6.5, max: 10.5, acc: 2.5, strafe: 3.2, climb: 3, turn: 21, boostT: 5, main: { name: '環臂光矛', dmg: 40, cd: 3, range: 250, spd: 250, arc: 40, trav: 50 }, tur: { dmg: 6, cd: 1.4, range: 170, acc: 0.85 }, pd: { dmg: 2, cd: 0.4, far: 75, acc: 0.78 }, msl: { n: 20, dmg: 40, range: 270, lockT: 1.1, cd: 0.45 } },
+    slots: [[1, 2, 2, 0, 2], [1, 3, 2, 0, 2], [2, 3, 3, 0, 3], [2, 4, 3, 0, 3], [2, 4, 3, 0, 3]] },
+  freighter: { name: '運輸艦', desc: '支援：大量輔助槽、維修', look: 0, skill: 'repair',
+    stats: { hp: 700, sh: 300, cruise: 5, max: 7.5, acc: 1.6, strafe: 2.2, climb: 2.2, turn: 14, boostT: 4, main: { name: '護盾砲', dmg: 14, cd: 1.2, range: 200, spd: 260, arc: 120, trav: 70 }, tur: { dmg: 6, cd: 1.4, range: 170, acc: 0.85 }, pd: { dmg: 2, cd: 0.4, far: 80, acc: 0.8 }, msl: { n: 16, dmg: 35, range: 260, lockT: 1.2, cd: 0.5 }, repair: { range: 170, hps: 18, dur: 6, recharge: 9 } },
+    slots: [[0, 1, 2, 0, 2], [0, 2, 3, 0, 3], [1, 2, 3, 1, 3], [1, 3, 4, 1, 4], [1, 3, 4, 1, 4]] },
+  lfreighter: { name: '輕運輸艦', desc: '輕型護衛，入門艦', look: 4, skill: 'burst',
+    stats: { hp: 260, sh: 140, cruise: 8.5, max: 13.5, acc: 3.4, strafe: 4.6, climb: 4, turn: 30, boostT: 5, main: { name: '輕型速射砲', dmg: 10, cd: 0.9, range: 190, spd: 280, arc: 120, trav: 90 }, tur: { dmg: 5, cd: 1.4, range: 150, acc: 0.85 }, pd: { dmg: 2, cd: 0.4, far: 70, acc: 0.75 }, msl: { n: 12, dmg: 35, range: 250, lockT: 1, cd: 0.5 } },
+    slots: [[0, 1, 1, 0, 1], [0, 1, 1, 0, 1], [1, 2, 2, 0, 2], [1, 2, 2, 0, 2], [1, 2, 2, 0, 2]] },
+};
+for (const [k, J] of Object.entries(CAP_HULL_NEW)) capHullNew(k, J);
+// 勝率、存活率的艦種係數：2026-11-22 用 1496 場 AI 對 AI 佔領戰（每方 1～3 艘、新舊艦種混合、原廠配置）擬合，其他參數不動。
+// 驗證（沒拿來擬合的 449 場）：預測勝負準確 68% → 89%；預測存活率和實際一致（雙叉 67%、三體 52%、發射 42%、新月 53%、運輸 45%、輕運輸 4%）
+Object.assign(CAP_ODDS.win.f, { twin: 2.267, tri: 1.912, launcher: 1.647, crescent: 2.13, freighter: 1.518, lfreighter: 0.714 });
+Object.assign(CAP_ODDS.surv.b, { twin: 0.115, tri: -0.479, launcher: -0.772, crescent: -0.403, freighter: -0.658, lfreighter: -3.889 });
 async function capHullsLoad() {
   try { const r = await fetch('models/' + encodeURIComponent('戰艦組裝') + '/hulls.json', { cache: 'no-cache' }); if (r.ok) capHullsApply(await r.json()); } catch (e) { /* 沒有就用預設 */ }
 }

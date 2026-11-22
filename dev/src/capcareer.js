@@ -32,8 +32,8 @@ const CC_RULE = {
   salary: 80,               // 玩家每週的薪餉
   repair: 1.2,              // 修理：每點缺少的船體多少資金（要在有維修船塢的己方星系）
   missile: 3,               // 補飛彈：每枚多少資金（有補給站、維修船塢或首都的己方星系）
-  build: { assault: 500, gunship: 900, support: 700, ew: 800, stealth: 850 },   // 新造艦的價錢
-  buildW: { assault: 1, gunship: 3, support: 2, ew: 2, stealth: 2 },   // 建造幾週（大船久）；一座船塢一次造一艘
+  build: { assault: 500, gunship: 900, support: 700, ew: 800, stealth: 850, lfreighter: 420, crescent: 760, freighter: 720, tri: 950, launcher: 1000, twin: 1150 },   // 新造艦的價錢
+  buildW: { assault: 1, gunship: 3, support: 2, ew: 2, stealth: 2, lfreighter: 1, crescent: 2, freighter: 2, tri: 3, launcher: 3, twin: 3 },   // 建造幾週（大船久）；一座船塢一次造一艘
   yardQ: 4,                 // 一座船塢最多排幾艘（造船、改裝一起算）
   fit: { base: 50, mod: { main: 300, tur: 150, msl: 200, def: 220, eng: 160 }, stock: 0.5, mk: [0, 0, 250, 450] },   // 改裝：工錢＋換模組（換回原廠半價）＋每升一級 Mk
   baseCost: 400,            // 把據點搬到另一個有維修船塢的己方星系
@@ -46,15 +46,15 @@ const CC_RULE = {
   aiOp: 0.35,               // AI 勢力每週下達一次特戰的機率（×難度的積極度）
   sqMerit: [0, 800, 2000],   // 指揮權：戰功到了才能多帶一個小隊（暫定，第 7 階段改成升遷）
 };
-const CC_HULL_LETTER = { assault: '突', gunship: '砲', support: '支', ew: '電', stealth: '匿' };
+const CC_HULL_LETTER = { assault: '突', gunship: '砲', support: '支', ew: '電', stealth: '匿', lfreighter: '輕', crescent: '月', freighter: '運', tri: '三', launcher: '射', twin: '叉' };
 
 // ───── 升遷（第 7 階段）─────
 // merit＝發考核的戰功；sq＝能帶幾隊；hulls＝能造的船型；mis＝同時最多幾個任務；base＝據點（1＝有據點、2＝據點多一座軌道防禦站）
 const CC_RANKS = [
-  { name: '單艦艦長', merit: 0, sq: 1, hulls: ['assault', 'gunship', 'support'], mis: 3, base: 0, desc: '帶一個小隊' },
-  { name: '小隊長', merit: 600, sq: 2, hulls: ['assault', 'gunship', 'support', 'ew'], mis: 4, base: 0, desc: '帶兩個小隊・可以建造電戰艦・任務多一個' },
-  { name: '特戰隊長', merit: 1600, sq: 3, hulls: ['assault', 'gunship', 'support', 'ew', 'stealth'], mis: 5, base: 1, desc: '帶三個小隊・可以建造匿蹤艦・有自己的據點（修理、補飛彈半價，軌道防禦每週重建）' },
-  { name: '特戰司令', merit: 3200, sq: 4, hulls: ['assault', 'gunship', 'support', 'ew', 'stealth'], mis: 6, base: 2, desc: '帶四個小隊・據點多一座軌道防禦站' },
+  { name: '單艦艦長', merit: 0, sq: 1, hulls: ['assault', 'gunship', 'support', 'lfreighter'], mis: 3, base: 0, desc: '帶一個小隊' },
+  { name: '小隊長', merit: 600, sq: 2, hulls: ['assault', 'gunship', 'support', 'lfreighter', 'ew', 'crescent', 'freighter'], mis: 4, base: 0, desc: '帶兩個小隊・可以建造電戰艦、新月戰艦、運輸艦・任務多一個' },
+  { name: '特戰隊長', merit: 1600, sq: 3, hulls: ['assault', 'gunship', 'support', 'lfreighter', 'ew', 'crescent', 'freighter', 'stealth', 'tri', 'launcher'], mis: 5, base: 1, desc: '帶三個小隊・可以建造匿蹤艦、三體戰艦、發射艦・有自己的據點（修理、補飛彈半價，軌道防禦每週重建）' },
+  { name: '特戰司令', merit: 3200, sq: 4, hulls: ['assault', 'gunship', 'support', 'lfreighter', 'ew', 'crescent', 'freighter', 'stealth', 'tri', 'launcher', 'twin'], mis: 6, base: 2, desc: '帶四個小隊・可以建造雙叉戰艦・據點多一座軌道防禦站' },
 ];
 const ccRankOf = (S) => CC_RANKS[S.pl.rank || 0];
 const ccHullOk = (S, k) => ccRankOf(S).hulls.includes(k) && !CC_TECH_ORDER.some((id) => CC_TECH[id].hull === k && !ccHas(S, id));   // 軍階＋研發
@@ -441,8 +441,13 @@ function ccAiR(S, f) {
 function ccAiMk(S, f) { const A = ccAiR(S, f), m = A.rp >= CC_AI.mk[3] ? 3 : A.rp >= CC_AI.mk[2] ? 2 : 1; return f === S.fac ? m : Math.min(m, CC_AI.mkMax[S.diff] || 3); }
 function ccAiHull(S, f) {
   const A = ccAiR(S, f), r = smRnd(S);
-  if (r > 0.9 && A.rp >= CC_AI.stealth) return 'stealth';
-  if (r > 0.78 && A.rp >= CC_AI.ew) return 'ew';
+  if (r > 0.92 && A.rp >= CC_AI.stealth) return 'stealth';
+  if (r > 0.84 && A.rp >= CC_AI.ew) return 'ew';
+  // 戰艦組裝的新艦種（槽位制度第 6 步）：跟玩家的軍階一樣分三段，用研究點數當進度
+  const pk = (L) => L[Math.floor(smRnd(S) * L.length)];
+  if (r > 0.72 && A.rp >= CC_AI.stealth) return pk(A.rp >= CC_AI.stealth * 1.6 ? ['tri', 'launcher', 'twin'] : ['tri', 'launcher']);
+  if (r > 0.6 && A.rp >= CC_AI.ew) return pk(['crescent', 'freighter']);
+  if (r > 0.52) return 'lfreighter';
   return ccRandHulls(S, 1)[0];
 }
 // AI 的船（槽位制度）：原廠配置；陣營的 Mk 套在每件裝備上；Mk II 起輔助槽補上中型裝甲、中型護盾（以前防禦槽 Mk 的船體、護盾加成）；
