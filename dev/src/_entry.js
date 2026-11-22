@@ -24406,7 +24406,7 @@ const capHullModel = (s) => (s ? capHullModelK(s.key, s.lv, capHas3D) : null);
 function capHull3D(i) { const H = CAP.on && capHullModel(capShipOf(i)); return H ? H.key : null; }
 // 發佈的模型在用到前要先下載（sy 開頭的鍵是「用到才下載」）：開機讀完 hulls.json 就先載好
 function capPubPreload() {
-  const keys = [...new Set(Object.values(CAP_HULL_PUB).flat().filter(Boolean).map((P) => P.model))];
+  const keys = [...new Set(Object.values(CAP_HULL_PUB).flat().filter(Boolean).flatMap((P) => [P.model, ...Object.values(P.gear || {})]))];   // 船體＋外觀點的裝備模型
   if (!keys.length || typeof ensureModels !== 'function') return Promise.resolve();
   return ensureModels(keys).then(() => { if (R3.ready) for (const k of keys) if (MODEL_SRC[k] && !R3.models[k]) R3.models[k] = getModel(k); R3.version = -1; });
 }
@@ -24438,6 +24438,9 @@ function capPubXform(model, P) {
   _sv.fromArray(P.p).applyMatrix4(_sO);
   return { o: [_sv.x, _sv.y, _sv.z], ax: [_sr.x, _sr.y, _sr.z, _su.x, _su.y, _su.z, _sf.x, _sf.y, _sf.z] };
 }
+// 外觀點（戰艦組裝的引擎點、護盾點、裝甲點、機庫點）：裝備 → 哪一類點；大小＝船長的比例 × 尺寸（大中小）
+const CAP_GEAR_PT = (g) => { const G = CAP_GEAR[g]; if (!G) return null; if (G.cls === 'ftr') return 'ftr'; if (G.cls !== 'aux') return null; const grp = CAP_AUX_FAM[G.fam].grp; return grp === 'eng' ? 'eng' : grp === 'shield' ? 'shield' : 'armor'; };
+const CAP_PT_LEN = { eng: 0.07, shield: 0.06, armor: 0.07, ftr: 0.08 }, CAP_PT_SIZE = { L: 1.25, M: 1, S: 0.75 };
 // ───── 槽位的位置與外觀（戰場、整修庫共用）─────
 // o＝{ key: 艦種, lv, eq, st: 風格, tk: 勢力船體的模型鍵（舊艦種的掛點從這裡來）, has }
 // 回傳 { HM: 發佈的模型或 null, slots: [{ sid, kind, o, ax, wk?, ck?, q? }]（有位置的槽位；wk＝要畫的武器模型）, decor: [原本的掛點]（舊艦種沒分到槽位的，照原樣畫）}
@@ -24448,7 +24451,17 @@ function capSlotLayout(o) {
   const HM = capHullModelK(o.key, o.lv, has), out = { HM, slots: [], decor: [] };
   const gear = (sid, kind) => { const e = eq[sid]; return e && e.g && capGearFits(kind, e.g) ? capGearWKey(o.st, e.g, has) : null; };
   if (HM) {
+    const gpUsed = {};
     for (const S of SL) {
+      // 輔助裝備、艦載機：畫在那一類的外觀點（pub.gp），照槽位順序依序用；點用完＝不畫（數值照算）
+      const e = eq[S.id], pt = e && e.g && capGearFits(S.kind, e.g) && CAP_GEAR_PT(e.g);
+      if (pt) {
+        const L = (HM.pub.gp || {})[pt] || [], j = gpUsed[pt] || 0, P = L[j]; gpUsed[pt] = j + 1;
+        const X = P && capPubXform(HM.key, P), wk = HM.pub.gear && HM.pub.gear[pt]; if (!X) continue;
+        const it = { sid: S.id, kind: S.kind, o: X.o, ax: X.ax, pt };
+        if (wk && has(wk)) { const G = CAP_GEAR[e.g], sc = (CAP_PT_LEN[pt] || 0.05) * (G.size ? CAP_PT_SIZE[G.size] : 1) / capWeapLen(wk); Object.assign(it, { wk, q: X.ax.map((v) => v * sc) }); }
+        out.slots.push(it); continue;
+      }
       const P = HM.pub.slots && HM.pub.slots[S.id], X = P && capPubXform(HM.key, P); if (!X) continue;
       const W = gear(S.id, S.kind), it = { sid: S.id, kind: S.kind, o: X.o, ax: X.ax };
       if (W) { const sc = (CAP_SLOT_LEN[S.kind] || 0.05) * W.k / capWeapLen(W.key); Object.assign(it, { wk: W.key, ck: W.ck, q: X.ax.map((v) => v * sc) }); }
@@ -24477,7 +24490,7 @@ function capSlotMounts(s, tk) {
   const L = capSlotLayout({ key: s.key, lv: s.lv, eq, st: FAC_KEY[shipFac(s.i)], tk: capHullModel(s) ? null : capMountRawKey(tk) });
   if (!L.HM && !base) return null;   // 2D 畫面（還沒建 3D）＝沒有掛點
   const out = [];
-  for (const it of L.slots) if (it.wk) out.push({ wk: it.wk, o: it.o, q: it.q, ax: it.ax, small: it.ck === 'aa', rig: { ...rigSpec(it.wk), g: CAP_CK_G[it.ck] }, parts: !!MODEL_SRC[it.wk].lods[0].attributes.aPart, ck: it.ck, slot: it.sid });
+  for (const it of L.slots) if (it.wk) out.push({ wk: it.wk, o: it.o, q: it.q, ax: it.ax, small: it.ck === 'aa', rig: { ...rigSpec(it.wk), g: CAP_CK_G[it.ck] || 0 }, parts: !!MODEL_SRC[it.wk].lods[0].attributes.aPart, ck: it.ck, slot: it.sid });
   if (base) for (const d of L.decor) if (base[d.j]) out.push(base[d.j]);
   return out;
 }
@@ -24487,7 +24500,7 @@ function capMountRawKey(tk) { const st = SHIP_TYPES[+tk.slice(1)], own = R3.mode
 function capMountCap(cap) {
   for (const s of CAP.ships) {
     const tk = typeKey(s.i), L = capSlotMounts(s, tk);
-    if (L) { for (const m of L) if (m.ck) cap[m.wk] = (cap[m.wk] || 0) + 1; continue; }
+    if (L) { for (const m of L) if (m.slot) cap[m.wk] = (cap[m.wk] || 0) + 1; continue; }   // 槽位上的武器＋外觀點上的裝備
     const X = capShipMods(s.i); if (!X) continue;
     const raw = capMountRaw(tk), base = R3.mounts[tk]; if (!raw || !base || raw.length !== base.length) continue;
     const sl = capMountSlots(raw); raw.forEach((m, j) => { const n = capSwapMount(m, base[j], X.mod, sl[j]); if (n) cap[n.wk] = (cap[n.wk] || 0) + 1; });

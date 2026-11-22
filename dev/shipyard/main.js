@@ -233,6 +233,19 @@ const SLOT_KINDS = {
   aux: { name: '輔助槽', short: '輔', col: 0xc9a7ff, size: 36, arc: 0 },
 };
 const SLOT_ORDER = ['main', 'sec', 'aa', 'ftr', 'aux'];
+// 外觀點（使用者 2026-11-22）：槽位不等於裝備畫在哪。輔助裝備、艦載機照種類放在這些點上（裝了幾件就依序用前幾個點，多的不顯示）：
+//   引擎點＝超頻引擎（三種）、護盾點＝能量護盾、裝甲點＝實體／反應裝甲、機庫點＝艦載機。砲塔、飛彈艙還是畫在槽位標記的位置
+// 設計裡跟槽位標記一樣是 { k: 'slot', kind: peng|pshield|parmor|pftr, n, p, r }；+x＝裝備朝向（引擎＝噴口朝 −x），發佈時記成 pub.gp
+Object.assign(SLOT_KINDS, {
+  peng: { name: '引擎點', short: '引', col: 0xff8a3c, size: 34, arc: 0, pt: 'eng' },
+  pshield: { name: '護盾點', short: '盾', col: 0x3fe0ff, size: 34, arc: 0, pt: 'shield' },
+  parmor: { name: '裝甲點', short: '甲', col: 0xb8c2d0, size: 34, arc: 0, pt: 'armor' },
+  pftr: { name: '機庫點', short: '庫', col: 0x8cff6a, size: 40, arc: 0, pt: 'ftr' },
+});
+const PT_ORDER = ['peng', 'pshield', 'parmor', 'pftr'], ALL_KINDS = [...SLOT_ORDER, ...PT_ORDER];
+const isPt = (pc) => !!(pc && pc.k === 'slot' && SLOT_KINDS[pc.kind] && SLOT_KINDS[pc.kind].pt);
+// 一件裝備畫在哪一類外觀點（null＝畫在槽位上）
+const PT_OF = (id) => { if (!id) return null; if (/^(oc|sprint|agile)[LMS]$/.test(id)) return 'eng'; if (/^shield[LMS]$/.test(id)) return 'shield'; if (/^(armor|react)[LMS]$/.test(id)) return 'armor'; if (id === 'wing' || id === 'awing') return 'ftr'; return null; };
 const slotMatCache = new Map();
 function slotMat(kind, op) {
   const k = kind + op; if (slotMatCache.has(k)) return slotMatCache.get(k);
@@ -244,7 +257,7 @@ function slotAsset(kind, arc) {
   const key = kind + '|' + arc; if (slotAssetCache.has(key)) return slotAssetCache.get(key);
   const K = SLOT_KINDS[kind], sz = K.size, items = [], I = new THREE.Matrix4();
   const add = (geo, op, box) => { geo.computeBoundingBox(); items.push({ geo, mat: slotMat(kind, op), flip: false, ms: [I], slot: box ? 2 : 1 }); };
-  add(new THREE.BoxGeometry(sz, sz * 0.5, sz), 0.45, true);   // 方塊（裝備預覽時藏起來，不擋住裝備）
+  add(K.pt ? new THREE.OctahedronGeometry(sz * 0.55) : new THREE.BoxGeometry(sz, sz * 0.5, sz), 0.45, true);   // 方塊（外觀點＝菱形）；裝備預覽時藏起來，不擋住裝備
   const cone = new THREE.ConeGeometry(sz * 0.22, sz * 0.8, 12); cone.rotateZ(-Math.PI / 2); cone.translate(sz * 0.9, 0, 0); add(cone, 0.95);
   if (arc > 0) { const fan = new THREE.CircleGeometry(sz * 2.4, 40, -arc * D2R, 2 * arc * D2R); fan.rotateX(-Math.PI / 2); add(fan, 0.14); }
   const box = new THREE.Box3(new THREE.Vector3(-sz / 2, -sz / 4, -sz / 2), new THREE.Vector3(sz * 1.3, sz / 4, sz / 2));
@@ -287,19 +300,20 @@ const GEAR_LIST = [
 const GEAR = Object.fromEntries(GEAR_LIST.map(([id, cls, name, look]) => [id, { id, cls, name, look }]));
 // 能裝在哪一類槽位（和遊戲 CAP_KIND 一樣）：主砲槽＝主砲、副砲級、大型輔助；副砲槽＝副砲級、中型輔助；防空槽＝防空砲、小型輔助；艦載機槽＝艦載機；輔助槽＝大中小輔助
 const SLOT_FITS = { main: ['main', 'sec', 'auxL'], sec: ['sec', 'auxM'], aa: ['aa', 'auxS'], ftr: ['ftr'], aux: ['auxL', 'auxM', 'auxS'] };
-const gearFits = (kind, id) => GEAR[id] && SLOT_FITS[kind].includes(GEAR[id].cls);
-const GEAR_DEF = { main: 'std', sec: 'gun', aa: 'pd', ftr: 'wing', aux: 'armorM' };
+const gearFits = (kind, id) => GEAR[id] && (SLOT_KINDS[kind].pt ? PT_OF(id) === SLOT_KINDS[kind].pt : SLOT_FITS[kind].includes(GEAR[id].cls));
+const GEAR_DEF = { main: 'std', sec: 'gun', aa: 'pd', ftr: 'wing', aux: 'armorM', peng: 'ocM', pshield: 'shieldM', parmor: 'armorM', pftr: 'wing' };
 const AUX_SC = { auxL: 1.4, auxM: 1, auxS: 0.7 };
 const slotLook = (pc) => (pc.look && gearFits(pc.kind, pc.look) ? pc.look : GEAR_DEF[pc.kind]);
 // 預覽用哪艘船的零件庫：設計裡第一個部件的船與塗裝（沒有就用左邊素材庫選的）
 const gearShip = () => { const p = S.pieces.find((x) => !isSlot(x) && x.ship); return p ? [p.ship, p.v] : [S.libShip, S.libVar]; };
 async function gearAsset(pc) {
   const [sid, v] = gearShip(), ship = LIB.byId[sid]; if (!ship) return null;
+  if (!isPt(pc) && PT_OF(slotLook(pc))) return null;   // 輔助裝備、艦載機畫在外觀點上，不畫在槽位上
   const G = GEAR[slotLook(pc)], [lib, sa] = await Promise.all([libAssets(sid, libStyle(ship, v)), shipAssets(sid, v)]);
   const name = G.look.map((n) => 'component_' + n).find((n) => lib.has(n)) || [...lib.keys()].find((n) => /turret/.test(n)); if (!name) return null;
   return { a: lib.get(name), mats: sa.mats, sc: (sa.compScale.get(name) || 1) * (AUX_SC[G.cls] || 1) };
 }
-const slotCounts = () => { const c = Object.fromEntries(SLOT_ORDER.map((k) => [k, 0])); for (const p of S.pieces) if (isSlot(p)) c[p.kind]++; return c; };
+const slotCounts = () => { const c = Object.fromEntries(ALL_KINDS.map((k) => [k, 0])); for (const p of S.pieces) if (isSlot(p)) c[p.kind]++; return c; };
 
 // ───── 狀態 ─────
 const S = { designs: {}, hulls: {}, canEdit: false, curId: null, pieces: [], sel: [], undo: [], redo: [], dirty: false, nextId: 1, libShip: null, libVar: null, showSlots: true, showGear: false };
@@ -538,7 +552,7 @@ function renderLib() {
   }).catch((e) => { $('libParts').textContent = e.message; });
 }
 function pieceLabel(pc) { return isSlot(pc) ? slotName(pc) : pc.k === 'part' ? partLabel(pc.n) : libLabel(pc.n); }
-const pieceSub = (pc) => (isSlot(pc) ? (SLOT_KINDS[pc.kind].arc ? `槽位・射界左右各 ${pc.arc || 0}°` : '槽位') : `${(LIB.byId[pc.ship] || {}).name || pc.ship}・${varLabel(pc.v)}`);
+const pieceSub = (pc) => (isSlot(pc) ? (isPt(pc) ? '外觀點' : SLOT_KINDS[pc.kind].arc ? `槽位・射界左右各 ${pc.arc || 0}°` : '槽位') : `${(LIB.byId[pc.ship] || {}).name || pc.ship}・${varLabel(pc.v)}`);
 function renderPieces() {
   $('pcount').textContent = S.pieces.length ? S.pieces.length + ' 個' : '';
   $('pieces').innerHTML = S.pieces.map((pc) => `<div class="it${S.sel.includes(pc.id) ? ' on' : ''}${isSlot(pc) ? ' slot' : ''}" data-pid="${pc.id}"${isSlot(pc) ? ` style="--sc:#${SLOT_KINDS[pc.kind].col.toString(16).padStart(6, '0')}"` : ''}><span>${esc(pieceLabel(pc))}</span><small>${esc(pieceSub(pc))}</small></div>`).join('') || '<div class="dim">還沒有部件。從左邊素材庫加入，或按「整艦放入」。</div>';
@@ -547,13 +561,13 @@ function renderPieces() {
 // 槽位面板：各類幾個、序號有沒有重複或跳號
 function renderSlots() {
   const c = slotCounts(), warn = [];
-  for (const k of SLOT_ORDER) {
+  for (const k of ALL_KINDS) {
     const ns = S.pieces.filter((p) => isSlot(p) && p.kind === k).map((p) => p.n).sort((a, b) => a - b);
     const dup = ns.filter((n, i) => i && ns[i - 1] === n), gap = ns.length && ns[ns.length - 1] !== ns.length - 1;
     if (dup.length) warn.push(`${SLOT_KINDS[k].name}序號重複：${[...new Set(dup)].map((n) => n + 1).join('、')}`);
     else if (gap) warn.push(`${SLOT_KINDS[k].name}序號跳號（應該是 1～${ns.length}）`);
   }
-  $('slotCounts').innerHTML = SLOT_ORDER.map((k) => `<span class="sc" style="--sc:#${SLOT_KINDS[k].col.toString(16).padStart(6, '0')}">${SLOT_KINDS[k].name.replace('槽', '')} <b>${c[k]}</b></span>`).join('');
+  $('slotCounts').innerHTML = ALL_KINDS.map((k) => `<span class="sc" style="--sc:#${SLOT_KINDS[k].col.toString(16).padStart(6, '0')}">${SLOT_KINDS[k].name.replace('槽', '')} <b>${c[k]}</b></span>`).join('');
   $('slotWarn').innerHTML = warn.map(esc).join('<br>');
 }
 function renderSel(liveOnly) {
@@ -569,12 +583,12 @@ function renderSel(liveOnly) {
   const so = isSlot(one) ? one : null;
   $('slotBox').hidden = !so; $('selVarRow').hidden = pcs.every(isSlot);
   if (so) {
-    $('slotKind').innerHTML = SLOT_ORDER.map((k) => `<option value="${k}"${k === so.kind ? ' selected' : ''}>${SLOT_KINDS[k].name}</option>`).join('');
+    $('slotKind').innerHTML = (isPt(so) ? PT_ORDER : SLOT_ORDER).map((k) => `<option value="${k}"${k === so.kind ? ' selected' : ''}>${SLOT_KINDS[k].name}</option>`).join('');
     $('slotN').value = so.n + 1; $('slotArc').value = so.arc || 0; $('slotArcRow').hidden = !SLOT_KINDS[so.kind].arc;
     const lk = slotLook(so);
     $('slotLook').innerHTML = GEAR_LIST.filter(([id]) => gearFits(so.kind, id)).map(([id, , nm]) => `<option value="${id}"${id === lk ? ' selected' : ''}>${esc(nm)}</option>`).join('');
   }
-  $('selName').innerHTML = one ? (so ? `<b>${esc(slotName(so))}</b> <span class="dim">遊戲裡的槽位編號 ${so.kind}${so.n}</span>` : `<b>${esc(pieceLabel(one))}</b> <span class="dim">${esc(LIB.byId[one.ship] ? LIB.byId[one.ship].name : one.ship)}・${esc(one.n)}</span>`) : `<b>選取了 ${pcs.length} 個</b> <span class="dim">（拖曳控制軸一起移動）</span>`;
+  $('selName').innerHTML = one ? (so ? `<b>${esc(slotName(so))}</b> <span class="dim">${isPt(so) ? '外觀點：這類裝備裝了幾件，就依序畫在前幾個點上' : `遊戲裡的槽位編號 ${so.kind}${so.n}`}</span>` : `<b>${esc(pieceLabel(one))}</b> <span class="dim">${esc(LIB.byId[one.ship] ? LIB.byId[one.ship].name : one.ship)}・${esc(one.n)}</span>`) : `<b>選取了 ${pcs.length} 個</b> <span class="dim">（拖曳控制軸一起移動）</span>`;
   const ships = new Set(pcs.filter((p) => !isSlot(p)).map((p) => p.ship)), vs = [...ships].map((s) => (LIB.byId[s] ? LIB.byId[s].variants.map((v) => v.name) : []));
   const common = vs.reduce((a, b) => a.filter((x) => b.includes(x)), vs[0] || []);
   const curV = new Set(pcs.filter((p) => !isSlot(p)).map((p) => p.v));
@@ -607,7 +621,7 @@ const ST_FIELDS = [
 const HS = { sel: null, dirty: false };
 // 一個設計裡各類標記幾個、序號是不是 0～n−1
 function designSlots(d) {
-  const c = Object.fromEntries(SLOT_ORDER.map((k) => [k, []]));
+  const c = Object.fromEntries(ALL_KINDS.map((k) => [k, []]));
   for (const p of (d && d.pieces) || []) if (isSlot(p)) c[p.kind].push(p.n);
   return c;
 }
@@ -635,6 +649,15 @@ function hullCheck(H) {
   return out;
 }
 const hullOk = (H) => hullCheck(H).every((m) => !m.length);
+// 外觀點的提醒（不擋發佈）：輔助槽有但某類外觀點一個都沒有＝裝了那類裝備看不到；機庫點比艦載機槽少＝多的機庫看不到
+function hullHint(H, l) {
+  if (H.old) return [];
+  const d = S.designs[(H.lv || [])[l]]; if (!d) return [];
+  const c = designSlots(d), row = (H.slots || [])[l] || [], out = [];
+  if ((row[4] || 0) > 0) for (const k of ['peng', 'pshield', 'parmor']) if (!c[k].length) out.push(`沒有${SLOT_KINDS[k].name}`);
+  if ((row[3] || 0) > c.pftr.length) out.push(`${SLOT_KINDS.pftr.name}少 ${(row[3] || 0) - c.pftr.length} 個`);
+  return out;
+}
 function openHulls() { $('hullDlg').hidden = false; if (!HS.sel || !S.hulls[HS.sel]) HS.sel = Object.keys(S.hulls)[0] || null; renderHulls(); }
 function hullDirty() { HS.dirty = true; $('hdDirty').textContent = '未儲存'; }
 function renderHulls() {
@@ -647,7 +670,7 @@ function renderHulls() {
   const rows = [0, 1, 2, 3, 4].map((l) => { const r = (H.slots[l] = H.slots[l] || [0, 0, 0, 0, 0]);
     return `<tr><td>Lv${l + 1}</td>${SLOT_ORDER.map((k, i) => `<td><input type="number" min="0" max="12" step="1" value="${r[i] || 0}" data-hs="${l},${i}"></td>`).join('')}
       ${H.old ? '' : `<td><select data-hl="${l}">${dOpts((H.lv || [])[l])}</select> <button class="small" data-hopen="${l}" ${(H.lv || [])[l] && S.designs[H.lv[l]] ? '' : 'disabled'}>打開</button></td>`}
-      <td class="chk">${chk[l].length ? `<span class="bad">${esc(chk[l].join('；'))}</span>` : '<span class="ok">✓</span>'}</td>
+      <td class="chk">${chk[l].length ? `<span class="bad">${esc(chk[l].join('；'))}</span>` : '<span class="ok">✓</span>'}${(() => { const h = hullHint(H, l); return h.length ? `<br><span class="dim" title="裝了這類裝備時，船上不會畫出來（數值照算）">${esc(h.join('；'))}</span>` : ''; })()}</td>
       ${H.old ? '' : `<td class="chk">${pubCell(HS.sel, H, l, chk[l].length)}</td>`}</tr>`; }).join('');
   const st = H.stats || {}, stg = H.old ? '' : ST_FIELDS.map(([g, F]) => `<div class="stgrid">${F.map(([f, nm]) => { const v = g ? (st[g] || {})[f] : st[f]; return `<label>${nm}<input type="number" step="any" value="${v ?? ''}" data-hst="${g}.${f}"></label>`; }).join('')}</div>`).join('<div style="height:6px"></div>');
   M.innerHTML = `
@@ -684,6 +707,17 @@ function pubCell(key, H, l, bad) {
   return (j && j.err ? `<span class="bad" title="${esc(j.err)}">發佈失敗（滑鼠移過來看原因）</span> ` : '') + info +
     `<button class="small" data-hpub="${l}" ${bad || !S.canEdit || Object.keys(PUBJ).some((k) => !PUBJ[k].err) ? 'disabled' : ''} title="${S.canEdit ? '' : '只有在伺服器那台電腦上才能發佈'}">${P ? '重新發佈' : '發佈'}</button>`;
 }
+// 外觀點的裝備模型：設計用的那艘船的零件庫零件（照設計的塗裝），一類一個 GLB；伺服器跟船體一起烘成遊戲模型（sy_艦種_g類）
+const PT_TYPES = { eng: 'peng', shield: 'pshield', armor: 'parmor', ftr: 'pftr' };
+async function buildGearGlbs() {
+  const out = {};
+  for (const [t, kind] of Object.entries(PT_TYPES)) {
+    const G = await gearAsset({ k: 'slot', kind, n: 0 }).catch(() => null); if (!G) continue;
+    const root = new THREE.Group(); root.name = 'gear_' + t; root.add(buildObject(G.a, G.mats));
+    out[t] = await new GLTFExporter().parseAsync(root, { binary: true, maxTextureSize: 1024 });
+  }
+  return out;
+}
 async function publishLv(key, l) {
   const H = S.hulls[key], id = H && (H.lv || [])[l], k = key + '|' + l;
   if (!H || !id || !S.designs[id]) return;
@@ -696,6 +730,11 @@ async function publishLv(key, l) {
     if (S.curId !== id) { S.dirty = false; openDesign(id); }
     await sync();
     const { buf } = await buildGlb();
+    PUBJ[k].msg = '上傳裝備外觀'; renderHulls();
+    for (const [t, gb] of Object.entries(await buildGearGlbs())) {
+      const r0 = await fetch(`../api/shipyard/gear?hull=${encodeURIComponent(key)}&t=${t}`, { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'model/gltf-binary' }, body: gb });
+      if (!r0.ok) { const j0 = await r0.json().catch(() => ({})); throw new Error(j0.error || 'HTTP ' + r0.status); }
+    }
     PUBJ[k].msg = `上傳 ${(buf.byteLength / 1048576).toFixed(0)} MB`; renderHulls();
     const r = await fetch(`../api/shipyard/publish?hull=${encodeURIComponent(key)}&lv=${l}`, { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'model/gltf-binary' }, body: buf });
     const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
@@ -840,7 +879,7 @@ $('allLook').onchange = () => {
   toast(n ? `${n} 個槽位預覽「${GEAR[id].name}」` : '沒有能裝這件裝備的槽位', !n);
 };
 $('btnRenum').onclick = () => {   // 每一類照目前的順序重新編成 1、2、3…
-  pushUndo(); for (const k of SLOT_ORDER) S.pieces.filter((p) => isSlot(p) && p.kind === k).sort((a, b) => a.n - b.n).forEach((p, i) => (p.n = i));
+  pushUndo(); for (const k of ALL_KINDS) S.pieces.filter((p) => isSlot(p) && p.kind === k).sort((a, b) => a.n - b.n).forEach((p, i) => (p.n = i));
   sync(); renderPieces(); renderSel(); renderSlots();
 };
 $('allVar').onchange = () => {

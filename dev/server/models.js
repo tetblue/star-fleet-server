@@ -116,7 +116,8 @@ function clusterToTarget(pos, uv, idx, nv, target, uvAware) {
 }
 function makeLods(kind, pos, uv, idx) {
   const nv = pos.length / 3, out = [], weapon = kind === 'weapon';
-  for (const target of LOD_TARGETS[kind] || LOD_TARGETS.hull) {
+  for (const target0 of LOD_TARGETS[kind] || LOD_TARGETS.hull) {
+    const target = Math.max(4, Math.min(target0, Math.floor(idx.length / 3 * 0.9)));   // 本來就比目標少的小模型（戰艦組裝的裝備零件）：減一點就好（目標不能比原本多，meshoptimizer 會中斷）
     const tc = target * 3;
     let [I] = MeshoptSimplifier.simplify(idx, pos, 3, tc, weapon ? 0.05 : 0.08, []), P = pos, UV = uv, NV = nv;
     if (I.length > tc * (weapon ? 1.5 : 1.5)) { const r = clusterToTarget(pos, uv, idx, nv, target, target >= (weapon ? 1000 : 2000)); I = r.idx; P = r.pos; UV = r.uv; NV = r.nv; }
