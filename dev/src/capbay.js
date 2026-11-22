@@ -184,12 +184,12 @@ function cbBuildProps() {
 }
 
 // ── 船：跟編成畫面同一套船體＋武器掛點；船頭朝鏡頭（+z）──
-function cbMakeShip(hull, fac) {
+function cbMakeShip(hull, fac, mk) {   // mk：指定船體模型（戰艦組裝發佈的艦種）
   const H = CAP_HULLS[hull]; if (!H) return null;
-  const fk = FAC_KEY[fac] || 'e', key = fk + H.look, M = getModel(key) || getModel('e' + H.look); if (!M) return null;
+  const fk = FAC_KEY[fac] || 'e', key = mk || fk + H.look, M = getModel(key) || getModel('e' + H.look); if (!M) return null;
   const L = CB_LEN[hull] || 30, g = new THREE.Group(), body = new THREE.Group();
   body.add(new THREE.Mesh(M.lods[0], cbInkMat(M.mat)));
-  for (const m of mountsOf(key)) { const W = getModel(fk + 'w' + m.w); if (!W) continue; const o = new THREE.Mesh(W.lods[Math.min(1, W.lods.length - 1)], cbInkMat(W.mat)); setMountObj(o, m); body.add(o); }
+  if (!mk) for (const m of mountsOf(key)) { const W = getModel(fk + 'w' + m.w); if (!W) continue; const o = new THREE.Mesh(W.lods[Math.min(1, W.lods.length - 1)], cbInkMat(W.mat)); setMountObj(o, m); body.add(o); }
   const geo = M.lods[0]; geo.computeBoundingBox(); const bb = geo.boundingBox;
   const cx = (bb.min.x + bb.max.x) / 2, cz = (bb.min.z + bb.max.z) / 2, y0 = 0.3 + CB_CRADLE;
   body.scale.setScalar(L); g.add(body);

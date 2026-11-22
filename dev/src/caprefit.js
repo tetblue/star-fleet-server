@@ -356,41 +356,60 @@ function crSparksStep(dt) {
 }
 
 // ───── 船：船體＋照模組換的武器＋塗裝層（Mk 條紋、裝甲、燒焦）＋護盾殼＋尾焰 ─────
-// 武器模型的鍵與尺寸（同 capfx.js 的 CAP_WLOOK；整修庫不經過 main.js，自己算）
-function crWeapon(m, slot, mod) {
-  const st = m.hk[0], X = capWKey(st, slot, mod);
-  if (!X) return { key: st + 'w' + m.w, m };
-  const { L, key } = X;
-  return getModel(key) ? { key, m: { ...m, hk: key[0] + m.hk.slice(1), w: +key.slice(2), s: (m.s || 0.1) * L.k } } : { key: st + 'w' + m.w, m };
-}
+// 槽位制度（第 5 步）：D＝{ eq, lv }（改裝中的設定）。武器照槽位裝（capfx.js capSlotLayout，跟戰場同一套位置）；發佈過的艦種用自己的模型
+// 塗裝、尾焰、護盾殼還是看舊 5 類的摘要（capEqSum）
+const crHas = (k) => !!getModel(k);
 function crMakeShip(c, D, fac) {
-  const W0 = CAP_FX.wpn ? { main: (D.mod || {}).main, tur: (D.mod || {}).tur } : {};   // 武器模型照配置換（CAP_FX.wpn）
-  if (!CAP_FX.look) D = { mod: {}, mk: {} };   // 其他升級的外觀關著：塗裝、尾焰、護盾殼照原廠的樣子
   const H = CAP_HULLS[c.key]; if (!H) return null;
-  const g = cbMakeShip(c.key, fac); if (!g) return null;
-  const body = g.children[0], fk = FAC_KEY[fac] || 'e', key = (getModel(fk + H.look) ? fk : 'e') + H.look, M = getModel(key);
-  while (body.children.length > 1) body.remove(body.children[body.children.length - 1]);   // 原廠武器拿掉，照模組重新裝
-  const raw = mountsOf(key).filter((m) => getModel(m.hk[0] + 'w' + m.w)), slots = capMountSlots(raw), mounts = [];
-  raw.forEach((m0, j) => {
-    const sl = slots[j], W = crWeapon(m0, sl, CAP_FX.look ? D.mod : W0), Wm = getModel(W.key); if (!Wm) return;
-    const o = new THREE.Mesh(Wm.lods[Math.min(1, Wm.lods.length - 1)], cbInkMat(Wm.mat)); setMountObj(o, W.m); body.add(o);
-    const gk = (WEAPON_GK['eamcrib'.indexOf(m0.hk[0])] || '')[m0.w]; mounts.push({ o, slot: sl || (gk === 'x' ? 'msl' : null), key: W.key, home: o.position.clone() });
-  });
+  const fk = FAC_KEY[fac] || 'e', st = getModel(fk + H.look) ? fk : 'e', lv = D.lv || c.lv || 1;
+  const Lay = capSlotLayout({ key: c.key, lv, eq: D.eq || {}, st, tk: st + H.look, has: crHas });
+  const g = cbMakeShip(c.key, fac, Lay.HM && Lay.HM.key); if (!g) return null;
+  const sum = CAP_FX.look ? capEqSum(c.key, D.eq || {}, lv) : { mod: {}, mk: {} };   // 其他升級的外觀關著：塗裝、尾焰、護盾殼照原廠的樣子
+  const body = g.children[0], M = getModel(Lay.HM ? Lay.HM.key : st + H.look);
+  while (body.children.length > 1) body.remove(body.children[body.children.length - 1]);   // 原廠武器拿掉，照槽位重新裝
+  const mounts = [], spots = {};
+  const put = (wk, mat, sid, kind) => {
+    const Wm = getModel(wk); if (!Wm) return;
+    const o = new THREE.Mesh(Wm.lods[Math.min(1, Wm.lods.length - 1)], cbInkMat(Wm.mat));
+    mat.decompose(o.position, o.quaternion, o.scale); body.add(o);
+    mounts.push({ o, sid, kind, key: wk, home: o.position.clone() });
+  };
+  const _m = new THREE.Matrix4();
+  for (const d of Lay.decor) put(d.m.hk[0] + 'w' + d.m.w, _m.copy(crMountMat(mountMatrix(d.m))), null, null);   // 沒分到槽位的掛點：照原樣（裝飾）
+  for (const it of Lay.slots) {
+    spots[it.sid] = { o: it.o, ax: it.ax, kind: it.kind };
+    if (CAP_FX.wpn && it.wk) put(it.wk, crMountMat(it), it.sid, it.kind);
+  }
   const geo = M.lods[0]; if (!geo.boundingBox) geo.computeBoundingBox(); if (!geo.attributes.normal) geo.computeVertexNormals();
-  const bb = geo.boundingBox, sp = { mk: Math.max(1, ...Object.values(D.mk || {})), def: (D.mod || {}).def || '', eng: (D.mod || {}).eng || 'std' }, F = FACTION[fac] || FACTION[0];
+  const bb = geo.boundingBox, sp = { mk: Math.max(1, ...Object.values(sum.mk || {})), def: (sum.mod || {}).def || '', eng: (sum.mod || {}).eng || 'std' }, F = FACTION[fac] || FACTION[0];
   const pm = capFxPaintMat(); pm.uniforms.uBmin.value.copy(bb.min); pm.uniforms.uBmax.value.copy(bb.max); pm.uniforms.uCol.value.set(F.ui);
-  capFxSetPaint(pm, D.mod, sp.mk, sp.def);
+  capFxSetPaint(pm, sum.mod, sp.mk, sp.def);
   const paint = new THREE.Mesh(geo, pm); paint.renderOrder = 3; body.add(paint);
   const shm = capFxShellMat(); shm.uniforms.uCol.value.copy(F.glow); shm.uniforms.uI.value = sp.def === 'shield' ? 0.1 : 0;
   const shell = new THREE.Mesh(capFxGeo().shell, shm), cc = bb.getCenter(new THREE.Vector3()), sz = bb.getSize(new THREE.Vector3());
   shell.position.copy(cc); shell.scale.set(sz.x * 0.5 * CAP_FX.shell, sz.y * 0.5 * CAP_FX.shell, sz.z * 0.5 * CAP_FX.shell); shell.visible = sp.def === 'shield'; body.add(shell);
   const E = CAP_FX.eng[sp.eng] || CAP_FX.eng.std, fm = capFxFlameMat(); fm.uniforms.uCol.value.copy(E.col ? new THREE.Color(...E.col) : F.glow);
   const flame = new THREE.Mesh(capFxGeo().flame, fm); flame.position.set(cc.x, cc.y, bb.min.z + sz.z * 0.02); flame.visible = false; body.add(flame);
-  g.userData.cr = { body, mounts, paint, shell, flame, E, bb, sp, L: body.scale.x };
+  // 選到的槽位：船上一圈會閃的環（槽位種類的顏色），沒裝東西的槽位也看得到在哪
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(1, 0.12, 8, 40), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthTest: false }));
+  ring.rotation.x = Math.PI / 2; ring.renderOrder = 10; ring.visible = false; body.add(ring);
+  g.userData.cr = { body, mounts, spots, ring, paint, shell, flame, E, bb, sp, L: body.scale.x };
   return g;
 }
+// 掛點的 o（位置）、q（三個軸×大小）→ 4×4 矩陣
+function crMountMat(it) { const q = it.q || it.ax, o = it.o; return new THREE.Matrix4().set(q[0], q[3], q[6], o[0], q[1], q[4], q[7], o[1], q[2], q[5], q[8], o[2], 0, 0, 0, 1); }
+const CR_SLOT_COL = { main: 0xff5a4a, sec: 0xffb347, aa: 0x5cc8ff, ftr: 0x6fdc8c, aux: 0xc9a7ff };
+// 選到的槽位（sid）：環放到那裡、鏡頭對過去；這個槽位在船上沒有位置（舊艦種的艦載機、輔助槽）＝null
+function crSelSlot(sid) {
+  const u = CR.ship && CR.ship.userData.cr; if (!u) return null;
+  const sp = sid && u.spots[sid]; u.ring.visible = !!sp; CR.focus = null; if (!sp) return null;
+  const r = (CAP_SLOT_LEN[sp.kind] || 0.05) * 0.75;
+  u.ring.position.set(sp.o[0], sp.o[1] + r * 0.15, sp.o[2]); u.ring.scale.setScalar(r); u.ring.material.color.setHex(CR_SLOT_COL[sp.kind] || 0xffffff);
+  CR.focus = u.body.localToWorld(new THREE.Vector3(sp.o[0], sp.o[1], sp.o[2])); CR.focusK = sp.kind;
+  return CR.focus;
+}
 // 換成新的設定：重蓋一艘（舊的武器先留著，給吊走的動畫用）
-function crSig(c, D) { return c.key + JSON.stringify([D.mod, D.mk]); }
+function crSig(c, D) { return c.key + JSON.stringify([D.eq, D.lv || c.lv]); }
 function crPut(c, D, fac) {
   const sig = crSig(c, D) + fac; if (CR.ship && CR.sig === sig) return { same: true };
   const old = CR.ship, g = crMakeShip(c, D, fac); if (!g) return { same: true };
@@ -417,9 +436,13 @@ function crShow(o) {
   if (first) { CR.cam = null; CR.t0 = crNow(); requestAnimationFrame(() => cbSize()); }
   const was = CR.ship, P = crPut(o.c, o.D, o.fac);
   crCaption(o.cap || '');
-  if (P.same || !o.last) { if (P.old) crDrop(P.old); return; }
-  const isMk = o.last.startsWith('mk:'), slot = isMk ? o.last.slice(3) : o.last;
-  crAnimStart(isMk ? 'mk' : slot, slot, P.old || was);
+  crSelSlot(o.sel);
+  if (!o.last || (P.same && !o.last.startsWith('mk:'))) { if (P.old) crDrop(P.old); return; }
+  // o.last＝剛改的槽位 id（Mk 改的是 'mk:槽位'）：武器（含飛彈艙）＝天車換砲；輔助＝裝甲刷塗裝／護盾殼／引擎試車；艦載機＝刷塗裝
+  const isMk = o.last.startsWith('mk:'), sid = isMk ? o.last.slice(3) : o.last, e = (o.D.eq || {})[sid] || {}, e0 = (o.c.eq || {})[sid] || {}, G = CAP_GEAR[e.g] || CAP_GEAR[e0.g];
+  const swap = !isMk && (CR.ship.userData.cr.mounts.some((m) => m.sid === sid) || (was && was.userData.cr && was.userData.cr.mounts.some((m) => m.sid === sid)));
+  const kind = isMk ? 'mk' : swap ? 'tur' : G && G.cls === 'aux' ? (CAP_AUX_FAM[G.fam].grp === 'eng' ? 'eng' : 'def') : 'def';
+  crAnimStart(kind, sid, P.old || was);
 }
 function crHide() {
   if (!CR.on) return;
@@ -447,17 +470,17 @@ function crAnimStart(kind, slot, old) {
   const A = CR.A = { kind, slot, t0: now, dur: CR_DUR[kind] || 2.4, old, sp: 0 };
   if (kind === 'main' || kind === 'tur') {
     // 舊船的那些砲塔留在場上，等天車吊走；舊船的其他東西藏起來
-    A.neu = u.mounts.filter((m) => m.slot === slot);
-    A.gone = old ? old.userData.cr.mounts.filter((m) => m.slot === slot).map((m) => m.o) : [];
+    A.neu = u.mounts.filter((m) => m.sid === slot);
+    A.gone = old ? old.userData.cr.mounts.filter((m) => m.sid === slot).map((m) => m.o) : [];
     if (old) { old.userData.cr.body.children.forEach((ch) => { if (!A.gone.includes(ch)) ch.visible = false; }); }
     for (const m of A.neu) m.o.visible = false;
-    const pts = A.neu.length ? A.neu.map((m) => crWorld(m.o)) : [crShipPt(0.6)];
+    const pts = A.neu.length ? A.neu.map((m) => crWorld(m.o)) : A.gone.length ? A.gone.map((o) => crWorld(o)) : [crShipPt(0.6)];   // 拆掉（換成空槽）＝對著被吊走的那座
     A.focus = pts.reduce((a, p) => a.add(p), new THREE.Vector3()).multiplyScalar(1 / pts.length); A.pts = pts;
-    if (!A.neu.length) A.kind = 'def';   // 這個船型沒有那個槽位的砲塔：改成刷塗裝
+    if (!A.neu.length && !A.gone.length) A.kind = 'def';   // 這個槽位在船上沒有砲塔：改成刷塗裝
   } else {
     if (old) crDrop(old); A.old = null;
     if (kind === 'eng') A.focus = crShipPt(0.02, 0.5);
-    else if (kind === 'msl') { const ms = u.mounts.filter((m) => m.slot === 'msl'); A.focus = ms.length ? crWorld(ms[0].o) : crShipPt(0.45); }
+    else if (kind === 'msl') { const ms = u.mounts.filter((m) => m.kind && CAP_GEAR_CK(CAP_GEAR[(CR.D && CR.D.eq[m.sid] || {}).g]) === 'msl'); A.focus = ms.length ? crWorld(ms[0].o) : crShipPt(0.45); }
     else A.focus = crShipPt(0.5, 0.9);
   }
   u.paint.material.uniforms.uCut.value = 0;   // 新的塗裝樣式：動畫裡從船尾刷到船頭
@@ -524,7 +547,7 @@ function crRepairNext() {
   const R = CR.rep; R.k++;
   if (R.k >= R.list.length) { crRepairEnd(); return; }
   const it = R.list[R.k], old = CR.ship;
-  CR.sig = ''; crPut(it.c, it.c.eq ? capEqSum(it.c.key, it.c.eq, it.c.lv) : { mod: it.c.mod || {}, mk: it.c.mk || {} }, R.fac); crDrop(old);
+  CR.sig = ''; crPut(it.c, { eq: it.c.eq || {}, lv: it.c.lv }, R.fac); crDrop(old); crSelSlot(null);
   CR.ship.userData.cr.paint.material.uniforms.uDmg.value = 1 - it.hp;
   R.t0 = crNow(); R.sp = 0; CR.cam = CR.cam || null;
 }
@@ -562,6 +585,7 @@ function crFrame() {
   if (CR.mode === 'rep') crRepairStep(t); else crAnimStep(t, dt);
   crSparksStep(dt); crArmsStep(dt);
   const sh = CR.ship, u = sh && sh.userData.cr, C = CB.cam; if (!u) return;
+  if (u.ring.visible) u.ring.material.opacity = 0.5 + 0.45 * Math.sin(t * 6);
   const hl = sh.userData.hl || 15, mid = (sh.userData.bot + sh.userData.top) / 2, cx = cbX(CR_K);
   // 鏡頭：動畫中＝飛到那個位置（從船外側、斜上方看）；平常＝慢慢繞著船
   if (CR.A && CR.A.focus) {
@@ -570,6 +594,10 @@ function crFrame() {
     const dir = K === 'eng' ? new THREE.Vector3(sx, 0.55, 0.35) : K === 'def' || K === 'mk' ? new THREE.Vector3(0.35, 0.5, 1) : new THREE.Vector3(sx, 0.75, 0.3);   // 砲塔：從側上方看（從前面看會被艦橋擋住）
     const d = K === 'eng' ? hl * 0.7 + 8 : K === 'def' || K === 'mk' ? hl * 1.5 + 10 : hl * 0.7 + 18;
     dir.normalize(); _crP.set(f.x + dir.x * d, f.y + dir.y * d, f.z + dir.z * d); _crL.copy(f);
+  } else if (CR.focus) {
+    // 選到一個槽位：從那一側的斜上方看過去（環在閃）
+    const f = CR.focus, sx = f.x >= cx ? 1 : -1, dir = new THREE.Vector3(sx * 0.8, 0.8, 0.45).normalize(), d = hl * 0.75 + 14;
+    _crP.set(f.x + dir.x * d, f.y + dir.y * d, f.z + dir.z * d); _crL.copy(f);
   } else {
     // 平常：在機庫開口前方左右慢慢擺
     const a = Math.sin((t - CR.t0) * 0.12) * 0.42, d = hl * 1.7 + 12;

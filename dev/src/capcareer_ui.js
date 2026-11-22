@@ -58,8 +58,13 @@ const CC_CSS = `.cc-ico{width:15px;height:15px;vertical-align:-3px;margin-right:
 .cc-lv{font-size:10px;font-weight:700;color:#8a96a8;border:1px solid #3a4658;border-radius:3px;padding:0 3px;margin-left:2px}.cc-lv.up{color:#c9a7ff;border-color:#7a5fb0}.cc-shipnm{cursor:pointer;text-decoration:underline dotted #3fdf8f88}
 .cc-mods{width:100%;border-collapse:collapse;font-size:12px;margin:6px 0}.cc-mods td{padding:3px 6px;border-top:1px solid #1d2838;vertical-align:top}.cc-mods td:first-child{color:#8a96a8;white-space:nowrap}.cc-mods td:nth-child(2){white-space:nowrap}
 .cc-cmp{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:2px 10px;font-size:12px;margin:6px 0}.cc-cmp dt{color:#8a96a8}.cc-cmp dd{margin:0}
-.cc-fit .cc-fsel{width:100%;max-width:240px;background:#0d1a30;color:#e6eefc;border:1px solid rgba(124,196,255,.35);border-radius:4px;padding:3px 4px;font:inherit;font-size:12px}.cc-fit .cc-fsel option:disabled{color:#6a7a95}
-.cc-fit .sm-seg{flex-wrap:wrap}.cc-fit .sm-seg button{font-size:11px;padding:2px 6px}.cc-fit tr.chg td:first-child{color:#c9a7ff;font-weight:700}
+.cc-slots{display:flex;flex-direction:column;gap:4px;margin:6px 0}.cc-skind{display:flex;flex-wrap:wrap;align-items:center;gap:4px}.cc-skind>span{width:54px;font-size:11px;font-weight:700;color:var(--k)}
+.cc-st{--k:#7cc4ff;display:flex;align-items:center;gap:4px;min-width:120px;max-width:164px;padding:3px 6px;background:#0d1a30;border:1px solid rgba(124,196,255,.25);border-left:3px solid var(--k);border-radius:4px;color:#e6eefc;cursor:pointer;text-align:left;font:inherit}.cc-st>span{display:flex;flex-direction:column;line-height:1.15;min-width:0;flex:1}.cc-st b{font-size:11px}.cc-st i{font-style:normal;font-size:11px;color:#a8b8d4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cc-st.on{background:#1b2c4c;border-color:#7cc4ff;box-shadow:0 0 0 1px #7cc4ff}.cc-st.chg b{color:#c9a7ff}.cc-st.chg{border-top-color:#c9a7ff;border-bottom-color:#c9a7ff}.cc-st.empty i{color:#6a7a95}
+.cc-sk-main{--k:#ff5a4a}.cc-sk-sec{--k:#ffb347}.cc-sk-aa{--k:#5cc8ff}.cc-sk-ftr{--k:#6fdc8c}.cc-sk-aux{--k:#c9a7ff}
+.cc-pick{border:1px solid rgba(124,196,255,.25);border-radius:6px;padding:6px;margin:4px 0 8px;background:#0a1424}.cc-pick-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;font-size:12px}.cc-pick .sm-seg button{font-size:11px;padding:2px 6px}
+.cc-gl{max-height:270px;overflow-y:auto;display:flex;flex-direction:column;gap:3px}.cc-gl-h{font-size:11px;color:#a8b8d4;margin:4px 0 0}
+.cc-gi{display:flex;align-items:center;gap:6px;width:100%;padding:4px 6px;background:#0d1a30;border:1px solid transparent;border-radius:4px;color:#e6eefc;cursor:pointer;text-align:left;font:inherit}.cc-gi:hover:not(:disabled){border-color:rgba(124,196,255,.5)}.cc-gi.on{border-color:#7cc4ff;background:#1b2c4c}.cc-gi:disabled{opacity:.55;cursor:default}
+.cc-gi .nm{flex:1;display:flex;flex-direction:column;min-width:0;line-height:1.25;font-size:12px}.cc-gi small{font-size:11px;color:#a8b8d4}.cc-gi .dl{display:flex;flex-wrap:wrap;gap:0 6px;font-size:11px}.cc-gi em{font-style:normal}.cc-gi em.up{color:#3fdf8f}.cc-gi em.dn{color:#ff8a7a}.cc-gi .pr{font-size:11px;white-space:nowrap;color:#ffd36a;max-width:120px;text-align:right}.cc-gi .lk{color:#ff8a7a;white-space:normal}
 .cc-yq{font-size:12px}.cc-yq .g-dim{font-size:12px}.cc-yq button{font-size:11px;padding:1px 6px;margin-left:3px}
 .cc-thr{margin:5px 0;padding:5px 7px;border:1px solid #ff6a5a;border-radius:6px;background:#2a1416}
 .cc-xp{height:6px;background:#1a2433;border-radius:3px;overflow:hidden;margin:3px 0 8px}.cc-xp i{display:block;height:100%;background:#c9a7ff}`;
@@ -452,17 +457,36 @@ function ccFitView(src, D) {
   D = D || { eq: JSON.parse(JSON.stringify(c.eq)), lv: c.lv }; ccIcoCss();
   const hx0 = ccHexNow();   // 六角圖：從上一次的形狀動畫過去
   const SL = capSlotList(c.key, c.lv);
-  // 槽位制度（2026-11-22）：每個槽位一列，裝備用下拉選單（能裝的才列出來），Mk 用按鈕
-  const rows = SL.map((sl) => {
-    const a = ccEqOf(c.eq, sl.id), d = ccEqOf(D.eq, sl.id), same = a.g === d.g, k0 = same && d.g ? a.mk || 1 : 1, kc = d.g ? d.mk || 1 : 1;
-    const ids = Object.keys(CAP_GEAR).filter((id) => capGearFits(sl.kind, id) && (id !== 'std' || H0.main));
-    const grp = (cls) => ids.filter((id) => (CAP_GEAR[id].cls === 'aux') === (cls === 'aux')).map((id) => { const w = id === a.g ? '' : ccFitOk(S, H0, id); return `<option value="${id}"${id === d.g ? ' selected' : ''}${w ? ' disabled' : ''}>${smuEsc(capGearName(H0, id))}${w ? `（${smuEsc(w)}）` : id === a.g ? '（裝著）' : ` ${CAP_GEAR[id].p}`}</option>`; }).join('');
-    const opts = `<option value=""${d.g ? '' : ' selected'}>（空）</option>${grp('wpn') ? `<optgroup label="武器">${grp('wpn')}</optgroup>` : ''}${grp('aux') ? `<optgroup label="輔助裝備">${grp('aux')}</optgroup>` : ''}`;
-    const mks = [1, 2, 3].map((k) => [k, ccMkBadge(k), !d.g || (k > cap && !(same && k <= (a.mk || 1))) || k < k0, !d.g ? '空槽' : k > cap ? (k > capL ? `船要 Lv${k === 2 ? 3 : 5}` : `要先研究 Mk ${k === 2 ? 'II' : 'III'} 工藝`) : k < k0 ? 'Mk 不能降' : `主要數值 ×${CAP_MK[k]}`]);
-    const G = CAP_GEAR[d.g], chg = !same || (d.g && kc !== (a.mk || 1));
-    return `<tr${chg ? ' class="chg"' : ''}><td><span class="cc-slot">${ccGearIco(d.g, ccMkCol(kc))}${capSlotName(sl)}</span></td><td><select class="cc-fsel" data-fs="${sl.id}">${opts}</select><div class="g-dim" style="font-size:11px;margin-top:2px">${G ? (d.g === 'std' ? '艦種原本的主砲' : G.desc || '') : '空槽'}${!same && d.g && (a.mk || 1) > 1 ? '（換裝備＝回到 Mk I）' : ''}</div></td><td>${smuSeg('cc-fk-' + sl.id, mks, kc)}</td></tr>`;
-  }).join('');
+  // 槽位制度第 5 步：上面是船的槽位（依種類分組的方塊，點一下選它；整修庫的船上同時亮出那個位置），下面是選到的槽位能裝的裝備清單與 Mk
+  if (!D.sel || !SL.some((x) => x.id === D.sel)) D.sel = SL.length ? SL[0].id : null;
   const A = capProfMod(capHullMod(H0, c), null, S.pl.prof), B = capProfMod(capHullMod(H0, D), null, S.pl.prof), f1 = (v) => Math.round(v * 10) / 10;
+  const tiles = CAP_KIND_ORDER.map((kind) => {
+    const L = SL.filter((x) => x.kind === kind); if (!L.length) return '';
+    return `<div class="cc-skind"><span class="cc-sk-${kind}">${CAP_KIND[kind].name}</span>${L.map((sl) => {
+      const a = ccEqOf(c.eq, sl.id), d = ccEqOf(D.eq, sl.id), kc = d.g ? d.mk || 1 : 1, chg = a.g !== d.g || (d.g && kc !== (a.mk || 1));
+      return `<button type="button" class="cc-st cc-sk-${kind}${sl.id === D.sel ? ' on' : ''}${chg ? ' chg' : ''}${d.g ? '' : ' empty'}" data-st="${sl.id}" title="${smuEsc(capSlotName(sl))}">${ccGearIco(d.g, ccMkCol(kc), 22)}<span><b>${CAP_KIND[kind].name.slice(0, 2)} ${sl.n + 1}</b><i>${smuEsc(d.g ? capGearName(H0, d.g) : '空')}</i></span>${d.g && kc > 1 ? ccMkBadge(kc) : ''}</button>`;
+    }).join('')}</div>`;
+  }).join('');
+  // 選到的槽位：能裝的裝備（武器、輔助分開），每件標價錢或鎖住的原因，以及換上去之後數值怎麼變
+  const sl = SL.find((x) => x.id === D.sel), K = (H) => ({ '主砲': H.main.none ? 0 : H.main.dmg / H.main.cd, '副砲': (H.tur.n * H.tur.dmg) / H.tur.cd, '點防禦': H.pd.n, '飛彈': H.msl ? H.msl.n * H.msl.dmg / 100 : 0, '護航機': H.ftr || 0, '船體': H.hp, '護盾': H.sh, '速度': H.max, '轉向': H.turn });
+  let pick = '';
+  if (sl) {
+    const a = ccEqOf(c.eq, sl.id), d = ccEqOf(D.eq, sl.id), same = a.g === d.g, k0 = same && d.g ? a.mk || 1 : 1, kc = d.g ? d.mk || 1 : 1, KB = K(B);
+    const ids = ['', ...Object.keys(CAP_GEAR).filter((id) => capGearFits(sl.kind, id) && (id !== 'std' || H0.main))];
+    const item = (id) => {
+      const w = !id || id === a.g ? '' : ccFitOk(S, H0, id), G = CAP_GEAR[id], on = id === d.g;
+      const T = on ? KB : K(capProfMod(capHullMod(H0, { eq: { ...D.eq, [sl.id]: { g: id, mk: id && id === a.g ? a.mk || 1 : 1 } }, lv: D.lv }), null, S.pl.prof));
+      const dl = on ? '' : Object.keys(KB).map((k) => { const v = T[k] - KB[k]; if (Math.abs(v) < 0.05) return ''; const pct = KB[k] ? Math.round(v / KB[k] * 100) : null; return `<em class="${v > 0 ? 'up' : 'dn'}">${k} ${v > 0 ? '+' : ''}${pct != null && Math.abs(pct) < 1000 ? pct + '%' : f1(v)}</em>`; }).join('');
+      const price = !id ? '拆掉' : id === a.g ? '裝著' : w ? `<span class="lk">🔒 ${smuEsc(w)}</span>` : `${G.p} 資金`;
+      return `<button type="button" class="cc-gi${on ? ' on' : ''}" data-gi="${id}" ${w ? 'disabled' : ''}>${ccGearIco(id, ccMkCol(on ? kc : 1), 24)}<span class="nm"><b>${smuEsc(id ? capGearName(H0, id) : '（空槽）')}</b><small>${smuEsc(id ? (id === 'std' ? '艦種原本的主砲' : G.desc || '') : '拆掉這個槽位的裝備（不用錢）')}</small>${dl ? `<span class="dl">${dl}</span>` : ''}</span><span class="pr">${price}</span></button>`;
+    };
+    const wpn = ids.filter((id) => !id || CAP_GEAR[id].cls !== 'aux'), aux = ids.filter((id) => id && CAP_GEAR[id].cls === 'aux');
+    const mks = [1, 2, 3].map((k) => [k, ccMkBadge(k), !d.g || (k > cap && !(same && k <= (a.mk || 1))) || k < k0, !d.g ? '空槽' : k > cap ? (k > capL ? `船要 Lv${k === 2 ? 3 : 5}` : `要先研究 Mk ${k === 2 ? 'II' : 'III'} 工藝`) : k < k0 ? 'Mk 不能降' : `主要數值 ×${CAP_MK[k]}`]);
+    const fits = CAP_KIND[sl.kind], can = [...fits.cls.map((x) => ({ main: '主砲', sec: '副砲級（砲塔、飛彈艙）', aa: '防空砲', ftr: '艦載機' }[x])), ...(fits.aux.length ? [`${fits.aux.map((z) => CAP_AUX_SIZE[z].name.slice(0, 1)).join('、')}型輔助裝備`] : [])].join('、');
+    pick = `<div class="cc-pick"><div class="cc-pick-h"><b>${capSlotName(sl)}</b><span class="g-dim">可以裝：${can}</span><span style="flex:1"></span>${smuSeg('cc-fk', mks, kc)}</div>
+      ${!same && d.g && (a.mk || 1) > 1 ? '<div class="g-dim" style="font-size:11px">換裝備＝回到 Mk I</div>' : ''}
+      <div class="cc-gl">${wpn.map(item).join('')}${aux.length ? `<div class="cc-gl-h">輔助裝備</div>${aux.map(item).join('')}` : ''}</div></div>`;
+  }
   const chg = [], cmp = (nm, a, b, fmt = f1, hi = 1) => { const x = fmt(a), y = fmt(b), d = b - a, col = Math.abs(d) < 1e-6 ? '' : (d > 0) === (hi > 0) ? '#3fdf8f' : '#ff8a7a'; if (col) chg.push(`${nm} ${x} → <b style="color:${col}">${y}</b>`); return `<dt>${nm}</dt><dd>${x}${col ? ` → <b style="color:${col}">${y}</b>` : ''}</dd>`; };
   const dps = (H) => H.main.dmg / H.main.cd, tdps = (H) => (H.tur.n * H.tur.dmg) / H.tur.cd, mt = (H) => (H.msl ? H.msl.n * H.msl.dmg : 0);
   const st = cmp('船體', A.hp, B.hp, Math.round) + cmp('護盾', A.sh, B.sh, Math.round) + cmp('主砲每秒傷害', dps(A), dps(B)) + cmp('主砲射程', A.main.range, B.main.range, Math.round) + cmp('主砲射界（左右各）', A.main.arc, B.main.arc, Math.round)
@@ -474,27 +498,26 @@ function ccFitView(src, D) {
   const back = F.q ? `好了回到${smuEsc(F.q.name)}（那時還在 ${s.name}、沒滿的話；不然停在船塢）` : '好了停回船塢（預備艦）';
   ccmSheet(`<h3>改裝：${F.q ? smuEsc(F.q.name) + '・' : '預備艦・'}${H0.name} <span class="cc-lv${c.lv > 1 ? ' up' : ''}" style="font-size:13px">Lv${c.lv}</span><span class="en">REFIT</span></h3>
     <div class="g-dim" style="font-size:12px">在 ${s.name} 的船塢改裝：佔用船塢一週，跟造船排同一個隊（排在還沒開工的造船前面）。改裝中的船離開小隊、不能出戰；${back}。Mk 上限 <b>${CAP_MK_NAME[cap]}</b>（船的等級與研發取低的）。資金 ${S.pl.money}</div>
-    <table class="cc-mods cc-fit"><tr><td></td><td class="g-dim">裝備</td><td class="g-dim">Mk</td></tr>${rows}</table>
-    <div class="g-dim" style="font-size:12px">槽位：${ccSlotSum(c.key, c.lv)}（Lv${c.lv}${c.lv < 5 ? '，升級會多開槽位' : ''}）・主砲槽可裝主砲、副砲級或大型輔助；副砲槽可裝副砲級或中型輔助；防空槽可裝防空砲或小型輔助；艦載機槽只能裝艦載機；輔助槽大中小都可以</div>
+    <div class="cc-fit cc-slots">${tiles}</div>
+    <div class="g-dim" style="font-size:11px">槽位：${ccSlotSum(c.key, c.lv)}（Lv${c.lv}${c.lv < 5 ? '，升級會多開槽位' : ''}）・點一個槽位，下面選要裝什麼；紫色＝這次改的</div>
+    ${pick}
     <div class="cc-fitcmp">${ccHexSvg(A, B, H0)}<dl class="cc-cmp">${st}</dl></div>
     <div class="g-dim" style="font-size:12px">價錢：工錢 ${CC_RULE.fit.base}＋換上的裝備（選單裡的數字；拆掉不用錢）・Mk II ${CC_RULE.fit.mk[2]}、Mk III 再 ${CC_RULE.fit.mk[3]}（每件裝備）</div>
     ${stop && cost ? `<div style="color:#ff8a7a;margin-top:6px">${stop}</div>` : ''}
     <div class="sm-btns"><button class="g-btn" id="cc-fit-no">${F.q ? '回到船的資料' : '回到船塢'}</button><button class="g-btn" id="cc-fit-rs" ${cost ? '' : 'disabled'}>重選</button><button class="g-btn primary" id="cc-fit-ok" ${stop ? 'disabled' : ''}>${cost ? `送進船塢（${cost} 資金・${eta} 週後好）` : '送進船塢'}</button></div>`, 'sm-wide cr-side', 'var(--violet)');
   const redo = () => ccFitView(src, D);
   ccHexAnim(hx0);
-  // 整修庫（caprefit.js）：背景照現在的設定擺船；剛選的零件播安裝動畫，下方說明這次的數值變化
-  // 整修庫的動畫還是照舊 5 類（主砲、副砲、飛彈、防禦、引擎）：剛改的槽位換算成那一類
-  { const ls = D._last, sid = ls && (ls.startsWith('mk:') ? ls.slice(3) : ls), sl = sid && SL.find((x) => x.id === sid), e = sl && ccEqOf(D.eq, sid);
-    const cat = sl && (ccGearIcoKey(e.g || ccEqOf(c.eq, sid).g) || 'def:std').split(':')[0], Dsum = capEqSum(c.key, D.eq, c.lv);
-    const head = sl ? `<b>${capSlotName(sl)}：${capGearName(H0, e.g)}${e.g && (e.mk || 1) > 1 ? ' ' + CAP_MK_NAME[e.mk] : ''}</b>` : `<b>${H0.name}</b>　整修庫`;
-    crShow({ c, D: Dsum, fac: SM_FAC[S.fac].game, last: sl ? (ls.startsWith('mk:') ? 'mk:' : '') + cat : null, cap: `${head}${chg.length ? '<br>' + chg.join('<br>') : '<br><span class="g-dim">在右邊選裝備：船上會裝給你看</span>'}` }); D._last = null; }
-  document.querySelectorAll('[data-fs]').forEach((el) => (el.onchange = () => {
-    const id = el.dataset.fs, v = el.value, a = ccEqOf(c.eq, id);
-    D.eq[id] = { g: v, mk: v && v === a.g ? a.mk || 1 : 1 }; D._last = id; redo();
+  // 整修庫（caprefit.js）：船照改裝中的設定擺（武器照槽位裝）；選到的槽位亮一圈、鏡頭對過去；剛換的裝備播安裝動畫，下方說明這次的數值變化
+  { const ls = D._last, sid = ls && (ls.startsWith('mk:') ? ls.slice(3) : ls), sl = sid && SL.find((x) => x.id === sid), e = sl && ccEqOf(D.eq, sid), cur = SL.find((x) => x.id === D.sel);
+    const ce = cur && ccEqOf(D.eq, cur.id), head = sl ? `<b>${capSlotName(sl)}：${capGearName(H0, e.g)}${e.g && (e.mk || 1) > 1 ? ' ' + CAP_MK_NAME[e.mk] : ''}</b>` : cur ? `<b>${capSlotName(cur)}</b>　${smuEsc(capGearName(H0, ce.g))}` : `<b>${H0.name}</b>　整修庫`;
+    crShow({ c, D: { eq: D.eq, lv: c.lv }, fac: SM_FAC[S.fac].game, sel: D.sel, last: sl ? ls : null, cap: `${head}${chg.length ? '<br>' + chg.join('<br>') : '<br><span class="g-dim">在右邊選裝備：船上會裝給你看</span>'}` }); D._last = null; }
+  document.querySelectorAll('[data-st]').forEach((el) => (el.onclick = () => { D.sel = el.dataset.st; redo(); }));
+  document.querySelectorAll('[data-gi]').forEach((el) => (el.onclick = () => {
+    if (el.disabled || !D.sel) return;
+    const v = el.dataset.gi, a = ccEqOf(c.eq, D.sel), d = ccEqOf(D.eq, D.sel); if (v === d.g) return;
+    D.eq[D.sel] = { g: v, mk: v && v === a.g ? a.mk || 1 : 1 }; D._last = D.sel; redo();
   }));
-  for (const sl of SL) {
-    const g2 = gEl('cc-fk-' + sl.id); if (g2) g2.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { if (b.disabled) return; const e = ccEqOf(D.eq, sl.id); if (!e.g) return; D.eq[sl.id] = { g: e.g, mk: +b.dataset.v }; D._last = 'mk:' + sl.id; redo(); }));
-  }
+  { const g2 = gEl('cc-fk'); if (g2) g2.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { if (b.disabled || !D.sel) return; const e = ccEqOf(D.eq, D.sel); if (!e.g || +b.dataset.v === (e.mk || 1)) return; D.eq[D.sel] = { g: e.g, mk: +b.dataset.v }; D._last = 'mk:' + D.sel; redo(); })); }
   gEl('cc-fit-rs').onclick = () => ccFitView(src);
   gEl('cc-fit-no').onclick = () => { if (F.q) ccShipView(F.q, F.q.ships.indexOf(c)); else ccYardView(s); };
   gEl('cc-fit-ok').onclick = () => { const err = ccFitOrder(S, src, D); if (err) { toast(err, 'warn'); return; } ccSave(S); ccRender(); ccYardView(s); };
