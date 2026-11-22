@@ -27,6 +27,8 @@ const DEFAULT_CONFIG = {
   maxRecordsPerPlayer: 500,
   // 貼圖繪製存回模型：'local'＝只有在伺服器這台電腦上玩的人可以存（預設）、'all'＝所有登入的玩家、'off'＝不能存
   modelEdit: 'local',
+  // 戰艦組裝「發佈」要用的 Blender（blender.exe 的路徑）；空的話自動找 C:/Program Files/Blender Foundation、F:/tools/Blender 等
+  blender: '',
 };
 const ts = () => new Date().toLocaleString('zh-TW', { hour12: false });
 const log = (...a) => console.log(`[${ts()}]`, ...a);
@@ -317,6 +319,28 @@ async function api(req, res, url) {
     }
     return json(res, 200, { ok: true });
   }
+  // 發佈：編輯器把某艦種某一級的設計匯出成 GLB 傳上來 → Blender 烘成遊戲模型（tools/shipyard/bake.py，幾分鐘，背景跑、編輯器輪詢）
+  if (p === '/api/shipyard/publish' && m === 'GET') {
+    const j = PUB.jobs.get(url.searchParams.get('job') || '');
+    return j ? json(res, 200, { state: j.state, msg: j.msg, result: j.result, err: j.err }) : json(res, 404, { error: '沒有這個工作' });
+  }
+  if (p === '/api/shipyard/publish' && m === 'POST') {
+    if (!canEditModels(req)) return json(res, 403, { error: '只有在伺服器那台電腦上才能發佈' });
+    const hull = url.searchParams.get('hull') || '', lv = +url.searchParams.get('lv');
+    const H = (readJSON(path.join(MODELS_DIR, '戰艦組裝', 'hulls.json'), {}).hulls || {})[hull];
+    if (!/^\w+$/.test(hull) || !H || H.old) return json(res, 400, { error: '沒有這個艦種（舊艦種不用發佈）' });
+    if (!(lv >= 0 && lv < 5)) return json(res, 400, { error: '等級不對' });
+    const did = (H.lv || [])[lv], D = did && (readJSON(path.join(MODELS_DIR, '戰艦組裝', 'designs.json'), {}).designs || {})[did];
+    if (!D) return json(res, 400, { error: `Lv${lv + 1} 還沒有指定設計（或設計沒存）` });
+    const blender = findBlender();
+    if (!blender) return json(res, 400, { error: '找不到 Blender：在 config.json 加上 "blender": "Blender 的 blender.exe 路徑"' });
+    const buf = await readRaw(req, 400 * 1048576);
+    if (buf.length < 20 || buf.toString('latin1', 0, 4) !== 'glTF') return json(res, 400, { error: '不是 GLB 檔' });
+    const id = Date.now().toString(36), job = { state: 'wait', msg: '排隊中', hull, lv, did, design: D, buf, who: me.name };
+    PUB.jobs.set(id, job);
+    PUB.chain = PUB.chain.catch(() => {}).then(() => runPublish(job, blender));
+    return json(res, 200, { ok: true, job: id });
+  }
   // 建築編輯器：建築種類（GLB 對位、碰撞、耐久）與自訂近地地圖都存在 models/建築/buildings.json；GLB 也放在 models/建築/
   if (p === '/api/buildings' && m === 'GET') {
     const d = readJSON(bldFile(), null) || { version: 1, types: {}, maps: {} };
@@ -391,6 +415,75 @@ function refreshModels() {   // 重讀模型資料夾（沒改的模型用快取
     const list = {}; for (const k in MODELS) list[k] = modelEntry(k);
     MODEL_JSON = JSON.stringify({ models: list });
   }));
+}
+// ───── 戰艦組裝的發佈（Blender 烘焙）─────
+// 產出：models/戰艦組裝/遊戲/艦種_lvN.glb、models.json 的 sy_艦種_N（kind hull、船首 +x）、hulls.json 該艦種的 pub[等級]＝{ model, design, at, tris, slots }
+// slots：設計裡的槽位標記（槽位 id → 位置 p、轉向 r 度、射界 arc），座標和設計一樣（公尺、+x 船首），遊戲第 4 步照這個掛裝備
+let BAKE_PY = null; try { BAKE_PY = require('../tools/shipyard/bake.py'); } catch (e) { /* 直接用 node 跑的時候讀檔 */ }
+const PUB = { jobs: new Map(), chain: Promise.resolve() };
+function findBlender() {
+  const c = [CFG.blender, process.env.BLENDER].filter(Boolean);
+  for (const root of ['C:/Program Files/Blender Foundation', 'F:/tools/Blender', 'D:/tools/Blender', 'C:/tools/Blender']) {
+    try { for (const d of fs.readdirSync(root).sort().reverse()) c.push(path.join(root, d, 'blender.exe')); } catch (e) { /* 沒這個資料夾 */ }
+  }
+  return c.find((f) => { try { return fs.statSync(f).isFile(); } catch (e) { return false; } }) || null;
+}
+function bakeScript() {
+  const f = path.join(__dirname, '..', 'tools', 'shipyard', 'bake.py');
+  if (fs.existsSync(f)) return f;
+  if (!BAKE_PY) throw new Error('找不到烘焙腳本 bake.py');
+  const out = path.join(CACHE_DIR, 'shipyard', 'bake.py'); fs.mkdirSync(path.dirname(out), { recursive: true }); fs.writeFileSync(out, BAKE_PY); return out;
+}
+function runPublish(job, blender) {
+  return new Promise((resolve) => {
+    const dir = path.join(CACHE_DIR, 'shipyard'), base = `${job.hull}_lv${job.lv + 1}`;
+    fs.mkdirSync(dir, { recursive: true });
+    const inp = path.join(dir, base + '_in.glb'), out = path.join(dir, base + '.glb');
+    fs.writeFileSync(inp, job.buf); job.buf = null;
+    const fail = (e) => { job.state = 'err'; job.err = e; log(`戰艦組裝發佈失敗：${base}：${e}`); resolve(); };
+    let script; try { script = bakeScript(); } catch (e) { return fail(e.message); }
+    job.state = 'run'; job.msg = '啟動 Blender'; const t0 = Date.now();
+    log(`戰艦組裝：${job.who} 發佈 ${base}（Blender 烘焙）`);
+    const cp = require('child_process').spawn(blender, ['--background', '--factory-startup', '--python', script, '--', inp, out], { windowsHide: true });
+    let tail = '', result = null;
+    const onLine = (s) => {
+      tail = (tail + s).slice(-4000);
+      for (const ln of s.split(/\r?\n/)) {
+        const st = ln.match(/^STEP (.*)$/); if (st) job.msg = st[1];
+        const r = ln.match(/^RESULT (.*)$/); if (r) try { result = JSON.parse(r[1]); } catch (e) { /* 不完整 */ }
+      }
+    };
+    cp.stdout.setEncoding('utf8'); cp.stderr.setEncoding('utf8');
+    cp.stdout.on('data', onLine); cp.stderr.on('data', onLine);
+    cp.on('error', (e) => fail('Blender 啟動失敗：' + e.message));
+    cp.on('close', async (code) => {
+      if (job.state === 'err') return;
+      if (code !== 0 || !result || !fs.existsSync(out)) return fail(`Blender 結束碼 ${code}\n${tail.split(/\r?\n/).filter((l) => /Error|錯誤|Traceback|line \d/.test(l)).slice(-6).join('\n') || tail.slice(-600)}`);
+      try {
+        job.msg = '登錄模型';
+        const gdir = path.join(MODELS_DIR, '戰艦組裝', '遊戲'); fs.mkdirSync(gdir, { recursive: true });
+        fs.copyFileSync(out, path.join(gdir, base + '.glb'));
+        const key = `sy_${job.hull}_${job.lv + 1}`, mf = path.join(MODELS_DIR, 'models.json'), man = JSON.parse(fs.readFileSync(mf, 'utf8'));
+        const H0 = (readJSON(path.join(MODELS_DIR, '戰艦組裝', 'hulls.json'), {}).hulls || {})[job.hull] || {};
+        man.models[key] = { file: `戰艦組裝/遊戲/${base}.glb`, kind: 'hull', forward: '+x', name: `${H0.name || job.hull} Lv${job.lv + 1}（戰艦組裝）` };
+        writeAtomic(mf, JSON.stringify(man, null, 2));
+        const slots = {};
+        for (const pc of job.design.pieces || []) if (pc.k === 'slot') slots[pc.kind + pc.n] = { p: pc.p, r: pc.r || [0, 0, 0], arc: pc.arc || 0 };
+        const hf = path.join(MODELS_DIR, '戰艦組裝', 'hulls.json'), hj = readJSON(hf, { version: 1, hulls: {} }), H = hj.hulls[job.hull];
+        if (H) {
+          H.pub = (H.pub || [null, null, null, null, null]).slice(0, 5); while (H.pub.length < 5) H.pub.push(null);
+          H.pub[job.lv] = { model: key, design: job.did, at: Date.now(), tris: result.tris, size: result.size, slots };
+          fs.copyFileSync(hf, hf + '.bak'); writeAtomic(hf, JSON.stringify(hj, null, 1));
+        }
+        await refreshModels();
+        job.result = { ...result, key, sec: Math.round((Date.now() - t0) / 1000), pub: H && H.pub[job.lv] };
+        job.state = 'done'; job.msg = '完成';
+        log(`戰艦組裝：${base} 發佈完成（${result.tris0} → ${result.tris} 面，${Math.round(result.bytes / 1024)} KB，${job.result.sec} 秒）`);
+        // 輸入的 GLB 留在快取（data/cache/shipyard/艦種_lvN_in.glb，下次發佈覆蓋）：可以直接拿來重跑 bake.py 查問題
+        resolve();
+      } catch (e) { fail(e.message); }
+    });
+  });
 }
 function canEditModels(req) {
   if (CFG.modelEdit === 'all') return true;

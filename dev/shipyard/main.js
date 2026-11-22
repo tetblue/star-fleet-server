@@ -647,7 +647,8 @@ function renderHulls() {
   const rows = [0, 1, 2, 3, 4].map((l) => { const r = (H.slots[l] = H.slots[l] || [0, 0, 0, 0, 0]);
     return `<tr><td>Lv${l + 1}</td>${SLOT_ORDER.map((k, i) => `<td><input type="number" min="0" max="12" step="1" value="${r[i] || 0}" data-hs="${l},${i}"></td>`).join('')}
       ${H.old ? '' : `<td><select data-hl="${l}">${dOpts((H.lv || [])[l])}</select> <button class="small" data-hopen="${l}" ${(H.lv || [])[l] && S.designs[H.lv[l]] ? '' : 'disabled'}>打開</button></td>`}
-      <td class="chk">${chk[l].length ? `<span class="bad">${esc(chk[l].join('；'))}</span>` : '<span class="ok">✓</span>'}</td></tr>`; }).join('');
+      <td class="chk">${chk[l].length ? `<span class="bad">${esc(chk[l].join('；'))}</span>` : '<span class="ok">✓</span>'}</td>
+      ${H.old ? '' : `<td class="chk">${pubCell(HS.sel, H, l, chk[l].length)}</td>`}</tr>`; }).join('');
   const st = H.stats || {}, stg = H.old ? '' : ST_FIELDS.map(([g, F]) => `<div class="stgrid">${F.map(([f, nm]) => { const v = g ? (st[g] || {})[f] : st[f]; return `<label>${nm}<input type="number" step="any" value="${v ?? ''}" data-hst="${g}.${f}"></label>`; }).join('')}</div>`).join('<div style="height:6px"></div>');
   M.innerHTML = `
     <div class="row"><b style="font-size:15px">${esc(H.name || HS.sel)}</b><span class="dim small">代號 ${esc(HS.sel)}</span>${H.old ? '<span class="dim small">現有艦種：數值寫在遊戲程式裡；槽位位置照各勢力船體的武器掛點自動產生，這裡只改每級的槽位數</span>' : `<span class="sp" style="flex:1"></span><button class="danger small" id="hdDel">刪除這個艦種</button>`}</div>
@@ -657,10 +658,12 @@ function renderHulls() {
       <div class="row small">說明 <input type="text" id="hdDesc" value="${esc(H.desc || '')}" style="flex:1"></div>`}
     <h4>每個等級的槽位數${H.old ? '' : '與設計'}</h4>
     <div class="dim small">數字是各類槽位幾個；設計裡同類的標記要剛好這麼多、序號 1～N。槽位數不能比上一級少（槽位編號升級時沿用，裝好的裝備才不會掉）。</div>
-    <table><tr><th></th>${SLOT_ORDER.map((k) => `<th style="color:#${SLOT_KINDS[k].col.toString(16).padStart(6, '0')}">${SLOT_KINDS[k].name}</th>`).join('')}${H.old ? '' : '<th>設計</th>'}<th>檢查</th></tr>${rows}</table>
+    <table><tr><th></th>${SLOT_ORDER.map((k) => `<th style="color:#${SLOT_KINDS[k].col.toString(16).padStart(6, '0')}">${SLOT_KINDS[k].name}</th>`).join('')}${H.old ? '' : '<th>設計</th>'}<th>檢查</th>${H.old ? '' : '<th>遊戲模型</th>'}</tr>${rows}</table>
+    ${H.old ? '' : '<div class="dim small">「發佈」：把那一級的設計交給伺服器上的 Blender 合併、減面到約 4 萬面、烘成一張貼圖，存成遊戲模型（每級幾分鐘）。槽位位置一起記下來。設計改過要重新發佈。</div>'}
     ${H.old ? '' : `<h4>數值（原廠裝備的數值；實際火力＝裝上的裝備加總）</h4>${stg}`}`;
   document.querySelectorAll('[data-hs]').forEach((el) => (el.onchange = () => { const [l, i] = el.dataset.hs.split(',').map(Number); H.slots[l][i] = Math.max(0, Math.round(+el.value || 0)); hullDirty(); renderHulls(); }));
   document.querySelectorAll('[data-hl]').forEach((el) => (el.onchange = () => { (H.lv = H.lv || [null, null, null, null, null])[+el.dataset.hl] = el.value || null; hullDirty(); renderHulls(); }));
+  document.querySelectorAll('[data-hpub]').forEach((el) => (el.onclick = () => publishLv(HS.sel, +el.dataset.hpub)));
   document.querySelectorAll('[data-hopen]').forEach((el) => (el.onclick = () => { const id = H.lv[+el.dataset.hopen]; $('hullDlg').hidden = true; openDesign(id); }));
   document.querySelectorAll('[data-hst]').forEach((el) => (el.onchange = () => {
     const [g, f] = el.dataset.hst.split('.'), v = el.value === '' ? undefined : +el.value; H.stats = H.stats || {};
@@ -669,6 +672,45 @@ function renderHulls() {
   const bind = (id, fn) => { const el = $(id); if (el) el.onchange = () => { fn(el.value); hullDirty(); renderHulls(); }; };
   bind('hdName', (v) => (H.name = v.trim() || HS.sel)); bind('hdShip', (v) => (H.ship = v)); bind('hdSkill', (v) => (H.skill = v)); bind('hdLook', (v) => (H.look = +v)); bind('hdDesc', (v) => (H.desc = v));
   if ($('hdDel')) $('hdDel').onclick = () => { if (!confirm(`刪除艦種「${H.name}」？（存檔後才會寫進伺服器）`)) return; delete S.hulls[HS.sel]; HS.sel = Object.keys(S.hulls)[0] || null; hullDirty(); renderHulls(); };
+}
+// ───── 發佈（槽位制度第 3 步之二）：一級的設計 → 伺服器的 Blender 烘成遊戲模型（models/戰艦組裝/遊戲/，models.json 的 sy_艦種_等級）─────
+const PUBJ = {};   // 'hull|lv' → { msg, err }：進行中或失敗的發佈
+const fmtT = (t) => { const d = new Date(t); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+function pubCell(key, H, l, bad) {
+  const j = PUBJ[key + '|' + l], P = (H.pub || [])[l], d = S.designs[(H.lv || [])[l]];
+  if (j && !j.err) return `<span class="dim">${esc(j.msg)}…</span>`;
+  const stale = P && d && (P.design !== H.lv[l] || (d.updated || 0) > P.at);
+  const info = P ? `<span class="${stale ? 'bad' : 'ok'}" title="${esc(P.model)}">${stale ? '設計改過了，' : ''}${fmtT(P.at)}・${Math.round(P.tris / 1000)}k 面</span> ` : '<span class="dim">未發佈</span> ';
+  return (j && j.err ? `<span class="bad" title="${esc(j.err)}">發佈失敗（滑鼠移過來看原因）</span> ` : '') + info +
+    `<button class="small" data-hpub="${l}" ${bad || !S.canEdit || Object.keys(PUBJ).some((k) => !PUBJ[k].err) ? 'disabled' : ''} title="${S.canEdit ? '' : '只有在伺服器那台電腦上才能發佈'}">${P ? '重新發佈' : '發佈'}</button>`;
+}
+async function publishLv(key, l) {
+  const H = S.hulls[key], id = H && (H.lv || [])[l], k = key + '|' + l;
+  if (!H || !id || !S.designs[id]) return;
+  if (HS.dirty) return toast('艦種有改過還沒存，先按「存檔」再發佈', true);
+  if (S.dirty && S.curId === id) return toast('這個設計有改過還沒儲存，先儲存再發佈', true);
+  if (S.dirty && S.curId !== id && !confirm('目前的設計還沒儲存，發佈會打開別的設計，要放棄修改嗎？')) return;
+  PUBJ[k] = { msg: '組合模型' }; renderHulls();
+  const done = (err) => { if (err) PUBJ[k] = { err }; else delete PUBJ[k]; if (!$('hullDlg').hidden) renderHulls(); };
+  try {
+    if (S.curId !== id) { S.dirty = false; openDesign(id); }
+    await sync();
+    const { buf } = await buildGlb();
+    PUBJ[k].msg = `上傳 ${(buf.byteLength / 1048576).toFixed(0)} MB`; renderHulls();
+    const r = await fetch(`../api/shipyard/publish?hull=${encodeURIComponent(key)}&lv=${l}`, { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'model/gltf-binary' }, body: buf });
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+    for (;;) {
+      await new Promise((res) => setTimeout(res, 1500));
+      const q = await (await fetch('../api/shipyard/publish?job=' + j.job, { headers: authHeaders() })).json();
+      if (q.state === 'err' || q.error) throw new Error(q.err || q.error);
+      if (q.state === 'done') {
+        (H.pub = H.pub || [null, null, null, null, null])[l] = q.result.pub;
+        toast(`${H.name} Lv${l + 1} 發佈完成：${q.result.tris0} → ${q.result.tris} 面，${Math.round(q.result.bytes / 1024)} KB，${q.result.sec} 秒`);
+        return done();
+      }
+      if (PUBJ[k].msg !== q.msg) { PUBJ[k].msg = q.msg; if (!$('hullDlg').hidden) renderHulls(); }
+    }
+  } catch (e) { console.error(e); toast('發佈失敗：' + e.message, true); done(e.message); }
 }
 function newHull() {
   const key = (prompt('新艦種的代號（英文字母、數字，例如 cruiser2；遊戲裡用這個當鍵）') || '').trim();
@@ -728,20 +770,24 @@ async function delDesign(id) {
 }
 
 // ───── 匯出 GLB：實例展開成共用網格的節點（glTF 允許多個節點用同一個網格；鏡像的直接用負的矩陣）─────
+// 目前畫面上的設計 → GLB（槽位標記、裝備預覽不算）；匯出和發佈共用
+async function buildGlb() {
+  const root = new THREE.Group(); root.name = $('dname').value.trim() || 'ship';
+  for (const pc of S.pieces) {
+    const o = OBJ.get(pc.id); if (!o || isSlot(pc)) continue;   // 槽位標記不匯出
+    const g = new THREE.Group(); g.name = pc.n; g.matrixAutoUpdate = false; g.matrix.copy(o.matrix); root.add(g);
+    for (const c of o.children) {
+      const it = c.userData.item; if (!it) continue;
+      for (const m of it.ms) { const mesh = new THREE.Mesh(it.geo, c.material); mesh.matrixAutoUpdate = false; mesh.matrix.copy(m); g.add(mesh); }
+    }
+  }
+  return { root, buf: await new GLTFExporter().parseAsync(root, { binary: true, maxTextureSize: 2048 }) };
+}
 async function exportGlb() {
   if (!S.pieces.length) return toast('設計是空的', true);
   busy(true);
   try {
-    const root = new THREE.Group(); root.name = $('dname').value.trim() || 'ship';
-    for (const pc of S.pieces) {
-      const o = OBJ.get(pc.id); if (!o || isSlot(pc)) continue;   // 槽位標記不匯出
-      const g = new THREE.Group(); g.name = pc.n; g.matrixAutoUpdate = false; g.matrix.copy(o.matrix); root.add(g);
-      for (const c of o.children) {
-        const it = c.userData.item;
-        for (const m of it.ms) { const mesh = new THREE.Mesh(it.geo, c.material); mesh.matrixAutoUpdate = false; mesh.matrix.copy(m); g.add(mesh); }
-      }
-    }
-    const buf = await new GLTFExporter().parseAsync(root, { binary: true, maxTextureSize: 2048 });
+    const { root, buf } = await buildGlb();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([buf], { type: 'model/gltf-binary' }));
     a.download = root.name + '.glb'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);

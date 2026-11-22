@@ -29,7 +29,7 @@ run(process.execPath, [path.join(root, 'build.mjs')]);
 
 // 2. 伺服器
 const cjs = path.join(out, 'server.cjs');
-await esbuild.build({ entryPoints: [path.join(root, 'server', 'server.js')], bundle: true, platform: 'node', format: 'cjs', target: 'node22', outfile: cjs, logLevel: 'warning' });
+await esbuild.build({ entryPoints: [path.join(root, 'server', 'server.js')], bundle: true, platform: 'node', format: 'cjs', target: 'node22', outfile: cjs, logLevel: 'warning', loader: { '.py': 'text' } });   // .py：戰艦組裝發佈的 Blender 烘焙腳本（tools/shipyard/bake.py）包進 exe
 
 // 3. SEA blob：web/ 的檔案，加上 2D 素材（build.mjs 不產生，從 web_backup/assets 補上；web/assets 有同名檔時以 web/ 為準）
 const assets = {};
