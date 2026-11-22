@@ -7,6 +7,7 @@
 <style>
   :root { --bg: #070b14; --panel: #0d1424; --line: #24324d; --text: #d8e4f5; --dim: #7f91ad; --acc: #5cc8ff; --ok: #6fdc8c; --warn: #ffc857; --bad: #ff6b6b; }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.5 "Microsoft JhengHei", "PingFang TC", system-ui, sans-serif; }
   body { display: grid; grid-template-columns: 260px 1fr 320px; grid-template-rows: 44px 1fr; height: 100vh; overflow: hidden; }
   header { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
@@ -49,6 +50,10 @@
   #designs .it span, #pieces .it span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #designs .it small, #pieces .it small { color: var(--dim); }
   #pieces { max-height: 300px; overflow: auto; }
+  #pieces .it.slot span { color: var(--sc); }
+  .slotbtn { border-color: var(--sc); color: var(--sc); }
+  #slotCounts .sc { color: var(--sc); margin-right: 8px; }
+  #slotCounts .sc b { color: var(--text); }
   #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); padding: 8px 16px; border-radius: 6px; background: #17324f; border: 1px solid #2f7fb8; display: none; z-index: 10; max-width: 70vw; }
   #toast.bad { background: #4a1c1c; border-color: var(--bad); }
   #toast.on { display: block; }
@@ -98,6 +103,11 @@
       <span>旋轉</span><input type="number" step="15" data-f="r0"><input type="number" step="15" data-f="r1"><input type="number" step="15" data-f="r2">
       <span>縮放</span><input type="number" step="0.1" data-f="s0"><input type="number" step="0.1" data-f="s1"><input type="number" step="0.1" data-f="s2">
     </div>
+    <div id="slotBox" hidden>
+      <div class="row small">種類 <select id="slotKind"></select> 序號 <input type="number" id="slotN" min="1" step="1" style="width:52px" title="同一類裡的第幾個；改成已經有的序號會和那個對調"></div>
+      <div class="row small" id="slotArcRow">射界左右各 <input type="number" id="slotArc" min="0" max="180" step="5" style="width:60px">°</div>
+      <div class="dim small">箭頭＝裝備朝向（砲口正前方），扇形＝射界。按 E 旋轉、W 移動；M 鏡像到另一舷會自動給新序號。</div>
+    </div>
     <div class="dim small">X 船首方向、Y 上、Z 右舷；單位公尺、角度。縮放為負就是鏡像。</div>
     <div class="row">
       <button id="btnDup" title="Ctrl+D">複製</button>
@@ -107,6 +117,16 @@
       <button id="btnDel" class="danger" title="Delete">刪除</button>
     </div>
   </div>
+
+  <h3>槽位<span class="sp"></span><label class="small dim"><input type="checkbox" id="showSlots" checked> 顯示</label></h3>
+  <div class="dim small">艦長模式的裝備位置。加一個標記放在畫面中央，再拖到船上、轉到砲口方向。每一類的序號就是遊戲裡的槽位編號，升級時沿用。</div>
+  <div class="row small">
+    <button data-addslot="main" style="--sc:#ff5a4a" class="slotbtn">＋主砲槽</button><button data-addslot="sec" style="--sc:#ffb347" class="slotbtn">＋副砲槽</button><button data-addslot="aa" style="--sc:#5cc8ff" class="slotbtn">＋防空槽</button>
+    <button data-addslot="ftr" style="--sc:#6fdc8c" class="slotbtn">＋艦載機槽</button><button data-addslot="aux" style="--sc:#c9a7ff" class="slotbtn">＋輔助槽</button>
+  </div>
+  <div class="row small" id="slotCounts"></div>
+  <div class="small" id="slotWarn" style="color:var(--warn)"></div>
+  <div class="row small"><button id="btnRenum" title="每一類照目前的序號順序重新編成 1、2、3…">重新編號</button></div>
 
   <h3>轉動模型</h3>
   <div class="dim small">有選取就轉選取的部件，沒選就轉整艘船（繞中心）。也可以按 E 後拖曳選取部件上的圓環自由旋轉；[ ] 鍵左右轉。</div>

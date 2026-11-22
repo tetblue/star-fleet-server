@@ -197,6 +197,7 @@ async function libAssets(shipId, style) {
   return libCache.get(key);
 }
 async function assetOf(pc) {
+  if (pc.k === 'slot') return { a: slotAsset(pc.kind, pc.arc || 0) };
   const ship = LIB.byId[pc.ship]; if (!ship) throw new Error('素材庫沒有 ' + pc.ship);
   if (pc.k === 'part') { const a = (await shipAssets(pc.ship, pc.v)).parts.get(pc.n); if (!a) throw new Error(`${ship.name} 沒有部件 ${pc.n}`); return { a }; }
   const [lib, sa] = await Promise.all([libAssets(pc.ship, libStyle(ship, pc.v)), shipAssets(pc.ship, pc.v)]);
@@ -214,16 +215,62 @@ function buildObject(a, mats) {
       it.ms.forEach((m, i) => o.setMatrixAt(i, m));
       o.computeBoundingSphere();
     }
+    if (it.slot) o.renderOrder = 1000;   // 槽位標記：畫在船身上面
     o.userData.item = it; g.add(o);
   }
   g.userData.box = a.box; g.userData.tris = a.tris;
   return g;
 }
 
+// ───── 槽位標記（艦長模式的槽位制度，dev/艦長槽位企劃.md 第 2 步）─────
+// 設計裡的一種部件：{ id, k: 'slot', kind: main|sec|aa|ftr|aux, n: 同類的序號（0 起）, arc: 射界左右各幾度, p, r, s }。
+// 標記的 +x＝裝備朝向（砲口的正前方）、+y＝上；裝備的模型之後裝在這個位置與方向。同類的序號就是遊戲裡的槽位編號（main0、sec1…），升級時沿用。
+const SLOT_KINDS = {
+  main: { name: '主砲槽', short: '主', col: 0xff5a4a, size: 60, arc: 45 },
+  sec: { name: '副砲槽', short: '副', col: 0xffb347, size: 40, arc: 120 },
+  aa: { name: '防空槽', short: '防', col: 0x5cc8ff, size: 26, arc: 180 },
+  ftr: { name: '艦載機槽', short: '機', col: 0x6fdc8c, size: 50, arc: 0 },
+  aux: { name: '輔助槽', short: '輔', col: 0xc9a7ff, size: 36, arc: 0 },
+};
+const SLOT_ORDER = ['main', 'sec', 'aa', 'ftr', 'aux'];
+const slotMatCache = new Map();
+function slotMat(kind, op) {
+  const k = kind + op; if (slotMatCache.has(k)) return slotMatCache.get(k);
+  const m = new THREE.MeshBasicMaterial({ color: SLOT_KINDS[kind].col, transparent: true, opacity: op, depthTest: false, depthWrite: false, side: THREE.DoubleSide });
+  slotMatCache.set(k, m); return m;
+}
+const slotAssetCache = new Map();
+function slotAsset(kind, arc) {
+  const key = kind + '|' + arc; if (slotAssetCache.has(key)) return slotAssetCache.get(key);
+  const K = SLOT_KINDS[kind], sz = K.size, items = [], I = new THREE.Matrix4();
+  const add = (geo, op) => { geo.computeBoundingBox(); items.push({ geo, mat: slotMat(kind, op), flip: false, ms: [I], slot: 1 }); };
+  add(new THREE.BoxGeometry(sz, sz * 0.5, sz), 0.45);
+  const cone = new THREE.ConeGeometry(sz * 0.22, sz * 0.8, 12); cone.rotateZ(-Math.PI / 2); cone.translate(sz * 0.9, 0, 0); add(cone, 0.95);
+  if (arc > 0) { const fan = new THREE.CircleGeometry(sz * 2.4, 40, -arc * D2R, 2 * arc * D2R); fan.rotateX(-Math.PI / 2); add(fan, 0.14); }
+  const box = new THREE.Box3(new THREE.Vector3(-sz / 2, -sz / 4, -sz / 2), new THREE.Vector3(sz * 1.3, sz / 4, sz / 2));
+  const a = { center: [0, 0, 0], box, items, tris: 0 }; slotAssetCache.set(key, a); return a;
+}
+// 標記上的字（「主1」）：一直朝向鏡頭、不被船身擋住
+function slotLabel(pc) {
+  const K = SLOT_KINDS[pc.kind], cv = document.createElement('canvas'); cv.width = 128; cv.height = 64;
+  const g = cv.getContext('2d'); g.font = 'bold 40px "Microsoft JhengHei", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.lineWidth = 6; g.strokeStyle = '#000'; g.strokeText(K.short + (pc.n + 1), 64, 34); g.fillStyle = '#' + K.col.toString(16).padStart(6, '0'); g.fillText(K.short + (pc.n + 1), 64, 34);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false, depthWrite: false, transparent: true, sizeAttenuation: false }));
+  sp.scale.set(0.07, 0.035, 1); sp.position.set(0, K.size * 0.75, 0); sp.renderOrder = 1001; return sp;   // 固定在畫面上的大小，拉遠也看得到
+}
+const isSlot = (pc) => pc && pc.k === 'slot';
+const slotName = (pc) => `${SLOT_KINDS[pc.kind].name} ${pc.n + 1}`;
+// 同類裡沒用過的最小序號（skip＝這個部件自己不算）
+function freeSlotN(kind, skip, also = []) {
+  const used = new Set(S.pieces.filter((p) => isSlot(p) && p.kind === kind && p.id !== skip).map((p) => p.n).concat(also));
+  let n = 0; while (used.has(n)) n++; return n;
+}
+const slotCounts = () => { const c = Object.fromEntries(SLOT_ORDER.map((k) => [k, 0])); for (const p of S.pieces) if (isSlot(p)) c[p.kind]++; return c; };
+
 // ───── 狀態 ─────
-const S = { designs: {}, canEdit: false, curId: null, pieces: [], sel: [], undo: [], redo: [], dirty: false, nextId: 1, libShip: null, libVar: null };
+const S = { designs: {}, canEdit: false, curId: null, pieces: [], sel: [], undo: [], redo: [], dirty: false, nextId: 1, libShip: null, libVar: null, showSlots: true };
 const OBJ = new Map();   // 部件 id → THREE.Group
-const keyOf = (pc) => `${pc.ship}|${pc.v}|${pc.k}|${pc.n}`;
+const keyOf = (pc) => (pc.k === 'slot' ? `slot|${pc.kind}|${pc.n}|${pc.arc || 0}` : `${pc.ship}|${pc.v}|${pc.k}|${pc.n}`);
 const pieceOf = (id) => S.pieces.find((p) => p.id === id);
 const triCount = () => { let n = 0; for (const o of OBJ.values()) n += o.userData.tris || 0; return n; };
 
@@ -253,6 +300,7 @@ async function sync() {   // 讓畫面上的物件和 S.pieces 一致（不同�
       if (tok !== syncTok && !pieceOf(pc.id)) return;
       const cur = pieceOf(pc.id); if (!cur || keyOf(cur) !== keyOf(pc)) return;
       const n = buildObject(a, mats); n.userData.pid = pc.id; n.userData.key = keyOf(pc);
+      if (isSlot(cur)) { n.add(slotLabel(cur)); n.userData.slot = 1; n.visible = S.showSlots; }
       const old = OBJ.get(pc.id); if (old) world.remove(old);
       world.add(n); OBJ.set(pc.id, n); applyT(n, cur);
     }).catch((e) => toast(e.message, true)));
@@ -269,7 +317,7 @@ function undo(redo) {
   const from = redo ? S.redo : S.undo, to = redo ? S.undo : S.redo;
   if (!from.length) return;
   to.push(snap()); S.pieces = JSON.parse(from.pop());
-  S.sel = S.sel.filter((id) => pieceOf(id)); S.dirty = true; updHeader(); autosave(); sync(); renderPieces();
+  S.sel = S.sel.filter((id) => pieceOf(id)); S.dirty = true; updHeader(); autosave(); sync(); renderPieces(); renderSlots();
 }
 function updHeader() {
   $('dirty').textContent = S.dirty ? '未儲存' : '';
@@ -351,7 +399,9 @@ renderer.domElement.addEventListener('pointerup', (e) => {
 const newId = () => 'p' + (S.nextId++);
 function addPieces(list, sel = true) {
   if (!list.length) return;
-  pushUndo(); S.pieces.push(...list); renderPieces();
+  // 槽位標記：複製、鏡像出來的換成同類沒用過的序號
+  const taken = {}; for (const pc of list) if (isSlot(pc)) { const t = taken[pc.kind] || (taken[pc.kind] = []); pc.n = freeSlotN(pc.kind, null, t); t.push(pc.n); }
+  pushUndo(); S.pieces.push(...list); renderPieces(); renderSlots();
   return sync().then(() => { if (sel) select(list.map((p) => p.id)); });
 }
 async function addPart(shipId, v, key) {
@@ -362,6 +412,12 @@ async function addLib(shipId, v, n) {
   const sc = (await shipAssets(shipId, v)).compScale.get(n) || 1, t = controls.target;
   const st = +$('snapT').value || 1, q = (x) => Math.round(x / st) * st;
   addPieces([{ id: newId(), ship: shipId, v, k: 'lib', n, p: [q(t.x), q(t.y), q(t.z)], r: [0, 0, 0], s: [sc, sc, sc] }]);
+}
+// 加一個槽位標記：放在畫面中央（吸附格點），朝船首
+function addSlot(kind) {
+  const t = controls.target, st = +$('snapT').value || 1, q = (x) => Math.round(x / st) * st;
+  S.showSlots = true; $('showSlots').checked = true;
+  addPieces([{ id: newId(), k: 'slot', kind, n: 0, arc: SLOT_KINDS[kind].arc, p: [q(t.x), q(t.y), q(t.z)], r: [0, 0, 0], s: [1, 1, 1] }]);
 }
 async function addWhole(shipId, v) {
   const sa = await shipAssets(shipId, v);
@@ -386,7 +442,8 @@ const cmd = {
     if (!S.sel.length) return; pushUndo();
     for (const id of S.sel) {
       const pc = pieceOf(id); if (!pc) continue;
-      if (pc.k === 'part') { const a = (await shipAssets(pc.ship, pc.v)).parts.get(pc.n); pc.p = a.center.slice(); pc.s = [1, 1, 1]; }
+      if (isSlot(pc)) pc.s = [1, 1, 1];
+      else if (pc.k === 'part') { const a = (await shipAssets(pc.ship, pc.v)).parts.get(pc.n); pc.p = a.center.slice(); pc.s = [1, 1, 1]; }
       else { const sc = (await shipAssets(pc.ship, pc.v)).compScale.get(pc.n) || 1; pc.s = [sc, sc, sc]; }
       pc.r = [0, 0, 0];
     }
@@ -409,7 +466,7 @@ const cmd = {
   del() {
     if (!S.sel.length) return; pushUndo();
     const del = new Set(S.sel); S.pieces = S.pieces.filter((p) => !del.has(p.id)); S.sel = [];
-    tc.detach(); sync(); renderPieces();
+    tc.detach(); sync(); renderPieces(); renderSlots();
   },
 };
 function frame() {
@@ -442,11 +499,24 @@ function renderLib() {
     document.querySelectorAll('[data-lib]').forEach((el) => (el.onclick = () => addLib(sid, v, el.dataset.lib)));
   }).catch((e) => { $('libParts').textContent = e.message; });
 }
-function pieceLabel(pc) { const s = LIB.byId[pc.ship]; return `${pc.k === 'part' ? partLabel(pc.n) : libLabel(pc.n)}`; }
+function pieceLabel(pc) { return isSlot(pc) ? slotName(pc) : pc.k === 'part' ? partLabel(pc.n) : libLabel(pc.n); }
+const pieceSub = (pc) => (isSlot(pc) ? (SLOT_KINDS[pc.kind].arc ? `槽位・射界左右各 ${pc.arc || 0}°` : '槽位') : `${(LIB.byId[pc.ship] || {}).name || pc.ship}・${varLabel(pc.v)}`);
 function renderPieces() {
   $('pcount').textContent = S.pieces.length ? S.pieces.length + ' 個' : '';
-  $('pieces').innerHTML = S.pieces.map((pc) => `<div class="it${S.sel.includes(pc.id) ? ' on' : ''}" data-pid="${pc.id}"><span>${esc(pieceLabel(pc))}</span><small>${esc((LIB.byId[pc.ship] || {}).name || pc.ship)}・${esc(varLabel(pc.v))}</small></div>`).join('') || '<div class="dim">還沒有部件。從左邊素材庫加入，或按「整艦放入」。</div>';
+  $('pieces').innerHTML = S.pieces.map((pc) => `<div class="it${S.sel.includes(pc.id) ? ' on' : ''}${isSlot(pc) ? ' slot' : ''}" data-pid="${pc.id}"${isSlot(pc) ? ` style="--sc:#${SLOT_KINDS[pc.kind].col.toString(16).padStart(6, '0')}"` : ''}><span>${esc(pieceLabel(pc))}</span><small>${esc(pieceSub(pc))}</small></div>`).join('') || '<div class="dim">還沒有部件。從左邊素材庫加入，或按「整艦放入」。</div>';
   document.querySelectorAll('#pieces [data-pid]').forEach((el) => (el.onclick = (e) => select([el.dataset.pid], e.shiftKey)));
+}
+// 槽位面板：各類幾個、序號有沒有重複或跳號
+function renderSlots() {
+  const c = slotCounts(), warn = [];
+  for (const k of SLOT_ORDER) {
+    const ns = S.pieces.filter((p) => isSlot(p) && p.kind === k).map((p) => p.n).sort((a, b) => a - b);
+    const dup = ns.filter((n, i) => i && ns[i - 1] === n), gap = ns.length && ns[ns.length - 1] !== ns.length - 1;
+    if (dup.length) warn.push(`${SLOT_KINDS[k].name}序號重複：${[...new Set(dup)].map((n) => n + 1).join('、')}`);
+    else if (gap) warn.push(`${SLOT_KINDS[k].name}序號跳號（應該是 1～${ns.length}）`);
+  }
+  $('slotCounts').innerHTML = SLOT_ORDER.map((k) => `<span class="sc" style="--sc:#${SLOT_KINDS[k].col.toString(16).padStart(6, '0')}">${SLOT_KINDS[k].name.replace('槽', '')} <b>${c[k]}</b></span>`).join('');
+  $('slotWarn').innerHTML = warn.map(esc).join('<br>');
 }
 function renderSel(liveOnly) {
   const pcs = S.sel.map(pieceOf).filter(Boolean);
@@ -458,10 +528,16 @@ function renderSel(liveOnly) {
     el.disabled = !one; if (document.activeElement !== el) el.value = one ? one[f][i] : '';
   });
   if (liveOnly) return;
-  $('selName').innerHTML = one ? `<b>${esc(pieceLabel(one))}</b> <span class="dim">${esc(LIB.byId[one.ship] ? LIB.byId[one.ship].name : one.ship)}・${esc(one.n)}</span>` : `<b>選取了 ${pcs.length} 個</b> <span class="dim">（拖曳控制軸一起移動）</span>`;
-  const ships = new Set(pcs.map((p) => p.ship)), vs = [...ships].map((s) => (LIB.byId[s] ? LIB.byId[s].variants.map((v) => v.name) : []));
+  const so = isSlot(one) ? one : null;
+  $('slotBox').hidden = !so; $('selVarRow').hidden = pcs.every(isSlot);
+  if (so) {
+    $('slotKind').innerHTML = SLOT_ORDER.map((k) => `<option value="${k}"${k === so.kind ? ' selected' : ''}>${SLOT_KINDS[k].name}</option>`).join('');
+    $('slotN').value = so.n + 1; $('slotArc').value = so.arc || 0; $('slotArcRow').hidden = !SLOT_KINDS[so.kind].arc;
+  }
+  $('selName').innerHTML = one ? (so ? `<b>${esc(slotName(so))}</b> <span class="dim">遊戲裡的槽位編號 ${so.kind}${so.n}</span>` : `<b>${esc(pieceLabel(one))}</b> <span class="dim">${esc(LIB.byId[one.ship] ? LIB.byId[one.ship].name : one.ship)}・${esc(one.n)}</span>`) : `<b>選取了 ${pcs.length} 個</b> <span class="dim">（拖曳控制軸一起移動）</span>`;
+  const ships = new Set(pcs.filter((p) => !isSlot(p)).map((p) => p.ship)), vs = [...ships].map((s) => (LIB.byId[s] ? LIB.byId[s].variants.map((v) => v.name) : []));
   const common = vs.reduce((a, b) => a.filter((x) => b.includes(x)), vs[0] || []);
-  const curV = new Set(pcs.map((p) => p.v));
+  const curV = new Set(pcs.filter((p) => !isSlot(p)).map((p) => p.v));
   $('selVar').innerHTML = (curV.size > 1 ? '<option value="">（不同）</option>' : '') + common.map((v) => `<option value="${esc(v)}"${curV.size === 1 && curV.has(v) ? ' selected' : ''}>${esc(varLabel(v))}</option>`).join('');
 }
 function renderAllVar() {
@@ -481,7 +557,7 @@ function loadPieces(list) {
   S.pieces = (list || []).map((p) => ({ ...p })); S.sel = []; S.undo = []; S.redo = [];
   S.nextId = 1 + S.pieces.reduce((m, p) => Math.max(m, +String(p.id).replace(/\D/g, '') || 0), 0);
   for (const [id, o] of OBJ) { world.remove(o); OBJ.delete(id); }
-  tc.detach(); sync().then(() => frame()); renderPieces(); renderSel();
+  tc.detach(); sync().then(() => frame()); renderPieces(); renderSel(); renderSlots();
 }
 function openDesign(id) {
   if (S.dirty && id !== S.curId && !confirm('目前的設計還沒儲存，要放棄修改嗎？')) return;
@@ -522,7 +598,7 @@ async function exportGlb() {
   try {
     const root = new THREE.Group(); root.name = $('dname').value.trim() || 'ship';
     for (const pc of S.pieces) {
-      const o = OBJ.get(pc.id); if (!o) continue;
+      const o = OBJ.get(pc.id); if (!o || isSlot(pc)) continue;   // 槽位標記不匯出
       const g = new THREE.Group(); g.name = pc.n; g.matrixAutoUpdate = false; g.matrix.copy(o.matrix); root.add(g);
       for (const c of o.children) {
         const it = c.userData.item;
@@ -557,13 +633,27 @@ document.querySelectorAll('[data-rot]').forEach((b) => (b.onclick = () => {
 }));
 $('selVar').onchange = () => {
   const v = $('selVar').value; if (!v) return;
-  pushUndo(); for (const id of S.sel) { const pc = pieceOf(id); if (pc) pc.v = v; }
+  pushUndo(); for (const id of S.sel) { const pc = pieceOf(id); if (pc && !isSlot(pc)) pc.v = v; }
   sync(); renderPieces();
+};
+// 槽位標記的欄位：種類、序號（和同類的另一個對調）、射界
+function slotEdit(fn) { const pc = S.sel.length === 1 && pieceOf(S.sel[0]); if (!isSlot(pc)) return; pushUndo(); fn(pc); sync(); renderPieces(); renderSel(); renderSlots(); }
+$('slotKind').onchange = () => slotEdit((pc) => { pc.kind = $('slotKind').value; pc.n = freeSlotN(pc.kind, pc.id); if (!SLOT_KINDS[pc.kind].arc) pc.arc = 0; else if (!pc.arc) pc.arc = SLOT_KINDS[pc.kind].arc; });
+$('slotN').onchange = () => slotEdit((pc) => {
+  const n = Math.max(0, Math.round(+$('slotN').value || 1) - 1), o = S.pieces.find((p) => isSlot(p) && p !== pc && p.kind === pc.kind && p.n === n);
+  if (o) o.n = pc.n; pc.n = n;
+});
+$('slotArc').onchange = () => slotEdit((pc) => { pc.arc = Math.max(0, Math.min(180, Math.round(+$('slotArc').value || 0))); });
+document.querySelectorAll('[data-addslot]').forEach((b) => (b.onclick = () => addSlot(b.dataset.addslot)));
+$('showSlots').onchange = () => { S.showSlots = $('showSlots').checked; for (const o of OBJ.values()) if (o.userData.slot) o.visible = S.showSlots; };
+$('btnRenum').onclick = () => {   // 每一類照目前的順序重新編成 1、2、3…
+  pushUndo(); for (const k of SLOT_ORDER) S.pieces.filter((p) => isSlot(p) && p.kind === k).sort((a, b) => a.n - b.n).forEach((p, i) => (p.n = i));
+  sync(); renderPieces(); renderSel(); renderSlots();
 };
 $('allVar').onchange = () => {
   const v = $('allVar').value; if (!v || !S.pieces.length) return;
   pushUndo(); let skip = 0;
-  for (const pc of S.pieces) { const s = LIB.byId[pc.ship]; if (s && s.variants.some((x) => x.name === v)) pc.v = v; else skip++; }
+  for (const pc of S.pieces) { if (isSlot(pc)) continue; const s = LIB.byId[pc.ship]; if (s && s.variants.some((x) => x.name === v)) pc.v = v; else skip++; }
   $('allVar').value = ''; sync(); renderPieces(); renderSel();
   if (skip) toast(`${skip} 個部件的艦型沒有「${varLabel(v)}」塗裝，維持原樣`);
 };
@@ -608,8 +698,8 @@ loop();
     if (work && work.pieces && work.pieces.length) {   // 上次沒關掉的工作（重新整理後接著做）
       S.curId = work.id && S.designs[work.id] ? work.id : null; $('dname').value = work.name || '';
       loadPieces(work.pieces); S.dirty = !!work.dirty; updHeader(); renderDesigns();
-    } else { renderPieces(); renderSel(); }
+    } else { renderPieces(); renderSel(); renderSlots(); }
     if (!ds) toast('沒有登入伺服器：設計只會存在這台瀏覽器', true);
   } catch (e) { console.error(e); toast(e.message, true); $('libParts').textContent = e.message; }
 })();
-window.__shipyard = { S, OBJ, LIB, shipAssets, libAssets, addWhole, frame };
+window.__shipyard = { S, OBJ, LIB, shipAssets, libAssets, addWhole, frame, addSlot, select, cmd };
