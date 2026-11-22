@@ -323,19 +323,112 @@ function capMountRaw(tk) {
   return list;
 }
 function capShipMods(i) { if (!CAP_FX.wpn) return null; const k = CAP.byI && i < CAP.byI.length ? CAP.byI[i] : -1, s = k >= 0 ? CAP.ships[k] : null, mod = s && s.H && s.H.mod; return mod && (mod.main || mod.tur) ? { s, mod } : null; }
+const capShipOf = (i) => { const k = CAP.byI && i < CAP.byI.length ? CAP.byI[i] : -1; return k >= 0 ? CAP.ships[k] : null; };
+
+// ───── 槽位制度第 4 步：發佈的艦種模型、裝備照槽位裝在船上 ─────
+// 發佈的模型：這一級沒發佈就用往下最近一級的；都沒有＝null（照原本借用勢力船體）
+function capHullModel(s) {
+  const P = s && CAP_HULL_PUB[s.key]; if (!P) return null;
+  for (let l = Math.min(4, (s.lv || 1) - 1); l >= 0; l--) if (P[l] && R3.models[P[l].model]) return { key: P[l].model, pub: P[l] };
+  return null;
+}
+// main.js rebuild3D／update3D：艦長的船用哪個船體模型（null＝原本的 hullKey）
+function capHull3D(i) { const H = CAP.on && capHullModel(capShipOf(i)); return H ? H.key : null; }
+// 發佈的模型在用到前要先下載（sy 開頭的鍵是「用到才下載」）：開機讀完 hulls.json 就先載好
+function capPubPreload() {
+  const keys = [...new Set(Object.values(CAP_HULL_PUB).flat().filter(Boolean).map((P) => P.model))];
+  if (!keys.length || typeof ensureModels !== 'function') return Promise.resolve();
+  return ensureModels(keys).then(() => { if (R3.ready) for (const k of keys) if (MODEL_SRC[k] && !R3.models[k]) R3.models[k] = getModel(k); R3.version = -1; });
+}
+// 裝備 → 武器模型鍵（st＝風格）與尺寸倍率；艦載機、輔助裝備還沒有模型（null）
+const CAP_GEAR_CK = (G) => (!G ? null : G.cls === 'main' ? 'main' : G.kind === 'gun' ? 'sec' : G.kind === 'pod' ? 'msl' : G.cls === 'aa' ? 'aa' : null);
+const CAP_CK_G = { main: 0, sec: 1, aa: 2, msl: 3 };
+function capRoleAny(st, role) { const fi = 'eamcrib'.indexOf(st), gk = WEAPON_GK[fi] || ''; for (let w = 0; w < 6; w++) if (gk[w] === role) return w; return -1; }
+function capGearWKey(st, g) {
+  const G = CAP_GEAR[g], ck = CAP_GEAR_CK(G); if (!ck) return null;
+  if ('eamcrib'.indexOf(st) < 0) st = 'e';
+  let key = null, k = 1;
+  if (ck === 'main' || ck === 'sec') {
+    const X = G.mod && capWKey(st, ck === 'main' ? 'main' : 'tur', { [ck === 'main' ? 'main' : 'tur']: G.mod });
+    if (X) { key = X.key; k = X.L.k || 1; } else key = st + 'w' + capRoleW(st, ck === 'main' ? 'm' : 's');
+  } else if (ck === 'aa') { key = st + 'w' + capRoleW(st, 'a'); if (g === 'lpd') k = 1.1; }
+  else { const w = capRoleAny(st, 'x'); key = w >= 0 ? st + 'w' + w : null; if (g === 'hpod') k = 1.2; }
+  return key && R3.models[key] ? { key, k, ck } : null;
+}
+// 發佈模型的槽位（設計座標：公尺、+x 船首）→ 船體模型座標（船長＝1、+z 船首）：套伺服器算的 orient
+const _sv = new THREE.Vector3(), _sf = new THREE.Vector3(), _su = new THREE.Vector3(), _sr = new THREE.Vector3(), _sE = new THREE.Euler(), _sM = new THREE.Matrix4(), _sO = new THREE.Matrix4(), _sN = new THREE.Matrix3();
+const CAP_SLOT_LEN = { main: 0.075, sec: 0.05, aa: 0.032, ftr: 0.05, aux: 0.04 };   // 發佈的船上，裝備的大小（船長的比例）
+function capWeapLen(wk) { const g = MODEL_SRC[wk] && MODEL_SRC[wk].lods[0]; if (!g) return 1; if (!g.boundingBox) g.computeBoundingBox(); const b = g.boundingBox; return Math.max(1e-3, b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z); }
+function capPubMount(model, P, slotKind, W) {
+  const man = MODEL_LOAD.man && MODEL_LOAD.man.models[model]; if (!man || !man.orient) return null;
+  _sO.fromArray(man.orient); _sN.setFromMatrix4(_sO);
+  const r = P.r || [0, 0, 0]; _sM.makeRotationFromEuler(_sE.set(r[0] * DEG, r[1] * DEG, r[2] * DEG, 'XYZ'));
+  _sf.set(1, 0, 0).applyMatrix4(_sM).applyMatrix3(_sN).normalize(); _su.set(0, 1, 0).applyMatrix4(_sM).applyMatrix3(_sN).normalize();
+  _sr.crossVectors(_su, _sf).normalize(); _su.crossVectors(_sf, _sr).normalize();
+  _sv.fromArray(P.p).applyMatrix4(_sO);
+  const sc = (CAP_SLOT_LEN[slotKind] || 0.05) * W.k / capWeapLen(W.key);
+  const ax = [_sr.x, _sr.y, _sr.z, _su.x, _su.y, _su.z, _sf.x, _sf.y, _sf.z];
+  return { wk: W.key, o: [_sv.x, _sv.y, _sv.z], q: ax.map((v) => v * sc), ax, small: W.ck === 'aa', rig: { ...rigSpec(W.key), g: CAP_CK_G[W.ck] }, parts: !!MODEL_SRC[W.key].lods[0].attributes.aPart, ck: W.ck, slot: P.id };
+}
+// 舊艦種：槽位位置照船型原本的武器掛點（主砲槽＝主砲掛點、副砲槽＝副砲與飛彈掛點、防空槽＝防空掛點，依序分配）；
+// 沒分到槽位的掛點照原樣畫（裝飾，不當砲口）；分到的槽位空著＝那個掛點不畫
+function capOldSlotMounts(s, tk, live, st) {
+  const raw = tk && capMountRaw(tk), base = R3.mounts && R3.mounts[tk]; if (!raw || !base || raw.length !== base.length) return null;   // 2D 畫面（還沒建 3D）＝沒有掛點
+  const role = raw.map((m) => { const fi = 'eamcrib'.indexOf(m.hk[0]); return fi < 0 ? '' : WEAPON_GK[fi][m.w]; }), sl = capMountSlots(raw);
+  const pool = { main: [], sec: [], aa: [] };
+  raw.forEach((m, j) => (sl[j] === 'main' ? pool.main : role[j] === 'a' ? pool.aa : pool.sec).push(j));
+  const used = new Map();
+  for (const [S, e] of live) {
+    const P = S.kind === 'main' ? (pool.main.length ? pool.main : pool.sec) : pool[S.kind]; if (!P || !P.length) continue;
+    used.set(P.shift(), [S, e]);
+  }
+  const out = [];
+  base.forEach((mm, j) => {
+    if (!used.has(j)) { out.push(mm); return; }
+    const [S, e] = used.get(j), W = e.g && capGearWKey(st, e.g); if (!W) return;
+    const m = raw[j], n = mountMatrix({ ...m, hk: W.key[0] + m.hk.slice(1), w: +W.key.slice(2), s: (m.s || 0.1) * W.k });
+    n.wk = W.key; n.rig = { ...rigSpec(W.key), g: CAP_CK_G[W.ck] }; n.parts = !!MODEL_SRC[W.key].lods[0].attributes.aPart; n.ck = W.ck; n.slot = S.id;
+    out.push(n);
+  });
+  return out;
+}
+// 這艘船照槽位的掛點清單（沒有槽位裝備的船＝null，照舊的模組換模型）
+function capSlotMounts(s, tk) {
+  const eq = s.H && s.H.eq; if (!eq || !CAP_FX.wpn) return null;
+  const live = capEqLive(s.key, s.lv || 1, eq).filter(([S, e]) => e.g && capGearFits(S.kind, e.g)), st = FAC_KEY[shipFac(s.i)];
+  const HM = capHullModel(s);
+  if (!HM) return capOldSlotMounts(s, tk, live, st);
+  const out = [];
+  for (const [S, e] of live) {
+    const P = HM.pub.slots && HM.pub.slots[S.id], W = P && capGearWKey(st, e.g); if (!W) continue;
+    const m = capPubMount(HM.key, { ...P, id: S.id }, S.kind, W); if (m) out.push(m);
+  }
+  return out;
+}
 // main.js rebuild3D：多留換上去的武器模型的容量
 function capMountCap(cap) {
   for (const s of CAP.ships) {
+    const tk = typeKey(s.i), L = capSlotMounts(s, tk);
+    if (L) { for (const m of L) if (m.ck) cap[m.wk] = (cap[m.wk] || 0) + 1; continue; }
     const X = capShipMods(s.i); if (!X) continue;
-    const tk = typeKey(s.i), raw = capMountRaw(tk), base = R3.mounts[tk]; if (!raw || !base || raw.length !== base.length) continue;
+    const raw = capMountRaw(tk), base = R3.mounts[tk]; if (!raw || !base || raw.length !== base.length) continue;
     const sl = capMountSlots(raw); raw.forEach((m, j) => { const n = capSwapMount(m, base[j], X.mod, sl[j]); if (n) cap[n.wk] = (cap[n.wk] || 0) + 1; });
   }
 }
 // main.js writeMounts：這艘船的掛點清單（沒有改裝＝null，用原本的）
 function capMountList(i, hk) {
+  const s = capShipOf(i); if (!s) return null;
+  if (!CAP_FX.wpn) return capHullModel(s) ? [] : null;   // 發佈的船體上沒有勢力船體的掛點：不畫武器
+  const HM = capHullModel(s), sig = `${R3.version}|${hk}|${s.lv}|${HM ? HM.key : ''}|${JSON.stringify((s.H && s.H.eq) || s.H.mod || '')}`;
+  if (s.mountSig === sig) return s.mounts;
+  s.mountSig = sig; s.mounts = null;
+  const L = capSlotMounts(s, hk);
+  if (L) {
+    if (L.some((m) => !R3.meshByKey[m.wk])) { R3.version = -1; s.mountSig = null; return L.filter((m) => R3.meshByKey[m.wk]); }   // 新的武器模型還沒有容量：下一幀重建
+    return (s.mounts = L);
+  }
+  if (HM) return (s.mounts = []);
   const X = capShipMods(i); if (!X) return null;
-  const s = X.s; if (s.mountV === R3.version && s.mountK === hk) return s.mounts;
-  s.mountV = R3.version; s.mountK = hk; s.mounts = null;
   const raw = capMountRaw(hk), base = R3.mounts && R3.mounts[hk]; if (!raw || !base || raw.length !== base.length) return null;
   const sl = capMountSlots(raw);
   s.mounts = base.map((mm, j) => { const n = capSwapMount(raw[j], mm, X.mod, sl[j]); return n && R3.meshByKey[n.wk] ? n : mm; });
@@ -373,13 +466,15 @@ function capMuzLocal(wk) {
 function capMuzGroups(s) {
   const hk = typeKey(s.i), list = (CAP.on && capMountList(s.i, hk)) || (R3.mounts && R3.mounts[hk]);
   if (s.muzG && s.muzG.list === list && s.muzG.v === R3.version) return s.muzG;
-  const G = { list, v: R3.version, main: [], sec: [], aa: [], msl: [] };
+  const G = { list, v: R3.version, main: [], sec: [], aa: [], msl: [], mainJ: [] };
   if (list && list.length) {
-    const raw = capMountRaw(hk), sl = raw && raw.length === list.length ? capMountSlots(raw) : null;
+    const bySlot = list.some((m) => m.ck);   // 照槽位的掛點：只有裝了武器的槽位當砲口（舊艦種沒分到槽位的掛點只是裝飾）
+    const raw = bySlot ? null : capMountRaw(hk), sl = raw && raw.length === list.length ? capMountSlots(raw) : null;
     list.forEach((m, j) => {
-      if (!MODEL_SRC[m.wk]) return;
-      const g = m.rig.g, k = sl && sl[j] === 'main' ? 'main' : g === 3 ? 'msl' : g === 2 ? 'aa' : g === 0 && !sl ? 'main' : 'sec';
+      if (!MODEL_SRC[m.wk] || (bySlot && !m.ck)) return;
+      const g = m.rig.g, k = bySlot ? m.ck : sl && sl[j] === 'main' ? 'main' : g === 3 ? 'msl' : g === 2 ? 'aa' : g === 0 && !sl ? 'main' : 'sec';
       const T = capMuzLocal(m.wk); T.tips.forEach((_, b) => G[k].push([j, b]));
+      if (k === 'main') G.mainJ.push(j);
     });
     if (!G.sec.length) G.sec = G.aa.length ? G.aa : G.main;
     if (!G.aa.length) G.aa = G.sec;
@@ -390,7 +485,16 @@ function capMuzGroups(s) {
 // 第 n 個砲口的世界座標（砲塔現在的方位、砲管仰角都算進去）；這艘船沒有這類武器的模型＝null
 function capMuzzleAt(s, kind, n, out = []) {
   const G = capMuzGroups(s), L = G[kind]; if (!L || !L.length || !G.list) return null;
-  const [j, b] = L[((n % L.length) + L.length) % L.length], m = G.list[j], T = capMuzLocal(m.wk), tip = T.tips[b % T.tips.length];
+  const [j, b] = L[((n % L.length) + L.length) % L.length];
+  return capMuzzleJB(s, G, j, b, out);
+}
+// 多門主砲一起開火：每一門主砲各一個砲口（第 n 次開火輪到每門的第 n 根砲管）
+function capMuzzleMains(s, n) {
+  const G = capMuzGroups(s); if (!G.list || G.mainJ.length < 2) return null;
+  return G.mainJ.map((j) => capMuzzleJB(s, G, j, n % capMuzLocal(G.list[j].wk).tips.length, []));
+}
+function capMuzzleJB(s, G, j, b, out) {
+  const m = G.list[j], T = capMuzLocal(m.wk), tip = T.tips[b % T.tips.length];
   let x = tip.p[0], y = tip.p[1], z = tip.p[2];
   const ok = RIG.ver === fleetVersion && s.i < RIG.n && j < RIG_M, r = s.i * RIG_M + j, yaw = ok ? RIG.yaw[r] : 0, pit = ok ? RIG.pit[r] : 0;
   if (tip.piv && pit) { const [px, py, pz] = tip.piv, dy = y - py, dz = z - pz, c = Math.cos(pit), sn = Math.sin(pit); y = py + dy * c + dz * sn; z = pz - dy * sn + dz * c; }
@@ -412,4 +516,4 @@ function capFxCam() {
   const sx = V.sx || 0, rx = Math.cos(a), rz = -Math.sin(a);   // 鏡頭的右方（水平）
   camPersp.lookAt(_fxa.x + rx * sx * d, _fxa.y, _fxa.z + rz * sx * d); camPersp.updateMatrixWorld();
 }
-Object.assign(window.__cap || (window.__cap = {}), { CAP_FX, CFX, capFxBuild, CAP_WLOOK, capWKey, CAP_LIVERY, capMuzGroups, capMuzzleAt, cam: () => camPersp });
+Object.assign(window.__cap || (window.__cap = {}), { CAP_FX, CFX, capFxBuild, CAP_WLOOK, capWKey, CAP_LIVERY, capMuzGroups, capMuzzleAt, capHullModel, capSlotMounts, capMountList, capGearWKey, capMuzzleMains, CAP_HULL_PUB, cam: () => camPersp });

@@ -28,6 +28,7 @@ Object.assign(window.__demo, { MOUNTS: () => MOUNTS, mountsOf, openWeaponEditor,
   try {
     await Promise.all([loadAllModels((f, n, total) => B && B.status(`載入模型 ${n}／${total}`, f)), capHullsLoad()]);   // capHullsLoad：戰艦組裝編輯器存的艦種槽位表（caphulls.js）
   } catch (e) { MODEL_LOAD.err.push(e.message); }
+  capPubPreload().catch((e) => console.warn('發佈的艦種模型載入失敗', e));   // 戰艦組裝發佈的船體（背景下載，caphulls.js／capfx.js）
   if (MODEL_LOAD.err.length && B) await B.warn('有模型沒有載入成功（3D 畫面會缺這些船或武器）：<br>' + MODEL_LOAD.err.join('<br>'));
   scheduleWeaponAtlas();
   let m = '2d'; try { m = STORE.getItem('fleet.render') || '2d'; } catch (e) { /* 預設 2D */ }

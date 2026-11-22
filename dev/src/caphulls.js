@@ -226,12 +226,31 @@ const CAP_HULL_SLOTS = {
 };
 // 戰艦組裝編輯器的「艦種」面板存的槽位表（models/戰艦組裝/hulls.json）蓋過上面的預設；遊戲啟動時讀一次，沒有檔案就用預設
 // 新艦種（沒有 old 的）要等槽位制度第 6 步才加進遊戲，這裡只套用現有艦種的槽位數
+// 發佈過的艦種模型（hulls.json 的 pub）：CAP_HULL_PUB[艦種][等級 0～4]＝{ model: 'sy_艦種_N', slots: { 槽位 id: { p, r, arc } } }（槽位制度第 4 步）
+const CAP_HULL_PUB = {};
 function capHullsApply(J) {
   for (const [k, H] of Object.entries((J && J.hulls) || {})) {
-    if (!CAP_HULLS[k] || !Array.isArray(H.slots) || H.slots.length !== 5) continue;
+    if (!Array.isArray(H.slots) || H.slots.length !== 5) continue;
+    if (!CAP_HULLS[k] && !H.old && H.stats && (H.pub || []).some(Boolean) && /^\w+$/.test(k)) capHullNew(k, H);
+    if (!CAP_HULLS[k]) continue;
     const T = H.slots.map((r) => CAP_KIND_ORDER.map((_, i) => Math.max(0, Math.min(12, (r && r[i]) | 0))));
     if (T.every((r, l) => !l || r.every((v, i) => v >= T[l - 1][i]))) CAP_HULL_SLOTS[k] = T;   // 槽位數不能比上一級少
+    if (Array.isArray(H.pub)) CAP_HULL_PUB[k] = H.pub.slice(0, 5).map((P) => (P && P.model ? P : null));
   }
+}
+// 戰艦組裝的新艦種（發佈過至少一級）：照 hulls.json 的數值建一個 CAP_HULLS。還不放進 CAP_HULL_ORDER（第 6 步上線時才給玩家選），測試、開發先用得到
+function capHullNew(k, J) {
+  const st = J.stats, S0 = J.slots[0] || [], sk = Object.values(CAP_HULLS).find((h) => h.skill && h.skill.key === J.skill);
+  const H = { name: J.name || k, en: k.toUpperCase(), look: Math.max(0, Math.min(4, +J.look || 0)), desc: J.desc || '', pub: true };
+  for (const f of ['hp', 'sh', 'cruise', 'max', 'acc', 'strafe', 'climb', 'turn', 'boostT']) H[f] = +st[f] || 1;
+  H.main = { name: '主砲', dmg: 20, cd: 1.5, range: 230, spd: 260, arc: 60, trav: 60, ...(st.main || {}) };
+  H.tur = { dmg: 6, cd: 1.4, range: 160, acc: 0.85, ...(st.tur || {}), n: Math.max(0, (S0[1] | 0) - 1) };   // 原廠：副砲槽留一個給飛彈艙
+  H.pd = { dmg: 2, cd: 0.4, far: 70, acc: 0.75, ...(st.pd || {}), n: S0[2] | 0 };
+  H.msl = { n: 16, dmg: 35, range: 260, lockT: 1.1, cd: 0.5, ...(st.msl || {}) };
+  if (st.repair) H.repair = { ...st.repair };
+  if (S0[3]) H.ftr = 3 * S0[3];
+  H.skill = sk ? { ...sk.skill } : { key: 'burst', name: '推進過載', cd: 25, dur: 5 };
+  CAP_HULLS[k] = H;
 }
 async function capHullsLoad() {
   try { const r = await fetch('models/' + encodeURIComponent('戰艦組裝') + '/hulls.json', { cache: 'no-cache' }); if (r.ok) capHullsApply(await r.json()); } catch (e) { /* 沒有就用預設 */ }

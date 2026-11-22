@@ -47,11 +47,17 @@ function capFireK(c, e = 1) {
   const k = (dm * CAP_MK[mk.main || 1] * pm * nm + dt * CAP_MK[mk.tur || 1] * nt) / (dm + dt);
   return k === 1 ? 1 : Math.pow(k, e);
 }
+// 勝率表沒有校正過的艦種（戰艦組裝的新艦種，第 6 步才擬合）：照原廠主砲＋副砲的每秒傷害，跟突擊艦比
+function capOddsF(key, W) {
+  const dps = (H) => (H && H.main ? H.main.dmg / H.main.cd : 0) + (H && H.tur ? (H.tur.n || 0) * H.tur.dmg / H.tur.cd : 0);
+  const a = dps(CAP_HULLS.assault), h = dps(CAP_HULLS[key]);
+  return a > 0 && h > 0 ? W.f.assault * h / a : W.f.assault;
+}
 function capOdds(sides, P = CAP_ODDS) {
   const W = P.win, sig = (z) => 1 / (1 + Math.exp(-z));
   const fem = (S) => {
     let F = 0, E = 0, Mm = 0; const D = CAP_DIFF[S.diff] || CAP_DIFF[1];
-    for (const q of S.squads) for (const c of q) { const H = capShipH(c); F += D.dmg * W.f[c.key] * capFireK(c, W.fk); E += D.hp * (H.hp * c.hp + W.alpha * H.sh * c.sh) / 100; if (H.msl) Mm += D.dmg * H.msl.n * c.msl * H.msl.dmg / 100; }   // H＝模組、Mk、熟練度之後的實際數值
+    for (const q of S.squads) for (const c of q) { const H = capShipH(c); F += D.dmg * (W.f[c.key] ?? capOddsF(c.key, W)) * capFireK(c, W.fk); E += D.hp * (H.hp * c.hp + W.alpha * H.sh * c.sh) / 100; if (H.msl) Mm += D.dmg * H.msl.n * c.msl * H.msl.dmg / 100; }   // H＝模組、Mk、熟練度之後的實際數值
     // 軌道防禦：每座的火力、耐久（和船同一個單位）；d＝種類，或 { type, hp: 剩下的比例 }
     if (S.defs && W.def) for (const d of S.defs) { const k = d.type || d, h = d.hp != null ? d.hp : 1, V = W.def[k]; if (V && h > 0) { F += D.dmg * V.F; E += D.hp * V.E * h; } }
     return { F, E, M: Mm };
@@ -64,7 +70,7 @@ function capOdds(sides, P = CAP_ODDS) {
     const nOwn = S.squads.flat().length, nFoe = Math.max(1, sides[1 - si].squads.flat().length);
     return S.squads.map((q) => q.map((c) => {
       const H = capShipH(c), fr = (H.hp * c.hp + W.alpha * H.sh * c.sh) / (H.hp + W.alpha * H.sh);
-      return sig(P.surv.b[c.key] + P.surv.c1 * lp + P.surv.c2 * Math.log(Math.max(0.05, fr)) + P.surv.c3 * Math.log(nOwn / nFoe));
+      return sig((P.surv.b[c.key] ?? P.surv.b.gunship) + P.surv.c1 * lp + P.surv.c2 * Math.log(Math.max(0.05, fr)) + P.surv.c3 * Math.log(nOwn / nFoe));
     }));
   });
   return { win: pw, surv, fem: [a, b] };   // fem：雙方的火力 F、耐久 E、飛彈 M（交戰畫面畫勝率的組成）

@@ -4406,7 +4406,7 @@ function rebuild3D() {
   R3.list = []; R3.meshByKey = {};
   const cap = {};
   const capT = {};   // 依艦種（e0～e5／a0～a5）算船數；cap 是依模型（借用外觀的艦種算在被借的模型上）
-  for (let i = 0; i < shipCount; i++) { const k = hullKey(i), tk = typeKey(i); cap[k] = (cap[k] || 0) + 1; capT[tk] = (capT[tk] || 0) + 1; }
+  for (let i = 0; i < shipCount; i++) { const k = (CAP.on && capHull3D(i)) || hullKey(i), tk = typeKey(i); cap[k] = (cap[k] || 0) + 1; capT[tk] = (capT[tk] || 0) + 1; }   // 艦長：發佈的艦種模型（capfx.js）
   for (const k of FAC_KEY) if (R3.models[k + 'f']) cap[k + 'f'] = FTR_MAX;
   cap.ef = FTR_MAX;
   // 武器：每艘船的掛點數 × 船數（只有細節夠的船才畫，但容量照最多的算）；借用外觀的艦種只畫被借模型上的防空砲
@@ -4533,7 +4533,9 @@ function update3D(cam = camera, vh = VH) {   // cam／vh：子畫面（其他旗
     st[lod]++;
     if (lod > 3) continue;
     if (ck >= 0) {   // 艦長：照船的前／上畫（轉彎時側傾）
-      const s = CAP.ships[ck], ms = R3.meshByKey[hullKey(i)]; if (!ms) continue;
+      const s = CAP.ships[ck], hk3 = capHull3D(i); let ms = R3.meshByKey[hk3 || hullKey(i)];
+      if (!ms && hk3) { R3.version = -1; ms = R3.meshByKey[hullKey(i)]; }   // 發佈的模型剛載好、還沒建：這一幀先畫原本的，下一幀重建
+      if (!ms) continue;
       if (lod <= 2) { const G = capGunDir(s); rigAim(i, 'main', _a.x + G[0] * 600, _a.y + G[1] * 600, _a.z + G[2] * 600); }   // 艦長：主砲塔一直跟著瞄準方向
       writeMatrixFU(ms[lod], _a.x, _a.y, _a.z, s.F, s.U, L);
       if (lod <= 2 && SETTINGS.weapons3D !== false) writeMounts(typeKey(i), lod, forced >= 0 ? Math.min(3, forced + 1) : pickPx > 1500 ? 0 : lod + 1, _a.x, _a.y, _a.z, s.F[0], s.F[1], s.F[2], L, i);

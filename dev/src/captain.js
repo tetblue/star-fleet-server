@@ -415,7 +415,7 @@ function capBegin(C) {
       aL.array.set([0, 0, 0], i * 3); aL2.array.set([0, 0, 0], i * 3);
       q.capK = k; g.capPl = true; q.off0 = [0, 0, 0]; q.off1 = [0, 0, 0]; q.mDur = 0; g.plan = null;
       CAP.byI[i] = k;
-      const s = { k, i, q, g, f, key, H, name: f.name, side: f.side, foe, sq: fd.capSq || 0, slot: fd.capSlot || 0, dm: foe ? CAP.Df.dmg : 1, guard: fd.capGuard || null, orb: (fd.capSlot || 0) % 2 ? 1 : -1, home0: { x: g.ax, y: g.ay, z: g.az }, L: sc[i] * TYPE_LEN3, x: g.ax, y: g.ay, z: g.az, vx: 0, vy: 0, vz: 0, yaw: g.to, P: 0, yr: 0, bank: 0,
+      const s = { k, i, q, g, f, key, H, lv: (st && st.lv) || 1, name: f.name, side: f.side, foe, sq: fd.capSq || 0, slot: fd.capSlot || 0, dm: foe ? CAP.Df.dmg : 1, guard: fd.capGuard || null, orb: (fd.capSlot || 0) % 2 ? 1 : -1, home0: { x: g.ax, y: g.ay, z: g.az }, L: sc[i] * TYPE_LEN3, x: g.ax, y: g.ay, z: g.az, vx: 0, vy: 0, vz: 0, yaw: g.to, P: 0, yr: 0, bank: 0,
         F: [Math.sin(g.to), 0, Math.cos(g.to)], U: [0, 1, 0], Rr: [-Math.cos(g.to), 0, Math.sin(g.to)], spd: 0, agl: 4, boostE: 1, boosting: false, burstT: -9, shieldT: -9,
         mainCd: 0, gY: 0, gP: 0, gOk: false, gAl: false, boostLock: false, ramT: -9, aiMslT: 0, mslN: H.msl ? H.msl.n : 0, mslCd: 0, lockT: 0, tcd: new Array(H.tur.n).fill(0).map((_, m) => m * 0.4), pcd: new Array(H.pd.n).fill(0), skillCd: 0, repE: 1, repOn: false,
         ftrMax: H.ftr || 0, ftrLost: 0, ftrIds: [], escT: 0, seen: 0, seeing: false, knownT: -99, sigT: -99, spot: null, dead: false, crashT: -9, outT: 0, hitT: -9,
@@ -990,15 +990,19 @@ function capMain(s, t) {
   const ex = ox + D[0] * sd, ey = oy + D[1] * sd, ez = oz + D[2] * sd, side = s.side;
   const dmg = M.dmg * s.dm, sdm = s.foe ? dmg / CAP_RULE.gunMul : dmg;   // 敵方特製戰艦打玩家：main.js 會把敵方的砲 ×gunMul（給一般戰艦用），先除掉
   const F = M.fx, hv = F ? !!F.hv : M.dmg >= 50;   // F＝改裝的主砲模組的外觀（caphulls.js CAP_MODS）
-  // 畫面：從主砲的砲口出去（每門主砲、每根砲管輪流；capfx.js capMuzzleAt），命中判定照舊用船上的瞄準點
-  const [vx, vy, vz] = capMuzzleAt(s, 'main', (s.muzN = (s.muzN || 0) + 1), _muz) || [ox, oy, oz];
-  if (F && F.beam) capBolt(vx, vy, vz, ex, ey, ez, t, 0.3, side, 0.95, sd + 1, s.L * F.wid);   // 光束：整條一起亮
-  else {
-    capBolt(vx, vy, vz, ex, ey, ez, t, tf, side, 0.95, F ? Math.max(s.L * F.seg, 8) : Math.max(s.L * (hv ? 1.6 : 1.1), hv ? 22 : 14), s.L * (F ? F.wid : hv ? 0.05 : 0.035));
-    spawnBeam(vx, vy, vz, ex, ey, ez, t, tf, side, F && F.trail ? F.trail : 0.3, 0.75, SIDE_FAC[side]);   // 淡淡的彈道（看得出從哪裡打到哪裡）
+  // 畫面：從主砲的砲口出去（每根砲管輪流；capfx.js capMuzzleAt），命中判定照舊用船上的瞄準點
+  // 槽位制度：裝了幾門主砲（H.mains）就從每一門的砲口各打一發，一起朝準心（傷害已經合在 M.dmg，命中只算一次）
+  const nm = Math.max(1, (s.H.mains || []).length), n0 = (s.muzN = (s.muzN || 0) + 1), MZ = nm > 1 ? capMuzzleMains(s, n0) : null;
+  const orgs = MZ && MZ.length > 1 ? MZ : [capMuzzleAt(s, 'main', n0, _muz) || [ox, oy, oz]];
+  for (const [vx, vy, vz] of orgs) {
+    if (F && F.beam) capBolt(vx, vy, vz, ex, ey, ez, t, 0.3, side, 0.95, sd + 1, s.L * F.wid);   // 光束：整條一起亮
+    else {
+      capBolt(vx, vy, vz, ex, ey, ez, t, tf, side, 0.95, F ? Math.max(s.L * F.seg, 8) : Math.max(s.L * (hv ? 1.6 : 1.1), hv ? 22 : 14), s.L * (F ? F.wid : hv ? 0.05 : 0.035));
+      spawnBeam(vx, vy, vz, ex, ey, ez, t, tf, side, F && F.trail ? F.trail : 0.3, 0.75, SIDE_FAC[side]);   // 淡淡的彈道（看得出從哪裡打到哪裡）
+    }
+    spawnFx(vx, vy, vz, side, s.L * (F ? F.fl : hv ? 0.4 : 0.26), 30);   // 砲口閃光
   }
-  rigFire(s.i, 'main', t, ex, ey, ez);   // 3D 砲塔轉向、後座
-  spawnFx(vx, vy, vz, side, s.L * (F ? F.fl : hv ? 0.4 : 0.26), 30);   // 砲口閃光
+  rigFire(s.i, 'main', t, ex, ey, ez);   // 3D 砲塔轉向、後座（所有主砲槽的砲塔一起）
   if (h.k) capFxAt(t + tf, ex, ey, ez, side, s.L * (F ? F.hit : hv ? 0.35 : 0.22), hv);   // 命中閃光
   if (!s.foe) CAP.stats.shots++; capSig(s, t);
   if (h.k === 'f') pending.push({ kind: 'ak', a: 1, t: t + tf, i: h.i, dmg: dmg * 0.5, side });
