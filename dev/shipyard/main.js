@@ -66,7 +66,11 @@ const camera = new THREE.PerspectiveCamera(40, 1, 0.5, 40000);
 camera.position.set(900, 520, 1000);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.mouseButtons = { LEFT: -1, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };   // 左鍵留給選取與拖曳
+controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };   // 左鍵拖空白處＝旋轉視角，點一下＝選取
+controls.autoRotateSpeed = 1.5;
+// 按在控制軸上時先關掉視角控制（capture 階段，比 OrbitControls 的監聽先跑），放開再打開
+document.getElementById('view').addEventListener('pointerdown', () => { controls.enabled = !(tc.object && tc.axis); }, true);
+window.addEventListener('pointerup', () => { if (!tc.dragging) controls.enabled = true; });
 const grid = new THREE.GridHelper(3000, 60, 0x2b4466, 0x16243a); scene.add(grid);
 const axes = new THREE.Group(); scene.add(axes);
 axes.add(new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 0), 800, 0x5cc8ff, 60, 30));   // 船首
@@ -388,6 +392,20 @@ const cmd = {
     }
     sync(); renderSel();
   },
+  // 轉動模型本身：有選取就轉選取的部件，沒選就轉整艘；繞它們外框的中心、世界座標軸
+  rotate(axis, deg) {
+    const ids = S.sel.length ? S.sel.slice() : S.pieces.map((p) => p.id);
+    const objs = ids.map((id) => [OBJ.get(id), pieceOf(id)]).filter(([o, pc]) => o && pc);
+    if (!objs.length) return;
+    pushUndo();
+    const box = new THREE.Box3(); for (const [o] of objs) box.union(o.userData.box.clone().applyMatrix4(o.matrixWorld));
+    const c = box.getCenter(new THREE.Vector3()), ax = new THREE.Vector3().setComponent(axis, 1);
+    const m = new THREE.Matrix4().makeTranslation(c.x, c.y, c.z)
+      .multiply(new THREE.Matrix4().makeRotationAxis(ax, deg * D2R))
+      .multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z));
+    for (const [o, pc] of objs) { o.updateMatrix(); m.clone().multiply(o.matrix).decompose(o.position, o.quaternion, o.scale); readT(o, pc); }
+    sync(); refreshSel();
+  },
   del() {
     if (!S.sel.length) return; pushUndo();
     const del = new Set(S.sel); S.pieces = S.pieces.filter((p) => !del.has(p.id)); S.sel = [];
@@ -532,6 +550,11 @@ $('btnSpace').onclick = toggleSpace;
 ['snapOn', 'snapT', 'snapR'].forEach((id) => ($(id).onchange = applySnap)); applySnap();
 $('showGrid').onchange = () => (grid.visible = $('showGrid').checked);
 $('showAxes').onchange = () => (axes.visible = $('showAxes').checked);
+$('autoRot').onchange = () => (controls.autoRotate = $('autoRot').checked);
+document.querySelectorAll('[data-rot]').forEach((b) => (b.onclick = () => {
+  const [axis, sign] = b.dataset.rot.split(','), step = +$('rotStep').value || 90;
+  cmd.rotate(+axis, +sign * step);
+}));
 $('selVar').onchange = () => {
   const v = $('selVar').value; if (!v) return;
   pushUndo(); for (const id of S.sel) { const pc = pieceOf(id); if (pc) pc.v = v; }
@@ -559,6 +582,7 @@ addEventListener('keydown', (e) => {
   else if (c) return;
   else if (k === 'w') setMode('translate'); else if (k === 'e') setMode('rotate'); else if (k === 'r') setMode('scale');
   else if (k === 'q') toggleSpace(); else if (k === 'f') frame(); else if (k === 'm') cmd.mirror();
+  else if (k === '[' || k === ']') cmd.rotate(1, (k === '[' ? 1 : -1) * (+$('rotStep').value || 90));   // 左右轉（繞 Y 軸）
   else if (k === 'delete' || k === 'backspace') cmd.del();
   else if (k === 'escape') select([]);
 });

@@ -82,7 +82,7 @@
 </nav>
 <main id="view">
   <div id="stat"></div>
-  <div id="hint">左鍵選取（Shift 加選）・拖曳箭頭移動｜W 移動 E 旋轉 R 縮放 Q 本地／世界座標｜Ctrl+D 複製 M 鏡像到另一舷 Delete 刪除｜右鍵旋轉視角、中鍵平移、滾輪縮放、F 取景</div>
+  <div id="hint">左鍵點選（Shift 加選）・拖曳空白處旋轉視角・拖曳箭頭移動部件｜W 移動 E 旋轉 R 縮放 Q 本地／世界座標｜Ctrl+D 複製 M 鏡像到另一舷 Delete 刪除｜中鍵平移、滾輪縮放、F 取景</div>
 </main>
 <aside>
   <h3>設計<span class="sp"></span><span id="canEdit" class="dim small"></span></h3>
@@ -108,6 +108,15 @@
     </div>
   </div>
 
+  <h3>轉動模型</h3>
+  <div class="dim small">有選取就轉選取的部件，沒選就轉整艘船（繞中心）。也可以按 E 後拖曳選取部件上的圓環自由旋轉；[ ] 鍵左右轉。</div>
+  <div class="row small">每次 <select id="rotStep"><option>15</option><option>45</option><option selected>90</option><option>180</option></select>°</div>
+  <div class="row small">
+    <button data-rot="1,1" title="繞 Y 軸（上下軸）向左轉">↺ 左轉</button><button data-rot="1,-1" title="繞 Y 軸向右轉">↻ 右轉</button>
+    <button data-rot="2,1" title="繞 Z 軸：船首抬起">船首上仰</button><button data-rot="2,-1" title="繞 Z 軸：船首壓低">船首下俯</button>
+    <button data-rot="0,1" title="繞 X 軸（船首方向）滾轉">左滾</button><button data-rot="0,-1" title="繞 X 軸滾轉">右滾</button>
+  </div>
+
   <h3>工具</h3>
   <div class="row small">
     <button data-mode="translate" class="sel">移動 W</button><button data-mode="rotate">旋轉 E</button><button data-mode="scale">縮放 R</button>
@@ -115,7 +124,7 @@
   </div>
   <div class="row small"><label><input type="checkbox" id="snapOn" checked> 吸附</label> 移動 <input type="number" id="snapT" value="5" min="0" step="1"> m 旋轉 <input type="number" id="snapR" value="15" min="0" step="5" style="width:52px">°</div>
   <div class="row small">全部換塗裝 <select id="allVar"></select></div>
-  <div class="row small"><label><input type="checkbox" id="showGrid" checked> 格線</label><label><input type="checkbox" id="showAxes" checked> 船首箭頭</label></div>
+  <div class="row small"><label><input type="checkbox" id="showGrid" checked> 格線</label><label><input type="checkbox" id="showAxes" checked> 船首箭頭</label><label><input type="checkbox" id="autoRot"> 自動旋轉</label></div>
 
   <h3>部件清單<span class="sp"></span><span id="pcount" class="dim small"></span></h3>
   <div id="pieces" class="small"></div>
