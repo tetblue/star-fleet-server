@@ -26,7 +26,7 @@ Object.assign(window.__demo, { MOUNTS: () => MOUNTS, mountsOf, openWeaponEditor,
   const B = window.BOOT;
   B && B.status('載入模型…', 0);
   try {
-    await loadAllModels((f, n, total) => B && B.status(`載入模型 ${n}／${total}`, f));
+    await Promise.all([loadAllModels((f, n, total) => B && B.status(`載入模型 ${n}／${total}`, f)), capHullsLoad()]);   // capHullsLoad：戰艦組裝編輯器存的艦種槽位表（caphulls.js）
   } catch (e) { MODEL_LOAD.err.push(e.message); }
   if (MODEL_LOAD.err.length && B) await B.warn('有模型沒有載入成功（3D 畫面會缺這些船或武器）：<br>' + MODEL_LOAD.err.join('<br>'));
   scheduleWeaponAtlas();

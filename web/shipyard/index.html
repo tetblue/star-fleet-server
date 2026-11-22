@@ -51,6 +51,25 @@
   #designs .it small, #pieces .it small { color: var(--dim); }
   #pieces { max-height: 300px; overflow: auto; }
   #pieces .it.slot span { color: var(--sc); }
+  #hullDlg { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 8; display: flex; align-items: center; justify-content: center; }
+  .hd-box { width: min(1180px, 96vw); height: min(820px, 92vh); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; display: flex; flex-direction: column; }
+  .hd-head { display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .hd-head .sp { flex: 1; }
+  .hd-body { flex: 1; display: grid; grid-template-columns: 220px 1fr; min-height: 0; }
+  .hd-list { border-right: 1px solid var(--line); overflow: auto; padding: 8px; }
+  .hd-list .it { padding: 5px 8px; border-radius: 4px; cursor: pointer; display: flex; justify-content: space-between; gap: 6px; }
+  .hd-list .it:hover { background: #15203a; } .hd-list .it.on { background: #1b3557; }
+  .hd-list .it small { color: var(--dim); }
+  .hd-list .it .bad { color: var(--bad); } .hd-list .it .ok { color: var(--ok); }
+  .hd-main { overflow: auto; padding: 10px 16px 30px; }
+  .hd-main h4 { margin: 14px 0 6px; color: var(--acc); font-size: 13px; }
+  .hd-main table { border-collapse: collapse; }
+  .hd-main td, .hd-main th { padding: 3px 6px; border-bottom: 1px solid #1a2640; text-align: left; font-weight: normal; }
+  .hd-main th { color: var(--dim); font-size: 12px; }
+  .hd-main input[type=number] { width: 58px; }
+  .hd-main .stgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 12px; }
+  .hd-main .stgrid label { display: flex; justify-content: space-between; gap: 6px; align-items: center; font-size: 12px; }
+  .hd-main .chk { font-size: 12px; } .hd-main .chk .bad { color: var(--bad); } .hd-main .chk .ok { color: var(--ok); }
   .slotbtn { border-color: var(--sc); color: var(--sc); }
   #slotCounts .sc { color: var(--sc); margin-right: 8px; }
   #slotCounts .sc b { color: var(--text); }
@@ -71,6 +90,7 @@
   <button id="btnNew">新設計</button>
   <button id="btnSave" class="primary" title="Ctrl+S">存檔</button>
   <button id="btnGlb">匯出 GLB</button>
+  <button id="btnHulls" class="primary" title="艦長模式的艦種：數值、每個等級的槽位數、每個等級用哪個設計">艦種…</button>
   <a href="../" style="color:var(--dim)">← 回遊戲</a>
 </header>
 <nav>
@@ -106,6 +126,7 @@
     <div id="slotBox" hidden>
       <div class="row small">種類 <select id="slotKind"></select> 序號 <input type="number" id="slotN" min="1" step="1" style="width:52px" title="同一類裡的第幾個；改成已經有的序號會和那個對調"></div>
       <div class="row small" id="slotArcRow">射界左右各 <input type="number" id="slotArc" min="0" max="180" step="5" style="width:60px">°</div>
+      <div class="row small">預覽裝備 <select id="slotLook" title="勾「裝上裝備預覽」時，這個槽位顯示哪一件裝備"></select></div>
       <div class="dim small">箭頭＝裝備朝向（砲口正前方），扇形＝射界。按 E 旋轉、W 移動；M 鏡像到另一舷會自動給新序號。</div>
     </div>
     <div class="dim small">X 船首方向、Y 上、Z 右舷；單位公尺、角度。縮放為負就是鏡像。</div>
@@ -127,6 +148,8 @@
   <div class="row small" id="slotCounts"></div>
   <div class="small" id="slotWarn" style="color:var(--warn)"></div>
   <div class="row small"><button id="btnRenum" title="每一類照目前的序號順序重新編成 1、2、3…">重新編號</button></div>
+  <div class="row small"><label><input type="checkbox" id="showGear"> 裝上裝備預覽</label><select id="allLook" title="所有能裝這件裝備的槽位都預覽它"></select></div>
+  <div class="dim small">勾了之後每個槽位顯示一件裝備（選到槽位時可以換）；外觀暫時用這艘船零件庫的砲塔、發射艙、推進器等。取消「顯示」可以只看裝備、藏起標記。</div>
 
   <h3>轉動模型</h3>
   <div class="dim small">有選取就轉選取的部件，沒選就轉整艘船（繞中心）。也可以按 E 後拖曳選取部件上的圓環自由旋轉；[ ] 鍵左右轉。</div>
@@ -149,6 +172,15 @@
   <h3>部件清單<span class="sp"></span><span id="pcount" class="dim small"></span></h3>
   <div id="pieces" class="small"></div>
 </aside>
+<div id="hullDlg" hidden>
+  <div class="hd-box">
+    <div class="hd-head"><b>艦種（艦長模式）</b><span class="dim small">每個艦種的數值、Lv1～5 各類槽位幾個、每個等級用哪個設計。存在伺服器 models/戰艦組裝/hulls.json。</span><span class="sp"></span><span id="hdDirty" style="color:var(--warn)"></span><button id="hdSave" class="primary">存檔</button><button id="hdClose">關閉</button></div>
+    <div class="hd-body">
+      <div class="hd-list"><div id="hdList"></div><div class="row"><button id="hdNew">＋新增艦種</button></div></div>
+      <div class="hd-main" id="hdMain"></div>
+    </div>
+  </div>
+</div>
 <div id="toast"></div>
 <div id="busy">載入中…</div>
 <script src="tool.js"></script>

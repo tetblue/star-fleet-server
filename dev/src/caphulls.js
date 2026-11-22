@@ -224,6 +224,18 @@ const CAP_HULL_SLOTS = {
   ew: [[1, 3, 3, 0, 2], [1, 3, 3, 0, 3], [1, 4, 3, 0, 3], [1, 4, 4, 0, 3], [1, 4, 4, 0, 4]],
   stealth: [[1, 2, 1, 0, 2], [1, 2, 2, 0, 2], [1, 3, 2, 0, 2], [1, 3, 2, 0, 3], [1, 3, 3, 0, 3]],
 };
+// 戰艦組裝編輯器的「艦種」面板存的槽位表（models/戰艦組裝/hulls.json）蓋過上面的預設；遊戲啟動時讀一次，沒有檔案就用預設
+// 新艦種（沒有 old 的）要等槽位制度第 6 步才加進遊戲，這裡只套用現有艦種的槽位數
+function capHullsApply(J) {
+  for (const [k, H] of Object.entries((J && J.hulls) || {})) {
+    if (!CAP_HULLS[k] || !Array.isArray(H.slots) || H.slots.length !== 5) continue;
+    const T = H.slots.map((r) => CAP_KIND_ORDER.map((_, i) => Math.max(0, Math.min(12, (r && r[i]) | 0))));
+    if (T.every((r, l) => !l || r.every((v, i) => v >= T[l - 1][i]))) CAP_HULL_SLOTS[k] = T;   // 槽位數不能比上一級少
+  }
+}
+async function capHullsLoad() {
+  try { const r = await fetch('models/' + encodeURIComponent('戰艦組裝') + '/hulls.json', { cache: 'no-cache' }); if (r.ok) capHullsApply(await r.json()); } catch (e) { /* 沒有就用預設 */ }
+}
 const capGearName = (H0, id) => (!id ? '（空）' : id === 'std' ? (H0 && H0.main ? H0.main.name : CAP_GEAR.std.name) : (CAP_GEAR[id] || { name: id }).name);
 const capGearFam = (id) => (CAP_GEAR[id] && CAP_GEAR[id].fam) || id;   // 研發、藍圖看的是系列（大中小的輔助裝備算同一種）
 function capSlotN(key, lv) { const T = CAP_HULL_SLOTS[key] || [[1, 2, 2, 0, 2]], r = T[Math.min(T.length, Math.max(1, lv || 1)) - 1]; return Object.fromEntries(CAP_KIND_ORDER.map((k, i) => [k, r[i] || 0])); }

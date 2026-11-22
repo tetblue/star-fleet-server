@@ -197,7 +197,7 @@ async function libAssets(shipId, style) {
   return libCache.get(key);
 }
 async function assetOf(pc) {
-  if (pc.k === 'slot') return { a: slotAsset(pc.kind, pc.arc || 0) };
+  if (pc.k === 'slot') return { a: slotAsset(pc.kind, pc.arc || 0), gear: S.showGear ? await gearAsset(pc).catch(() => null) : null };
   const ship = LIB.byId[pc.ship]; if (!ship) throw new Error('素材庫沒有 ' + pc.ship);
   if (pc.k === 'part') { const a = (await shipAssets(pc.ship, pc.v)).parts.get(pc.n); if (!a) throw new Error(`${ship.name} 沒有部件 ${pc.n}`); return { a }; }
   const [lib, sa] = await Promise.all([libAssets(pc.ship, libStyle(ship, pc.v)), shipAssets(pc.ship, pc.v)]);
@@ -243,8 +243,8 @@ const slotAssetCache = new Map();
 function slotAsset(kind, arc) {
   const key = kind + '|' + arc; if (slotAssetCache.has(key)) return slotAssetCache.get(key);
   const K = SLOT_KINDS[kind], sz = K.size, items = [], I = new THREE.Matrix4();
-  const add = (geo, op) => { geo.computeBoundingBox(); items.push({ geo, mat: slotMat(kind, op), flip: false, ms: [I], slot: 1 }); };
-  add(new THREE.BoxGeometry(sz, sz * 0.5, sz), 0.45);
+  const add = (geo, op, box) => { geo.computeBoundingBox(); items.push({ geo, mat: slotMat(kind, op), flip: false, ms: [I], slot: box ? 2 : 1 }); };
+  add(new THREE.BoxGeometry(sz, sz * 0.5, sz), 0.45, true);   // 方塊（裝備預覽時藏起來，不擋住裝備）
   const cone = new THREE.ConeGeometry(sz * 0.22, sz * 0.8, 12); cone.rotateZ(-Math.PI / 2); cone.translate(sz * 0.9, 0, 0); add(cone, 0.95);
   if (arc > 0) { const fan = new THREE.CircleGeometry(sz * 2.4, 40, -arc * D2R, 2 * arc * D2R); fan.rotateX(-Math.PI / 2); add(fan, 0.14); }
   const box = new THREE.Box3(new THREE.Vector3(-sz / 2, -sz / 4, -sz / 2), new THREE.Vector3(sz * 1.3, sz / 4, sz / 2));
@@ -259,18 +259,52 @@ function slotLabel(pc) {
   sp.scale.set(0.07, 0.035, 1); sp.position.set(0, K.size * 0.75, 0); sp.renderOrder = 1001; return sp;   // 固定在畫面上的大小，拉遠也看得到
 }
 const isSlot = (pc) => pc && pc.k === 'slot';
+// 標記隱藏時：有裝備預覽的只藏標記（方塊、箭頭、扇形、字），裝備照樣顯示
+function slotVis(o) {
+  const g = o.children.some((c) => c.userData.gear); o.visible = g || S.showSlots;
+  for (const c of o.children) if (!c.userData.gear) c.visible = S.showSlots && !(g && c.userData.item && c.userData.item.slot === 2);
+}
 const slotName = (pc) => `${SLOT_KINDS[pc.kind].name} ${pc.n + 1}`;
 // 同類裡沒用過的最小序號（skip＝這個部件自己不算）
 function freeSlotN(kind, skip, also = []) {
   const used = new Set(S.pieces.filter((p) => isSlot(p) && p.kind === kind && p.id !== skip).map((p) => p.n).concat(also));
   let n = 0; while (used.has(n)) n++; return n;
 }
+// ───── 裝備外觀預覽：槽位上裝一件裝備看起來怎樣（使用者 2026-11-22）─────
+// 裝備清單照遊戲的 CAP_GEAR（dev/src/caphulls.js）；外觀暫時用設計裡那艘船的零件庫（依序找第一個有的零件）。輔助裝備大中小照尺寸放大縮小。
+// 之後遊戲裡的裝備外觀（槽位制度第 4 步）會照這張表。
+const GEAR_LIST = [
+  ['std', 'main', '原廠主砲', ['main_turret', 'triple_turret']], ['rail', 'main', '磁軌砲', ['main_turret']], ['heavy', 'main', '重粒子砲', ['triple_turret', 'main_turret']],
+  ['rapid', 'main', '速射砲', ['main_turret']], ['beam', 'main', '光束砲', ['main_turret']],
+  ['gun', 'sec', '標準砲塔', ['low_turret', 'casemate']], ['hgun', 'sec', '重型砲塔', ['triple_turret', 'main_turret']], ['agun', 'sec', '防空砲塔', ['ball_mount', 'low_turret']],
+  ['pod', 'sec', '標準飛彈艙', ['launch_bay', 'gun_port_triple']], ['hpod', 'sec', '重飛彈艙', ['launch_bay', 'gun_port']], ['spod', 'sec', '蜂群飛彈艙', ['gun_port_triple', 'launch_bay']],
+  ['pd', 'aa', '防空砲', ['ball_mount', 'low_turret']], ['lpd', 'aa', '遠程防空砲', ['ball_mount']],
+  ['wing', 'ftr', '護航機中隊', ['hangar_door']], ['awing', 'ftr', '攔截機中隊', ['hangar_door']],
+  ...[['armor', '實體裝甲', ['casemate', 'stack']], ['react', '反應裝甲', ['casemate']], ['shield', '能量護盾', ['shield_gun', 'dome', 'shield_gun_triple']],
+    ['oc', '超頻引擎', ['thruster']], ['sprint', '衝刺超頻引擎', ['thruster']], ['agile', '機動超頻引擎', ['thruster']]]
+    .flatMap(([f, nm, look]) => [['L', '大型'], ['M', '中型'], ['S', '小型']].map(([sz, sn]) => [f + sz, 'aux' + sz, sn + nm, look])),
+];
+const GEAR = Object.fromEntries(GEAR_LIST.map(([id, cls, name, look]) => [id, { id, cls, name, look }]));
+// 能裝在哪一類槽位（和遊戲 CAP_KIND 一樣）：主砲槽＝主砲、副砲級、大型輔助；副砲槽＝副砲級、中型輔助；防空槽＝防空砲、小型輔助；艦載機槽＝艦載機；輔助槽＝大中小輔助
+const SLOT_FITS = { main: ['main', 'sec', 'auxL'], sec: ['sec', 'auxM'], aa: ['aa', 'auxS'], ftr: ['ftr'], aux: ['auxL', 'auxM', 'auxS'] };
+const gearFits = (kind, id) => GEAR[id] && SLOT_FITS[kind].includes(GEAR[id].cls);
+const GEAR_DEF = { main: 'std', sec: 'gun', aa: 'pd', ftr: 'wing', aux: 'armorM' };
+const AUX_SC = { auxL: 1.4, auxM: 1, auxS: 0.7 };
+const slotLook = (pc) => (pc.look && gearFits(pc.kind, pc.look) ? pc.look : GEAR_DEF[pc.kind]);
+// 預覽用哪艘船的零件庫：設計裡第一個部件的船與塗裝（沒有就用左邊素材庫選的）
+const gearShip = () => { const p = S.pieces.find((x) => !isSlot(x) && x.ship); return p ? [p.ship, p.v] : [S.libShip, S.libVar]; };
+async function gearAsset(pc) {
+  const [sid, v] = gearShip(), ship = LIB.byId[sid]; if (!ship) return null;
+  const G = GEAR[slotLook(pc)], [lib, sa] = await Promise.all([libAssets(sid, libStyle(ship, v)), shipAssets(sid, v)]);
+  const name = G.look.map((n) => 'component_' + n).find((n) => lib.has(n)) || [...lib.keys()].find((n) => /turret/.test(n)); if (!name) return null;
+  return { a: lib.get(name), mats: sa.mats, sc: (sa.compScale.get(name) || 1) * (AUX_SC[G.cls] || 1) };
+}
 const slotCounts = () => { const c = Object.fromEntries(SLOT_ORDER.map((k) => [k, 0])); for (const p of S.pieces) if (isSlot(p)) c[p.kind]++; return c; };
 
 // ───── 狀態 ─────
-const S = { designs: {}, canEdit: false, curId: null, pieces: [], sel: [], undo: [], redo: [], dirty: false, nextId: 1, libShip: null, libVar: null, showSlots: true };
+const S = { designs: {}, hulls: {}, canEdit: false, curId: null, pieces: [], sel: [], undo: [], redo: [], dirty: false, nextId: 1, libShip: null, libVar: null, showSlots: true, showGear: false };
 const OBJ = new Map();   // 部件 id → THREE.Group
-const keyOf = (pc) => (pc.k === 'slot' ? `slot|${pc.kind}|${pc.n}|${pc.arc || 0}` : `${pc.ship}|${pc.v}|${pc.k}|${pc.n}`);
+const keyOf = (pc) => (pc.k === 'slot' ? `slot|${pc.kind}|${pc.n}|${pc.arc || 0}|${S.showGear ? slotLook(pc) + '@' + gearShip().join('|') : ''}` : `${pc.ship}|${pc.v}|${pc.k}|${pc.n}`);
 const pieceOf = (id) => S.pieces.find((p) => p.id === id);
 const triCount = () => { let n = 0; for (const o of OBJ.values()) n += o.userData.tris || 0; return n; };
 
@@ -296,11 +330,15 @@ async function sync() {   // 讓畫面上的物件和 S.pieces 一致（不同�
   for (const pc of S.pieces) {
     const o = OBJ.get(pc.id);
     if (o && o.userData.key === keyOf(pc)) { applyT(o, pc); continue; }
-    jobs.push(assetOf(pc).then(({ a, mats }) => {
+    jobs.push(assetOf(pc).then(({ a, mats, gear }) => {
       if (tok !== syncTok && !pieceOf(pc.id)) return;
       const cur = pieceOf(pc.id); if (!cur || keyOf(cur) !== keyOf(pc)) return;
       const n = buildObject(a, mats); n.userData.pid = pc.id; n.userData.key = keyOf(pc);
-      if (isSlot(cur)) { n.add(slotLabel(cur)); n.userData.slot = 1; n.visible = S.showSlots; }
+      if (isSlot(cur)) {
+        n.add(slotLabel(cur)); n.userData.slot = 1;
+        if (gear) { const go = buildObject(gear.a, gear.mats); go.scale.setScalar(gear.sc); go.userData.gear = 1; n.add(go); }
+        slotVis(n);
+      }
       const old = OBJ.get(pc.id); if (old) world.remove(old);
       world.add(n); OBJ.set(pc.id, n); applyT(n, cur);
     }).catch((e) => toast(e.message, true)));
@@ -533,6 +571,8 @@ function renderSel(liveOnly) {
   if (so) {
     $('slotKind').innerHTML = SLOT_ORDER.map((k) => `<option value="${k}"${k === so.kind ? ' selected' : ''}>${SLOT_KINDS[k].name}</option>`).join('');
     $('slotN').value = so.n + 1; $('slotArc').value = so.arc || 0; $('slotArcRow').hidden = !SLOT_KINDS[so.kind].arc;
+    const lk = slotLook(so);
+    $('slotLook').innerHTML = GEAR_LIST.filter(([id]) => gearFits(so.kind, id)).map(([id, , nm]) => `<option value="${id}"${id === lk ? ' selected' : ''}>${esc(nm)}</option>`).join('');
   }
   $('selName').innerHTML = one ? (so ? `<b>${esc(slotName(so))}</b> <span class="dim">遊戲裡的槽位編號 ${so.kind}${so.n}</span>` : `<b>${esc(pieceLabel(one))}</b> <span class="dim">${esc(LIB.byId[one.ship] ? LIB.byId[one.ship].name : one.ship)}・${esc(one.n)}</span>`) : `<b>選取了 ${pcs.length} 個</b> <span class="dim">（拖曳控制軸一起移動）</span>`;
   const ships = new Set(pcs.filter((p) => !isSlot(p)).map((p) => p.ship)), vs = [...ships].map((s) => (LIB.byId[s] ? LIB.byId[s].variants.map((v) => v.name) : []));
@@ -550,6 +590,102 @@ function renderDesigns() {
   $('designs').innerHTML = ids.map((id) => { const d = S.designs[id]; return `<div class="it${id === S.curId ? ' on' : ''}" data-did="${esc(id)}"><span>${esc(d.name || '未命名')}</span><small>${(d.pieces || []).length} 個</small><button class="danger small" data-ddel="${esc(id)}" title="刪除這個設計">×</button></div>`; }).join('') || '<div class="dim">還沒有存過設計。</div>';
   document.querySelectorAll('[data-did]').forEach((el) => (el.onclick = (e) => { if (!e.target.dataset.ddel) openDesign(el.dataset.did); }));
   document.querySelectorAll('[data-ddel]').forEach((el) => (el.onclick = () => delDesign(el.dataset.ddel)));
+}
+
+// ───── 艦種（艦長模式的槽位制度，dev/艦長槽位企劃.md 第 3 步）─────
+// hulls.json＝{ 艦種: { name, old?（現有的 5 種：只改槽位數，位置照勢力船體的武器掛點自動產生）, ship（模型用哪艘）, desc, look（還沒發佈前借用的外觀）,
+//   skill, stats: { hp, sh, cruise…, main, tur, pd, msl, repair? }, slots: [Lv1～5 的 [主砲, 副砲, 防空, 艦載機, 輔助]], lv: [Lv1～5 的設計 id] } }
+const SKILLS = { burst: '推進過載', shield: '護盾超載', repair: '維修光束', jam: '電子干擾', cloak: '匿蹤' };
+const LOOKS = ['航母', '戰列艦', '巡洋艦', '驅逐艦', '護衛艦'];
+const ST_FIELDS = [
+  ['', [['hp', '船體'], ['sh', '護盾'], ['cruise', '巡航速度'], ['max', '最高速度'], ['acc', '加速'], ['strafe', '側移'], ['climb', '升降'], ['turn', '轉向°／秒'], ['boostT', '推進秒數']]],
+  ['main', [['dmg', '原廠主砲傷害'], ['cd', '裝填秒'], ['range', '射程'], ['arc', '射界°'], ['trav', '轉速°／秒'], ['spd', '彈速']]],
+  ['tur', [['dmg', '副砲每座傷害'], ['cd', '裝填秒'], ['range', '射程'], ['acc', '命中']]],
+  ['pd', [['dmg', '防空每座傷害'], ['cd', '裝填秒'], ['far', '攔截距離'], ['acc', '命中']]],
+  ['msl', [['n', '每個飛彈艙彈量'], ['dmg', '每枚傷害'], ['range', '射程'], ['lockT', '鎖定秒'], ['cd', '發射間隔']]],
+];
+const HS = { sel: null, dirty: false };
+// 一個設計裡各類標記幾個、序號是不是 0～n−1
+function designSlots(d) {
+  const c = Object.fromEntries(SLOT_ORDER.map((k) => [k, []]));
+  for (const p of (d && d.pieces) || []) if (isSlot(p)) c[p.kind].push(p.n);
+  return c;
+}
+// 檢查一個艦種：每級的設計標記數量要和槽位表一致、序號連續；槽位數不能比上一級少（槽位編號升級時沿用）
+function hullCheck(H) {
+  const out = [];
+  for (let l = 0; l < 5; l++) {
+    const row = (H.slots || [])[l] || [0, 0, 0, 0, 0], msg = [];
+    if (l && SLOT_ORDER.some((k, i) => row[i] < ((H.slots[l - 1] || [])[i] || 0))) msg.push('槽位比上一級少');
+    if (!H.old) {
+      const id = (H.lv || [])[l], d = id && S.designs[id];
+      if (!id) msg.push('還沒指定設計');
+      else if (!d) msg.push('設計不見了');
+      else {
+        const c = designSlots(d);
+        SLOT_ORDER.forEach((k, i) => {
+          const have = c[k].length, need = row[i] || 0, nm = SLOT_KINDS[k].name;
+          if (have < need) msg.push(`還差 ${need - have} 個${nm}`); else if (have > need) msg.push(`多了 ${have - need} 個${nm}`);
+          else if (c[k].slice().sort((a, b) => a - b).some((n, j) => n !== j)) msg.push(`${nm}序號要是 1～${need}`);
+        });
+      }
+    }
+    out.push(msg);
+  }
+  return out;
+}
+const hullOk = (H) => hullCheck(H).every((m) => !m.length);
+function openHulls() { $('hullDlg').hidden = false; if (!HS.sel || !S.hulls[HS.sel]) HS.sel = Object.keys(S.hulls)[0] || null; renderHulls(); }
+function hullDirty() { HS.dirty = true; $('hdDirty').textContent = '未儲存'; }
+function renderHulls() {
+  const keys = Object.keys(S.hulls);
+  $('hdList').innerHTML = keys.map((k) => { const H = S.hulls[k], ok = hullOk(H); return `<div class="it${k === HS.sel ? ' on' : ''}" data-hk="${esc(k)}"><span>${esc(H.name || k)}</span><small>${H.old ? '現有' : ''}<span class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '！'}</span></small></div>`; }).join('');
+  document.querySelectorAll('[data-hk]').forEach((el) => (el.onclick = () => { HS.sel = el.dataset.hk; renderHulls(); }));
+  const H = S.hulls[HS.sel], M = $('hdMain');
+  if (!H) { M.innerHTML = '<div class="dim">還沒有艦種。</div>'; return; }
+  const chk = hullCheck(H), dOpts = (cur) => `<option value="">（還沒指定）</option>` + Object.entries(S.designs).map(([id, d]) => `<option value="${esc(id)}"${id === cur ? ' selected' : ''}>${esc(d.name || '未命名')}</option>`).join('');
+  const rows = [0, 1, 2, 3, 4].map((l) => { const r = (H.slots[l] = H.slots[l] || [0, 0, 0, 0, 0]);
+    return `<tr><td>Lv${l + 1}</td>${SLOT_ORDER.map((k, i) => `<td><input type="number" min="0" max="12" step="1" value="${r[i] || 0}" data-hs="${l},${i}"></td>`).join('')}
+      ${H.old ? '' : `<td><select data-hl="${l}">${dOpts((H.lv || [])[l])}</select> <button class="small" data-hopen="${l}" ${(H.lv || [])[l] && S.designs[H.lv[l]] ? '' : 'disabled'}>打開</button></td>`}
+      <td class="chk">${chk[l].length ? `<span class="bad">${esc(chk[l].join('；'))}</span>` : '<span class="ok">✓</span>'}</td></tr>`; }).join('');
+  const st = H.stats || {}, stg = H.old ? '' : ST_FIELDS.map(([g, F]) => `<div class="stgrid">${F.map(([f, nm]) => { const v = g ? (st[g] || {})[f] : st[f]; return `<label>${nm}<input type="number" step="any" value="${v ?? ''}" data-hst="${g}.${f}"></label>`; }).join('')}</div>`).join('<div style="height:6px"></div>');
+  M.innerHTML = `
+    <div class="row"><b style="font-size:15px">${esc(H.name || HS.sel)}</b><span class="dim small">代號 ${esc(HS.sel)}</span>${H.old ? '<span class="dim small">現有艦種：數值寫在遊戲程式裡；槽位位置照各勢力船體的武器掛點自動產生，這裡只改每級的槽位數</span>' : `<span class="sp" style="flex:1"></span><button class="danger small" id="hdDel">刪除這個艦種</button>`}</div>
+    ${H.old ? '' : `<div class="row small">名稱 <input type="text" id="hdName" value="${esc(H.name || '')}" style="width:140px"> 模型 <select id="hdShip">${LIB.ships.map((s) => `<option value="${esc(s.id)}"${s.id === H.ship ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</select>
+      技能 <select id="hdSkill">${Object.entries(SKILLS).map(([k, n]) => `<option value="${k}"${k === H.skill ? ' selected' : ''}>${n}</option>`).join('')}</select>
+      發佈前借用外觀 <select id="hdLook">${LOOKS.map((n, i) => `<option value="${i}"${i === +H.look ? ' selected' : ''}>${n}</option>`).join('')}</select></div>
+      <div class="row small">說明 <input type="text" id="hdDesc" value="${esc(H.desc || '')}" style="flex:1"></div>`}
+    <h4>每個等級的槽位數${H.old ? '' : '與設計'}</h4>
+    <div class="dim small">數字是各類槽位幾個；設計裡同類的標記要剛好這麼多、序號 1～N。槽位數不能比上一級少（槽位編號升級時沿用，裝好的裝備才不會掉）。</div>
+    <table><tr><th></th>${SLOT_ORDER.map((k) => `<th style="color:#${SLOT_KINDS[k].col.toString(16).padStart(6, '0')}">${SLOT_KINDS[k].name}</th>`).join('')}${H.old ? '' : '<th>設計</th>'}<th>檢查</th></tr>${rows}</table>
+    ${H.old ? '' : `<h4>數值（原廠裝備的數值；實際火力＝裝上的裝備加總）</h4>${stg}`}`;
+  document.querySelectorAll('[data-hs]').forEach((el) => (el.onchange = () => { const [l, i] = el.dataset.hs.split(',').map(Number); H.slots[l][i] = Math.max(0, Math.round(+el.value || 0)); hullDirty(); renderHulls(); }));
+  document.querySelectorAll('[data-hl]').forEach((el) => (el.onchange = () => { (H.lv = H.lv || [null, null, null, null, null])[+el.dataset.hl] = el.value || null; hullDirty(); renderHulls(); }));
+  document.querySelectorAll('[data-hopen]').forEach((el) => (el.onclick = () => { const id = H.lv[+el.dataset.hopen]; $('hullDlg').hidden = true; openDesign(id); }));
+  document.querySelectorAll('[data-hst]').forEach((el) => (el.onchange = () => {
+    const [g, f] = el.dataset.hst.split('.'), v = el.value === '' ? undefined : +el.value; H.stats = H.stats || {};
+    if (g) (H.stats[g] = H.stats[g] || {})[f] = v; else H.stats[f] = v; hullDirty();
+  }));
+  const bind = (id, fn) => { const el = $(id); if (el) el.onchange = () => { fn(el.value); hullDirty(); renderHulls(); }; };
+  bind('hdName', (v) => (H.name = v.trim() || HS.sel)); bind('hdShip', (v) => (H.ship = v)); bind('hdSkill', (v) => (H.skill = v)); bind('hdLook', (v) => (H.look = +v)); bind('hdDesc', (v) => (H.desc = v));
+  if ($('hdDel')) $('hdDel').onclick = () => { if (!confirm(`刪除艦種「${H.name}」？（存檔後才會寫進伺服器）`)) return; delete S.hulls[HS.sel]; HS.sel = Object.keys(S.hulls)[0] || null; hullDirty(); renderHulls(); };
+}
+function newHull() {
+  const key = (prompt('新艦種的代號（英文字母、數字，例如 cruiser2；遊戲裡用這個當鍵）') || '').trim();
+  if (!key) return; if (!/^[a-z][a-z0-9_]*$/i.test(key)) return toast('代號只能用英文字母、數字、底線，開頭要是字母', true);
+  if (S.hulls[key]) return toast('已經有這個代號', true);
+  const T = S.hulls.twin;
+  S.hulls[key] = { name: '新艦種', ship: (LIB.ships[0] || {}).id, desc: '', look: 2, skill: 'burst', stats: JSON.parse(JSON.stringify((T && T.stats) || { hp: 400, sh: 220, cruise: 7, max: 11, acc: 2.6, strafe: 3.5, climb: 3, turn: 24, boostT: 5, main: { name: '主砲', dmg: 20, cd: 1.5, range: 230, spd: 260, arc: 60, trav: 60 }, tur: { dmg: 6, cd: 1.4, range: 160, acc: 0.85 }, pd: { dmg: 2, cd: 0.4, far: 70, acc: 0.75 }, msl: { n: 20, dmg: 40, range: 270, lockT: 1.1, cd: 0.45 } })),
+    slots: [[1, 2, 2, 0, 1], [1, 2, 2, 0, 2], [1, 3, 3, 0, 2], [2, 3, 3, 0, 2], [2, 4, 3, 0, 3]], lv: [null, null, null, null, null] };
+  HS.sel = key; hullDirty(); renderHulls();
+}
+async function saveHulls() {
+  for (const [k, H] of Object.entries(S.hulls)) if (H.slots.some((r, l) => l && SLOT_ORDER.some((_, i) => r[i] < H.slots[l - 1][i]))) return toast(`${H.name}：槽位數不能比上一級少`, true);
+  try {
+    if (!S.canEdit) lsSet('shipyard.hulls', JSON.stringify(S.hulls));
+    else { const r = await fetch('../api/shipyard', { method: 'PUT', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ hulls: S.hulls }) }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status); }
+  } catch (e) { return toast('存檔失敗：' + e.message, true); }
+  HS.dirty = false; $('hdDirty').textContent = ''; toast(S.canEdit ? '艦種已存到伺服器（遊戲下次開啟時套用）' : '艦種只存在這台瀏覽器（伺服器只允許在伺服器那台電腦上存）');
 }
 
 // ───── 設計存取 ─────
@@ -619,6 +755,8 @@ $('libVar').onchange = () => { S.libVar = $('libVar').value; lsSet('shipyard.lib
 $('btnWhole').onclick = () => addWhole(S.libShip, S.libVar);
 $('btnUndo').onclick = () => undo(false); $('btnRedo').onclick = () => undo(true);
 $('btnNew').onclick = newDesign; $('btnSave').onclick = saveDesign; $('btnGlb').onclick = exportGlb;
+$('btnHulls').onclick = openHulls; $('hdSave').onclick = saveHulls; $('hdNew').onclick = newHull;
+$('hdClose').onclick = () => { $('hullDlg').hidden = true; };
 $('dname').oninput = () => markDirty();
 $('btnDup').onclick = cmd.dup; $('btnMirror').onclick = cmd.mirror; $('btnFlip').onclick = cmd.flip; $('btnReset').onclick = cmd.reset; $('btnDel').onclick = cmd.del;
 document.querySelectorAll('[data-mode]').forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
@@ -645,7 +783,16 @@ $('slotN').onchange = () => slotEdit((pc) => {
 });
 $('slotArc').onchange = () => slotEdit((pc) => { pc.arc = Math.max(0, Math.min(180, Math.round(+$('slotArc').value || 0))); });
 document.querySelectorAll('[data-addslot]').forEach((b) => (b.onclick = () => addSlot(b.dataset.addslot)));
-$('showSlots').onchange = () => { S.showSlots = $('showSlots').checked; for (const o of OBJ.values()) if (o.userData.slot) o.visible = S.showSlots; };
+$('showSlots').onchange = () => { S.showSlots = $('showSlots').checked; for (const o of OBJ.values()) if (o.userData.slot) slotVis(o); };
+$('showGear').onchange = () => { S.showGear = $('showGear').checked; lsSet('shipyard.showGear', S.showGear ? '1' : ''); sync(); };
+// 預覽的裝備：選到一個槽位時改那一個；「全部換成」改所有能裝的槽位
+$('slotLook').onchange = () => slotEdit((pc) => { pc.look = $('slotLook').value; if (!S.showGear) { S.showGear = true; $('showGear').checked = true; } });
+$('allLook').onchange = () => {
+  const id = $('allLook').value; if (!id) return; pushUndo(); let n = 0;
+  for (const pc of S.pieces) if (isSlot(pc) && gearFits(pc.kind, id)) { pc.look = id; n++; }
+  S.showGear = true; $('showGear').checked = true; $('allLook').value = ''; sync(); renderSel();
+  toast(n ? `${n} 個槽位預覽「${GEAR[id].name}」` : '沒有能裝這件裝備的槽位', !n);
+};
 $('btnRenum').onclick = () => {   // 每一類照目前的順序重新編成 1、2、3…
   pushUndo(); for (const k of SLOT_ORDER) S.pieces.filter((p) => isSlot(p) && p.kind === k).sort((a, b) => a.n - b.n).forEach((p, i) => (p.n = i));
   sync(); renderPieces(); renderSel(); renderSlots();
@@ -662,7 +809,7 @@ document.querySelectorAll('#selBox [data-f]').forEach((el) => (el.onchange = () 
   pushUndo(); pc[el.dataset.f[0]][+el.dataset.f[1]] = +el.value; sync();
 }));
 addEventListener('keydown', (e) => {
-  if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
+  if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) || !$('hullDlg').hidden) return;
   const k = e.key.toLowerCase(), c = e.ctrlKey || e.metaKey;
   if (c && k === 'z') { e.preventDefault(); undo(e.shiftKey); }
   else if (c && k === 'y') { e.preventDefault(); undo(true); }
@@ -687,12 +834,16 @@ loop();
       fetch('../api/shipyard', { headers: authHeaders() }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ]);
     LIB.ships = lib.ships || []; for (const s of LIB.ships) LIB.byId[s.id] = s;
-    if (ds) { S.designs = ds.designs || {}; S.canEdit = !!ds.canEdit; }
+    if (ds) { S.designs = ds.designs || {}; S.canEdit = !!ds.canEdit; S.hulls = ds.hulls || {}; }
+    if (!ds || !Object.keys(S.hulls).length) S.hulls = await fetch(urlOf('hulls.json'), { cache: 'no-cache' }).then((r) => (r.ok ? r.json() : {})).then((j) => j.hulls || {}).catch(() => ({}));
+    if (!S.canEdit) { try { Object.assign(S.hulls, JSON.parse(lsGet('shipyard.hulls') || '{}')); } catch (e) { /* 壞掉就算了 */ } }
     if (!S.canEdit) { try { Object.assign(S.designs, JSON.parse(lsGet('shipyard.designs') || '{}')); } catch (e) { /* 壞掉就算了 */ } }
     let pick = null; try { pick = JSON.parse(lsGet('shipyard.lib') || 'null'); } catch (e) { /* 沒有 */ }
     S.libShip = pick && LIB.byId[pick[0]] ? pick[0] : (LIB.ships[0] || {}).id;
     const ship = LIB.byId[S.libShip];
     S.libVar = ship && pick && ship.variants.some((v) => v.name === pick[1]) ? pick[1] : ship && ship.variants[0].name;
+    S.showGear = !!lsGet('shipyard.showGear'); $('showGear').checked = S.showGear;
+    $('allLook').innerHTML = '<option value="">全部換成…</option>' + GEAR_LIST.map(([id, , nm]) => `<option value="${id}">${esc(nm)}</option>`).join('');
     renderLib(); renderAllVar(); renderDesigns();
     let work = null; try { work = JSON.parse(lsGet('shipyard.work') || 'null'); } catch (e) { /* 沒有 */ }
     if (work && work.pieces && work.pieces.length) {   // 上次沒關掉的工作（重新整理後接著做）
