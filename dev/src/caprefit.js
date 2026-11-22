@@ -524,7 +524,7 @@ function crRepairNext() {
   const R = CR.rep; R.k++;
   if (R.k >= R.list.length) { crRepairEnd(); return; }
   const it = R.list[R.k], old = CR.ship;
-  CR.sig = ''; crPut(it.c, { mod: it.c.mod || {}, mk: it.c.mk || {} }, R.fac); crDrop(old);
+  CR.sig = ''; crPut(it.c, it.c.eq ? capEqSum(it.c.key, it.c.eq, it.c.lv) : { mod: it.c.mod || {}, mk: it.c.mk || {} }, R.fac); crDrop(old);
   CR.ship.userData.cr.paint.material.uniforms.uDmg.value = 1 - it.hp;
   R.t0 = crNow(); R.sp = 0; CR.cam = CR.cam || null;
 }

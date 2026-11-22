@@ -109,11 +109,11 @@ function cceData(S) {
   return { B, s, P, plA, mine, foe, foeDefs, ownDefs, win, sv, fem, from };
 }
 const cceNS = (L) => L.reduce((a, q) => a + q.ships.length, 0);
-const cceMk = (c) => CAP_MK_NAME[Math.max(1, ...Object.values(c.mk || {}))];
+const cceMk = (c) => CAP_MK_NAME[capMaxMk(c)];
 function ccEngage(S, calc, go, view) {
   const { s, P, plA, mine, foe, foeDefs, ownDefs, win, sv, fem, from } = cceData(S), nS = cceNS;
   const col = cceOddCol(win), C = 2 * Math.PI * 130;
-  const shipMk = (c) => { const m = Math.max(1, ...Object.values(c.mk || {})); return CAP_MK_NAME[m]; };
+  const shipMk = (c) => CAP_MK_NAME[capMaxMk(c)];
   const mineHtml = mine.map((q, qi) => { const ai = q !== P;
     return `<div class="sqt" style="color:${ai ? 'var(--ally)' : 'var(--own)'}">${ai ? '' : '★ '}${smuEsc(q.name)}<small>${ai ? `${q.ships.length} 艘` : '親自指揮'}</small>${ai ? '<span class="ai">AI</span>' : ''}</div>
       ${q.ships.map((c, k) => { const v = (sv[qi] || [])[k];

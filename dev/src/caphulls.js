@@ -103,11 +103,20 @@ function capModBase(H, slot) { return slot === 'main' ? H.main.name : slot === '
 function capModName(H, slot, id) { const M = id && CAP_MODS[slot][id]; return M ? M.name : capModBase(H, slot); }
 const capLvOf = (xp) => CAP_XP.lv.reduce((a, v, k) => (xp >= v ? k + 1 : a), 1);
 const capMkCapLv = (lv) => (lv >= 5 ? 3 : lv >= 3 ? 2 : 1);   // 船的等級能裝到的 Mk（研發的上限之後再加）
-// 新船、舊存檔的船：補上等級、模組的欄位
-function capShipFix(c) { if (c.lv == null) c.lv = 1; if (c.xp == null) c.xp = 0; if (!c.mod) c.mod = {}; if (!c.mk) c.mk = {}; return c; }
-const capNewShip = (key) => capShipFix({ key, hp: 1, sh: 1, msl: 1 });
-// 照模組與 Mk 算出這艘船實際的數值（o＝{ mod, mk }；都是原廠就直接回傳原本的船型）
+// 新船、舊存檔的船：補上等級、裝備（eq）的欄位；舊的 5 槽模組（mod、mk）換算成槽位裝備（見下面「槽位制度」）
+function capShipFix(c) {
+  if (c.lv == null) c.lv = 1; if (c.xp == null) c.xp = 0;
+  if (!c.eq) { const o = capEqFromOld(c.key, c.mod, c.mk, c.lv); c.eq = o.eq; c.conv = 1; if (o.refund) c.refund = (c.refund || 0) + o.refund; }
+  delete c.mod; delete c.mk;
+  capEqGrow(c); return c;
+}
+const capNewShip = (key) => capShipFix({ key, hp: 1, sh: 1, msl: 1, eq: capStockEq(key) });
+// 照裝備算出這艘船實際的數值：o＝{ eq, lv }（新）或 { mod, mk }（舊的戰鬥快照、改裝草稿）；回傳的 H.mod／H.mk＝舊 5 槽的摘要（外觀、熟練度用）
 function capHullMod(H0, o) {
+  if (o && o.eq) return capHullEq(H0, o.eq, o.lv);
+  return capHullOld(H0, o);
+}
+function capHullOld(H0, o) {
   const mod = (o && o.mod) || {}, mk = (o && o.mk) || {};
   if (!CAP_SLOTS.some(([k]) => mod[k] || (mk[k] || 1) > 1)) return H0;
   const H = { ...H0, main: { ...H0.main }, tur: { ...H0.tur }, pd: { ...H0.pd }, msl: H0.msl ? { ...H0.msl } : null, mod, mk };
@@ -150,6 +159,7 @@ function capProfName(k) { const [slot, id] = k.split(':'), nm = CAP_SLOTS.find((
 // 照熟練度調整數值（mod＝這艘船的模組，prof＝S.pl.prof；沒有熟練度就回傳原本的）
 function capProfMod(H, mod, prof) {
   if (!prof) return H;
+  if (H.mod) mod = H.mod;   // 槽位裝備：用摘要（每類取第一件）
   const l = CAP_SLOTS.map(([s]) => capProfLv(prof[capProfKey(s, (mod || {})[s])] || 0)); if (!l.some(Boolean)) return H;
   H = { ...H, main: { ...H.main }, tur: { ...H.tur }, pd: { ...H.pd }, msl: H.msl ? { ...H.msl } : null };
   const p = CAP_PROF.per, mx = CAP_PROF.lv.length - 1, [a, b, c, d, e] = l;
@@ -158,5 +168,171 @@ function capProfMod(H, mod, prof) {
   if (H.msl) { H.msl.lockT *= 1 - p * c; if (c >= mx) H.msl.n = Math.round(H.msl.n * 1.2); }
   H.sh *= 1 + p * d; if (d >= mx) H.hp *= 1.05;
   H.turn *= 1 + p * e; if (e >= mx) H.strafe *= 1.15;
+  return H;
+}
+
+// ═══════════════════════ 艦長：槽位制度（dev/艦長槽位企劃.md 第 1 步，2026-11-22） ═══════════════════════
+// 每個艦種、每個等級有幾個主砲槽、副砲槽、防空槽、艦載機槽、輔助槽（CAP_HULL_SLOTS）；船的記錄 c.eq＝{ 槽位編號: { g: 裝備, mk } }，g＝'' 是空槽。
+// 槽位編號＝種類＋序號（main0、sec1、aux0…），升級時沿用，所以裝好的裝備不會掉；新開的槽是空的。
+// 能裝的東西（使用者 2026-11-22）：主砲槽＝主砲、副砲級（副砲、飛彈艙）、大型輔助；副砲槽＝副砲級、中型輔助；防空槽＝防空砲、小型輔助；
+// 艦載機槽＝只能放艦載機；輔助槽＝大中小輔助都可以。輔助裝備：實體裝甲、能量護盾、超頻引擎（＋研發、藍圖的變體），各分大中小。
+// 船的火力＝裝備加總；艦種本身只有船體、護盾、機動與技能。原廠裝備（std、gun、pod、pd、wing）照艦種原本的數值，所以原廠的 Lv1 船數值不變。
+// 戰鬥還是一門主砲、一組砲塔（第 4 步才照槽位分開）：多門主砲先合成一門（傷害相加），副砲、飛彈艙取平均、加總。
+const CAP_KIND_ORDER = ['main', 'sec', 'aa', 'ftr', 'aux'];
+const CAP_KIND = {
+  main: { name: '主砲槽', cls: ['main', 'sec'], aux: ['L'] },
+  sec: { name: '副砲槽', cls: ['sec'], aux: ['M'] },
+  aa: { name: '防空槽', cls: ['aa'], aux: ['S'] },
+  ftr: { name: '艦載機槽', cls: ['ftr'], aux: [] },
+  aux: { name: '輔助槽', cls: [], aux: ['L', 'M', 'S'] },
+};
+const CAP_AUX_SIZE = { L: { name: '大型', k: 1 }, M: { name: '中型', k: 0.7 }, S: { name: '小型', k: 0.45 } };
+// 輔助裝備的效果（大型的；中、小型照 CAP_AUX_SIZE 打折）：數值是倍率的增減（0.25＝+25%）；grp 相同的裝多個會遞減（CAP_AUX_STACK）
+const CAP_AUX_FAM = {
+  armor: { name: '實體裝甲', grp: 'hull', fx: { hp: 0.25, cruise: -0.06, max: -0.06, acc: -0.06 }, p: 220, desc: '船體多，速度略降' },
+  react: { name: '反應裝甲', grp: 'hull', fx: { hp: 0.08, cruise: -0.03, max: -0.03 }, mslCut: 0.3, res: true, p: 260, desc: '飛彈打到船體的傷害少（大型 30%），船體略增' },
+  shield: { name: '能量護盾', grp: 'shield', fx: { sh: 0.35, hp: -0.05 }, p: 220, desc: '護盾多，船體略減' },
+  oc: { name: '超頻引擎', grp: 'eng', fx: { cruise: 0.12, max: 0.12, acc: 0.1, hp: -0.03 }, p: 160, desc: '巡航、最高速度、加速都快，船體略減' },
+  sprint: { name: '衝刺超頻引擎', grp: 'eng', fx: { max: 0.2, cruise: 0.1, acc: 0.15, turn: -0.15 }, p: 180, desc: '最高速度快很多，轉向變慢' },
+  agile: { name: '機動超頻引擎', grp: 'eng', fx: { turn: 0.3, strafe: 0.25, climb: 0.2, max: -0.05 }, p: 180, desc: '轉向、側移快，最高速度略降' },
+};
+const CAP_AUX_STACK = [1, 0.8, 0.6, 0.45, 0.35];
+// 裝備：cls＝裝在哪一類（main 主砲、sec 副砲級、aa 防空、ftr 艦載機、aux 輔助）；p＝改裝換上的價錢；res＝要研發；mod＝對應的舊模組（外觀、熟練度）
+const CAP_GEAR = {
+  std: { cls: 'main', name: '原廠主砲', p: 150, desc: '這個艦種原本的主砲' },
+  rail: { cls: 'main', mod: 'rail', p: 300 }, heavy: { cls: 'main', mod: 'heavy', p: 300 }, rapid: { cls: 'main', mod: 'rapid', p: 300 }, beam: { cls: 'main', mod: 'beam', p: 320, res: true },
+  gun: { cls: 'sec', kind: 'gun', name: '標準砲塔', p: 100, desc: '自動射擊的砲塔（艦種原本的副砲）' },
+  hgun: { cls: 'sec', kind: 'gun', mod: 'heavy', p: 150 },
+  agun: { cls: 'sec', kind: 'gun', mod: 'aa', pdN: 1, p: 150 },
+  pod: { cls: 'sec', kind: 'pod', name: '標準飛彈艙', p: 150, desc: '垂直發射飛彈（艦種原本的彈艙）' },
+  hpod: { cls: 'sec', kind: 'pod', name: '重飛彈艙', msl: { n: 0.4, dmg: 2.2, lockT: 1.3 }, p: 200, desc: '數量少、一發傷害高，鎖定比較久' },
+  spod: { cls: 'sec', kind: 'pod', name: '蜂群飛彈艙', msl: { n: 2, dmg: 0.45, lockT: 0.7 }, salvo: 3, p: 200, desc: '數量多、一發傷害低，鎖定快' },
+  pd: { cls: 'aa', name: '防空砲', p: 80, desc: '點防禦：攔飛彈、打艦載機' },
+  lpd: { cls: 'aa', name: '遠程防空砲', far: 1.3, dmg: 0.85, p: 120, desc: '攔截距離遠 30%，傷害低一點' },
+  wing: { cls: 'ftr', name: '護航機中隊', n: 3, p: 200, desc: '3 架護航機' },
+  awing: { cls: 'ftr', name: '攔截機中隊', n: 4, p: 260, desc: '4 架攔截機（聯盟的技術）' },
+};
+for (const k of ['rail', 'heavy', 'rapid', 'beam']) Object.assign(CAP_GEAR[k], { name: CAP_MODS.main[k].name, desc: CAP_MODS.main[k].desc });
+for (const [k, m] of [['hgun', 'heavy'], ['agun', 'aa']]) Object.assign(CAP_GEAR[k], { name: CAP_MODS.tur[m].name, desc: CAP_MODS.tur[m].desc });
+CAP_GEAR.agun.desc = '對艦傷害低；附 1 座點防禦（攔截距離遠 25%），專打飛彈與艦載機';
+for (const [fam, F] of Object.entries(CAP_AUX_FAM)) for (const [sz, Z] of Object.entries(CAP_AUX_SIZE)) CAP_GEAR[fam + sz] = { cls: 'aux', fam, size: sz, name: `${Z.name}${F.name}`, p: Math.round(F.p * (0.5 + Z.k * 0.5) / 10) * 10, res: F.res, desc: F.desc };
+// 每個艦種 Lv1～5 的槽位數 [主砲, 副砲, 防空, 艦載機, 輔助]（預設值；之後在戰艦組裝編輯器的艦種面板改）。Lv1＝原廠的配置
+const CAP_HULL_SLOTS = {
+  assault: [[1, 3, 2, 0, 2], [1, 3, 3, 0, 2], [1, 4, 3, 0, 2], [1, 4, 3, 0, 3], [2, 4, 3, 0, 3]],
+  gunship: [[1, 5, 2, 0, 2], [1, 5, 3, 0, 2], [1, 6, 3, 0, 2], [1, 6, 3, 0, 3], [2, 6, 3, 0, 3]],
+  support: [[1, 3, 4, 2, 2], [1, 3, 4, 2, 3], [1, 3, 5, 2, 3], [1, 4, 5, 2, 3], [1, 4, 5, 3, 3]],
+  ew: [[1, 3, 3, 0, 2], [1, 3, 3, 0, 3], [1, 4, 3, 0, 3], [1, 4, 4, 0, 3], [1, 4, 4, 0, 4]],
+  stealth: [[1, 2, 1, 0, 2], [1, 2, 2, 0, 2], [1, 3, 2, 0, 2], [1, 3, 2, 0, 3], [1, 3, 3, 0, 3]],
+};
+const capGearName = (H0, id) => (!id ? '（空）' : id === 'std' ? (H0 && H0.main ? H0.main.name : CAP_GEAR.std.name) : (CAP_GEAR[id] || { name: id }).name);
+const capGearFam = (id) => (CAP_GEAR[id] && CAP_GEAR[id].fam) || id;   // 研發、藍圖看的是系列（大中小的輔助裝備算同一種）
+function capSlotN(key, lv) { const T = CAP_HULL_SLOTS[key] || [[1, 2, 2, 0, 2]], r = T[Math.min(T.length, Math.max(1, lv || 1)) - 1]; return Object.fromEntries(CAP_KIND_ORDER.map((k, i) => [k, r[i] || 0])); }
+// 這個艦種、這個等級的槽位：[{ id, kind, n }]
+function capSlotList(key, lv) { const N = capSlotN(key, lv), out = []; for (const k of CAP_KIND_ORDER) for (let n = 0; n < N[k]; n++) out.push({ id: k + n, kind: k, n }); return out; }
+const capSlotName = (sl) => `${CAP_KIND[sl.kind].name} ${sl.n + 1}`;
+// 這件裝備能不能裝在這一類槽位（不看研發）
+function capGearFits(kind, id) {
+  if (!id) return true;
+  const G = CAP_GEAR[id], K = CAP_KIND[kind]; if (!G || !K) return false;
+  return G.cls === 'aux' ? K.aux.includes(G.size) : K.cls.includes(G.cls);
+}
+// 原廠配置：主砲 1 門、副砲照艦種的砲塔數＋1 個飛彈艙、防空照點防禦數、艦載機每 3 架一個槽；輔助槽空著
+function capStockEq(key) {
+  const H = CAP_HULLS[key], N = capSlotN(key, 1), eq = {}, put = (kind, list) => { for (let n = 0; n < N[kind]; n++) eq[kind + n] = { g: list[n] || '', mk: 1 }; };
+  put('main', H && H.main ? ['std'] : []);
+  put('sec', [...Array(H ? H.tur.n : 0).fill('gun'), ...(H && H.msl ? ['pod'] : [])]);
+  put('aa', Array(H ? H.pd.n : 0).fill('pd'));
+  put('ftr', Array(Math.round(((H && H.ftr) || 0) / 3)).fill('wing'));
+  put('aux', []);
+  return eq;
+}
+// 升級：新開的槽位補成空的；多出來的（等級下降、槽位表改小）留著不用
+function capEqGrow(c) { for (const sl of capSlotList(c.key, c.lv)) if (!c.eq[sl.id]) c.eq[sl.id] = { g: '', mk: 1 }; return c; }
+const capEqLive = (key, lv, eq) => capSlotList(key, lv).map((sl) => [sl, (eq && eq[sl.id]) || { g: '', mk: 1 }]);
+// 舊的 5 槽模組 → 槽位裝備。機庫（飛彈艙換成護航機）在沒有艦載機槽的船上裝不了：退回改裝費（refund，由生涯存檔發給你）
+const CAP_OLD_REFUND = 200;   // 等於以前換飛彈艙模組的價錢
+function capEqFromOld(key, mod, mk, lv) {
+  mod = mod || {}; mk = mk || {};
+  const eq = capStockEq(key), L = capSlotList(key, lv || 1), M = (s) => mk[s] || 1; let refund = 0;
+  for (const sl of L) if (!eq[sl.id]) eq[sl.id] = { g: '', mk: 1 };
+  if (eq.main0 && eq.main0.g) eq.main0 = { g: mod.main || 'std', mk: M('main') };
+  for (const sl of L) {
+    const e = eq[sl.id];
+    if (e.g === 'gun') { e.g = mod.tur === 'heavy' ? 'hgun' : mod.tur === 'aa' ? 'agun' : 'gun'; e.mk = M('tur'); }
+    if (e.g === 'pod') { e.g = mod.msl === 'heavy' ? 'hpod' : mod.msl === 'swarm' ? 'spod' : 'pod'; e.mk = M('msl'); }
+  }
+  if (mod.msl === 'hangar') refund += CAP_OLD_REFUND;
+  const aux = L.filter((sl) => sl.kind === 'aux'), put = (g, m) => { const sl = aux.shift(); if (sl) eq[sl.id] = { g, mk: m }; };
+  const def = { armor: 'armorL', shield: 'shieldL', react: 'reactL' }[mod.def] || (M('def') > 1 ? 'armorS' : '');
+  const eng = { cruise: 'ocM', sprint: 'sprintL', agile: 'agileL' }[mod.eng] || (M('eng') > 1 ? 'ocS' : '');
+  if (def) put(def, M('def')); if (eng) put(eng, M('eng'));
+  return { eq, refund };
+}
+// 舊 5 槽的摘要（每類取第一件）：外觀（capfx、整修庫）、熟練度、勝率的 Mk 係數還是照這個
+function capEqSum(key, eq, lv) {
+  const mod = {}, mk = {}, take = (slot, id, m) => { if (mk[slot] == null) { if (id) mod[slot] = id; mk[slot] = m || 1; } };
+  for (const [, e] of capEqLive(key, lv || 5, eq)) {
+    const G = CAP_GEAR[e.g]; if (!G) continue;
+    if (G.cls === 'main') take('main', G.mod, e.mk);
+    else if (G.kind === 'gun') take('tur', G.mod, e.mk);
+    else if (G.kind === 'pod') take('msl', { hpod: 'heavy', spod: 'swarm' }[e.g], e.mk);
+    else if (G.cls === 'ftr' && e.g === 'awing') take('msl', 'hangar', e.mk);
+    else if (G.cls === 'aux' && CAP_AUX_FAM[G.fam].grp !== 'eng') take('def', G.fam, e.mk);
+    else if (G.cls === 'aux') take('eng', { oc: 'cruise', sprint: 'sprint', agile: 'agile' }[G.fam], e.mk);
+  }
+  for (const [s] of CAP_SLOTS) if (mk[s] === 1) delete mk[s];
+  return { mod, mk };
+}
+const capMaxMk = (c) => Math.max(1, ...Object.values(c.eq || {}).filter((e) => e.g).map((e) => e.mk || 1), ...Object.values(c.mk || {}));
+const capHullKey = (H0) => Object.keys(CAP_HULLS).find((k) => CAP_HULLS[k] === H0) || '';
+// 照槽位裝備算出實際數值（H0＝艦種；eq＝c.eq）。只算目前等級有的槽位（lv 沒給就全部）
+function capHullEq(H0, eq, lv) {
+  const key = capHullKey(H0), H = { ...H0, eq };
+  const list = (key ? capEqLive(key, lv || 5, eq) : Object.entries(eq).map(([id, e]) => [{ id, kind: id.replace(/\d+$/, '') }, e])).filter(([sl, e]) => e.g && CAP_GEAR[e.g] && capGearFits(sl.kind, e.g));
+  const K = (e) => CAP_MK[e.mk || 1];
+  // 主砲：每門照自己的型式；多門先合成一門（裝填照第一門，傷害照每秒傷害相加）
+  const base = H0.main || { name: '主砲', dmg: 15, cd: 1, range: 220, spd: 260, arc: 60, trav: 60 }, dps0 = base.dmg / base.cd;
+  const mains = list.filter(([, e]) => CAP_GEAR[e.g].cls === 'main').map(([sl, e]) => {
+    const G = CAP_GEAR[e.g], mm = G.mod && CAP_MODS.main[G.mod];
+    const g = mm ? { name: mm.name, cd: mm.p.cd, dmg: dps0 * mm.p.k * mm.p.cd, range: mm.p.range, spd: mm.p.spd, arc: mm.p.arc, trav: mm.p.trav, mod: G.mod, fx: mm.fx } : { ...base };
+    g.dmg = Math.round(g.dmg * K(e) * 10) / 10; g.slot = sl.id; return g;
+  });
+  H.mains = mains;
+  H.main = mains.length ? { ...mains[0], dmg: Math.round(mains.reduce((a, g) => a + g.dmg * mains[0].cd / g.cd, 0) * 10) / 10 } : { ...base, dmg: 0, none: true };
+  // 副砲（砲塔）：每座照型式，合成一組（每秒傷害不變）
+  const tb = H0.tur || { n: 0, dmg: 6, cd: 1.4, range: 160, acc: 0.85 };
+  const guns = list.filter(([, e]) => CAP_GEAR[e.g].kind === 'gun').map(([, e]) => {
+    const G = CAP_GEAR[e.g], m = G.mod && CAP_MODS.tur[G.mod], t = { dmg: tb.dmg, cd: tb.cd, range: tb.range, acc: tb.acc };
+    if (m && m.tur) for (const k in m.tur) t[k] *= m.tur[k];
+    t.dmg *= K(e); t.fx = m && m.fx; t.pdN = G.pdN || 0; return t;
+  });
+  if (guns.length) { const n = guns.length, c0 = guns[0].cd; H.tur = { n, cd: c0, dmg: Math.round(guns.reduce((a, t) => a + t.dmg / t.cd, 0) / n * c0 * 1000) / 1000, range: guns.reduce((a, t) => a + t.range, 0) / n, acc: guns.reduce((a, t) => a + t.acc, 0) / n }; if (guns[0].fx) H.tur.fx = guns[0].fx; }
+  else H.tur = { ...tb, n: 0 };
+  // 防空：防空砲＋防空砲塔附的點防禦
+  const pb = H0.pd || { n: 0, dmg: 2, cd: 0.4, far: 70, acc: 0.75 };
+  const pds = list.filter(([, e]) => CAP_GEAR[e.g].cls === 'aa').map(([, e]) => { const G = CAP_GEAR[e.g]; return { dmg: pb.dmg * (G.dmg || 1) * K(e), far: pb.far * (G.far || 1) }; });
+  for (const t of guns) for (let j = 0; j < t.pdN; j++) pds.push({ dmg: pb.dmg * 0.6, far: pb.far * 1.25 });
+  H.pd = pds.length ? { ...pb, n: pds.length, dmg: pds.reduce((a, p) => a + p.dmg, 0) / pds.length, far: pds.reduce((a, p) => a + p.far, 0) / pds.length } : { ...pb, n: 0 };
+  // 飛彈艙：彈量相加，傷害、鎖定時間照彈量平均
+  const mb = H0.msl || { n: 16, dmg: 35, range: 260, lockT: 1.1, cd: 0.5 };
+  const pods = list.filter(([, e]) => CAP_GEAR[e.g].kind === 'pod').map(([, e]) => { const G = CAP_GEAR[e.g], m = { ...mb }; if (G.msl) for (const k in G.msl) m[k] *= G.msl[k]; m.n = Math.max(2, Math.round(m.n)); m.dmg *= K(e); m.salvo = G.salvo || 0; return m; });
+  if (pods.length) {
+    const n = pods.reduce((a, m) => a + m.n, 0); H.msl = { ...mb, n, dmg: pods.reduce((a, m) => a + m.dmg * m.n, 0) / n, lockT: pods.reduce((a, m) => a + m.lockT * m.n, 0) / n };
+    const sw = pods.filter((m) => m.salvo); if (sw.length * 2 > pods.length) H.msl.salvo = sw[0].salvo; else delete H.msl.salvo;
+  } else H.msl = null;
+  // 艦載機
+  H.ftr = list.filter(([, e]) => CAP_GEAR[e.g].cls === 'ftr').reduce((a, [, e]) => a + CAP_GEAR[e.g].n, 0);
+  // 輔助：大型的效果 × 尺寸 × Mk（只放大好處），同一組的第 2、3 件遞減
+  const add = {}, seen = {}; let cut = 0;
+  const aux = list.filter(([, e]) => CAP_GEAR[e.g].cls === 'aux').map(([, e]) => ({ e, G: CAP_GEAR[e.g] })).sort((a, b) => CAP_AUX_SIZE[b.G.size].k - CAP_AUX_SIZE[a.G.size].k);
+  for (const { e, G } of aux) {
+    const F = CAP_AUX_FAM[G.fam]; seen[F.grp] = (seen[F.grp] ?? -1) + 1;
+    const w = CAP_AUX_STACK[Math.min(CAP_AUX_STACK.length - 1, seen[F.grp])] * CAP_AUX_SIZE[G.size].k;
+    for (const k in F.fx) add[k] = (add[k] || 0) + F.fx[k] * w * (F.fx[k] > 0 ? K(e) : 1);
+    if (F.mslCut) cut += F.mslCut * w;
+  }
+  for (const k in add) H[k] = H[k] * Math.max(0.3, 1 + add[k]);
+  if (cut) H.mslCut = Math.min(0.5, cut); else delete H.mslCut;
+  const sum = capEqSum(key, eq, lv); H.mod = sum.mod; H.mk = sum.mk;
   return H;
 }

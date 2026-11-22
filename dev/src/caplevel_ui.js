@@ -134,7 +134,7 @@ const CCV_TICO = {
   scorch: '<path d="M12 21c-4 0-6.5-2.8-6.5-6.3 0-3.7 3-5.3 3.6-9.2 2.3 1.6 3.4 3.7 3.4 6 1-.8 1.6-2 1.7-3.4 2.4 2 4.3 4.3 4.3 6.7 0 3.4-2.6 6.2-6.5 6.2z"/>',
 };
 function ccvTSvg(id) {
-  const T = CC_TECH[id], mk = T.mod && T.mod.join(':');
+  const T = CC_TECH[id], mk = T.gear && ccGearIcoKey(T.gear);
   if (mk && typeof CC_MODICO !== 'undefined' && CC_MODICO[mk]) return `<svg viewBox="0 0 20 20">${CC_MODICO[mk]}</svg>`;
   const sc = /^(scorch|bomb)(\d)/.exec(id), n = sc ? +sc[2] : 0;
   const dots = Array.from({ length: n }, (_, i) => `<circle cx="${12 + (i - (n - 1) / 2) * 3.6}" cy="16.5" r="1.1" fill="var(--c)" stroke="none"/>`).join('');

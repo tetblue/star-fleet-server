@@ -30,8 +30,8 @@ const CAP_ODDS = {
 const CAP_SHIPH = new Map();
 function capShipH(c) {
   if (c.H) return c.H;
-  const H0 = CAP_HULLS[c.key]; if (!c.mod && !c.prof) return H0;
-  const k = c.key + JSON.stringify([c.mod, c.mk, c.prof]); let H = CAP_SHIPH.get(k);
+  const H0 = CAP_HULLS[c.key]; if (!c.eq && !c.mod && !c.prof) return H0;
+  const k = c.key + JSON.stringify([c.eq, c.lv, c.mod, c.mk, c.prof]); let H = CAP_SHIPH.get(k);
   if (!H) { H = capProfMod(capHullMod(H0, c), c.mod, c.prof); if (CAP_SHIPH.size > 2000) CAP_SHIPH.clear(); CAP_SHIPH.set(k, H); }
   return H;
 }
@@ -39,10 +39,12 @@ function capShipH(c) {
 // 2026-11-15 用 77 場遊戲裡 AI 對 AI 的實戰校正：換砲的型式（磁軌、重粒子、速射…）對勝負幾乎沒影響，
 // 用「改裝後的每秒傷害 ÷ 原廠」反而預測變差（log loss 0.62～0.71）；只算 Mk＝0.545（舊公式 0.693）。船體、護盾、飛彈照改裝後的實際數值。
 function capFireK(c, e = 1) {
-  const H0 = CAP_HULLS[c.key], mk = c.mk || (c.H && c.H.mk) || {}, mod = c.mod || (c.H && c.H.mod) || {};
+  const H0 = CAP_HULLS[c.key], H = c.eq && !c.H ? capShipH(c) : c.H, mk = c.mk || (H && H.mk) || {}, mod = c.mod || (H && H.mod) || {};
   const pm = c.prof ? 1 / (1 - CAP_PROF.per * capProfLv(c.prof[capProfKey('main', mod.main)] || 0)) : 1;
   const dm = H0.main.dmg / H0.main.cd, dt = (H0.tur.n * H0.tur.dmg * H0.tur.acc) / H0.tur.cd;
-  const k = (dm * CAP_MK[mk.main || 1] * pm + dt * CAP_MK[mk.tur || 1]) / (dm + dt);
+  // 槽位制度：主砲門數、砲塔座數比原廠多（升級開的槽）就照數量加權；型式不算（見上面的校正）
+  const nm = H && H.mains ? H.mains.length : 1, nt = H && H.tur && H0.tur.n ? H.tur.n / H0.tur.n : 1;
+  const k = (dm * CAP_MK[mk.main || 1] * pm * nm + dt * CAP_MK[mk.tur || 1] * nt) / (dm + dt);
   return k === 1 ? 1 : Math.pow(k, e);
 }
 function capOdds(sides, P = CAP_ODDS) {

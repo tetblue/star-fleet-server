@@ -980,7 +980,8 @@ function capRam(s, t) {
   }
 }
 function capMain(s, t) {
-  const M = s.H.main; s.mainCd = M.cd;
+  const M = s.H.main; if (M.none) return;   // 槽位制度：主砲槽都沒裝主砲（caphulls.js capHullEq）
+  s.mainCd = M.cd;
   const G = capGunDir(s), [ox, oy, oz] = capMuzzle(s);
   const sp = 0.004, D = v3.norm([G[0] + (capRnd() - 0.5) * sp * 2, G[1] + (capRnd() - 0.5) * sp * 2, G[2] + (capRnd() - 0.5) * sp * 2]);
   const h = pilotRay(ox, oy, oz, D, M.range, { speed: M.spd }, true, 1 - s.side), mh = s.foe ? null : groundMsRay(ox, oy, oz, D, h.k ? h.s + 0.5 : M.range);

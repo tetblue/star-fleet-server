@@ -32,6 +32,19 @@ function ccModIco(slot, id, col, sz) {
   const p = CC_MODICO[slot + ':' + (id || 'std')] || CC_MODICO[slot + ':std'] || '';
   return `<svg class="cc-mico" viewBox="0 0 20 20" width="${sz || 18}" height="${sz || 18}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"${col ? ` style="color:${col}"` : ''}>${p}</svg>`;
 }
+// 槽位制度的裝備（或系列）→ 上面的圖示鍵
+function ccGearIcoKey(id) {
+  const G = CAP_GEAR[id], fam = capGearFam(id);
+  if (CAP_AUX_FAM[fam]) return CAP_AUX_FAM[fam].grp === 'eng' ? 'eng:' + ({ oc: 'cruise' }[fam] || fam) : 'def:' + fam;
+  if (!G) return '';
+  if (G.cls === 'main') return 'main:' + (G.mod || 'std');
+  if (G.kind === 'gun') return 'tur:' + (G.mod || 'std');
+  if (G.kind === 'pod') return 'msl:' + ({ hpod: 'heavy', spod: 'swarm' }[id] || 'std');
+  if (G.cls === 'aa') return 'tur:aa';
+  if (G.cls === 'ftr') return 'msl:hangar';
+  return '';
+}
+function ccGearIco(id, col, sz) { const k = ccGearIcoKey(id); if (!k) return `<svg class="cc-mico" viewBox="0 0 20 20" width="${sz || 18}" height="${sz || 18}"></svg>`; const [a, b] = k.split(':'); return ccModIco(a, b === 'std' ? '' : b, col, sz); }
 // Mk 徽章：等階的顏色
 const ccMkBadge = (k) => `<span class="cc-mk cc-mk${k || 1}">${CAP_MK_NAME[k || 1]}</span>`;
 
