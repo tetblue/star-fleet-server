@@ -686,6 +686,7 @@ function renderHulls() {
     <table><tr><th></th>${SLOT_ORDER.map((k) => `<th style="color:#${SLOT_KINDS[k].col.toString(16).padStart(6, '0')}">${SLOT_KINDS[k].name}</th>`).join('')}${H.old ? '' : '<th>設計</th>'}<th>檢查</th>${H.old ? '' : '<th>遊戲模型</th>'}</tr>${rows}</table>
     ${H.old ? '' : '<div class="dim small">「發佈」：把那一級的設計交給伺服器上的 Blender 合併、減面到約 4 萬面、烘成一張貼圖，存成遊戲模型（每級幾分鐘）。槽位位置一起記下來。設計改過要重新發佈。</div>'}
     ${H.old ? '' : `<h4>數值（原廠裝備的數值；實際火力＝裝上的裝備加總）</h4>${stg}`}`;
+  hdSliders();
   document.querySelectorAll('[data-hs]').forEach((el) => (el.onchange = () => { const [l, i] = el.dataset.hs.split(',').map(Number); H.slots[l][i] = Math.max(0, Math.round(+el.value || 0)); hullDirty(); renderHulls(); }));
   document.querySelectorAll('[data-hl]').forEach((el) => (el.onchange = () => { (H.lv = H.lv || [null, null, null, null, null])[+el.dataset.hl] = el.value || null; hullDirty(); renderHulls(); }));
   document.querySelectorAll('[data-hpub]').forEach((el) => (el.onclick = () => publishLv(HS.sel, +el.dataset.hpub)));
@@ -752,6 +753,27 @@ async function publishLv(key, l) {
       if (PUBJ[k].msg !== q.msg) { PUBJ[k].msg = q.msg; if (!$('hullDlg').hidden) renderHulls(); }
     }
   } catch (e) { console.error(e); toast('發佈失敗：' + e.message, true); done(e.message); }
+}
+// 艦種視窗的滑桿（使用者 2026-11-23）：每個數值欄位下面一條，範圍照欄位（數值本來就超出範圍就放寬）；拖的時候數字跟著變，放開＝改好了
+const HD_SL = {
+  hp: [50, 1500, 10], sh: [0, 1000, 10], cruise: [1, 20, 0.1], max: [1, 30, 0.1], acc: [0.5, 8, 0.1], strafe: [0.5, 10, 0.1], climb: [0.5, 10, 0.1], turn: [5, 60, 1], boostT: [1, 15, 0.5],
+  'main.dmg': [1, 200, 1], 'main.cd': [0.2, 10, 0.1], 'main.range': [50, 500, 5], 'main.arc': [0, 180, 5], 'main.trav': [5, 180, 5], 'main.spd': [50, 500, 10],
+  'tur.dmg': [0.5, 30, 0.5], 'tur.cd': [0.2, 5, 0.1], 'tur.range': [50, 400, 5], 'tur.acc': [0.1, 1, 0.01],
+  'pd.dmg': [0.5, 10, 0.5], 'pd.cd': [0.1, 2, 0.05], 'pd.far': [20, 200, 5], 'pd.acc': [0.1, 1, 0.01],
+  'msl.n': [0, 60, 1], 'msl.dmg': [5, 150, 5], 'msl.range': [50, 500, 10], 'msl.lockT': [0.2, 4, 0.1], 'msl.cd': [0.1, 2, 0.05],
+};
+function hdSlider(n, lo, hi, st) {
+  const r = document.createElement('input'); r.type = 'range';
+  const v = +n.value; if (n.value !== '' && isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+  r.min = lo; r.max = hi; r.step = st; r.value = n.value === '' ? lo : v; r.title = n.title || '';
+  r.addEventListener('input', () => { n.value = r.value; });
+  r.addEventListener('change', () => { n.value = r.value; n.dispatchEvent(new Event('change')); });
+  n.addEventListener('input', () => { r.value = n.value; });
+  n.after(r); return r;
+}
+function hdSliders() {
+  document.querySelectorAll('#hdMain [data-hs]').forEach((n) => hdSlider(n, 0, 12, 1));
+  document.querySelectorAll('#hdMain [data-hst]').forEach((n) => { const k = n.dataset.hst.replace(/^\./, ''), R = HD_SL[k] || [0, 100, 1]; hdSlider(n, ...R); });
 }
 function newHull() {
   const key = (prompt('新艦種的代號（英文字母、數字，例如 cruiser2；遊戲裡用這個當鍵）') || '').trim();

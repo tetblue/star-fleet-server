@@ -72,7 +72,10 @@
   .hd-main th { color: var(--dim); font-size: 12px; }
   .hd-main input[type=number] { width: 58px; }
   .hd-main .stgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 12px; }
-  .hd-main .stgrid label { display: flex; justify-content: space-between; gap: 6px; align-items: center; font-size: 12px; }
+  .hd-main .stgrid label { display: grid; grid-template-columns: 1fr 58px; column-gap: 6px; align-items: center; font-size: 12px; }
+  .hd-main .stgrid label input[type=range] { grid-column: 1 / -1; width: 100%; }
+  .hd-main td input[type=range] { display: block; width: 58px; margin-top: 2px; }
+  .hd-main input[type=range] { accent-color: #7cc4ff; cursor: pointer; }
   .hd-main .chk { font-size: 12px; } .hd-main .chk .bad { color: var(--bad); } .hd-main .chk .ok { color: var(--ok); }
   .slotbtn { border-color: var(--sc); color: var(--sc); }
   #slotCounts .sc { color: var(--sc); margin-right: 8px; }
