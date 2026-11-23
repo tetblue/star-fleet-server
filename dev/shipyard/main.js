@@ -579,6 +579,7 @@ function renderSel(liveOnly) {
     const [f, i] = [el.dataset.f[0], +el.dataset.f[1]];
     el.disabled = !one; if (document.activeElement !== el) el.value = one ? one[f][i] : '';
   });
+  slXyz();
   if (liveOnly) return;
   const so = isSlot(one) ? one : null;
   $('slotBox').hidden = !so; $('selVarRow').hidden = pcs.every(isSlot);
@@ -593,6 +594,7 @@ function renderSel(liveOnly) {
   const common = vs.reduce((a, b) => a.filter((x) => b.includes(x)), vs[0] || []);
   const curV = new Set(pcs.filter((p) => !isSlot(p)).map((p) => p.v));
   $('selVar').innerHTML = (curV.size > 1 ? '<option value="">（不同）</option>' : '') + common.map((v) => `<option value="${esc(v)}"${curV.size === 1 && curV.has(v) ? ' selected' : ''}>${esc(varLabel(v))}</option>`).join('');
+  slPairs();
 }
 function renderAllVar() {
   const all = new Set(); for (const s of LIB.ships) for (const v of s.variants) all.add(v.name);
@@ -846,7 +848,7 @@ $('dname').oninput = () => markDirty();
 $('btnDup').onclick = cmd.dup; $('btnMirror').onclick = cmd.mirror; $('btnFlip').onclick = cmd.flip; $('btnReset').onclick = cmd.reset; $('btnDel').onclick = cmd.del;
 document.querySelectorAll('[data-mode]').forEach((b) => (b.onclick = () => setMode(b.dataset.mode)));
 $('btnSpace').onclick = toggleSpace;
-['snapOn', 'snapT', 'snapR'].forEach((id) => ($(id).onchange = applySnap)); applySnap();
+['snapOn', 'snapT', 'snapR'].forEach((id) => ($(id).onchange = () => { applySnap(); slXyz(); })); applySnap();
 $('showGrid').onchange = () => (grid.visible = $('showGrid').checked);
 $('showAxes').onchange = () => (axes.visible = $('showAxes').checked);
 $('autoRot').onchange = () => (controls.autoRotate = $('autoRot').checked);
@@ -891,8 +893,54 @@ $('allVar').onchange = () => {
 };
 document.querySelectorAll('#selBox [data-f]').forEach((el) => (el.onchange = () => {
   const pc = S.sel.length === 1 && pieceOf(S.sel[0]); if (!pc || el.value === '' || !isFinite(+el.value)) return;
-  pushUndo(); pc[el.dataset.f[0]][+el.dataset.f[1]] = +el.value; sync();
+  pushUndo(); pc[el.dataset.f[0]][+el.dataset.f[1]] = +el.value; sync(); slXyz();
 }));
+// ───── 滑桿（使用者 2026-11-23：調模型的數值欄位都要能用滑桿）─────
+// 位置、旋轉、縮放：拖的時候部件即時跟著動，整次拖動只算一步復原；範圍照設計大小（位置）、−180～180（旋轉）、−3～3（縮放），吸附開著就照吸附的間隔
+let slDrag = false;
+function slRange(f) {
+  const snap = $('snapOn').checked;
+  if (f === 'p') {
+    let m = 0; for (const pc of S.pieces) for (const v of pc.p) m = Math.max(m, Math.abs(v));
+    const span = Math.max(100, Math.ceil((m * 1.25) / 50) * 50);
+    return [-span, span, snap ? Math.max(0.1, +$('snapT').value || 1) : 0.5];
+  }
+  if (f === 'r') return [-180, 180, snap ? Math.max(1, +$('snapR').value || 1) : 1];
+  return [-3, 3, 0.01];
+}
+function slXyz() {
+  const one = S.sel.length === 1 && pieceOf(S.sel[0]);
+  document.querySelectorAll('#selBox [data-fr]').forEach((el) => {
+    const f = el.dataset.fr[0], i = +el.dataset.fr[1], [lo, hi, st] = slRange(f);
+    el.disabled = !one; el.min = lo; el.max = hi; el.step = st;
+    if (one && document.activeElement !== el) el.value = one[f][i];
+  });
+}
+document.querySelectorAll('#selBox [data-fr]').forEach((el) => {
+  el.addEventListener('input', () => {
+    const pc = S.sel.length === 1 && pieceOf(S.sel[0]); if (!pc) return;
+    if (!slDrag) { pushUndo(); slDrag = true; }
+    const f = el.dataset.fr[0], i = +el.dataset.fr[1]; pc[f][i] = r1(+el.value);
+    const num = document.querySelector(`#selBox [data-f="${el.dataset.fr}"]`); if (num) num.value = pc[f][i];
+    sync();
+  });
+  el.addEventListener('change', () => { slDrag = false; slXyz(); });
+});
+// 其他數字欄位（槽位序號、射界、吸附）：滑桿跟數字欄位同步；放開滑桿＝數字欄位「改好了」（照原本的處理：復原、對調序號…）
+function slPairs() {
+  document.querySelectorAll('input.slr[data-for]').forEach((r) => {
+    const n = $(r.dataset.for); if (!n) return;
+    if (r.dataset.for === 'slotN') { const pc = S.sel.length === 1 && pieceOf(S.sel[0]); r.max = Math.max(1, isSlot(pc) ? S.pieces.filter((p) => isSlot(p) && p.kind === pc.kind).length : 1); }
+    if (document.activeElement !== r && n.value !== '') r.value = n.value;
+  });
+}
+document.querySelectorAll('input.slr[data-for]').forEach((r) => {
+  const n = $(r.dataset.for); if (!n) return;
+  r.addEventListener('input', () => { n.value = r.value; });
+  r.addEventListener('change', () => { n.value = r.value; n.dispatchEvent(new Event('change')); });
+  n.addEventListener('input', () => { r.value = n.value; });
+  n.addEventListener('change', () => { r.value = n.value; });
+});
 addEventListener('keydown', (e) => {
   if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) || !$('hullDlg').hidden) return;
   const k = e.key.toLowerCase(), c = e.ctrlKey || e.metaKey;

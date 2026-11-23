@@ -44,6 +44,10 @@
   #stat { position: absolute; right: 10px; top: 8px; color: var(--dim); font-size: 12px; pointer-events: none; text-align: right; }
   .grid3 { display: grid; grid-template-columns: 34px repeat(3, 1fr); gap: 4px; align-items: center; }
   .grid3 input { width: 100%; }
+  .xyz { display: flex; flex-direction: column; gap: 2px; margin: 4px 0; } .xyzh { margin-top: 4px; font-weight: 600; }
+  .sl { display: grid; grid-template-columns: 14px 1fr 64px; gap: 6px; align-items: center; } .sl i { font-style: normal; color: var(--dim, #8aa); }
+  .sl input[type=range], input.slr { width: 100%; accent-color: #7cc4ff; cursor: pointer; } .sl input[type=number] { width: 100%; }
+  input.slr { display: block; margin: 2px 0 4px; }
   #designs .it, #pieces .it { padding: 2px 6px; cursor: pointer; display: flex; gap: 6px; align-items: center; border-radius: 3px; }
   #designs .it:hover, #pieces .it:hover { background: #15203a; }
   #designs .it.on, #pieces .it.on { background: #1b3557; }
@@ -118,14 +122,24 @@
   <div id="selBox" hidden>
     <div id="selName" class="small"></div>
     <div class="row small" id="selVarRow">塗裝 <select id="selVar"></select></div>
-    <div class="grid3 small">
-      <span>位置</span><input type="number" step="1" data-f="p0"><input type="number" step="1" data-f="p1"><input type="number" step="1" data-f="p2">
-      <span>旋轉</span><input type="number" step="15" data-f="r0"><input type="number" step="15" data-f="r1"><input type="number" step="15" data-f="r2">
-      <span>縮放</span><input type="number" step="0.1" data-f="s0"><input type="number" step="0.1" data-f="s1"><input type="number" step="0.1" data-f="s2">
+    <div class="xyz small">
+      <div class="xyzh">位置 <span class="dim">（公尺）</span></div>
+      <label class="sl"><i>X</i><input type="range" data-fr="p0"><input type="number" step="1" data-f="p0"></label>
+      <label class="sl"><i>Y</i><input type="range" data-fr="p1"><input type="number" step="1" data-f="p1"></label>
+      <label class="sl"><i>Z</i><input type="range" data-fr="p2"><input type="number" step="1" data-f="p2"></label>
+      <div class="xyzh">旋轉 <span class="dim">（度）</span></div>
+      <label class="sl"><i>X</i><input type="range" data-fr="r0"><input type="number" step="15" data-f="r0"></label>
+      <label class="sl"><i>Y</i><input type="range" data-fr="r1"><input type="number" step="15" data-f="r1"></label>
+      <label class="sl"><i>Z</i><input type="range" data-fr="r2"><input type="number" step="15" data-f="r2"></label>
+      <div class="xyzh">縮放 <span class="dim">（負數＝鏡像）</span></div>
+      <label class="sl"><i>X</i><input type="range" data-fr="s0"><input type="number" step="0.1" data-f="s0"></label>
+      <label class="sl"><i>Y</i><input type="range" data-fr="s1"><input type="number" step="0.1" data-f="s1"></label>
+      <label class="sl"><i>Z</i><input type="range" data-fr="s2"><input type="number" step="0.1" data-f="s2"></label>
     </div>
     <div id="slotBox" hidden>
       <div class="row small">種類 <select id="slotKind"></select> 序號 <input type="number" id="slotN" min="1" step="1" style="width:52px" title="同一類裡的第幾個；改成已經有的序號會和那個對調"></div>
-      <div class="row small" id="slotArcRow">射界左右各 <input type="number" id="slotArc" min="0" max="180" step="5" style="width:60px">°</div>
+      <input type="range" class="slr" data-for="slotN" min="1" max="10" step="1" title="序號">
+      <div class="row small" id="slotArcRow">射界左右各 <input type="number" id="slotArc" min="0" max="180" step="5" style="width:60px">°<input type="range" class="slr" data-for="slotArc" min="0" max="180" step="5" title="射界（左右各幾度）"></div>
       <div class="row small">預覽裝備 <select id="slotLook" title="勾「裝上裝備預覽」時，這個槽位顯示哪一件裝備"></select></div>
       <div class="dim small">箭頭＝裝備朝向（砲口正前方），扇形＝射界。按 E 旋轉、W 移動；M 鏡像到另一舷會自動給新序號。</div>
     </div>
@@ -168,6 +182,8 @@
     <button id="btnSpace" title="Q">世界座標</button>
   </div>
   <div class="row small"><label><input type="checkbox" id="snapOn" checked> 吸附</label> 移動 <input type="number" id="snapT" value="5" min="0" step="1"> m 旋轉 <input type="number" id="snapR" value="15" min="0" step="5" style="width:52px">°</div>
+  <div class="sl small"><i>移</i><input type="range" class="slr" data-for="snapT" min="0" max="50" step="1" title="吸附：移動（公尺）"><span class="dim">吸附距離</span></div>
+  <div class="sl small"><i>轉</i><input type="range" class="slr" data-for="snapR" min="0" max="90" step="5" title="吸附：旋轉（度）"><span class="dim">吸附角度</span></div>
   <div class="row small">全部換塗裝 <select id="allVar"></select></div>
   <div class="row small"><label><input type="checkbox" id="showGrid" checked> 格線</label><label><input type="checkbox" id="showAxes" checked> 船首箭頭</label><label><input type="checkbox" id="autoRot"> 自動旋轉</label></div>
 
