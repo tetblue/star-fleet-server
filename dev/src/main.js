@@ -1925,7 +1925,7 @@ function groupBaseSpeed(g) {
   let ts = 2, fs = 9;
   for (const q of g.sqs) { if (q.alive <= 0) continue; for (let k = 0; k < NT; k++) if (q.typeAlive[k] > 0 && SHIP_TYPES[k].speed < ts) ts = SHIP_TYPES[k].speed; fs = Math.min(fs, fleetMods(q.fleet).speed); }
   if (ts > 1.9) ts = 1;
-  return BASE_SPEED * ts * Math.min(fs, 2) * (FORMATIONS[g.formation].speed || 1);
+  return BASE_SPEED * ts * Math.min(fs, 2) * (FORMATIONS[g.formation].speed || 1) * (g.spdMul || 1);
 }
 // 部隊速度＝最慢艦種 × 指揮官機動加成 × 陣型 × 換陣中 × 地形
 function groupSpeed(g, t) {
@@ -1937,7 +1937,7 @@ function groupSpeed(g, t) {
     if (!morph && sqMorphing(q, t)) morph = true;
   }
   if (ts > 1.9) ts = 1;
-  return BASE_SPEED * ts * Math.min(fs, 2) * (FORMATIONS[g.formation].speed || 1) * (morph ? 0.75 : 1) * (inTerrain('asteroid', g.ax, g.az, g.ay || 0) ? 0.5 : 1) * (GRD ? gravMul(g) : 1);   // 近地：重力
+  return BASE_SPEED * ts * Math.min(fs, 2) * (FORMATIONS[g.formation].speed || 1) * (g.spdMul || 1) * (morph ? 0.75 : 1) * (inTerrain('asteroid', g.ax, g.az, g.ay || 0) ? 0.5 : 1) * (GRD ? gravMul(g) : 1);   // 近地：重力
 }
 // 突進：只有往前走時加速
 function groupFwd(g) { let f = 9; for (const q of g.sqs) if (q.alive > 0) f = Math.min(f, fleetMods(q.fleet).fwd); return f > 8 ? 1 : f; }

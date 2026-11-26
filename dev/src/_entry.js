@@ -3041,7 +3041,7 @@ function groupBaseSpeed(g) {
   let ts = 2, fs = 9;
   for (const q of g.sqs) { if (q.alive <= 0) continue; for (let k = 0; k < NT; k++) if (q.typeAlive[k] > 0 && SHIP_TYPES[k].speed < ts) ts = SHIP_TYPES[k].speed; fs = Math.min(fs, fleetMods(q.fleet).speed); }
   if (ts > 1.9) ts = 1;
-  return BASE_SPEED * ts * Math.min(fs, 2) * (FORMATIONS[g.formation].speed || 1);
+  return BASE_SPEED * ts * Math.min(fs, 2) * (FORMATIONS[g.formation].speed || 1) * (g.spdMul || 1);
 }
 // 部隊速度＝最慢艦種 × 指揮官機動加成 × 陣型 × 換陣中 × 地形
 function groupSpeed(g, t) {
@@ -3053,7 +3053,7 @@ function groupSpeed(g, t) {
     if (!morph && sqMorphing(q, t)) morph = true;
   }
   if (ts > 1.9) ts = 1;
-  return BASE_SPEED * ts * Math.min(fs, 2) * (FORMATIONS[g.formation].speed || 1) * (morph ? 0.75 : 1) * (inTerrain('asteroid', g.ax, g.az, g.ay || 0) ? 0.5 : 1) * (GRD ? gravMul(g) : 1);   // 近地：重力
+  return BASE_SPEED * ts * Math.min(fs, 2) * (FORMATIONS[g.formation].speed || 1) * (g.spdMul || 1) * (morph ? 0.75 : 1) * (inTerrain('asteroid', g.ax, g.az, g.ay || 0) ? 0.5 : 1) * (GRD ? gravMul(g) : 1);   // 近地：重力
 }
 // 突進：只有往前走時加速
 function groupFwd(g) { let f = 9; for (const q of g.sqs) if (q.alive > 0) f = Math.min(f, fleetMods(q.fleet).fwd); return f > 8 ? 1 : f; }
@@ -23379,7 +23379,9 @@ function capStationModel(o, g) {
 // 場景（capspace.js 的 CAP_SPACE）：深空・恆星（高溫區）、行星軌道（重力＋大氣層）、星雲（到處能躲雷達，外圍是離子風暴）、太空站周邊（巨大太空站＋殘骸區）。
 // 任務：護送（我方運輸船隊到躍遷點）、救援撤離（接駁受困的友艦，帶到撤離點）、摧毀設施（雷達陣列、船塢、補給站、跳躍門的護衛平台）、偵察（靠近偵察點掃描後離開）。
 // 我方的非玩家艦艇（運輸艦、受困的友艦）放在 CAP.ally，由這裡的 AI 移動；敵軍會把它們當目標（capAllyTarget）。
-const CAP_MIS2 = { linkR: 110, linkT: 6, scanT: 5, scanR: 120, holdR: 260 };
+// convoyK：運輸船隊的速度＝我方最慢戰艦巡航速度（含巨艦手感）× convoyK（原本是補給艦縱陣 12.8，戰艦巡航只有 3.3～4.2）
+// convoyZ：躍遷點的 z（出發點 z≈980；原本 -1020）。戰場再縮 0.55 倍 → 航程約 540，不被打斷約 3 分鐘
+const CAP_MIS2 = { linkR: 110, linkT: 6, scanT: 5, scanR: 120, holdR: 260, convoyK: 0.8, convoyZ: 0 };
 Object.assign(CAP_UNIT, {
   array: { kind: 'bldg', sub: 'array', name: '雷達陣列', hp: 620, r: 3.4, hh: 0, sensor: 420, sh: 0, radar: true, intel: true, merit: 90, space: true },
   gate: { kind: 'bldg', sub: 'gate', name: '跳躍門', hp: 9000, r: 12, hh: 0, sensor: 0, merit: 0, space: true },
@@ -23398,13 +23400,14 @@ function capMisLayout2(type, p, o) {
   let nEn = o.nEn;
   const comp = (n) => { const c = new Array(SHIP_TYPES.length).fill(0); for (let m = 0; m < n; m++) c[shipT()]++; return c; };
   if (type === 'escort') {
-    const E = { x: Math.round((R() - 0.5) * 700), z: -1020 }; used.push({ x: E.x, z: E.z, ex: 240 });
+    const E = { x: Math.round((R() - 0.5) * 600), z: CAP_MIS2.convoyZ }; used.push({ x: E.x, z: E.z, ex: 240 });
     const nC = [3, 3, 4, 4, 5][li];
-    const wp = [0.25, 0.5, 0.75, 1].map((f) => [Math.round(S.x + (E.x - S.x) * f + (f < 1 ? (R() - 0.5) * 520 : 0)), Math.round(S.z + (E.z - S.z) * f)]);
+    const wp = [0.25, 0.5, 0.75, 1].map((f) => [Math.round(S.x + (E.x - S.x) * f + (f < 1 ? (R() - 0.5) * 360 : 0)), Math.round(S.z + (E.z - S.z) * f)]);
     fleets.push(fleet({ side: 0, name: '運輸船隊', capRole: 'aconvoy', comp: comp1(5, nC), x: S.x + 50, z: S.z - 50, y: 0, h: Math.PI, wp, formation: 'column' }));
     const nA = Math.max(2, nEn + 1);
     for (let k = 0; k < 2; k++) {   // 伏擊：航線中段的兩側
-      const f0 = 0.38 + k * 0.28, w = wp[k + 1], c = { x: w[0] + (k ? 1 : -1) * (150 + R() * 100), z: S.z + (E.z - S.z) * f0 };
+      // 航程縮短後：太靠近出發點會一開場就進到遇襲範圍（holdR），所以伏擊放在航程的 62%／84%
+      const f0 = 0.62 + k * 0.22, w = wp[k + 1], c = { x: w[0] + (k ? 1 : -1) * (150 + R() * 100), z: S.z + (E.z - S.z) * f0 };
       if (Math.hypot(c.x, c.z) > CAP_EDGE.R - 150) c.x = w[0];
       fleets.push(fleet({ side: 1, name: `伏擊隊 ${k + 1}`, capRole: 'patrol', comp: comp(k ? nA - Math.ceil(nA / 2) || 1 : Math.ceil(nA / 2)), x: Math.round(c.x), z: Math.round(c.z), y: alt(0.5), h: R() * TAU }));
     }
@@ -23471,6 +23474,10 @@ function capAllyAI(t) {
     const C = centerOf(al); A.c = C;
     let dest = null;
     if (A.role === 'aconvoy') {
+      if (!A.g.spdMul) {   // 第一次：船隊速度跟著我方最慢戰艦的巡航速度（巨艦手感也算進去）
+        const cr = CAP.own.filter((s) => !s.dead && s.H).reduce((m, s) => Math.min(m, s.H.cruise), 9) * (capHeavy() ? CAP_FEEL.spd : 1);
+        A.g.spdMul = Math.min(1, cr * CAP_MIS2.convoyK / groupBaseSpeed(A.g));
+      }
       const w = A.wp[Math.min(A.wi, A.wp.length - 1)];
       if (Math.hypot(w.x - C.x, w.z - C.z) < 55) A.wi++;
       if (A.wi >= A.wp.length) { capAllyLeave(A); continue; }
