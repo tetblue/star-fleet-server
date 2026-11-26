@@ -9,7 +9,8 @@ const CW = { list: [], glowT: 0 };
 const _wpos = new THREE.Vector3();
 function capWarpPos(s) { shipWorldCPU(s.i, _wpos); return { x: _wpos.x, y: _wpos.y, z: _wpos.z }; }
 const capWarpLen = (s) => Math.max(4, shipGeo.getAttribute('aScale').array[s.i] * TYPE_LEN3);
-const capWarpCol = (s) => (fxFac(s.side) === 1 ? 0x7fd4ff : 0xffb060);
+// 一律藍色（使用者 2026-11-26：帝國原本用橘色，配上白色閃光看起來像爆炸）
+const capWarpCol = () => 0x7fd4ff;
 const capWarpSys = () => (pfxInit() ? PFX.sys : null);
 // 光束：沿著 F 從 a 到 b（距離＝船長的倍數）排一串光暈，加幾條往前飛的光條
 function capWarpBeam(P, F, L, a, b, col, w, life) {
@@ -22,7 +23,7 @@ function capWarpBeam(P, F, L, a, b, col, w, life) {
 }
 function capWarpFlash(P, L, col, big) {
   const S = capWarpSys(); if (!S) return;
-  S.gl.emit({ x: P.x, y: P.y, z: P.z, life: 0.45, s0: L * (big ? 1.8 : 1.4), s1: L * (big ? 5.5 : 4), c0: 0xffffff, k: 2, a: 1, cell: PC.star, fade: 1 });
+  S.gl.emit({ x: P.x, y: P.y, z: P.z, life: 0.35, s0: L * (big ? 1.4 : 1.1), s1: L * (big ? 3 : 2.2), c0: 0xcfeeff, k: 2, a: 0.9, cell: PC.star, fade: 1 });   // 偏藍的白、不擴太大（太大像爆炸）
   S.gl.emit({ x: P.x, y: P.y, z: P.z, life: 0.45, s0: L * 0.8, s1: L * 3.2, c0: col, k: 1.4, a: 0.8, cell: PC.ring, fade: 1 });
 }
 // 一艘船的躍遷。o：{ charge＝充能秒數（out）, delay＝開始前等幾秒, F＝方向（預設船頭）, keep＝進入時不碰 hidden（呼叫的人自己顯示） }
