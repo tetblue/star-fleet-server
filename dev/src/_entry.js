@@ -28383,7 +28383,15 @@ const ccCur = (S) => S.sq.find((q) => q.id === CC.cur && q.pl && q.ships.length)
 function ccFleeHtml(S) {
   const F = S.pl.flee, q = F && ccSqById(F.q); if (!q || S.fin) return '';
   return `<div class="ccm-z ccm-flee"><div class="h"><b>選擇撤退的目的地</b><span>${smuEsc(q.name)}從 ${smuEsc(S.sys[F.from].name)} 躍遷撤退・現在在 <b>${smuEsc(S.sys[q.sys].name)}</b></span></div>
-    <div class="L">${F.opts.map((id) => { const t = S.sys[id]; return `<button type="button" data-flee="${id}" class="${id === q.sys ? 'on' : ''}" style="--c:${ccFacCol(S, t.owner)}"><i></i>${smuEsc(t.name)}<small>${t.owner === S.fac ? '己方' : '中立'}${t.yard ? '・船塢' : ''}${id === q.prev ? '' : ''}</small></button>`; }).join('')}<button type="button" data-flee="-1" class="ok">就這樣</button></div></div>`;
+    <div class="L">${F.opts.map((id) => { const t = S.sys[id]; return `<button type="button" data-flee="${id}" class="${id === q.sys ? 'on' : ''}" style="--c:${ccFacCol(S, t.owner)}"><i></i>${smuEsc(t.name)}<small>${t.owner === S.fac ? '己方' : '中立'}${t.yard ? '・船塢' : ''}${id === F.def ? '・原本的' : ''}</small></button>`; }).join('')}<button type="button" data-flee="-1" class="ok">就這樣</button></div></div>`;
+}
+// 撤退的目的地（使用者 2026-11-26：橫幅常被任務簡報、週報蓋住，沒選就照預設回上週的星系）——打開星圖時先跳出這個對話框，選了才繼續
+function ccFleeModal(S) {
+  const F = S.pl.flee, q = F && ccSqById(F.q); if (!q || S.fin) return;
+  const sv = SMU.q; SMU.q = [];   // 任務簡報等這個選完再出來
+  smuModal(`<h3>選擇撤退的目的地</h3><p style="line-height:1.7">${smuEsc(q.name)}從 <b>${smuEsc(S.sys[F.from].name)}</b> 躍遷撤退。要躍遷到哪個相鄰的星系？</p>
+    <div class="sm-btns" style="flex-wrap:wrap;justify-content:flex-start">${F.opts.map((id) => { const t = S.sys[id]; return `<button type="button" class="g-btn${id === F.def ? '' : ' primary'}" data-fleem="${id}"><span style="color:${ccFacCol(S, t.owner)}">●</span> ${smuEsc(t.name)}<small class="g-dim">（${t.owner === S.fac ? '己方' : '中立'}${t.yard ? '・船塢' : ''}${id === F.def ? '・原本的' : ''}）</small></button>`; }).join('')}</div>`);
+  document.querySelectorAll('[data-fleem]').forEach((b) => (b.onclick = () => { const sid = +b.dataset.fleem; if (sid === q.sys) S.pl.flee = null; else ccFleePick(S, sid); ccSave(S); CC.sel = -1; ccRender(); SMU.q = sv.concat(SMU.q); smuCloseModal(); }));   // 關掉之後排隊的任務簡報接著出來
 }
 function ccDraw(ts) {
   const cv = gEl('cc-cv'); if (!cv || !CC.S) return;
@@ -29020,7 +29028,7 @@ function ccBattleDone() {
     if (ok) ccLog(S, `${s.name}：你的小隊打贏了（擊沉 ${st.ks} 艘${I.att ? '，取得軌道' : ''}）`, 'ok');
     else { ccLog(S, `${s.name}：你的小隊${R.retreat ? '躍遷撤退' : '撤出戰場'}`, 'bad'); for (const id of I.own) { const q = ccSqById(id); if (!q || !q.ships.length) continue;
       const O = q === P ? ccFleeOpts(S, q, s.id) : [];   // 你指揮的小隊：撤退的目的地在星圖上選（預設上週的星系）
-      if (O.length) { q.sys = O.includes(q.prev) ? q.prev : O[0]; q.prev = s.id; q.to = null; if (O.length > 1) S.pl.flee = { q: q.id, from: s.id, opts: O }; }
+      if (O.length) { q.sys = O.includes(q.prev) ? q.prev : O[0]; q.prev = s.id; q.to = null; if (O.length > 1) S.pl.flee = { q: q.id, from: s.id, opts: O, def: q.sys }; else ccLog(S, `${q.name}撤退到 ${S.sys[q.sys].name}（其他相鄰的星系有敵軍或已經滿了，只能退這裡）`, ''); }
       else if (I.att) { q.sys = q.prev; q.to = null; } else ccFlee(S, q); } }
     for (const id of I.foe) { const q = ccSqById(id); if (q && q.ships.length && ok) ccFlee(S, q); }
   } else if (I.kind === 'raid') {
@@ -29940,6 +29948,7 @@ function ccPostLeave() {
   CC.post = null;
   setPhase('menu');
   const S = CC.S; CC.sel = -1; ccRender();
+  ccFleeModal(S);   // 戰鬥中躍遷撤退：先選目的地（任務簡報排在後面）
   if (Q.week && !S.fin) ccTurnStart(S, true);
 }
 const CCE_REP_CSS = `body:has(#game:not([hidden])) #cce-side.rep{display:block}body.ccl-on #cce-side.rep{display:none}#g-screen > #cce-side.rep{top:128px}

@@ -379,6 +379,7 @@ function ccPostLeave() {
   CC.post = null;
   setPhase('menu');
   const S = CC.S; CC.sel = -1; ccRender();
+  ccFleeModal(S);   // 戰鬥中躍遷撤退：先選目的地（任務簡報排在後面）
   if (Q.week && !S.fin) ccTurnStart(S, true);
 }
 const CCE_REP_CSS = `body:has(#game:not([hidden])) #cce-side.rep{display:block}body.ccl-on #cce-side.rep{display:none}#g-screen > #cce-side.rep{top:128px}
